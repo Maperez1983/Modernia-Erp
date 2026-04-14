@@ -49855,6 +49855,10 @@ class Handler(BaseHTTPRequestHandler):
                   i.propietario_telefono,
                   i.propietario_email,
                   i.informador_nombre,
+                  i.asesor,
+                  i.responsable,
+                  i.ultima_fecha_contacto,
+                  i.estado_contacto,
                   i.precio_objetivo,
                   i.precio_pedido_cliente,
                   COALESCE(NULLIF(i.precio_encargo, 0), cap.precio_encargo) AS precio_encargo,
@@ -53779,6 +53783,7 @@ def main():
         legal_thread.start()
     # Creamos el servidor ANTES de bootstraps pesados para evitar 502 en plataformas (Render) con timeouts de arranque.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    bound_host, bound_port = server.server_address[:2]
     # Bootstrap DB en background (no bloquea bind del puerto).
     try:
         Handler._trigger_db_bootstrap_async(args.db)
@@ -53792,7 +53797,7 @@ def main():
             print(f"[WARN] OCR DB no disponible al arrancar: {type(exc).__name__}: {exc}")
     threading.Thread(target=_ocr_bootstrap, name="ocr-bootstrap", daemon=True).start()
     print(
-        f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
+        f"Servidor activo en http://{bound_host}:{bound_port} · db={Path(args.db).resolve()} · "
         f"ocr_db={Path(args.ocr_db).resolve()} · ocr_workers={ocr_workers}"
     )
     server.serve_forever()

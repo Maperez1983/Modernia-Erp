@@ -2840,6 +2840,16 @@ const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
 	const inmuebleTabImagenes = document.getElementById("inmuebleTabImagenes");
 	const inmuebleTabAdjuntos = document.getElementById("inmuebleTabAdjuntos");
+  const inmuebleTabPersonas = document.getElementById("inmuebleTabPersonas");
+  const inmueblePersonasTabNewBtn = document.getElementById("inmueblePersonasTabNewBtn");
+  const inmueblePersonasTabList = document.getElementById("inmueblePersonasTabList");
+  const inmuebleTabHistorial = document.getElementById("inmuebleTabHistorial");
+  const inmuebleHistorialTabList = document.getElementById("inmuebleHistorialTabList");
+  const inmuebleTabEvolucion = document.getElementById("inmuebleTabEvolucion");
+  const inmuebleEvolucionTabTable = document.getElementById("inmuebleEvolucionTabTable");
+  const inmuebleTabServicios = document.getElementById("inmuebleTabServicios");
+  const inmuebleServiciosTabEditBtn = document.getElementById("inmuebleServiciosTabEditBtn");
+  const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
 	const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
 const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
@@ -22339,6 +22349,70 @@ const updateInmuebleMap = (lat, lon, address = "") => {
   renderMapPreview(inmuebleMap, lat, lon, address);
 };
 
+let inmueblePositionPickActive = false;
+let inmueblePositionPickCleanup = null;
+
+const setInmueblePositionPickActive = (active) => {
+  const next = Boolean(active);
+  inmueblePositionPickActive = next;
+  if (inmuebleTecnoPosBtn) {
+    inmuebleTecnoPosBtn.classList.toggle("danger", next);
+    inmuebleTecnoPosBtn.textContent = next ? "Cancelar posición" : "Modifica posición";
+  }
+  if (inmuebleSaveStatus) {
+    inmuebleSaveStatus.textContent = next
+      ? "Modo posición: haz clic en el mapa para fijar la localización."
+      : "";
+  }
+  if (!next && typeof inmueblePositionPickCleanup === "function") {
+    try {
+      inmueblePositionPickCleanup();
+    } catch {}
+    inmueblePositionPickCleanup = null;
+  }
+};
+
+const startInmueblePositionPickMode = () => {
+  if (!inmuebleMap) return false;
+  const inst = leafletMapInstances.get(inmuebleMap);
+  if (!inst?.map || !inst?.marker) {
+    return false;
+  }
+  if (typeof inmueblePositionPickCleanup === "function") {
+    try {
+      inmueblePositionPickCleanup();
+    } catch {}
+    inmueblePositionPickCleanup = null;
+  }
+  const handler = (event) => {
+    const lat = Number(event?.latlng?.lat);
+    const lon = Number(event?.latlng?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    try {
+      inst.marker.setLatLng([lat, lon]);
+      inst.map.panTo([lat, lon]);
+    } catch {}
+    void saveInmuebleFields({ lat, lon }).then((res) => {
+      if (res?.error) {
+        setInmuebleSaveStatus(res.error || "Error al guardar posición.");
+        return;
+      }
+      const inm = state.currentInmuebleContext?.inmueble || {};
+      const displayAddress = buildInmuebleDisplayAddress(inm) || String(inm.direccion || "").trim();
+      updateInmuebleMap(lat, lon, displayAddress);
+      setInmueblePositionPickActive(false);
+    });
+  };
+  inst.map.on("click", handler);
+  inmueblePositionPickCleanup = () => {
+    try {
+      inst.map.off("click", handler);
+    } catch {}
+  };
+  setInmueblePositionPickActive(true);
+  return true;
+};
+
 const updateCaptacionMap = (lat, lon) => {
   renderMapPreview(captacionMap, lat, lon);
 };
@@ -25419,7 +25493,6 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  "alquileres",
 	  "compraventas",
     "demandas",
-    "relaciones",
     "visitas",
     "agenda",
     "informadores",
@@ -25456,7 +25529,6 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		  alquileres: crmViewAlquileres,
 		  compraventas: crmViewCompraventas,
 	    demandas: crmViewDemandas,
-	    relaciones: crmViewRelaciones,
 	    visitas: crmViewVisitas,
 	    agenda: crmViewAgenda,
 	    informadores: crmViewInformadores,
@@ -29946,24 +30018,16 @@ let crmClientesReloadTimer = null;
 const buildCrmClientesDenseTableNode = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) return null;
-  const extractNumero = (direccion = "") => {
-    const raw = String(direccion || "").trim();
-    if (!raw) return "";
-    const match = raw.match(/\b(\d{1,4})\b(?!.*\b\d{1,4}\b)/);
-    return match ? match[1] : "";
-  };
   const table = document.createElement("table");
   table.className = "crm-dense-table crm-clientes-table";
   const thead = document.createElement("thead");
   thead.innerHTML = `
     <tr>
-      <th style="width:34px;"></th>
       <th>Cliente</th>
-      <th style="width:130px;">Móvil</th>
       <th style="width:130px;">Teléfono</th>
-      <th style="width:140px;">Otro teléfono</th>
+      <th style="width:130px;">Móvil</th>
+      <th style="width:260px;">Email</th>
       <th>Dirección</th>
-      <th style="width:72px;">Nº</th>
       <th style="width:170px;">Localidad</th>
     </tr>
   `;
@@ -29987,39 +30051,27 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
     if (id) {
       tr.addEventListener("click", open);
     }
-    const selectCell = document.createElement("td");
-    selectCell.className = "crm-dense-select";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.addEventListener("click", (event) => event.stopPropagation());
-    selectCell.appendChild(checkbox);
-    tr.appendChild(selectCell);
-
     const nameCell = document.createElement("td");
     const kicker = [row.nif || "", row.email || ""].filter(Boolean).join(" · ");
     nameCell.className = "crm-dense-main";
     nameCell.innerHTML = `<strong>${escapeHtml(row.nombre || "Sin nombre")}</strong>${kicker ? `<div class="muted">${escapeHtml(kicker)}</div>` : ""}`;
     tr.appendChild(nameCell);
 
-    const movilCell = document.createElement("td");
-    movilCell.textContent = String(row.movil || "").trim();
-    tr.appendChild(movilCell);
-
     const telCell = document.createElement("td");
     telCell.textContent = String(row.telefono || "").trim();
     tr.appendChild(telCell);
 
-    const otroCell = document.createElement("td");
-    otroCell.textContent = String(row.otro_telefono || "").trim();
-    tr.appendChild(otroCell);
+    const movilCell = document.createElement("td");
+    movilCell.textContent = String(row.movil || "").trim();
+    tr.appendChild(movilCell);
+
+    const emailCell = document.createElement("td");
+    emailCell.textContent = String(row.email || "").trim();
+    tr.appendChild(emailCell);
 
     const dirCell = document.createElement("td");
     dirCell.textContent = String(row.direccion || "").trim();
     tr.appendChild(dirCell);
-
-    const numCell = document.createElement("td");
-    numCell.textContent = extractNumero(row.direccion || "");
-    tr.appendChild(numCell);
 
     const locCell = document.createElement("td");
     locCell.textContent = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
@@ -32397,6 +32449,196 @@ const renderInmuebleTecnocloudPanels = ({
   }
 };
 
+const inmuebleServicioIconFor = (label) => {
+  const key = normalizeSimple(label || "");
+  if (key.includes("bañ") || key.includes("bano") || key.includes("aseo")) return "🛁";
+  if (key.includes("cocin")) return "🍳";
+  if (key.includes("calef")) return "🔥";
+  if (key.includes("ascens")) return "🛗";
+  if (key.includes("terraza") || key.includes("balcon") || key.includes("balcón")) return "🌤";
+  if (key.includes("garaje") || key.includes("parking")) return "🚗";
+  if (key.includes("traster")) return "📦";
+  if (key.includes("piscin")) return "🏊";
+  if (key.includes("jardin") || key.includes("jardín")) return "🌿";
+  if (key.includes("aire") || key.includes("a/a") || key.includes("acond")) return "❄️";
+  return "＋";
+};
+
+const renderInmueblePersonasTab = ({ inmueble = {}, captacion = {}, propietarios = [], compradores = [] } = {}) => {
+  if (!inmueblePersonasTabList) return;
+  const rows = [];
+  (Array.isArray(propietarios) ? propietarios : []).forEach((p) => {
+    rows.push({
+      tipo: "Propietario",
+      nombre: String(p?.nombre || "").trim(),
+      telefono: String(p?.telefono || "").trim(),
+      email: String(p?.email || "").trim(),
+      extra: String(p?.nif || "").trim(),
+    });
+  });
+  (Array.isArray(compradores) ? compradores : []).forEach((b) => {
+    rows.push({
+      tipo: "Comprador",
+      nombre: String(b?.cliente || b?.nombre || "").trim(),
+      telefono: String(b?.telefono || b?.movil || "").trim(),
+      email: String(b?.email || "").trim(),
+      extra: String(b?.estado || b?.prioridad || "").trim(),
+    });
+  });
+  const informador = String(captacion?.informador_nombre || "").trim();
+  if (informador) {
+    rows.push({ tipo: "Informador", nombre: informador, telefono: "", email: "", extra: "" });
+  }
+  const asesor = String(inmueble?.asesor || captacion?.asesor || "").trim();
+  if (asesor) {
+    rows.push({ tipo: "Asesor", nombre: asesor, telefono: "", email: "", extra: "" });
+  }
+
+  if (!rows.length) {
+    inmueblePersonasTabList.innerHTML = "<p class='muted'>Sin personas relacionadas.</p>";
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "crm-dense-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width:150px;">Tipo</th>
+        <th>Persona</th>
+        <th style="width:150px;">Teléfono</th>
+        <th style="width:240px;">Email</th>
+        <th style="width:190px;">Detalle</th>
+      </tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const tdTipo = document.createElement("td");
+    tdTipo.textContent = row.tipo || "-";
+    tr.appendChild(tdTipo);
+    const tdNombre = document.createElement("td");
+    tdNombre.className = "crm-dense-main";
+    tdNombre.innerHTML = `<strong>${escapeHtml(row.nombre || "-")}</strong>`;
+    tr.appendChild(tdNombre);
+    const tdTel = document.createElement("td");
+    tdTel.textContent = row.telefono || "";
+    tr.appendChild(tdTel);
+    const tdEmail = document.createElement("td");
+    tdEmail.textContent = row.email || "";
+    tr.appendChild(tdEmail);
+    const tdExtra = document.createElement("td");
+    tdExtra.textContent = row.extra || "";
+    tr.appendChild(tdExtra);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  inmueblePersonasTabList.innerHTML = "";
+  inmueblePersonasTabList.appendChild(table);
+};
+
+const renderInmuebleServiciosTab = ({ servicios = [] } = {}) => {
+  if (!inmuebleServiciosTabList) return;
+  const list = (Array.isArray(servicios) ? servicios : [])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  if (!list.length) {
+    inmuebleServiciosTabList.innerHTML = "<p class='muted'>Sin servicios definidos.</p>";
+    return;
+  }
+  const quick = list.slice(0, 30);
+  inmuebleServiciosTabList.innerHTML = `
+    <div class="tc-servgrid" role="list">
+      ${quick
+        .map(
+          (s) => `
+            <div class="tc-servitem" role="listitem">
+              <div class="tc-servico" aria-hidden="true">${escapeHtml(inmuebleServicioIconFor(s))}</div>
+              <div class="tc-servlabel">${escapeHtml(s)}</div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+const renderInmuebleHistorialTab = ({ inmueble = {}, captacion = {}, actividad = [] } = {}) => {
+  if (!inmuebleHistorialTabList) return;
+  const updated = String(inmueble?.updated_at || captacion?.updated_at || "").trim();
+  const created = String(inmueble?.created_at || captacion?.created_at || "").trim();
+  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || "") || String(inmueble?.estado || captacion?.etapa || "").trim();
+  const last = (Array.isArray(actividad) ? actividad : [])
+    .slice()
+    .sort((a, b) => String(b?.fecha || "").localeCompare(String(a?.fecha || "")) || String(b?.hora || "").localeCompare(String(a?.hora || "")))[0];
+  const lastLabel = last ? [last.fecha || "", last.hora || "", last.asunto || last.tipo || ""].filter(Boolean).join(" · ") : "";
+  const proxima = String(captacion?.proxima_accion || "").trim();
+
+  const items = [
+    created ? `Alta ficha · ${created}` : "",
+    stage ? `Estado actual · ${stage}` : "",
+    updated ? `Última actualización · ${updated}` : "",
+    proxima ? `Próxima acción · ${proxima}` : "",
+    lastLabel ? `Última actividad · ${lastLabel}` : "",
+  ].filter(Boolean);
+
+  inmuebleHistorialTabList.innerHTML = items.length
+    ? items.map((text) => `<div class="crm-focus-link">${escapeHtml(text)}</div>`).join("")
+    : "<div class='muted'>Sin historial disponible.</div>";
+};
+
+const renderInmuebleEvolucionTab = ({ inmueble = {}, captacion = {}, actividad = [] } = {}) => {
+  if (!inmuebleEvolucionTabTable) return;
+  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || "") || String(inmueble?.estado || captacion?.etapa || "").trim() || "-";
+  const created = String(inmueble?.created_at || captacion?.created_at || "").trim();
+  const updated = String(inmueble?.updated_at || captacion?.updated_at || "").trim();
+  const last = (Array.isArray(actividad) ? actividad : [])
+    .slice()
+    .sort((a, b) => String(b?.fecha || "").localeCompare(String(a?.fecha || "")) || String(b?.hora || "").localeCompare(String(a?.hora || "")))[0];
+
+  const milestones = [
+    created ? { fecha: created.slice(0, 10), estado: "Alta", detalle: "Creación de ficha" } : null,
+    last ? { fecha: String(last.fecha || "").slice(0, 10) || "-", estado: "Actividad", detalle: String(last.asunto || last.tipo || "").trim() } : null,
+    updated ? { fecha: updated.slice(0, 10), estado: stage, detalle: "Última actualización" } : null,
+  ].filter(Boolean);
+
+  if (!milestones.length) {
+    inmuebleEvolucionTabTable.innerHTML = "<p class='muted'>Sin datos de evolución.</p>";
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "crm-dense-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width:140px;">Fecha</th>
+        <th style="width:200px;">Evento/Estado</th>
+        <th>Detalle</th>
+      </tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+  milestones.forEach((row) => {
+    const tr = document.createElement("tr");
+    const tdFecha = document.createElement("td");
+    tdFecha.textContent = row.fecha || "-";
+    tr.appendChild(tdFecha);
+    const tdEstado = document.createElement("td");
+    tdEstado.textContent = row.estado || "-";
+    tr.appendChild(tdEstado);
+    const tdDet = document.createElement("td");
+    tdDet.className = "crm-dense-main";
+    tdDet.innerHTML = `<strong>${escapeHtml(row.detalle || "-")}</strong>`;
+    tr.appendChild(tdDet);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  inmuebleEvolucionTabTable.innerHTML = "";
+  inmuebleEvolucionTabTable.appendChild(table);
+};
+
 const refreshCurrentInmuebleProfile = () => {
   const context = state.currentInmuebleContext || {};
   const inmueble = context.inmueble || {};
@@ -32406,6 +32648,8 @@ const refreshCurrentInmuebleProfile = () => {
   const demandas = Array.isArray(context.demandas) ? context.demandas : [];
   const visitas = Array.isArray(context.visitas) ? context.visitas : [];
   const actividad = Array.isArray(context.actividad) ? context.actividad : [];
+  const compradores = Array.isArray(context.compradores) ? context.compradores : [];
+  const servicios = Array.isArray(context.servicios) ? context.servicios : [];
 
   const resolveInmoStageKey = () => {
     const key = normalizeSimple(captacion.situacion_comercial || inmueble.estado || "");
@@ -32618,6 +32862,11 @@ const refreshCurrentInmuebleProfile = () => {
     actividad,
   });
 
+  renderInmueblePersonasTab({ inmueble, captacion, propietarios, compradores });
+  renderInmuebleServiciosTab({ servicios });
+  renderInmuebleHistorialTab({ inmueble, captacion, actividad });
+  renderInmuebleEvolucionTab({ inmueble, captacion, actividad });
+
   if (inmuebleEstadoValidation) {
     const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
     const pendientes = requirements.filter((item) => !item.ok);
@@ -32697,12 +32946,14 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   const trHead = document.createElement("tr");
   [
     "",
-    "Localidad",
     "Inmueble",
     "Propietario",
-    "Tel. propietario",
-    "Informador relac.",
-    "Dirección",
+    "Tel.",
+    "Estado",
+    "Precio",
+    "Asesor",
+    "Últ. contacto",
+    "Próxima acción",
   ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
@@ -32736,10 +32987,6 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
       : "";
     tr.appendChild(flagTd);
 
-    const locTd = document.createElement("td");
-    locTd.textContent = String(row.localidad || row.poblacion || "").trim() || "-";
-    tr.appendChild(locTd);
-
     const inmuebleTd = document.createElement("td");
     inmuebleTd.className = "crm-dense-main";
     const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
@@ -32749,13 +32996,17 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     const portalLabel = portalRaw === "1" ? "Portal: publicado" : "";
     const verifiedLabel = String(row.noticia_verificada ?? "").trim() === "1" ? "Verificado" : "";
     const certifiedLabel = String(row.certificado ?? "").trim() === "1" ? "Certificado" : "";
+    const localidad = [row.poblacion || row.localidad || "", row.provincia || ""].filter(Boolean).join(" · ");
     const subtitle = [
+      localidad,
       row.subtipologia || "",
-      stage ? `Estado: ${stage}` : "",
+      row.tipo_inmueble || "",
       verifiedLabel,
       certifiedLabel,
       portalLabel,
-    ].filter(Boolean).join(" · ");
+    ]
+      .filter(Boolean)
+      .join(" · ");
     inmuebleTd.innerHTML = `<strong>${escapeHtml(`${prefix} - ${address}`)}</strong>${subtitle ? `<div class="muted">${escapeHtml(subtitle)}</div>` : ""}`;
     tr.appendChild(inmuebleTd);
 
@@ -32769,13 +33020,31 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     telTd.textContent = String(row.propietario_telefono || "").trim();
     tr.appendChild(telTd);
 
-    const infTd = document.createElement("td");
-    infTd.textContent = String(row.informador_nombre || "").trim() || "-";
-    tr.appendChild(infTd);
+    const estadoTd = document.createElement("td");
+    estadoTd.textContent = stage || "-";
+    tr.appendChild(estadoTd);
 
-    const dirTd = document.createElement("td");
-    dirTd.textContent = String(row.direccion || "").trim();
-    tr.appendChild(dirTd);
+    const precioTd = document.createElement("td");
+    const early = stage === "Inmueble" || stage === "Noticia";
+    const precio = early
+      ? row.precio_pedido_cliente || row.precio_objetivo
+      : row.precio_encargo || row.precio_objetivo;
+    const formatted = formatCell("precio_objetivo", precio);
+    precioTd.textContent = formatted === null ? "" : formatted;
+    tr.appendChild(precioTd);
+
+    const asesorTd = document.createElement("td");
+    asesorTd.textContent = String(row.asesor || row.responsable || "").trim() || "-";
+    tr.appendChild(asesorTd);
+
+    const contactoTd = document.createElement("td");
+    const contactRaw = String(row.ultima_fecha_contacto || "").trim();
+    contactoTd.textContent = contactRaw ? (formatCell("fecha", contactRaw) || contactRaw) : "-";
+    tr.appendChild(contactoTd);
+
+    const proximaTd = document.createElement("td");
+    proximaTd.textContent = String(row.proxima_accion || "").trim();
+    tr.appendChild(proximaTd);
 
     tbody.appendChild(tr);
   });
@@ -35093,7 +35362,6 @@ const openDemandaDetail = (id) => {
 const normalizeInmuebleTabKey = (tab) => {
   const key = String(tab || "").trim();
   if (!key) return "datos";
-  if (key === "actividad") return "evolucion";
   if (key === "docs") return "adjuntos";
   return key;
 };
@@ -35105,7 +35373,11 @@ const setInmuebleTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === key);
   });
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
-  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", key !== "evolucion");
+  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", key !== "actividad");
+  if (inmuebleTabPersonas) inmuebleTabPersonas.classList.toggle("hidden", key !== "personas");
+  if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", key !== "historial");
+  if (inmuebleTabEvolucion) inmuebleTabEvolucion.classList.toggle("hidden", key !== "evolucion");
+  if (inmuebleTabServicios) inmuebleTabServicios.classList.toggle("hidden", key !== "servicios");
   if (inmuebleTabImagenes) inmuebleTabImagenes.classList.toggle("hidden", key !== "imagenes");
   if (inmuebleTabAdjuntos) inmuebleTabAdjuntos.classList.toggle("hidden", key !== "adjuntos");
   // Legacy tabs (solo accesibles desde acciones laterales si existen).
@@ -51364,8 +51636,20 @@ if (inmuebleTecnoSideServiciosEdit) {
   });
 }
 
+if (inmuebleServiciosTabEditBtn) {
+  inmuebleServiciosTabEditBtn.addEventListener("click", () => {
+    openInmuebleServiciosModal();
+  });
+}
+
 if (inmuebleTecnoSidePersonasNew) {
   inmuebleTecnoSidePersonasNew.addEventListener("click", () => {
+    openInmueblePersonasModal();
+  });
+}
+
+if (inmueblePersonasTabNewBtn) {
+  inmueblePersonasTabNewBtn.addEventListener("click", () => {
     openInmueblePersonasModal();
   });
 }
@@ -51395,6 +51679,14 @@ if (inmuebleTecnoCampaignBtn) {
 if (inmuebleTecnoPosBtn) {
   inmuebleTecnoPosBtn.addEventListener("click", () => {
     setInmuebleTab("datos");
+    if (inmueblePositionPickActive) {
+      setInmueblePositionPickActive(false);
+      return;
+    }
+    // Tecnocloud: permite corregir la posición directamente en el mapa.
+    // Si Leaflet no está disponible, usamos el fallback (abrir OSM).
+    const started = startInmueblePositionPickMode();
+    if (started) return;
     const inm = state.currentInmuebleContext?.inmueble || {};
     const address = [
       String(inm.direccion || "").trim(),

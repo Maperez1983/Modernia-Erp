@@ -2495,22 +2495,18 @@
 					              <div id="crmViewResumen" class="crm-workspace-view">
 					                <div class="crm-home-grid tc-home-grid">
 					                  <div class="crm-home-left">
-					                    <div class="crm-home-cards crm-home-kpis hidden" aria-label="KPIs">
-					                      <button type="button" class="dashboard-card kpi-clickable" data-crm-view="captaciones" data-etapa="Noticia">
-					                        <div class="kpi-label">Noticias Web activas</div>
-					                        <div class="kpi-value" id="crmHomeKpiNoticias">0</div>
-					                        <div class="muted">últimos 5 días</div>
-					                      </button>
-					                      <button type="button" class="dashboard-card kpi-clickable" data-crm-view="clientes">
-					                        <div class="kpi-label">Clientes Genéricos Web</div>
-					                        <div class="kpi-value" id="crmHomeKpiClientesWeb">0</div>
-					                        <div class="muted">cartera inmobiliaria</div>
-					                      </button>
-					                      <button type="button" class="dashboard-card kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:activa">
-					                        <div class="kpi-label">Pedidos nuevos</div>
-					                        <div class="kpi-value" id="crmHomeKpiPedidosNuevos">0</div>
-					                        <div class="muted">últimos 5 días</div>
-					                      </button>
+					                    <div class="tc-listview tc-home-panel" aria-label="Accesos directos">
+					                      <div class="tc-listhead">
+					                        <div class="tc-listleft">
+					                          <strong class="tc-title">Inicio</strong>
+					                        </div>
+					                      </div>
+					                      <div class="tc-quickgrid">
+					                        <button type="button" class="tc-quickbtn" id="crmInicioContactarBtn">Clientes a contactar</button>
+					                        <button type="button" class="tc-quickbtn" id="crmInicioPanelBtn">Panel de control</button>
+					                        <button type="button" class="tc-quickbtn" id="crmInicioMapaBtn">Mapa inmuebles</button>
+					                        <button type="button" class="tc-quickbtn" id="crmInicioAgendaBtn">Agenda</button>
+					                      </div>
 					                    </div>
 					                    <div class="crm-home-cards" aria-label="Gestión">
 					                      <div class="tc-listview tc-home-panel">
@@ -3299,7 +3295,11 @@
 	            </div>
 	            <div class="tabs" id="inmuebleTabs">
 	              <button class="tab active" type="button" data-tab="datos">Información</button>
+	              <button class="tab" type="button" data-tab="actividad">Actividad</button>
+	              <button class="tab" type="button" data-tab="personas">Personas relacionadas</button>
+	              <button class="tab" type="button" data-tab="historial">Historial</button>
 	              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+	              <button class="tab" type="button" data-tab="servicios">Servicios</button>
 	              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
 	              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
 	            </div>
@@ -3579,6 +3579,52 @@
                 </form>
               </div>
             </div>
+	            <div id="inmuebleTabPersonas" class="hidden">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Personas relacionadas</h3>
+	                    <p class="muted">Propietarios, compradores e informadores vinculados al expediente.</p>
+	                  </div>
+	                  <button type="button" class="secondary" id="inmueblePersonasTabNewBtn">Nueva persona relacionada</button>
+	                </div>
+	                <div id="inmueblePersonasTabList"></div>
+	              </div>
+	            </div>
+	            <div id="inmuebleTabHistorial" class="hidden">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Historial de cambios</h3>
+	                    <p class="muted">Registro de cambios sobre la ficha (estilo Tecnocloud).</p>
+	                  </div>
+	                </div>
+	                <div id="inmuebleHistorialTabList" class="crm-focus-list"></div>
+	              </div>
+	            </div>
+	            <div id="inmuebleTabEvolucion" class="hidden">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Evolución del inmueble</h3>
+	                    <p class="muted">Evolución por fechas y estados (resumen operativo).</p>
+	                  </div>
+	                </div>
+	                <div id="inmuebleEvolucionTabTable"></div>
+	              </div>
+	            </div>
+	            <div id="inmuebleTabServicios" class="hidden">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Servicios inmobiliarios</h3>
+	                    <p class="muted">Características rápidas de la vivienda (como en Tecnocloud).</p>
+	                  </div>
+	                  <button type="button" class="secondary" id="inmuebleServiciosTabEditBtn">Editar servicios</button>
+	                </div>
+	                <div id="inmuebleServiciosTabList"></div>
+	              </div>
+	            </div>
 	            <div id="inmuebleTabImagenes" class="hidden">
 	              <div class="form-card">
 	                <h3>Imágenes</h3>
