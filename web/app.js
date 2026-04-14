@@ -22877,6 +22877,7 @@ const leafletMapInstances = new WeakMap();
 
 const renderMapPreview = (container, lat, lon, address = "") => {
   if (!container) return;
+  const isInmueblePanel = container === inmuebleMap || String(container.id || "").trim() === "inmuebleMap";
   const destroyLeaflet = () => {
     const existing = leafletMapInstances.get(container);
     if (existing?.map) {
@@ -23003,13 +23004,21 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   container.innerHTML = `
     <div class="map-box-leaflet-wrap">
       <div class="map-box-leaflet" aria-label="Mapa ${escapeHtml(cleanAddress || center)}"></div>
+      <div class="map-box-toolbar" aria-label="Buscar ubicación">
+        <form class="map-box-search" data-map-searchform="1" autocomplete="off">
+          <input type="search" placeholder="Buscar dirección..." value="${escapeHtml(cleanAddress || "")}" data-map-search="1" />
+          <button type="submit" class="secondary ghost" title="Buscar">Buscar</button>
+          <button type="button" class="secondary ghost hidden" data-map-apply="1" title="Fijar posición">Fijar</button>
+        </form>
+        <div class="map-box-hint muted" data-map-hint="1"></div>
+      </div>
       <div class="map-box-leaflet-controls" role="group" aria-label="Capa de mapa">
         <button type="button" class="secondary ghost active" data-layer="street">Mapa</button>
         <button type="button" class="secondary ghost" data-layer="satellite">Satélite</button>
       </div>
     </div>
     <div class="map-box-meta">
-      <span class="muted">${escapeHtml(cleanAddress || center)}</span>
+      <span class="muted" data-map-status="1">${escapeHtml(cleanAddress || center)}</span>
       <a class="muted" href="${osmUrl}" target="_blank" rel="noreferrer">Abrir en OpenStreetMap</a>
     </div>
   `;
@@ -23018,7 +23027,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   if (!mapEl) return;
   const map = window.L.map(mapEl, { zoomControl: false, attributionControl: true, scrollWheelZoom: true });
   try {
-    window.L.control.zoom({ position: "topright" }).addTo(map);
+    window.L.control.zoom({ position: "bottomright" }).addTo(map);
   } catch {}
   const street = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20,
@@ -23032,10 +23041,13 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     }
   );
   street.addTo(map);
-  const marker = window.L.marker([Number(lat), Number(lon)]);
+  const marker = window.L.marker([Number(lat), Number(lon)], { draggable: true });
   marker.addTo(map);
   map.setView([Number(lat), Number(lon)], 16);
-  leafletMapInstances.set(container, { map, marker, street, satellite, active: "street" });
+  try {
+    if (marker.dragging) marker.dragging.disable();
+  } catch {}
+  leafletMapInstances.set(container, { map, marker, street, satellite, active: "street", savedLat: Number(lat), savedLon: Number(lon), preview: null, syncPickUi: null });
 
   const setLayer = (layerKey) => {
     const inst = leafletMapInstances.get(container);
@@ -23061,6 +23073,120 @@ const renderMapPreview = (container, lat, lon, address = "") => {
       const btn = event.target?.closest?.("button[data-layer]");
       if (!btn) return;
       setLayer(btn.dataset.layer);
+    });
+  }
+
+  const statusEl = container.querySelector("[data-map-status]");
+  const hintEl = container.querySelector("[data-map-hint]");
+  const applyBtn = container.querySelector("[data-map-apply]");
+  const form = container.querySelector("[data-map-searchform]");
+  const input = container.querySelector("[data-map-search]");
+  const setHint = (text = "") => {
+    if (!hintEl) return;
+    hintEl.textContent = String(text || "").trim();
+  };
+  const setStatus = (text = "") => {
+    if (!statusEl) return;
+    statusEl.textContent = String(text || "").trim();
+  };
+
+  const syncPickUi = () => {
+    const inst = leafletMapInstances.get(container);
+    if (!inst?.marker) return;
+    const pick = Boolean(isInmueblePanel && inmueblePositionPickActive);
+    container.closest?.(".map-box")?.setAttribute?.("data-pick", pick ? "1" : "0");
+    container.dataset.pick = pick ? "1" : "0";
+    try {
+      if (inst.marker.dragging) {
+        if (pick) inst.marker.dragging.enable();
+        else inst.marker.dragging.disable();
+      }
+    } catch {}
+    if (applyBtn) applyBtn.classList.toggle("hidden", !(pick && inst.preview));
+    if (pick) setHint("Modo posición: busca o haz clic en el mapa para fijar.");
+    else setHint("");
+  };
+  try {
+    const inst = leafletMapInstances.get(container);
+    if (inst) inst.syncPickUi = syncPickUi;
+  } catch {}
+  syncPickUi();
+
+  const centerTo = (nextLat, nextLon, zoom = 16) => {
+    const inst = leafletMapInstances.get(container);
+    if (!inst?.map || !inst?.marker) return;
+    try {
+      inst.marker.setLatLng([Number(nextLat), Number(nextLon)]);
+      inst.map.setView([Number(nextLat), Number(nextLon)], zoom);
+    } catch {}
+  };
+
+  if (marker) {
+    marker.on("dragend", () => {
+      const inst = leafletMapInstances.get(container);
+      if (!inst?.marker) return;
+      const ll = inst.marker.getLatLng?.();
+      const nextLat = Number(ll?.lat);
+      const nextLon = Number(ll?.lng);
+      if (!Number.isFinite(nextLat) || !Number.isFinite(nextLon)) return;
+      if (!(isInmueblePanel && inmueblePositionPickActive)) {
+        // No permitimos mover si no está activo el modo Tecnocloud "Modifica posición".
+        centerTo(inst.savedLat, inst.savedLon, inst.map.getZoom ? inst.map.getZoom() : 16);
+        setHint("Activa “Modifica posición” para mover el marcador.");
+        return;
+      }
+      inst.preview = { lat: nextLat, lon: nextLon, display_name: "Marcador movido" };
+      if (applyBtn) applyBtn.classList.remove("hidden");
+      setStatus(`${nextLat.toFixed(6)}, ${nextLon.toFixed(6)}`);
+      syncPickUi();
+    });
+  }
+
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const q = String(input?.value || "").trim();
+      if (!q) {
+        setHint("Escribe una dirección para buscar.");
+        return;
+      }
+      setHint("Buscando...");
+      const hit = await lookupMapAddress(q);
+      if (!hit) {
+        setHint("No se encontró. Prueba con “Calle, Municipio, Provincia”.");
+        return;
+      }
+      const inst = leafletMapInstances.get(container);
+      if (inst) inst.preview = { lat: hit.lat, lon: hit.lon, display_name: hit.display_name };
+      centerTo(hit.lat, hit.lon, 16);
+      setStatus(hit.display_name || `${hit.lat}, ${hit.lon}`);
+      setHint(isInmueblePanel && inmueblePositionPickActive ? "Pulsa “Fijar” para guardar esta posición." : "");
+      syncPickUi();
+    });
+  }
+
+  if (applyBtn) {
+    applyBtn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!(isInmueblePanel && inmueblePositionPickActive)) return;
+      const inst = leafletMapInstances.get(container);
+      const preview = inst?.preview || null;
+      const nextLat = Number(preview?.lat);
+      const nextLon = Number(preview?.lon);
+      if (!Number.isFinite(nextLat) || !Number.isFinite(nextLon)) return;
+      setHint("Guardando posición...");
+      const res = await saveInmuebleFields({ lat: nextLat, lon: nextLon });
+      if (res?.error) {
+        setHint(res.error || "Error al guardar.");
+        return;
+      }
+      inst.savedLat = nextLat;
+      inst.savedLon = nextLon;
+      inst.preview = null;
+      setHint("Posición guardada.");
+      setInmueblePositionPickActive(false);
+      syncPickUi();
     });
   }
 
@@ -23091,6 +23217,14 @@ const setInmueblePositionPickActive = (active) => {
       ? "Modo posición: haz clic en el mapa para fijar la localización."
       : "";
   }
+  try {
+    if (inmuebleMap) {
+      const inst = leafletMapInstances.get(inmuebleMap);
+      if (typeof inst?.syncPickUi === "function") {
+        inst.syncPickUi();
+      }
+    }
+  } catch {}
   if (!next && typeof inmueblePositionPickCleanup === "function") {
     try {
       inmueblePositionPickCleanup();
@@ -23262,6 +23396,43 @@ const clientSideGeocodeLookup = async (query) => {
       } catch {}
     }
   }
+  return null;
+};
+
+const lookupMapAddress = async (query) => {
+  const q = String(query || "").replace(/\s+/g, " ").trim();
+  if (!q) return null;
+  try {
+    const params = new URLSearchParams({ q });
+    const data = await api(`/api/geocode_lookup?${params.toString()}`);
+    if (data?.ok) {
+      const lat = Number(data.lat);
+      const lon = Number(data.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return {
+          provider: String(data.provider || "server").trim() || "server",
+          lat,
+          lon,
+          display_name: String(data.display_name || data.query_used || q).trim() || q,
+        };
+      }
+    }
+  } catch {}
+  try {
+    const hit = await clientSideGeocodeLookup(q);
+    if (hit) {
+      const lat = Number(hit.lat);
+      const lon = Number(hit.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return {
+          provider: String(hit.provider || "browser").trim() || "browser",
+          lat,
+          lon,
+          display_name: String(hit.display_name || q).trim() || q,
+        };
+      }
+    }
+  } catch {}
   return null;
 };
 

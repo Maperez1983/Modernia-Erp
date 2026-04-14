@@ -3123,6 +3123,54 @@ body.crm-fin #companySummary {
   color: rgba(var(--ink-rgb), 0.92) !important;
 }
 
+.map-box-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 550;
+  display: grid;
+  gap: 6px;
+  max-width: min(420px, calc(100% - 20px));
+}
+
+.map-box-search {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+}
+
+.map-box-search input[type="search"] {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.map-box-search button {
+  padding: 6px 10px !important;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.map-box-hint {
+  padding: 0 2px;
+  font-size: 12px;
+  text-align: right;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.map-box[data-pick="1"] .map-box-leaflet {
+  cursor: crosshair;
+}
+
 .map-box-meta {
   display: flex;
   justify-content: space-between;
