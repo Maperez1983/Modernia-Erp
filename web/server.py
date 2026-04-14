@@ -7692,6 +7692,147 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                 pass
 
 
+def _parse_date_ddmmyyyy_to_iso(raw: object) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    text = text.replace("-", "/").replace(".", "/")
+    match = re.search(r"([0-9]{2})/([0-9]{2})/([0-9]{4})", text)
+    if not match:
+        return ""
+    try:
+        return datetime(int(match.group(3)), int(match.group(2)), int(match.group(1))).date().isoformat()
+    except Exception:
+        return ""
+
+
+def _score_renta_ocr_text(text: str) -> int:
+    normalized = normalize_lookup_text(text or "")
+    if not normalized:
+        return 0
+    score = min(len(normalized), 2600) // 13
+    for token, weight in (
+        ("AGENCIA TRIBUTARIA", 30),
+        ("MODELO 100", 60),
+        ("IMPUESTO SOBRE LA RENTA", 55),
+        ("RESULTADO DE LA DECLARACION", 35),
+        ("CODIGO SEGURO DE VERIFICACION", 25),
+        ("CSV", 12),
+        ("BORRADOR", 10),
+        ("PRESENTACION REALIZADA", 20),
+    ):
+        if token in normalized:
+            score += weight
+    return max(0, min(300, int(score)))
+
+
+def _parse_renta_pdf_fields(text: str) -> dict:
+    raw = str(text or "")
+    if not raw.strip():
+        return {}
+    normalized = normalize_lookup_text(raw)
+    fields: dict[str, object] = {}
+
+    casillas = {
+        "rendimientos_trabajo_total": "0012",
+        "base_imponible_general": "0432",
+        "base_liquidable_general": "0500",
+        "casilla_505": "0505",
+        "resultado_declaracion": "0670",
+    }
+    for key, code in casillas.items():
+        match = re.search(rf"([\-0-9\., ]+)\s+{code}\b", raw)
+        if not match:
+            continue
+        value = parse_optional_float(match.group(1))
+        if value is None:
+            continue
+        fields[key] = round(float(value), 2)
+
+    if "resultado_declaracion" not in fields:
+        match = re.search(
+            r"RESULTADO DE LA DECLARACI[OÓ]N[^\n\r]{0,80}?([\-]?[0-9][0-9\.,]*)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if match:
+            value = parse_optional_float(match.group(1))
+            if value is not None:
+                fields["resultado_declaracion"] = round(float(value), 2)
+
+    presentacion = ""
+    match = re.search(
+        r"Presentaci[oó]n realizada el\s*:?\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+        raw,
+        re.IGNORECASE,
+    )
+    if match:
+        presentacion = _parse_date_ddmmyyyy_to_iso(match.group(1))
+    if presentacion:
+        fields["presentacion_fecha"] = presentacion
+
+    return fields
+
+
+def process_renta_ocr_job(payload, conn):
+    raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=None, session=None)
+    tmp_path = None
+    text = ""
+    err_detail = ""
+    method = ""
+    source_hint = " ".join(
+        [
+            str(payload.get("filename") or ""),
+            str(payload.get("s3_key") or ""),
+            str(payload.get("source_hint") or ""),
+            str(payload_hint or ""),
+        ]
+    ).strip()
+    try:
+        suffix = ".pdf"
+        if mime and mime.startswith("image/"):
+            suffix = ".png" if "png" in mime else ".jpg"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+            tmp_file.write(raw_bytes)
+            tmp_path = tmp_file.name
+        if mime == "application/pdf":
+            text, err_detail, method = extract_pdf_text(tmp_path)
+        else:
+            method = "vision" if external_ocr_available() else "tesseract"
+            image_text = ""
+            image_err = ""
+            if external_ocr_available():
+                vision_bytes = prepare_image_bytes_for_vision(tmp_path)
+                if vision_bytes:
+                    image_text, image_err = ocr_image_external(vision_bytes)
+            if not image_text:
+                image_text, image_err = ocr_pdf_first_page(tmp_path)
+            text = image_text or ""
+            if image_err and not err_detail:
+                err_detail = image_err
+        if not text:
+            raise RuntimeError(err_detail or "No se pudo extraer texto")
+
+        parsed_fields = _parse_renta_pdf_fields(text)
+        score = _score_renta_ocr_text(text)
+        if parsed_fields:
+            parsed_fields["ocr_score"] = score
+            parsed_fields["ocr_method"] = method
+            if source_hint:
+                parsed_fields["ocr_source_hint"] = source_hint
+        return {
+            "fields": parsed_fields,
+            "ocr_method": method,
+            "ocr_score": score,
+        }
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 def _update_workspace_inbox_ocr(conn, workspace_id, document_id, fields, now="now"):
     if not workspace_id or not document_id:
         return False
@@ -7908,21 +8049,99 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
             job_id = row["id"]
             kind = row["kind"]
             payload = json.loads(row["payload_json"] or "{}")
-            if kind == "seguros":
-                main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
-                try:
+            main_conn = None
+            try:
+                # En Postgres, get_db ignora main_db_path y abre pool Postgres con compat SQLite.
+                main_conn = get_db(main_db_path)
+                if kind == "seguros":
                     result = process_seguros_ocr(payload, main_conn)
-                finally:
-                    main_conn.close()
-            elif kind == "factura":
-                main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
-                try:
+                elif kind == "factura":
                     result = process_workspace_factura_ocr_job(payload, main_conn, now="now")
+                elif kind == "renta":
+                    result = process_renta_ocr_job(payload, main_conn)
+                    now = datetime.now(timezone.utc).isoformat()
+                    cliente_id = str(payload.get("cliente_id") or "").strip()
+                    entry_id = str(payload.get("entry_id") or "").strip()
+                    doc_id = str(payload.get("doc_id") or "").strip()
+                    extracted = (result or {}).get("fields") or {}
+                    if cliente_id and entry_id and extracted:
+                        cg_row = main_conn.execute(
+                            "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                            (cliente_id,),
+                        ).fetchone()
+                        renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+                        entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+                        current_entry = next(
+                            (item for item in entries if str(item.get("id") or "").strip() == entry_id),
+                            None,
+                        )
+                        if current_entry:
+                            updated = dict(current_entry)
+                            for key in (
+                                "rendimientos_trabajo_total",
+                                "base_imponible_general",
+                                "base_liquidable_general",
+                                "casilla_505",
+                                "resultado_declaracion",
+                                "presentacion_fecha",
+                            ):
+                                if key not in extracted:
+                                    continue
+                                value = extracted.get(key)
+                                if value in (None, "", [], {}):
+                                    continue
+                                existing = updated.get(key)
+                                if existing in (None, "", [], {}):
+                                    updated[key] = value
+                                    continue
+                                if isinstance(value, (int, float)):
+                                    prev = coerce_renta_money(existing)
+                                    if (prev is None or abs(prev) < 0.0001) and abs(float(value)) >= 0.0001:
+                                        updated[key] = value
+                            updated["ocr_status"] = "done"
+                            updated["ocr_method"] = str(extracted.get("ocr_method") or "").strip()
+                            updated["ocr_score"] = extracted.get("ocr_score")
+                            upsert_cliente_renta_entry(main_conn, cliente_id, updated, now)
+                            if doc_id:
+                                try:
+                                    campos = [
+                                        k
+                                        for k in (
+                                            "casilla_505",
+                                            "resultado_declaracion",
+                                            "base_imponible_general",
+                                            "base_liquidable_general",
+                                            "rendimientos_trabajo_total",
+                                        )
+                                        if extracted.get(k) not in (None, "", [], {})
+                                    ]
+                                    main_conn.execute(
+                                        """
+                                        UPDATE gestoria_docs
+                                        SET calidad_ocr = ?, campos_ocr = ?, updated_at = datetime(?)
+                                        WHERE id = ?
+                                        """,
+                                        (
+                                            f"Renta OCR ({(result or {}).get('ocr_method') or 'tesseract'})",
+                                            ",".join(campos),
+                                            now,
+                                            doc_id,
+                                        ),
+                                    )
+                                except Exception:
+                                    pass
+                else:
+                    raise RuntimeError("Tipo OCR no soportado")
+                try:
                     main_conn.commit()
-                finally:
-                    main_conn.close()
-            else:
-                raise RuntimeError("Tipo OCR no soportado")
+                except Exception:
+                    pass
+            finally:
+                try:
+                    if main_conn is not None:
+                        main_conn.close()
+                except Exception:
+                    pass
             update_ocr_job(jobs_conn, job_id, "done", result=result, error=None)
             jobs_conn.commit()
             jobs_conn.close()
@@ -44041,8 +44260,51 @@ class Handler(BaseHTTPRequestHandler):
                         trabajo["id"],
                     ),
                 )
+            ocr_job_id = ""
+            if doc_key:
+                try:
+                    ocr_job_id = enqueue_ocr_job(
+                        self.ocr_db_path,
+                        "renta",
+                        {
+                            "cliente_id": cliente_id,
+                            "entry_id": entry_id,
+                            "ejercicio": ejercicio,
+                            "doc_id": doc_id,
+                            "s3_key": doc_key,
+                            "filename": doc_nombre or f"Renta {ejercicio}.pdf",
+                            "source_hint": f"renta {ejercicio} {estado_presentacion}",
+                        },
+                    )
+                except Exception:
+                    try:
+                        ensure_ocr_tables(self.ocr_db_path)
+                        ocr_job_id = enqueue_ocr_job(
+                            self.ocr_db_path,
+                            "renta",
+                            {
+                                "cliente_id": cliente_id,
+                                "entry_id": entry_id,
+                                "ejercicio": ejercicio,
+                                "doc_id": doc_id,
+                                "s3_key": doc_key,
+                                "filename": doc_nombre or f"Renta {ejercicio}.pdf",
+                                "source_hint": f"renta {ejercicio} {estado_presentacion}",
+                            },
+                        )
+                    except Exception:
+                        ocr_job_id = ""
             audit("renta_campaign_document", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
-            json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "estado_presentacion": estado_presentacion})
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "entry_id": entry_id,
+                    "doc_id": doc_id,
+                    "estado_presentacion": estado_presentacion,
+                    "ocr_job_id": ocr_job_id,
+                },
+            )
             return
         elif parsed.path == "/api/cliente_relaciones":
             cliente_id = str(payload.get("cliente_id") or "").strip()

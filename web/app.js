@@ -46538,15 +46538,40 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
     if (gestoriaRentaEstadoPresentacion) {
       gestoriaRentaEstadoPresentacion.value = payload.estado_presentacion;
     }
-    if (gestoriaRentaDocumentoFile) {
-      gestoriaRentaDocumentoFile.value = "";
-    }
-    loadClienteGestoria(state.currentClienteId);
-  } catch (error) {
-    if (gestoriaRentaDocumentoStatus) {
-      gestoriaRentaDocumentoStatus.textContent = error?.message || "Error al guardar el documento.";
-    }
-  }
+	    if (gestoriaRentaDocumentoFile) {
+	      gestoriaRentaDocumentoFile.value = "";
+	    }
+	    loadClienteGestoria(state.currentClienteId);
+	    if (response?.ocr_job_id) {
+	      try {
+	        if (gestoriaRentaDocumentoStatus) {
+	          gestoriaRentaDocumentoStatus.textContent = "OCR en cola...";
+	        }
+	        await pollOcrJob(
+	          response.ocr_job_id,
+	          (jobRow) => {
+	            if (!gestoriaRentaDocumentoStatus) return;
+	            if (jobRow.status === "processing") {
+	              gestoriaRentaDocumentoStatus.textContent = "Leyendo renta (OCR)...";
+	            }
+	          },
+	          4 * 60 * 1000
+	        );
+	        if (gestoriaRentaDocumentoStatus) {
+	          gestoriaRentaDocumentoStatus.textContent = "OCR aplicado a la campaña.";
+	        }
+	        loadClienteGestoria(state.currentClienteId);
+	      } catch (err) {
+	        if (gestoriaRentaDocumentoStatus) {
+	          gestoriaRentaDocumentoStatus.textContent = err?.message || "OCR falló.";
+	        }
+	      }
+	    }
+	  } catch (error) {
+	    if (gestoriaRentaDocumentoStatus) {
+	      gestoriaRentaDocumentoStatus.textContent = error?.message || "Error al guardar el documento.";
+	    }
+	  }
 };
 
 const renderGestoriaRentaDetail = (entry = {}) => {
