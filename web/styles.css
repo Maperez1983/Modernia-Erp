@@ -3212,6 +3212,56 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   background: #fffdf8;
 }
 
+.crm-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.crm-title-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(248, 250, 252, 0.95);
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+.crm-title-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+}
+
+.crm-mini-kpis {
+  margin-top: 12px;
+  margin-bottom: 16px;
+}
+
+.tabs .tab.crm-tab-ico {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tabs .tab.crm-tab-ico .crm-tab-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabs .tab.crm-tab-ico .crm-tab-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+}
+
 .crm-header-stack {
   flex-wrap: wrap;
 }

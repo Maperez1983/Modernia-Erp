@@ -2419,6 +2419,7 @@ const segurosAiRun = document.getElementById("segurosAiRun");
 const segurosAiStatus = document.getElementById("segurosAiStatus");
 const segurosAiOutput = document.getElementById("segurosAiOutput");
 const segurosKpis = document.getElementById("segurosKpis");
+const segurosHeaderMiniKpis = document.getElementById("segurosHeaderMiniKpis");
 const segurosRamoKpis = document.getElementById("segurosRamoKpis");
 const segurosRamoChart = document.getElementById("segurosRamoChart");
 const segurosRamoListado = document.getElementById("segurosRamoListado");
@@ -2538,6 +2539,7 @@ const finAsesoramientoConvert = document.getElementById("finAsesoramientoConvert
 const finAsesoramientosTable = document.getElementById("finAsesoramientosTable");
 const finAsesoramientosInfo = document.getElementById("finAsesoramientosInfo");
 const finAsesorKpis = document.getElementById("finAsesorKpis");
+const finHeaderMiniKpis = document.getElementById("finHeaderMiniKpis");
 const finChecklistGenerate = document.getElementById("finChecklistGenerate");
 const finChecklistStatus = document.getElementById("finChecklistStatus");
 const finChecklistTable = document.getElementById("finChecklistTable");
@@ -42559,8 +42561,36 @@ const loadSegurosKpis = () => {
   const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (segurosHeaderMiniKpis) {
+      segurosHeaderMiniKpis.innerHTML = "";
+    }
     return;
   }
+  const renderHeaderMiniKpis = (data) => {
+    if (!segurosHeaderMiniKpis) return;
+    const total = Number(data?.total || 0);
+    const enVigor = Number(data?.en_vigor || 0);
+    const vencen30 = Number(data?.vencen_30 || 0);
+    const faltantes = Number(data?.faltantes || 0);
+    const prima = Number(data?.prima_total || 0);
+    const items = [
+      { label: "Pólizas", value: numberFormatter.format(total) },
+      { label: "En vigor", value: numberFormatter.format(enVigor) },
+      { label: "Vencen 30d", value: numberFormatter.format(vencen30) },
+      { label: "Faltantes", value: numberFormatter.format(faltantes) },
+    ];
+    if (Number.isFinite(prima) && prima > 0) {
+      items.push({ label: "Prima total", value: euroFormatter.format(prima) });
+    }
+    segurosHeaderMiniKpis.innerHTML = items
+      .map(
+        (item) =>
+          `<div class="workspace-mini-kpi"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(
+            item.value
+          )}</strong></div>`
+      )
+      .join("");
+  };
   const renderKpis = (data) => {
     const wrapper = document.createElement("div");
     wrapper.className = "grid crm-kpis";
@@ -42602,13 +42632,16 @@ const loadSegurosKpis = () => {
     .then((data) => {
       state.segurosKpisCache = data || {};
       renderKpis(data || {});
+      renderHeaderMiniKpis(data || {});
     })
     .catch(() => {
       if (state.segurosKpisCache) {
         renderKpis(state.segurosKpisCache);
+        renderHeaderMiniKpis(state.segurosKpisCache);
         return;
       }
       segurosKpis.innerHTML = "<p class='muted'>No se pudieron cargar los KPIs.</p>";
+      if (segurosHeaderMiniKpis) segurosHeaderMiniKpis.innerHTML = "";
     });
 };
 
@@ -45959,6 +45992,24 @@ const renderFinAsesorKpisFromRows = (rows = []) => {
     `;
     finAsesorKpis.appendChild(card);
   });
+
+  if (finHeaderMiniKpis) {
+    const mini = [
+      { label: "Expedientes", value: numberFormatter.format(total) },
+      { label: "Documentación", value: numberFormatter.format(docs) },
+      { label: "Bancos/Firma", value: numberFormatter.format(bancos) },
+      { label: "Firmadas", value: numberFormatter.format(convertidos) },
+      { label: "Bloqueos", value: numberFormatter.format(faltantes) },
+    ];
+    finHeaderMiniKpis.innerHTML = mini
+      .map(
+        (item) =>
+          `<div class="workspace-mini-kpi"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(
+            item.value
+          )}</strong></div>`
+      )
+      .join("");
+  }
 };
 
 const updateFinSelectedSummary = () => {

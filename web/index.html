@@ -4649,19 +4649,55 @@
           </div>
         </div>
         <div id="segurosCrmSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>CRM Seguros</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                CRM Seguros
+              </h3>
               <p class="muted">Pólizas, seguimiento y oportunidades.</p>
             </div>
           </div>
+          <div class="workspace-mini-kpis crm-mini-kpis" id="segurosHeaderMiniKpis"></div>
           <div class="tabs" id="segurosTabs">
-            <button class="tab active" type="button" data-seguros-tab="dashboard">Dashboard Seguros</button>
-            <button class="tab" type="button" data-seguros-tab="bdt">Pólizas cargadas</button>
-            <button class="tab" type="button" data-seguros-tab="alta">Alta pólizas</button>
-            <button class="tab" type="button" data-seguros-tab="gestion">Gestión</button>
-            <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
-            <button class="tab" type="button" data-seguros-tab="contabilidad">Contabilidad Seguros</button>
+            <button class="tab active crm-tab-ico" type="button" data-seguros-tab="dashboard">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span>Dashboard</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-seguros-tab="bdt">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Pólizas</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-seguros-tab="alta">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Alta</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-seguros-tab="gestion">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.94 7.94 0 0 0 .1-1 7.94 7.94 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a8.1 8.1 0 0 0-1.7-1l-.4-2.6H10l-.4 2.6a8.1 8.1 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.94 7.94 0 0 0-.1 1c0 .34.03.67.1 1l-2 1.5 2 3.5 2.4-1c.53.4 1.1.74 1.7 1l.4 2.6h4l.4-2.6c.6-.26 1.17-.6 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span>Gestión</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-seguros-tab="campanas">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 22a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22Z" fill="currentColor"/><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span>Campañas</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-seguros-tab="contabilidad">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Contabilidad</span>
+            </button>
           </div>
           <datalist id="segurosCompaniasList">
             <option value="Allianz"></option>
@@ -6497,13 +6533,55 @@
           </div>
         </div>
           <div id="hipotecaSection" class="hidden">
+          <div class="crm-header crm-header-stack">
+            <div>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 21V10l5-3 5 3v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-6h4v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                </span>
+                CRM Financiaciones
+              </h3>
+              <p class="muted">Hipotecas, asesoramientos, workflow y seguimiento bancario.</p>
+            </div>
+          </div>
+          <div class="workspace-mini-kpis crm-mini-kpis" id="finHeaderMiniKpis"></div>
           <div id="hipotecaTabs" class="tabs">
-            <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
-            <button class="tab" type="button" data-hipoteca-section="alta">Workflow</button>
-            <button class="tab" type="button" data-hipoteca-section="asesoramiento">Asesoramiento</button>
-            <button class="tab" type="button" data-hipoteca-section="agenda">Agenda</button>
-            <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
-            <button class="tab" type="button" data-hipoteca-section="contabilidad">Contabilidad</button>
+            <button class="tab active crm-tab-ico" type="button" data-hipoteca-section="dashboard">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span>Dashboard</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="alta">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Workflow</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="asesoramiento">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 18V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12" stroke="currentColor" stroke-width="2"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Asesoramiento</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="agenda">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Agenda</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="bdt">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>BDT</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="contabilidad">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Contabilidad</span>
+            </button>
           </div>
           <div id="hipotecaDashboardPanel" class="form-card">
             <div class="dashboard-head">
