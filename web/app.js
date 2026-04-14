@@ -16960,6 +16960,85 @@ const setCrmQuickNewOpen = (open = false) => {
   }
 };
 
+// --- Return-to-form drafts (avoid losing user input when opening other records) ---
+const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
+const RETURN_DRAFT_PAYLOAD_KEY = "v2:return_draft_payload";
+
+const setReturnDraft = (ctx = "", payload = {}, meta = {}) => {
+  try {
+    const safeCtx = String(ctx || "").trim();
+    if (!safeCtx) return;
+    sessionStorage.setItem(RETURN_DRAFT_CTX_KEY, safeCtx);
+    sessionStorage.setItem(
+      RETURN_DRAFT_PAYLOAD_KEY,
+      JSON.stringify({
+        ts: Date.now(),
+        payload: payload && typeof payload === "object" ? payload : {},
+        ...((meta && typeof meta === "object") ? meta : {}),
+      })
+    );
+  } catch {}
+};
+
+const peekReturnDraftCtx = () => {
+  try {
+    return String(sessionStorage.getItem(RETURN_DRAFT_CTX_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const consumeReturnDraft = (ctx = "") => {
+  try {
+    const expected = String(ctx || "").trim();
+    const stored = String(sessionStorage.getItem(RETURN_DRAFT_CTX_KEY) || "").trim();
+    if (!expected || stored !== expected) return null;
+    const raw = sessionStorage.getItem(RETURN_DRAFT_PAYLOAD_KEY);
+    sessionStorage.removeItem(RETURN_DRAFT_CTX_KEY);
+    sessionStorage.removeItem(RETURN_DRAFT_PAYLOAD_KEY);
+    if (!raw) return { payload: {} };
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : { payload: {} };
+  } catch {
+    return null;
+  }
+};
+
+const applyDraftToForm = (formEl, payload = {}) => {
+  if (!formEl) return;
+  const data = payload && typeof payload === "object" ? payload : {};
+  try {
+    Array.from(formEl.elements || []).forEach((el) => {
+      if (!el || !el.name) return;
+      if (!(el.name in data)) return;
+      const value = data[el.name];
+      if (el.type === "checkbox") {
+        const key = String(value || "").trim().toLowerCase();
+        el.checked = value === true || value === 1 || value === "1" || ["true", "yes", "si", "sí", "on"].includes(key);
+        return;
+      }
+      if (el.tagName === "SELECT" && el.multiple) {
+        const values = Array.isArray(value) ? value : String(value || "").split(",").map((v) => v.trim()).filter(Boolean);
+        Array.from(el.options || []).forEach((opt) => {
+          opt.selected = values.includes(String(opt.value || opt.textContent || "").trim());
+        });
+        return;
+      }
+      el.value = value === null || value === undefined ? "" : String(value);
+    });
+  } catch {}
+};
+
+const maybeReturnToCrmCaptacionCreate = () => {
+  if (peekReturnDraftCtx() !== "crm_captacion_create") return;
+  if (!crmCaptacionModal) return;
+  window.setTimeout(() => {
+    try {
+      setCrmCaptacionModalOpen(true);
+    } catch {}
+  }, 0);
+};
+
 const setCrmClienteModalOpen = (open = false) => {
   if (!crmClienteModal) return;
   const next = Boolean(open);
@@ -16986,9 +17065,20 @@ const setCrmCaptacionModalOpen = (open = false) => {
     setCrmQuickNewOpen(false);
     setCrmRecentOpen(false);
     if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "";
-    try {
-      crmCaptacionCreateForm?.reset?.();
-    } catch {}
+    const restored = consumeReturnDraft("crm_captacion_create");
+    if (restored?.payload && crmCaptacionCreateForm) {
+      applyDraftToForm(crmCaptacionCreateForm, restored.payload);
+      if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "Borrador restaurado.";
+      const focusName = String(restored?.focusName || "").trim();
+      if (focusName) {
+        const el = crmCaptacionCreateForm.querySelector(`[name="${CSS.escape(focusName)}"]`);
+        if (el && el.focus) window.setTimeout(() => el.focus(), 0);
+      }
+    } else {
+      try {
+        crmCaptacionCreateForm?.reset?.();
+      } catch {}
+    }
     setTimeout(() => {
       const input = crmCaptacionCreateForm?.querySelector?.('input[name="direccion"]');
       if (input && input.focus) input.focus();
@@ -19290,6 +19380,8 @@ const hasToken = (text, tokens) => tokens.some((token) => text.includes(token));
 
 const isMoneyColumnKey = (value) => {
   const lower = String(value || "").toLowerCase();
+  // Campo inmobiliario: es una etiqueta (Venta/Alquiler/Permuta...), no un importe.
+  if (lower === "necesidad_venta_alquiler") return false;
   return MONEY_COLUMNS.has(lower) || hasToken(lower, MONEY_COLUMN_TOKENS) || lower.includes("comision");
 };
 
@@ -19844,6 +19936,38 @@ const INMOBILIARIA_ASESORES = [
   "Daniel García",
 ];
 
+const normalizeInmobiliariaPersona = (value, candidates = INMOBILIARIA_ASESORES) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const list = Array.isArray(candidates) ? candidates.map((v) => String(v || "").trim()).filter(Boolean) : [];
+  const rawKey = normalizeSimple(raw);
+  const exact = list.find((name) => normalizeSimple(name) === rawKey);
+  if (exact) return exact;
+  const user = getUserByValue(raw);
+  const full = user
+    ? String(user.nombre_completo || `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || "").trim()
+    : "";
+  const fullKey = normalizeSimple(full);
+  const matchFromFull = fullKey ? list.find((name) => fullKey.includes(normalizeSimple(name))) : "";
+  if (matchFromFull) return matchFromFull;
+  const matchFromRaw = rawKey ? list.find((name) => rawKey.includes(normalizeSimple(name))) : "";
+  if (matchFromRaw) return matchFromRaw;
+  return full || raw;
+};
+
+const inferInmobiliariaCategoria = (tipoInmueble) => {
+  const key = normalizeSimple(tipoInmueble || "");
+  if (!key) return "";
+  const residencial = new Set(["piso", "atico", "ático", "bajo", "duplex", "dúplex", "casa", "chalet", "adosado", "pareado", "villa", "finca"]);
+  if (residencial.has(key)) return "Residencial";
+  if (["local", "oficina"].includes(key)) return "Comercial";
+  if (["nave"].includes(key)) return "Industrial";
+  if (["garaje", "trastero"].includes(key)) return "Anexos";
+  if (["terreno", "solar"].includes(key)) return "Suelo";
+  if (["edificio", "hotel"].includes(key)) return "Edificio";
+  return String(tipoInmueble || "").trim();
+};
+
 const INMUEBLE_CHECKLISTS = {
   Inmueble: [
     "Alta básica de la ficha",
@@ -20094,12 +20218,28 @@ const CAPTACION_FIELDS = [
     section: "Propiedad y origen",
   },
   { key: "responsable", label: "Responsable", type: "text", section: "Propiedad y origen" },
-  { key: "focalizacion", label: "Focalización", type: "text", section: "Propiedad y origen" },
+  { key: "focalizacion", label: "Foco (zona/segmento)", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
-  { key: "motivo", label: "Motivo", type: "text", section: "Propiedad y origen" },
-  { key: "motivacion", label: "Motivación", type: "text", section: "Propiedad y origen" },
-  { key: "necesidad_venta_alquiler", label: "Necesidad venta/alquiler", type: "text", section: "Propiedad y origen" },
+  { key: "motivo", label: "Motivo (qué necesita)", type: "text", section: "Propiedad y origen" },
+  { key: "motivacion", label: "Motivación (por qué ahora)", type: "text", section: "Propiedad y origen" },
+  {
+    key: "necesidad_venta_alquiler",
+    label: "Necesidad",
+    type: "select",
+    options: [
+      "",
+      "Venta",
+      "Alquiler",
+      "Alquiler con opción a compra",
+      "Traspaso",
+      "Permuta",
+      "Cesión",
+      "Subrogación",
+      "Otro",
+    ],
+    section: "Propiedad y origen",
+  },
   { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Propiedad y origen" },
   { key: "propietario_email", label: "Email propietario", type: "text", section: "Propiedad y origen" },
   { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Propiedad y origen" },
@@ -22594,6 +22734,18 @@ const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => 
         const lat = Number(data.lat);
         const lon = Number(data.lon);
         if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+        // Best-effort: si el provider devuelve CP en display_name, lo rellenamos (sin prompts).
+        try {
+          const currentCp = String(codigoPostal?.value || "").trim();
+          if (!currentCp) {
+            const m = String(data.display_name || data.query_used || data.query || "").match(/\b\d{5}\b/);
+            const cp = m ? m[0] : "";
+            if (cp && codigoPostal) {
+              codigoPostal.value = cp;
+              saveInmuebleField("codigo_postal", cp);
+            }
+          }
+        } catch {}
         if (latInput) latInput.value = String(lat);
         if (lonInput) lonInput.value = String(lon);
         saveInmuebleField("lat", lat);
@@ -22655,6 +22807,16 @@ const geocodeCaptacionAddress = () => {
       const lat = Number(data.lat);
       const lon = Number(data.lon);
       if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+      try {
+        const currentCp = String(codigoPostalInput?.value || "").trim();
+        if (!currentCp) {
+          const m = String(data.display_name || data.query_used || data.query || "").match(/\b\d{5}\b/);
+          const cp = m ? m[0] : "";
+          if (cp && codigoPostalInput) {
+            codigoPostalInput.value = cp;
+          }
+        }
+      } catch {}
       if (latInput) latInput.value = String(lat);
       if (lonInput) lonInput.value = String(lon);
       updateCaptacionMap(lat, lon);
@@ -35802,11 +35964,24 @@ const openInmuebleDetail = (id, originView = "") => {
   ])
     .then(([data]) => {
       const inmueble = data.inmueble || {};
-      state.currentInmueble = inmueble;
+      // Normaliza nombres de usuario (evita duplicados tipo "MPerez" vs "Miguel Angel Pérez").
+      const normalizedInmueble = {
+        ...inmueble,
+        titulo: String(inmueble.titulo || "").trim() ? inmueble.titulo : (inmueble.direccion || inmueble.referencia || ""),
+        asesor: normalizeInmobiliariaPersona(inmueble.asesor),
+        responsable: normalizeInmobiliariaPersona(inmueble.responsable),
+        categoria: String(inmueble.categoria || "").trim() ? inmueble.categoria : inferInmobiliariaCategoria(inmueble.tipo_inmueble),
+      };
+      state.currentInmueble = normalizedInmueble;
       const captacion = data.captacion || {};
+      const normalizedCaptacion = {
+        ...captacion,
+        asesor: normalizeInmobiliariaPersona(captacion.asesor),
+        responsable: normalizeInmobiliariaPersona(captacion.responsable),
+      };
 	      state.currentInmuebleContext = {
-	        inmueble,
-	        captacion,
+	        inmueble: normalizedInmueble,
+	        captacion: normalizedCaptacion,
 	        propietarios: data.propietarios || [],
 	        docs: data.docs || [],
 	        servicios: Array.isArray(data.servicios) ? data.servicios : [],
@@ -35837,11 +36012,11 @@ const openInmuebleDetail = (id, originView = "") => {
         kind: "inmueble",
         inmuebleId: String(id || "").trim(),
         view: String(state.currentInmuebleOriginView || originView || state.crmWorkspaceView || "inmuebles").trim() || "inmuebles",
-        title: inmueble.direccion || inmueble.referencia || "Ficha de inmueble",
+        title: normalizedInmueble.direccion || normalizedInmueble.referencia || "Ficha de inmueble",
         meta: [
-          inmueble.referencia || "",
-          inmueble.poblacion || "",
-          inmueble.estado || captacion.etapa || "",
+          normalizedInmueble.referencia || "",
+          normalizedInmueble.poblacion || "",
+          normalizedInmueble.estado || normalizedCaptacion.etapa || "",
         ]
           .filter(Boolean)
           .join(" · "),
@@ -35849,11 +36024,11 @@ const openInmuebleDetail = (id, originView = "") => {
       if (inmuebleDatosGrid) {
         const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
         const fields = filterInmuebleFieldsForOperacion(baseFields, state.currentInmuebleOperacionTipo);
-        renderEditableGrid(inmuebleDatosGrid, fields, inmueble, "inmueble");
+        renderEditableGrid(inmuebleDatosGrid, fields, normalizedInmueble, "inmueble");
       }
       if (inmuebleCaptacionGrid) {
         const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
-        renderEditableGrid(inmuebleCaptacionGrid, fields, captacion, "captacion");
+        renderEditableGrid(inmuebleCaptacionGrid, fields, normalizedCaptacion, "captacion");
         renderPropietariosEditor(data.propietarios || []);
       }
       if (inmuebleDemandaCliente) {
@@ -46421,6 +46596,8 @@ const closeClienteDetail = () => {
   setUrlParams(
     returnModule === "clientes" ? new URLSearchParams({ clientes: "1" }) : new URLSearchParams()
   );
+  // Si veníamos de un alta rápida (duplicados / comprobación), reabrimos el modal con los datos intactos.
+  maybeReturnToCrmCaptacionCreate();
 };
 
 const loadTable = () => {
@@ -47270,6 +47447,12 @@ if (crmCaptacionCreateForm) {
             try {
               const id = String(dup?.id || "").trim();
               if (!id) return;
+              const active = document.activeElement;
+              const focusName =
+                active && crmCaptacionCreateForm && crmCaptacionCreateForm.contains(active) && active.name
+                  ? String(active.name || "").trim()
+                  : "";
+              setReturnDraft("crm_captacion_create", payload, { focusName });
               setCrmCaptacionModalOpen(false);
               setCrmWorkspaceView("captaciones");
               loadCrmCaptaciones();
@@ -51499,6 +51682,8 @@ if (inmuebleBackBtn) {
     setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
     state.currentInmuebleOriginView = "inmuebles";
+    // Si el usuario estaba creando un inmueble y abrió una ficha para comprobar duplicado, reabrimos el alta con su borrador.
+    maybeReturnToCrmCaptacionCreate();
   });
 }
 

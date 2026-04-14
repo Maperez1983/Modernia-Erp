@@ -16225,6 +16225,26 @@ def infer_inmueble_type_from_catastro_use(use_label, current_value=""):
     return mapping.get(key) or normalize_person_name(use_label or "")
 
 
+def infer_inmobiliaria_categoria(tipo_inmueble):
+    key = normalize_lookup_text(tipo_inmueble or "")
+    if not key:
+        return ""
+    residencial = {"piso", "atico", "ático", "bajo", "duplex", "dúplex", "casa", "chalet", "adosado", "pareado", "villa", "finca"}
+    if key in residencial:
+        return "Residencial"
+    if key in {"local", "oficina"}:
+        return "Comercial"
+    if key in {"nave"}:
+        return "Industrial"
+    if key in {"garaje", "trastero"}:
+        return "Anexos"
+    if key in {"terreno", "solar"}:
+        return "Suelo"
+    if key in {"edificio", "hotel"}:
+        return "Edificio"
+    return normalize_person_name(tipo_inmueble or "")
+
+
 def extract_catastro_public_summary_from_html(html_text, reference=""):
     if not html_text:
         return {}
@@ -18970,6 +18990,7 @@ def ensure_tables(db_path):
         "provincia": "provincia TEXT",
         "situacion_comercial": "situacion_comercial TEXT",
         "fecha_conversion": "fecha_conversion TEXT",
+        "tipo_operacion": "tipo_operacion TEXT",
         # TecnoCloud-style fields (zona/priorización).
         "situacion_ocupacion": "situacion_ocupacion TEXT",
         "ocupado_por": "ocupado_por TEXT",
@@ -18986,6 +19007,7 @@ def ensure_tables(db_path):
         "provincia": "provincia TEXT",
         "asesor": "asesor TEXT",
         "ocupado_por": "ocupado_por TEXT",
+        "tipo_operacion": "tipo_operacion TEXT",
     }.items():
         try:
             ensure_column(conn, "inmuebles", col_name, col_sql)
@@ -42007,10 +42029,52 @@ class Handler(BaseHTTPRequestHandler):
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
                 etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
+
+                # Defaults / normalización (evita fichas “vacías” en Resumen y rellena dirección detallada).
+                try:
+                    direccion_raw = str(payload.get("direccion") or "").strip()
+                    tipo_inmueble_raw = str(payload.get("tipo_inmueble") or "").strip()
+                    poblacion_raw = str(payload.get("poblacion") or "").strip()
+
+                    if not str(payload.get("titulo") or "").strip():
+                        if direccion_raw:
+                            payload["titulo"] = direccion_raw
+                        elif tipo_inmueble_raw and poblacion_raw:
+                            payload["titulo"] = f"{tipo_inmueble_raw} en {poblacion_raw}"
+                        else:
+                            payload["titulo"] = tipo_inmueble_raw or "Inmueble"
+
+                    if not str(payload.get("categoria") or "").strip():
+                        payload["categoria"] = infer_inmobiliaria_categoria(tipo_inmueble_raw)
+
+                    tipo_oper = str(payload.get("tipo_operacion") or "").strip()
+                    if not tipo_oper:
+                        tipo_oper = str(payload.get("necesidad_venta_alquiler") or "").strip()
+                    tipo_oper_key = normalize_lookup_text(tipo_oper)
+                    if "alquil" in tipo_oper_key or "arrend" in tipo_oper_key or "renta" in tipo_oper_key:
+                        payload["tipo_operacion"] = "alquiler"
+                    elif tipo_oper_key:
+                        payload["tipo_operacion"] = "venta"
+                    else:
+                        payload["tipo_operacion"] = "venta"
+
+                    # Parseamos número/planta/puerta desde dirección si no vienen explícitos.
+                    if direccion_raw:
+                        parts = parse_inmobiliaria_address_for_catastro(direccion_raw)
+                        if not str(payload.get("direccion_numero") or "").strip() and parts.get("numero"):
+                            payload["direccion_numero"] = parts.get("numero")
+                        if not str(payload.get("escalera") or "").strip() and parts.get("escalera"):
+                            payload["escalera"] = parts.get("escalera")
+                        if not str(payload.get("interior") or "").strip():
+                            interior = " ".join([str(parts.get("planta") or "").strip(), str(parts.get("puerta") or "").strip()]).strip()
+                            if interior:
+                                payload["interior"] = interior
+                except Exception:
+                    pass
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, titulo, referencia_catastral, direccion, direccion_numero, interior, escalera, edificio,
+                      id, empresa_id, referencia, titulo, referencia_catastral, tipo_operacion, direccion, direccion_numero, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, focalizacion, tipo_inmueble, subtipologia,
                       m2, anio_construccion, anio_reforma, habitaciones, banos, precio_objetivo, precio_encargo, precio_valoracion,
                       precio_pedido_cliente, fecha_valoracion, desviacion_pct,
@@ -42025,7 +42089,7 @@ class Handler(BaseHTTPRequestHandler):
                       planificacion_encargo, fecha_ultima_renov_rebaja,
                       estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42034,6 +42098,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("referencia"),
                         payload.get("titulo"),
                         payload.get("referencia_catastral"),
+                        payload.get("tipo_operacion"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
                         payload.get("interior"),
@@ -42096,7 +42161,7 @@ class Handler(BaseHTTPRequestHandler):
                       id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
                       precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
-                      urgencia, motivo, motivacion, necesidad_venta_alquiler, canal, tipo_procedencia,
+                      urgencia, motivo, motivacion, necesidad_venta_alquiler, tipo_operacion, canal, tipo_procedencia,
                       situacion_comercial, fecha_conversion,
                       etapa, noticia_verificada, situacion_ocupacion, ocupado_por,
                       probabilidad, proxima_accion, fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
@@ -42105,7 +42170,7 @@ class Handler(BaseHTTPRequestHandler):
                       propietario_telefono, propietario_email,
                       asesor, responsable, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42140,6 +42205,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("motivo"),
                         payload.get("motivacion"),
                         payload.get("necesidad_venta_alquiler"),
+                        payload.get("tipo_operacion"),
                         payload.get("canal"),
                         payload.get("tipo_procedencia"),
                         payload.get("situacion_comercial") or etapa_value,
