@@ -26779,10 +26779,15 @@ const renderPropietariosEditor = (propietarios) => {
   if (!inmuebleCaptacionGrid) return;
   const wrapper = document.createElement("div");
   wrapper.className = "card editable-card editable-card--owners";
-  wrapper.innerHTML = `
-    <h3>Propietarios vinculados</h3>
-    <p class="muted editable-card-help">Gestiona aquí los clientes propietarios reales del inmueble. Esta vinculación alimenta documentos, expedientes y seguimiento.</p>
+  const head = document.createElement("div");
+  head.className = "section-head";
+  head.innerHTML = `
+    <div>
+      <h3>Propietarios vinculados</h3>
+      <p class="muted">Clientes propietarios reales del inmueble (para documentos, expedientes y seguimiento).</p>
+    </div>
   `;
+  wrapper.appendChild(head);
 
   const list = document.createElement("div");
   list.className = "inline-list";
@@ -26845,7 +26850,7 @@ const renderPropietariosEditor = (propietarios) => {
     addOwnerRow("");
   }
   const actions = document.createElement("div");
-  actions.className = "inline-actions";
+  actions.className = "form-actions";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.textContent = "Añadir propietario";
@@ -26853,7 +26858,7 @@ const renderPropietariosEditor = (propietarios) => {
   const quickAddBtn = document.createElement("button");
   quickAddBtn.type = "button";
   quickAddBtn.className = "secondary";
-  quickAddBtn.textContent = "Dar de alta propietario";
+  quickAddBtn.textContent = "Alta propietario";
   quickAddBtn.addEventListener("click", async () => {
     if (!state.currentInmuebleId) {
       alert("No hay inmueble seleccionado.");
@@ -26912,8 +26917,33 @@ const renderPropietariosEditor = (propietarios) => {
   });
   actions.appendChild(addBtn);
   actions.appendChild(quickAddBtn);
-  wrapper.appendChild(actions);
-  inmuebleCaptacionGrid.appendChild(wrapper);
+  head.appendChild(actions);
+
+  const insertIntoPropiedadOrigen = () => {
+    try {
+      const details = Array.from(inmuebleCaptacionGrid.querySelectorAll("details.tc-accordion"));
+      const wanted = details.find((node) => {
+        const summary = node.querySelector("summary");
+        return normalizeSimple(summary?.textContent || "") === normalizeSimple("Propiedad y origen");
+      });
+      const body = wanted ? wanted.querySelector(".tc-accordion-body") : null;
+      const mount = body || wanted || null;
+      if (mount) {
+        const copy = mount.querySelector(".tc-accordion-copy");
+        if (copy && copy.parentElement === mount) {
+          copy.insertAdjacentElement("afterend", wrapper);
+        } else {
+          mount.insertAdjacentElement("afterbegin", wrapper);
+        }
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  if (!insertIntoPropiedadOrigen()) {
+    inmuebleCaptacionGrid.appendChild(wrapper);
+  }
 };
 
 const updateTableVisibility = () => {
