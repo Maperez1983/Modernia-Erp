@@ -4040,7 +4040,7 @@ body.crm-fin #companySummary {
   border: none;
   background: transparent;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -4520,6 +4520,30 @@ body.crm-fin #companySummary {
   padding: 0;
   background: transparent;
   backdrop-filter: none;
+}
+
+#crmSection .crm-insert-modal--anchored {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: block;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+#crmSection .crm-insert-modal--anchored .crm-insert-card {
+  position: absolute;
+  top: var(--crm-insert-top, 76px);
+  left: var(--crm-insert-left, 16px);
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(78vh, 640px);
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 22px 48px rgba(11, 29, 51, 0.22);
+  padding: 14px;
 }
 
 #crmSection .crm-insert-modal.hidden {

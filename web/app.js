@@ -17350,7 +17350,19 @@ const filterCrmInsertList = () => {
   });
 };
 
-const setCrmQuickNewOpen = (open = false) => {
+const positionCrmInsertModal = (anchorEl) => {
+  if (!crmInsertModal || !anchorEl) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+  const desiredWidth = Math.min(380, Math.max(280, Math.floor(viewportW - 32)));
+  let left = rect.left + rect.width / 2 - desiredWidth / 2;
+  left = Math.max(16, Math.min(left, viewportW - desiredWidth - 16));
+  const top = Math.max(16, rect.bottom + 10);
+  crmInsertModal.style.setProperty("--crm-insert-left", `${Math.round(left)}px`);
+  crmInsertModal.style.setProperty("--crm-insert-top", `${Math.round(top)}px`);
+};
+
+const setCrmQuickNewOpen = (open = false, options = {}) => {
   if (!crmInsertModal) return;
   const next = Boolean(open);
   crmInsertModal.classList.toggle("hidden", !next);
@@ -17359,6 +17371,16 @@ const setCrmQuickNewOpen = (open = false) => {
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
   if (next) {
+    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
+    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
+    if (isAnchored) {
+      positionCrmInsertModal(anchorEl);
+    } else {
+      crmInsertModal.style.removeProperty("--crm-insert-left");
+      crmInsertModal.style.removeProperty("--crm-insert-top");
+    }
     setCrmRecentOpen(false);
     setCrmClienteModalOpen(false);
     setCrmCaptacionModalOpen(false);
@@ -17367,6 +17389,10 @@ const setCrmQuickNewOpen = (open = false) => {
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
     filterCrmInsertList();
+  } else {
+    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+    crmInsertModal.style.removeProperty("--crm-insert-left");
+    crmInsertModal.style.removeProperty("--crm-insert-top");
   }
 };
 
@@ -51129,7 +51155,7 @@ if (crmQuickNewBtn && crmInsertModal) {
     event.preventDefault();
     event.stopPropagation();
     const isOpen = !crmInsertModal.classList.contains("hidden");
-    setCrmQuickNewOpen(!isOpen);
+    setCrmQuickNewOpen(!isOpen, { anchorEl: crmQuickNewBtn });
   });
 }
 
@@ -51138,7 +51164,7 @@ if (crmTopNewBtn && crmInsertModal) {
     event.preventDefault();
     event.stopPropagation();
     const isOpen = !crmInsertModal.classList.contains("hidden");
-    setCrmQuickNewOpen(!isOpen);
+    setCrmQuickNewOpen(!isOpen, { anchorEl: crmTopNewBtn });
   });
 }
 
@@ -51515,6 +51541,12 @@ if (crmInsertModal && (crmQuickNewBtn || crmTopNewBtn)) {
     if (crmQuickNewBtn && crmQuickNewBtn.contains(target)) return;
     if (crmTopNewBtn && crmTopNewBtn.contains(target)) return;
     setCrmQuickNewOpen(false);
+  });
+
+  window.addEventListener("resize", () => {
+    if (crmInsertModal.classList.contains("hidden")) return;
+    if (!crmInsertModal.classList.contains("crm-insert-modal--anchored")) return;
+    positionCrmInsertModal(crmTopNewBtn);
   });
 
   document.addEventListener("keydown", (event) => {
