@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=181" />
+    <link rel="stylesheet" href="styles.css?v=182" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3399,16 +3399,12 @@
 	              </div>
 	              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
 	            </div>
-	            <div class="tabs" id="inmuebleTabs">
-	              <button class="tab active" type="button" data-tab="datos">Información</button>
-	              <button class="tab" type="button" data-tab="actividad">Actividad</button>
-	              <button class="tab" type="button" data-tab="personas">Personas relacionadas</button>
-	              <button class="tab" type="button" data-tab="historial">Historial</button>
-	              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
-	              <button class="tab" type="button" data-tab="servicios">Servicios</button>
-	              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
-	              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
-	            </div>
+		            <div class="tabs" id="inmuebleTabs">
+		              <button class="tab active" type="button" data-tab="datos">Información</button>
+		              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+		              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
+		              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
+		            </div>
 	            <div class="inmueble-tecno-grid">
 	              <div class="inmueble-tecno-main">
 	            <div id="inmuebleTabDatos">
@@ -3732,13 +3728,23 @@
 	                <div id="inmuebleServiciosTabList"></div>
 	              </div>
 	            </div>
-	            <div id="inmuebleTabImagenes" class="hidden">
-	              <div class="form-card">
-	                <h3>Imágenes</h3>
-	                <p class="muted">Fotos del inmueble.</p>
-	                <div id="inmuebleFotosList"></div>
-	              </div>
-	            </div>
+		            <div id="inmuebleTabImagenes" class="hidden">
+		              <div class="form-card">
+		                <div class="section-head">
+		                  <div>
+		                    <h3>Imágenes <span class="pill" id="inmuebleFotosCount">0</span></h3>
+		                    <p class="muted">Fotos del inmueble (estilo Tecnocloud).</p>
+		                  </div>
+		                  <div class="form-actions">
+		                    <button type="button" class="secondary" id="inmuebleFotosUploadBtn">Cargar imagen</button>
+		                    <button type="button" class="secondary ghost" id="inmuebleFotosAssignBtn">Asignar imagen</button>
+		                    <input id="inmuebleFotosFile" type="file" class="hidden" multiple accept="image/*,.png,.jpg,.jpeg,.webp" />
+		                    <span id="inmuebleFotosStatus" class="muted"></span>
+		                  </div>
+		                </div>
+		                <div id="inmuebleFotosList"></div>
+		              </div>
+		            </div>
 	            <div id="inmuebleTabAdjuntos" class="hidden">
 	              <div class="form-card">
 	                <h3>Archivos adjuntos</h3>
@@ -3843,18 +3849,18 @@
                   </div>
                   <div id="inmuebleTecnoSideActividadList"></div>
                 </div>
-		                <div class="form-card" id="inmuebleTecnoSidePropietario">
-		                  <div class="section-head">
-		                    <div>
-		                      <h3>Personas relacionadas <span class="pill" id="inmuebleTecnoSidePersonasCount">0</span></h3>
-		                      <p class="muted">Propietarios, compradores e informadores vinculados al expediente.</p>
-		                    </div>
-		                    <div class="form-actions">
-		                      <button type="button" class="secondary" id="inmuebleTecnoSidePersonasNew">Nuevo</button>
-		                    </div>
-		                  </div>
-		                  <div id="inmuebleTecnoSidePersonasCard"></div>
-		                </div>
+			                <div class="form-card" id="inmuebleTecnoSidePropietario">
+			                  <div class="section-head">
+			                    <div>
+			                      <h3><span id="inmuebleTecnoSidePropietarioTitle">Personas relacionadas</span> <span class="pill" id="inmuebleTecnoSidePersonasCount">0</span></h3>
+			                      <p class="muted" id="inmuebleTecnoSidePropietarioSubtitle">Propietarios, compradores e informadores vinculados al expediente.</p>
+			                    </div>
+			                    <div class="form-actions">
+			                      <button type="button" class="secondary" id="inmuebleTecnoSidePersonasNew">Nuevo</button>
+			                    </div>
+			                  </div>
+			                  <div id="inmuebleTecnoSidePersonasCard"></div>
+			                </div>
 		                <div class="form-card" id="inmuebleTecnoSideServicios">
 		                  <div class="section-head">
 		                    <div>

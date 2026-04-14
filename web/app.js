@@ -2848,19 +2848,26 @@ const inmuebleTecnoPrintBtn = document.getElementById("inmuebleTecnoPrintBtn");
 const inmuebleTecnoPrintMenu = document.getElementById("inmuebleTecnoPrintMenu");
 const inmuebleTecnoCampaignBtn = document.getElementById("inmuebleTecnoCampaignBtn");
 const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValoracionBtn");
-const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
-const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
-const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
-const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
-const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
-const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
-	const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
-	const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
-	const inmuebleTecnoSidePersonasCount = document.getElementById("inmuebleTecnoSidePersonasCount");
-	const inmuebleTecnoSidePersonasNew = document.getElementById("inmuebleTecnoSidePersonasNew");
-	const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
-	const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
-	const inmuebleTecnoSideServiciosCount = document.getElementById("inmuebleTecnoSideServiciosCount");
+  const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
+  const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
+  const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
+  const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
+  const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
+  const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
+		const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
+		const inmuebleTecnoSideUbicacionCard = document.getElementById("inmuebleTecnoSideUbicacion");
+		const inmuebleTecnoSideDemandasCard = document.getElementById("inmuebleTecnoSideDemandas");
+		const inmuebleTecnoSideActividadCard = document.getElementById("inmuebleTecnoSideActividad");
+		const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietario");
+		const inmuebleTecnoSideServiciosCard = document.getElementById("inmuebleTecnoSideServicios");
+		const inmuebleTecnoSidePropietarioTitle = document.getElementById("inmuebleTecnoSidePropietarioTitle");
+		const inmuebleTecnoSidePropietarioSubtitle = document.getElementById("inmuebleTecnoSidePropietarioSubtitle");
+		const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
+		const inmuebleTecnoSidePersonasCount = document.getElementById("inmuebleTecnoSidePersonasCount");
+		const inmuebleTecnoSidePersonasNew = document.getElementById("inmuebleTecnoSidePersonasNew");
+		const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
+		const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
+		const inmuebleTecnoSideServiciosCount = document.getElementById("inmuebleTecnoSideServiciosCount");
 	const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
@@ -2943,6 +2950,11 @@ const inmuebleVisitaDemanda = document.getElementById("inmuebleVisitaDemanda");
 	const inmuebleMap = document.getElementById("inmuebleMap");
 	const inmuebleDocsList = document.getElementById("inmuebleDocsList");
 	const inmuebleFotosList = document.getElementById("inmuebleFotosList");
+	const inmuebleFotosCount = document.getElementById("inmuebleFotosCount");
+	const inmuebleFotosUploadBtn = document.getElementById("inmuebleFotosUploadBtn");
+	const inmuebleFotosAssignBtn = document.getElementById("inmuebleFotosAssignBtn");
+	const inmuebleFotosFile = document.getElementById("inmuebleFotosFile");
+	const inmuebleFotosStatus = document.getElementById("inmuebleFotosStatus");
 	const inmuebleAdjuntosList = document.getElementById("inmuebleAdjuntosList");
 	const inmuebleEstadoInfo = document.getElementById("inmuebleEstadoInfo");
 const inmuebleEstadoValidation = document.getElementById("inmuebleEstadoValidation");
@@ -34378,6 +34390,50 @@ const renderInmuebleTecnocloudPanels = ({
     : [];
 
   if (inmuebleTecnoSidePersonasCard) {
+    const topKey = resolveInmuebleTopTabKey(state.currentInmuebleTabKey || "datos");
+    const personasMode = topKey === "datos";
+
+    if (inmuebleTecnoSidePropietarioTitle) {
+      inmuebleTecnoSidePropietarioTitle.textContent = personasMode ? "Personas relacionadas" : "Propietario";
+    }
+    if (inmuebleTecnoSidePropietarioSubtitle) {
+      inmuebleTecnoSidePropietarioSubtitle.textContent = personasMode
+        ? "Propietarios, compradores e informadores vinculados al expediente."
+        : "Propietario principal del expediente (según ficha).";
+    }
+    if (inmuebleTecnoSidePersonasNew) {
+      inmuebleTecnoSidePersonasNew.classList.toggle("hidden", !personasMode);
+    }
+    if (inmuebleTecnoSidePersonasCount) {
+      inmuebleTecnoSidePersonasCount.classList.toggle("hidden", !personasMode);
+    }
+
+    if (!personasMode) {
+      const owner = (Array.isArray(propietarios) ? propietarios : []).find((p) => String(p?.nombre || "").trim()) || {};
+      const nombre = String(owner?.nombre || "").trim();
+      const telefono = String(owner?.telefono || "").trim();
+      const email = String(owner?.email || "").trim();
+      const nif = String(owner?.nif || "").trim();
+      inmuebleTecnoSidePersonasCard.innerHTML = `
+        <div class="inmueble-tecno-minirow">
+          <strong>${escapeHtml(nombre || "Sin propietario")}</strong>
+          <div class="muted">
+            ${escapeHtml([telefono, email, nif ? `NIF ${nif}` : ""].filter(Boolean).join(" · ") || "-")}
+          </div>
+        </div>
+        <button type="button" class="secondary ghost tc-servmore" data-open-personas="1">Ver personas relacionadas</button>
+      `;
+      const openBtn = inmuebleTecnoSidePersonasCard.querySelector("[data-open-personas]");
+      if (openBtn) {
+        openBtn.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setInmuebleTab("personas");
+        };
+      }
+      return;
+    }
+
     const ownerNames = (Array.isArray(propietarios) ? propietarios : [])
       .map((p) => String(p?.nombre || "").trim())
       .filter(Boolean);
@@ -37989,25 +38045,72 @@ const normalizeInmuebleTabKey = (tab) => {
   return key;
 };
 
+const resolveInmuebleTopTabKey = (tabKey = "") => {
+  const key = normalizeInmuebleTabKey(tabKey);
+  if (["datos", "evolucion", "imagenes", "adjuntos"].includes(key)) return key;
+  if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado", "generar_encargo"].includes(key)) {
+    return "evolucion";
+  }
+  return "datos";
+};
+
+const syncInmuebleTecnocloudSidebar = (tabKey = "") => {
+  const topKey = resolveInmuebleTopTabKey(tabKey);
+  const toggle = (el, on) => {
+    if (!el) return;
+    el.classList.toggle("hidden", !on);
+  };
+
+  // Tecnocloud: el lateral derecho cambia por pestaña.
+  // - Información: Ubicación + Personas relacionadas + Servicios
+  // - Evolución: Actividades y citas + Propietario + Ubicación
+  // - Imágenes/Adjuntos: Pedidos relacionados + Actividades y citas + Propietario
+  toggle(inmuebleTecnoSideUbicacionCard, topKey === "datos" || topKey === "evolucion");
+  toggle(inmuebleTecnoSideDemandasCard, topKey === "imagenes" || topKey === "adjuntos");
+  toggle(inmuebleTecnoSideActividadCard, topKey === "evolucion" || topKey === "imagenes" || topKey === "adjuntos");
+  toggle(inmuebleTecnoSidePropietarioCard, true);
+  toggle(inmuebleTecnoSideServiciosCard, topKey === "datos");
+
+  // Re-render para ajustar contenido del panel (Personas vs Propietario).
+  const ctx = state.currentInmuebleContext || null;
+  if (ctx) {
+    renderInmuebleTecnocloudPanels({
+      inmueble: ctx.inmueble || {},
+      captacion: ctx.captacion || {},
+      propietarios: Array.isArray(ctx.propietarios) ? ctx.propietarios : [],
+      docs: Array.isArray(ctx.docs) ? ctx.docs : [],
+      demandas: Array.isArray(ctx.demandas) ? ctx.demandas : [],
+      visitas: Array.isArray(ctx.visitas) ? ctx.visitas : [],
+      actividad: Array.isArray(ctx.actividad) ? ctx.actividad : [],
+    });
+  }
+};
+
 const setInmuebleTab = (tab) => {
   if (!inmuebleTabs) return;
   const key = normalizeInmuebleTabKey(tab);
+  state.currentInmuebleTabKey = key;
   inmuebleTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === key);
   });
+  // Tabs Tecnocloud-like (4): Información / Evolución / Imágenes / Adjuntos.
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
-  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", key !== "actividad");
-  if (inmuebleTabPersonas) inmuebleTabPersonas.classList.toggle("hidden", key !== "personas");
-  if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", key !== "historial");
   if (inmuebleTabEvolucion) inmuebleTabEvolucion.classList.toggle("hidden", key !== "evolucion");
-  if (inmuebleTabServicios) inmuebleTabServicios.classList.toggle("hidden", key !== "servicios");
+  if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", !(key === "evolucion" || key === "historial"));
   if (inmuebleTabImagenes) inmuebleTabImagenes.classList.toggle("hidden", key !== "imagenes");
   if (inmuebleTabAdjuntos) inmuebleTabAdjuntos.classList.toggle("hidden", key !== "adjuntos");
+
+  // Subvistas (solo via botones "Ver todo" / acciones laterales).
+  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", key !== "actividad");
+  if (inmuebleTabPersonas) inmuebleTabPersonas.classList.toggle("hidden", key !== "personas");
+  if (inmuebleTabServicios) inmuebleTabServicios.classList.toggle("hidden", key !== "servicios");
   // Legacy tabs (solo accesibles desde acciones laterales si existen).
   if (inmuebleTabGenerarEncargo) inmuebleTabGenerarEncargo.classList.toggle("hidden", key !== "generar_encargo");
   if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", key !== "demandas");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", key !== "estado");
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", key !== "docs");
+
+  syncInmuebleTecnocloudSidebar(key);
 };
 
 const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
@@ -38955,32 +39058,65 @@ const renderInmuebleDocs = (rows = []) => {
     else docs.push(row);
   });
 
+  if (inmuebleFotosCount) {
+    inmuebleFotosCount.textContent = String(photos.length);
+  }
+
   if (inmuebleFotosList) {
     if (!photos.length) {
       inmuebleFotosList.innerHTML = "<p class='muted'>Sin imágenes.</p>";
     } else {
-      const grid = document.createElement("div");
-      grid.className = "inmueble-media-grid";
+      inmuebleFotosList.innerHTML = "";
+      const table = document.createElement("table");
+      table.className = "crm-dense-table tc-media-table";
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th style="width:86px;">Foto</th>
+            <th>Nombre</th>
+            <th style="width:160px;">Tipo</th>
+            <th style="width:140px;">Estado</th>
+            <th style="width:90px;">Acción</th>
+          </tr>
+        </thead>
+      `;
+      const tbody = document.createElement("tbody");
       photos.forEach((row) => {
         const url = row.url ? buildPhotoSrc(row.url) : "";
+        const tr = document.createElement("tr");
+        const tdThumb = document.createElement("td");
+        tdThumb.innerHTML = url
+          ? `<img class="tc-media-thumb" src="${escapeHtml(url)}" loading="lazy" alt="" />`
+          : `<div class="muted">-</div>`;
+        tr.appendChild(tdThumb);
+
+        const tdName = document.createElement("td");
         const name = row.nombre || "Foto";
-        const estado = row.estado || "Vigente";
-        const a = document.createElement("a");
-        a.className = "inmueble-media-item";
-        a.href = url || "#";
-        a.target = "_blank";
-        a.rel = "noreferrer";
-        a.innerHTML = `
-          ${url ? `<img src="${escapeHtml(url)}" loading="lazy" alt="" />` : `<div class="muted">Sin imagen</div>`}
-          <div class="inmueble-media-meta">
-            <div class="inmueble-media-name">${escapeHtml(name)}</div>
-            <div class="muted">${escapeHtml(estado)}</div>
-          </div>
+        const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
+        tdName.innerHTML = `
+          <strong>${escapeHtml(name)}</strong>
+          ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
         `;
-        grid.appendChild(a);
+        tr.appendChild(tdName);
+
+        const tdTipo = document.createElement("td");
+        tdTipo.textContent = row.tipo || "Fotos";
+        tr.appendChild(tdTipo);
+
+        const tdEstado = document.createElement("td");
+        tdEstado.textContent = row.estado || "Vigente";
+        tr.appendChild(tdEstado);
+
+        const tdAction = document.createElement("td");
+        tdAction.innerHTML = url
+          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Ver</a>`
+          : "-";
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
       });
-      inmuebleFotosList.innerHTML = "";
-      inmuebleFotosList.appendChild(grid);
+      table.appendChild(tbody);
+      inmuebleFotosList.appendChild(table);
     }
   }
 
@@ -56680,6 +56816,96 @@ if (inmuebleActividadForm) {
   });
 }
 
+const uploadInmuebleDocsFiles = async ({ files = [], tipo = "", nombreBase = "", statusEl = null } = {}) => {
+  if (!state.currentInmuebleId) throw new Error("Selecciona un inmueble.");
+  const queue = Array.from(files || []).filter(Boolean);
+  if (!queue.length) throw new Error("Selecciona un archivo.");
+  const maxInline = 2_000_000;
+
+  for (let i = 0; i < queue.length; i += 1) {
+    const file = queue[i];
+    const payload = {
+      inmueble_id: state.currentInmuebleId,
+      empresa_nombre: resolveCrmInmoEmpresaNombre(),
+      usuario: getCurrentUser(),
+      tipo,
+      nombre: queue.length === 1 && nombreBase ? nombreBase : file.name,
+    };
+    try {
+      if (file.size > maxInline) {
+        try {
+          if (statusEl) statusEl.textContent = `Subiendo ${i + 1}/${queue.length} (S3)...`;
+          const upload = await uploadFileToS3(file, `inmuebles/${state.currentInmuebleId}`, statusEl);
+          if (upload?.key) payload.s3_key = upload.key;
+          else payload.file_base64 = await fileToBase64(file);
+        } catch {
+          payload.file_base64 = await fileToBase64(file);
+        }
+      } else {
+        if (statusEl) statusEl.textContent = `Subiendo ${i + 1}/${queue.length}...`;
+        payload.file_base64 = await fileToBase64(file);
+      }
+    } catch (err) {
+      throw new Error(err?.message || "No se pudo leer el archivo.");
+    }
+    if (statusEl) statusEl.textContent = `Registrando ${i + 1}/${queue.length}...`;
+    const res = await fetch("/api/inmueble_docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) {
+      throw new Error(data?.error || "Error al subir.");
+    }
+  }
+  return queue.length;
+};
+
+if (inmuebleFotosUploadBtn && inmuebleFotosFile) {
+  inmuebleFotosUploadBtn.addEventListener("click", () => {
+    if (!state.currentInmuebleId) {
+      if (inmuebleFotosStatus) inmuebleFotosStatus.textContent = "Selecciona un inmueble.";
+      return;
+    }
+    inmuebleFotosFile.click();
+  });
+}
+
+if (inmuebleFotosFile) {
+  inmuebleFotosFile.addEventListener("change", async () => {
+    if (!state.currentInmuebleId) {
+      if (inmuebleFotosStatus) inmuebleFotosStatus.textContent = "Selecciona un inmueble.";
+      return;
+    }
+    const files = Array.from(inmuebleFotosFile.files || []).filter(Boolean);
+    if (!files.length) return;
+    try {
+      const count = await uploadInmuebleDocsFiles({
+        files,
+        tipo: "Fotos",
+        nombreBase: "",
+        statusEl: inmuebleFotosStatus,
+      });
+      if (inmuebleFotosStatus) inmuebleFotosStatus.textContent = `Subida completada (${count}).`;
+      inmuebleFotosFile.value = "";
+      loadInmuebleDocs(state.currentInmuebleId);
+    } catch (err) {
+      if (inmuebleFotosStatus) inmuebleFotosStatus.textContent = err?.message || "Error al subir.";
+    }
+  });
+}
+
+if (inmuebleFotosAssignBtn) {
+  inmuebleFotosAssignBtn.addEventListener("click", () => {
+    setInmuebleTab("adjuntos");
+    const tipoSelect = inmuebleDocsForm?.querySelector?.('[name="tipo"]');
+    if (tipoSelect) tipoSelect.value = "Fotos";
+    if (inmuebleDocsFile) inmuebleDocsFile.focus();
+    if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = "Sube aquí las imágenes si necesitas añadir nombre/tipo.";
+  });
+}
+
 if (inmuebleDocsForm) {
   inmuebleDocsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -56699,53 +56925,9 @@ if (inmuebleDocsForm) {
     const tipo = String(inmuebleDocsForm.querySelector('[name="tipo"]')?.value || "").trim();
     const nombreBase = String(inmuebleDocsForm.querySelector('[name="nombre"]')?.value || "").trim();
 
-    const uploadOne = async (file, index) => {
-      const maxInline = 2_000_000;
-      const payload = {
-        inmueble_id: state.currentInmuebleId,
-        empresa_nombre: resolveCrmInmoEmpresaNombre(),
-        usuario: getCurrentUser(),
-        tipo,
-        nombre: files.length === 1 && nombreBase ? nombreBase : file.name,
-      };
-      try {
-        if (file.size > maxInline) {
-          try {
-            if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subiendo ${index + 1}/${files.length} (S3)...`;
-            const upload = await uploadFileToS3(file, `inmuebles/${state.currentInmuebleId}`, inmuebleDocsStatus);
-            if (upload?.key) {
-              payload.s3_key = upload.key;
-            } else {
-              payload.file_base64 = await fileToBase64(file);
-            }
-          } catch (err) {
-            payload.file_base64 = await fileToBase64(file);
-          }
-        } else {
-          if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subiendo ${index + 1}/${files.length}...`;
-          payload.file_base64 = await fileToBase64(file);
-        }
-      } catch (err) {
-        throw new Error(err?.message || "No se pudo leer el archivo.");
-      }
-      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Registrando ${index + 1}/${files.length}...`;
-      const res = await fetch("/api/inmueble_docs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.error) {
-        throw new Error(data?.error || "Error al subir.");
-      }
-      return data;
-    };
-
     try {
-      for (let i = 0; i < files.length; i += 1) {
-        await uploadOne(files[i], i);
-      }
-      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subida completada (${files.length}).`;
+      const count = await uploadInmuebleDocsFiles({ files, tipo, nombreBase, statusEl: inmuebleDocsStatus });
+      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subida completada (${count}).`;
       inmuebleDocsForm.reset();
       loadInmuebleDocs(state.currentInmuebleId);
     } catch (err) {

@@ -6751,6 +6751,20 @@ body.crm-context-inmo .crm-resumen-compact-note {
   text-overflow: ellipsis;
 }
 
+.tc-media-table .tc-media-thumb {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 10px;
+  display: block;
+  border: 1px solid var(--line);
+  background: rgba(60, 110, 113, 0.06);
+}
+
+.tc-media-table td {
+  vertical-align: top;
+}
+
 @media (max-width: 1024px) {
   .inmueble-profile-top,
   .inmueble-data-workspace {
