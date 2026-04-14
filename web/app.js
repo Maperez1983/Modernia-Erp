@@ -21269,8 +21269,20 @@ const INMUEBLE_FIELDS = [
   { key: "fecha_primer_contacto", label: "Fecha 1er contacto", type: "date", section: "Seguimiento" },
   { key: "ultima_fecha_contacto", label: "Última fecha contacto", type: "date", section: "Seguimiento" },
   { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Seguimiento" },
-  { key: "estado_inmueble", label: "Estado inmueble", type: "text", section: "Seguimiento" },
-  { key: "potencial_adquisicion", label: "Potencial adquisición", type: "text", section: "Seguimiento" },
+  {
+    key: "estado_inmueble",
+    label: "Estado inmueble",
+    type: "select",
+    options: ["", "Sin definir", "Bueno", "Regular", "A reformar", "Reformado", "Obra nueva"],
+    section: "Seguimiento",
+  },
+  {
+    key: "potencial_adquisicion",
+    label: "Potencial adquisición",
+    type: "select",
+    options: ["", "No", "Sí"],
+    section: "Seguimiento",
+  },
   {
     key: "con_inquilino",
     label: "Con inquilino",
@@ -23551,15 +23563,43 @@ const renderEditableGrid = (grid, fields, data, target) => {
 	      }
 	      input.addEventListener("blur", saveHandler);
 	    }
-    valueWrap.appendChild(input);
-    if (status) {
-      valueWrap.appendChild(status);
-    }
-    if (isInmueble && field.key === "referencia_catastral") {
-      const hint = document.createElement("p");
-      hint.className = "muted editable-card-help";
-      hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
-      valueWrap.appendChild(hint);
+	    valueWrap.appendChild(input);
+	    if (status) {
+	      valueWrap.appendChild(status);
+	    }
+	    if (isInmueble && field.key === "potencial_adquisicion") {
+	      const actions = document.createElement("div");
+	      actions.className = "inline-actions";
+	      const btn = document.createElement("button");
+	      btn.type = "button";
+	      btn.className = "secondary ghost";
+	      btn.textContent = "Fijar cita";
+	      const isYes = (value) => {
+	        const key = normalizeSimple(value || "");
+	        return key === "si" || key === "1" || key === "true" || key === "yes";
+	      };
+	      const sync = () => {
+	        btn.classList.toggle("hidden", !isYes(input.value));
+	      };
+	      btn.addEventListener("click", () => {
+	        queueInmuebleCitaPrefill({
+	          tipo: "Cita de adquisición",
+	          asunto: "Cita de adquisición",
+	          statusText: "Potencial adquisición marcado. Programa la cita y guárdala para mantener trazabilidad.",
+	        });
+	        applyPendingInmuebleCitaPrefill();
+	        window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 0);
+	      });
+	      input.addEventListener("change", sync);
+	      sync();
+	      actions.appendChild(btn);
+	      valueWrap.appendChild(actions);
+	    }
+	    if (isInmueble && field.key === "referencia_catastral") {
+	      const hint = document.createElement("p");
+	      hint.className = "muted editable-card-help";
+	      hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
+	      valueWrap.appendChild(hint);
       const actions = document.createElement("div");
       actions.className = "catastro-actions";
       const openBtn = document.createElement("button");
