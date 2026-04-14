@@ -2903,12 +2903,18 @@
 		                  <div class="tc-listview">
 	                    <div class="tc-listhead">
 	                      <div class="tc-listleft">
-	                        <strong class="tc-title">Visitas</strong>
+	                        <select id="crmVisitasPreset" title="Visitas">
+	                          <option value="semana">Visitas semana</option>
+	                          <option value="hoy">Visitas hoy</option>
+	                          <option value="pendientes">Visitas pendientes</option>
+	                          <option value="todas">Visitas</option>
+	                        </select>
 	                      </div>
 	                      <div class="tc-listright">
-	                        <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
+	                        <button type="button" class="secondary ghost" id="crmVisitasPrintBtn">Impresiones</button>
+	                        <input id="crmVisitaSearch" placeholder="Buscar en la lista..." />
 	                        <select id="crmVisitaEstadoFilter" title="Estado">
-	                          <option value="">Todos los estados</option>
+	                          <option value="">Todos</option>
 	                          <option value="pendiente">Pendiente</option>
 	                          <option value="realizada">Realizada</option>
 	                          <option value="cancelada">Cancelada</option>
