@@ -23254,6 +23254,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     return normalizeSimple(data?.estado || data?.situacion_comercial || "");
   };
   const inmoStageKey = resolveInmoStageKey();
+  const isInmoStageInmueble = normalizeSimple(inmoStageKey) === "inmueble";
   const isInmoEarlyStage = (key) => {
     const k = normalizeSimple(key || "");
     return !k || k === "inmueble" || k === "noticia";
@@ -23303,6 +23304,10 @@ const renderEditableGrid = (grid, fields, data, target) => {
       if (field.key === "precio_objetivo") return;
       if (field.key === "precio_pedido_cliente" && !showOwnerPrice) return;
       if (field.key === "precio_encargo" && !showEncargoPrice) return;
+    }
+    // Tecnocloud: honorarios no se capturan en fase "Inmueble" (solo cuando hay Noticia/Encargo).
+    if (isInmueble && field.key === "honorarios" && isInmoStageInmueble) {
+      return;
     }
     if (target === "cliente" && field.key === "apellidos" && isJuridica) {
       return;
@@ -23390,7 +23395,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
       const requiredBadge = document.createElement("span");
       requiredBadge.className = "editable-field-hint";
       const priceKey = showOwnerPrice ? "precio_pedido_cliente" : "precio_encargo";
-      if ((field.key === "direccion") || (field.key === "tipo_operacion") || (field.key === "tipo_inmueble") || (field.key === priceKey) || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
+      const honorariosIsClave = field.key === "honorarios" && !isInmoStageInmueble;
+      if ((field.key === "direccion") || (field.key === "tipo_operacion") || (field.key === "tipo_inmueble") || (field.key === priceKey) || honorariosIsClave || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
         requiredBadge.textContent = "Clave";
       } else if (field.key === "referencia_catastral") {
         requiredBadge.textContent = "Obligatorio para cierre";
@@ -36513,6 +36519,8 @@ const refreshCurrentInmuebleProfile = () => {
   }
 
   if (inmuebleFactsPanel) {
+    const stageKey = normalizeSimple(captacion?.situacion_comercial || captacion?.etapa || inmueble?.estado || "");
+    const showHonorarios = stageKey && stageKey !== "inmueble";
     const cards = [
       {
         title: "Localización",
@@ -36532,18 +36540,18 @@ const refreshCurrentInmuebleProfile = () => {
           ["Antigüedad", inmueble.anio_construccion],
         ],
       },
-	      {
-	        title: "Comercial y seguimiento",
-	        items: [
-	          ["Propietarios", ownerNames.length ? ownerNames.join(", ") : ""],
-	          ["Situación", captacion.situacion_comercial],
-	          ["Canal", captacion.canal],
-	          ["Honorarios", inmueble.honorarios],
-	          ["Ocupación", inmueble.situacion_ocupacion],
-	          ["Urgencia", captacion.urgencia],
-	          ["Responsable", inmueble.asesor || captacion.asesor || inmueble.responsable || captacion.responsable],
-	          ["Demandas", demandas.length],
-	          ["Visitas", visitas.length],
+		      {
+		        title: "Comercial y seguimiento",
+		        items: [
+		          ["Propietarios", ownerNames.length ? ownerNames.join(", ") : ""],
+		          ["Situación", captacion.situacion_comercial],
+		          ["Canal", captacion.canal],
+		          ...(showHonorarios ? [["Honorarios", inmueble.honorarios]] : []),
+		          ["Ocupación", inmueble.situacion_ocupacion],
+		          ["Urgencia", captacion.urgencia],
+		          ["Responsable", inmueble.asesor || captacion.asesor || inmueble.responsable || captacion.responsable],
+		          ["Demandas", demandas.length],
+		          ["Visitas", visitas.length],
 	          ["Documentos", docs.length],
 	          ["Próxima acción", captacion.proxima_accion],
 	        ],
