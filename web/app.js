@@ -27905,6 +27905,13 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_proteccion_pago" inputmode="decimal" />
               </label>
               <label>
+                <span>Protección pago · Financiado</span>
+                <select data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_proteccion_financiado">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </label>
+              <label>
                 <span>Total gastos (auto)</span>
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_gastos" inputmode="decimal" readonly />
               </label>
@@ -28455,17 +28462,31 @@ const computeHipotecaLiquidacionComputed = (data) => {
     Number(gastosCv.gestoria || 0);
   gastosCv.total = round2(totalCv);
 
+  const proteccionFinanciado = ["si", "sí", "s", "true", "1"].includes(
+    normalizeSimple(hip.seguro_proteccion_financiado || "Sí")
+  );
+  const proteccionCash = proteccionFinanciado ? 0 : Number(hip.seguro_proteccion_pago || 0);
+
   const totalHip =
     Number(hip.notaria_impuestos_gestoria || 0) +
     Number(hip.comision_apertura || 0) +
     Number(hip.cuota_socio || 0) +
     Number(hip.comision_cheques || 0) +
-    Number(hip.seguro_proteccion_pago || 0);
+    proteccionCash;
   hip.total_gastos = round2(totalHip);
 
   const totalSeguros = Number(hip.seguro_hogar || 0) + Number(hip.seguro_vida || 0);
   hip.total_seguros = round2(totalSeguros);
-  hip.total_bloque = round2(Number(hip.total_gastos || 0) + Number(hip.total_seguros || 0));
+  // Total de todos los gastos del bloque (incluye seguros aunque estén financiados).
+  hip.total_bloque = round2(
+    Number(hip.notaria_impuestos_gestoria || 0) +
+      Number(hip.comision_apertura || 0) +
+      Number(hip.cuota_socio || 0) +
+      Number(hip.comision_cheques || 0) +
+      Number(hip.seguro_proteccion_pago || 0) +
+      Number(hip.seguro_hogar || 0) +
+      Number(hip.seguro_vida || 0)
+  );
 
   // Precio: si solo rellenan "Escriturado" (muy habitual), usarlo como precio de compra.
   if ((comprador.precio_compra ?? "") === "" && (comprador.escriturado ?? "") !== "") {
@@ -29086,6 +29107,9 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   }
   if ((getNestedValue(liquidacion, "comprador.hipoteca.capital") ?? "") === "" && importeHipoteca !== null) {
     setNestedValue(liquidacion, "comprador.hipoteca.capital", importeHipoteca);
+  }
+  if (!String(getNestedValue(liquidacion, "comprador.hipoteca.seguro_proteccion_financiado") || "").trim()) {
+    setNestedValue(liquidacion, "comprador.hipoteca.seguro_proteccion_financiado", "Sí");
   }
   if ((getNestedValue(liquidacion, "comprador.entregas.prestamo_concedido") ?? "") === "" && importeHipoteca !== null) {
     setNestedValue(liquidacion, "comprador.entregas.prestamo_concedido", importeHipoteca);
