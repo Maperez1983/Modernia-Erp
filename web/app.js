@@ -27974,6 +27974,7 @@ const ensureHipotecaFichaPanel = () => {
 
           <div class="form-card">
             <h4>Cantidades entregadas</h4>
+            <div id="hipotecaIngresarBancoHint" class="ui-status is-empty"></div>
             <div class="form-grid">
               <label>
                 <span>Señal</span>
@@ -27986,6 +27987,10 @@ const ensureHipotecaFichaPanel = () => {
               <label>
                 <span>A ingresar en banco</span>
                 <input data-json="liquidacion_json" data-path="comprador.entregas.ingresar_banco" inputmode="decimal" />
+              </label>
+              <label>
+                <span>&nbsp;</span>
+                <button type="button" id="hipotecaIngresarBancoFix" class="secondary" style="width: 100%;">Recalcular ingreso banco</button>
               </label>
               <label>
                 <span>Préstamo concedido</span>
@@ -28784,6 +28789,56 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       check.textContent = `Error de cuadre: sobrante comprador (${formatMoneyInputValue(
         sobranComprador
       )}) ≠ sobrante cheques (${formatMoneyInputValue(sobranCuadre)}).`;
+    }
+  }
+
+  const ingresarHint = panel.querySelector("#hipotecaIngresarBancoHint");
+  const ingresarBtn = panel.querySelector("#hipotecaIngresarBancoFix");
+  const ingresarEl = panel.querySelector(
+    '[data-json="liquidacion_json"][data-path="comprador.entregas.ingresar_banco"]'
+  );
+  if (ingresarHint && ingresarBtn && ingresarEl) {
+    const necesaria = toNumber(getNestedValue(computed, "comprador.suma_total_necesaria"));
+    const prestamo = toNumber(getNestedValue(computed, "comprador.entregas.prestamo_concedido"));
+    const senal = toNumber(getNestedValue(computed, "comprador.entregas.senal"));
+    const transf = toNumber(getNestedValue(computed, "comprador.entregas.transf_modernia"));
+    const actual = toNumber(ingresarEl.value);
+    if (necesaria === null || prestamo === null || senal === null || transf === null) {
+      ingresarHint.classList.remove("is-error", "is-success");
+      ingresarHint.classList.add("is-empty");
+      ingresarHint.textContent = "";
+      ingresarBtn.disabled = true;
+    } else {
+      const base = Math.max(necesaria - prestamo - senal - transf, 0);
+      const expected = Math.ceil(base / 100) * 100;
+      ingresarBtn.dataset.expected = String(expected);
+      const same = actual !== null && Math.abs(actual - expected) <= 0.01;
+      ingresarBtn.disabled = same;
+      if (actual === null) {
+        ingresarHint.classList.remove("is-error", "is-success");
+        ingresarHint.classList.add("is-empty");
+        ingresarHint.textContent = `Ingreso banco sugerido (auto): ${formatMoneyInputValue(expected)}.`;
+      } else if (same) {
+        ingresarHint.classList.remove("is-error", "is-empty");
+        ingresarHint.classList.add("is-success");
+        ingresarHint.textContent = `Ingreso banco OK: ${formatMoneyInputValue(actual)}.`;
+      } else {
+        ingresarHint.classList.remove("is-success", "is-empty");
+        ingresarHint.classList.add("is-error");
+        ingresarHint.textContent = `Ingreso banco no cuadra. Sugerido: ${formatMoneyInputValue(
+          expected
+        )} (actual: ${formatMoneyInputValue(actual)}).`;
+      }
+      if (!ingresarBtn.dataset.bound) {
+        ingresarBtn.dataset.bound = "1";
+        ingresarBtn.addEventListener("click", () => {
+          const next = toNumber(ingresarBtn.dataset.expected);
+          if (next !== null) {
+            ingresarEl.value = formatMoneyInputValue(next);
+          }
+          refreshHipotecaLiquidacionComputedControls(panel);
+        });
+      }
     }
   }
 };

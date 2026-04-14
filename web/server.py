@@ -3846,16 +3846,13 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     suma_total_necesaria = _round2(precio + total_cv + total_necesario + gestion_inmo + gestion_fin)
     comprador["suma_total_necesaria"] = suma_total_necesaria
 
-    # Entregas (A ingresar en banco autocalculado como Excel si está vacío).
+    # Entregas (A ingresar en banco autocalculado como Excel para impresión).
     senal = parse_money_value(entregas.get("senal") or 0)
     transf_modernia = parse_money_value(entregas.get("transf_modernia") or 0)
     prestamo_concedido = parse_money_value(entregas.get("prestamo_concedido") or 0)
-    ingresar_banco_raw = entregas.get("ingresar_banco")
-    ingresar_banco = parse_money_value(ingresar_banco_raw or 0)
-    if (ingresar_banco_raw is None) or (str(ingresar_banco_raw).strip() == ""):
-        base = max(suma_total_necesaria - prestamo_concedido - senal - transf_modernia, 0)
-        ingresar_banco = float((int((base + 99) // 100) * 100)) if base > 0 else 0.0
-        entregas["ingresar_banco"] = _round2(ingresar_banco)
+    base = max(suma_total_necesaria - prestamo_concedido - senal - transf_modernia, 0)
+    ingresar_banco = float((int((base + 99) // 100) * 100)) if base > 0 else 0.0
+    entregas["ingresar_banco"] = _round2(ingresar_banco)
 
     suma_entregada = _round2(senal + transf_modernia + ingresar_banco)
     comprador["suma_total_entregada"] = suma_entregada
