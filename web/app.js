@@ -21265,7 +21265,7 @@ const INMUEBLE_FIELDS = [
     section: "Seguimiento",
   },
   { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Seguimiento" },
-  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Seguimiento" },
+  { key: "planificacion_encargo", label: "Duración encargo (meses)", type: "text", section: "Seguimiento" },
   { key: "fecha_primer_contacto", label: "Fecha 1er contacto", type: "date", section: "Seguimiento" },
   { key: "ultima_fecha_contacto", label: "Última fecha contacto", type: "date", section: "Seguimiento" },
   { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Seguimiento" },
@@ -21441,12 +21441,11 @@ const CAPTACION_FIELDS = [
     section: "Pipeline",
   },
   { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Pipeline" },
-  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Pipeline" },
   { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Pipeline" },
   { key: "prioridad_noticia", label: "Prioridad noticia", type: "text", section: "Pipeline" },
   {
     key: "encargo_competencia",
-    label: "Encargo competencia",
+    label: "Encargo de competencia",
     type: "select",
     options: [
       { value: "0", label: "No" },
@@ -21454,6 +21453,8 @@ const CAPTACION_FIELDS = [
     ],
     section: "Pipeline",
   },
+  { key: "encargo_competencia_agencia", label: "Agencia competencia", type: "text", section: "Pipeline" },
+  { key: "encargo_competencia_hasta", label: "Vigente hasta", type: "date", section: "Pipeline" },
   { key: "notas", label: "Notas", type: "textarea", section: "Notas internas" },
 ];
 
@@ -21466,7 +21467,7 @@ const CAPTACION_FIELDS_ENCARGO = [
   { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Seguimiento" },
   {
     key: "encargo_competencia",
-    label: "Encargo competencia",
+    label: "Encargo de competencia",
     type: "select",
     options: [
       { value: "0", label: "No" },
@@ -23268,6 +23269,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
   };
   const inmoStageKey = resolveInmoStageKey();
   const isInmoStageInmueble = normalizeSimple(inmoStageKey) === "inmueble";
+  const isInmoStageNoticia = normalizeSimple(inmoStageKey) === "noticia";
+  const isInmoStageEncargo = normalizeSimple(inmoStageKey) === "encargo";
   const isInmoEarlyStage = (key) => {
     const k = normalizeSimple(key || "");
     return !k || k === "inmueble" || k === "noticia";
@@ -23317,6 +23320,18 @@ const renderEditableGrid = (grid, fields, data, target) => {
       if (field.key === "precio_objetivo") return;
       if (field.key === "precio_pedido_cliente" && !showOwnerPrice) return;
       if (field.key === "precio_encargo" && !showEncargoPrice) return;
+    }
+    // Encargo: la "Duración encargo" solo tiene sentido cuando el expediente ya está en fase Encargo.
+    if ((isInmueble || target === "captacion") && field.key === "planificacion_encargo" && !isInmoStageEncargo) {
+      return;
+    }
+    // Competencia: solo relevante durante la fase Noticia.
+    if (
+      target === "captacion" &&
+      (field.key === "encargo_competencia" || field.key === "encargo_competencia_agencia" || field.key === "encargo_competencia_hasta") &&
+      !isInmoStageNoticia
+    ) {
+      return;
     }
     // Tecnocloud: honorarios no se capturan en fase "Inmueble" (solo cuando hay Noticia/Encargo).
     if (isInmueble && field.key === "honorarios" && isInmoStageInmueble) {
@@ -23398,7 +23413,6 @@ const renderEditableGrid = (grid, fields, data, target) => {
         precio_encargo: operacionIsAlquiler ? "Renta pactada (€/mes)" : "Precio encargo (EUR)",
         precio_pedido_cliente: operacionIsAlquiler ? "Renta pedida (€/mes)" : "Precio pedido cliente (EUR)",
         honorarios: operacionIsAlquiler ? "Honorarios (mensualidades)" : "Honorarios (% sin IVA)",
-        planificacion_encargo: operacionIsAlquiler ? "Duración encargo (meses)" : "Duración encargo (meses)",
       };
       if (overrides[field.key]) {
         label.textContent = overrides[field.key];
