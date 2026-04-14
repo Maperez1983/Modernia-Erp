@@ -9117,7 +9117,19 @@ const renderWorkspaceRrhhHub = () => {
     const companies = state.currentWorkspaceDetail?.companies || [];
     const employeesAll = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
     const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
-    const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
+    const usersAll = (() => {
+      const combined = [];
+      if (Array.isArray(state.usersList)) combined.push(...state.usersList);
+      if (Array.isArray(state.workspaceTimeUsers)) combined.push(...state.workspaceTimeUsers);
+      const seen = new Set();
+      return combined.filter((row) => {
+        const id = String(row?.id || "").trim();
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    })();
     const usersById = new Map(usersAll.map((row) => [String(row.id || "").trim(), row]));
 
 	    const normalizeMemberTab = (value = "") => {
@@ -9654,6 +9666,7 @@ const renderWorkspaceRrhhHub = () => {
 			    const renderMemberDetail = (m) => {
 			      const employee = m?.employee || null;
 			      const user = m?.user || null;
+            const isLinkedToUser = Boolean(Number(employee?.usuario_manual || 0) === 1 && String(employee?.usuario_id || "").trim());
             const resolveSuggestedUser = () => {
               if (user) return null;
               const email = normalizeSimple(employee?.email || "");
@@ -9832,8 +9845,8 @@ const renderWorkspaceRrhhHub = () => {
                       <div class="muted">Marca qué módulos verá este usuario.</div>
                       <div class="rrhh-service-grid" data-rrhh-service-scope="${escapeHtml(String(user.id || ""))}">
                         ${getWorkspaceAccessServiceOptions().map((label) => {
-                          const key = normalizeSimple(label);
-                          const selected = parseServiceList(user?.servicio || "").includes(key);
+                          const key = normalizeWorkspaceServiceKey(label);
+                          const selected = expandServiceAliases(parseServiceList(user?.servicio || "").map(normalizeWorkspaceServiceKey)).includes(key);
                           return `
                             <label class="inline-check">
                               <input type="checkbox" data-rrhh-service-check="${escapeHtml(label)}" ${selected ? "checked" : ""} />
@@ -9950,10 +9963,10 @@ const renderWorkspaceRrhhHub = () => {
 		              <div class="workspace-rrhh-row">
 		                <div>
 		                  <strong>Vínculo</strong>
-	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : (suggestedUser ? "Sin vincular · Usuario sugerido por email" : "Sin vincular")}</div>
+	                  <div class="muted">${isLinkedToUser ? "Vinculado" : (suggestedUser ? "Sin vincular · Usuario sugerido por email" : "Sin vincular")}</div>
 	                </div>
 	                <div class="workspace-rrhh-row-actions">
-                  ${employee?.usuario_manual ? `
+                  ${isLinkedToUser ? `
                     <button type="button" class="secondary danger button-inline" data-rrhh-member-unlink>Desvincular</button>
                   ` : `
                     <label class="muted">
