@@ -3535,6 +3535,12 @@ body.crm-fin #companySummary {
   background: rgba(15, 23, 42, 0.03);
 }
 
+#crmSection table.crm-dense-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #crmSection .crm-dense-main strong {
   font-size: 13px;
 }
@@ -3654,29 +3660,40 @@ body.crm-fin #companySummary {
   width: 260px;
 }
 
-#crmSection table.crm-captaciones-table th:first-child,
-#crmSection table.crm-captaciones-table td:first-child {
-  width: 18px;
+#crmSection table.crm-captaciones-table th:nth-child(1),
+#crmSection table.crm-captaciones-table td:nth-child(1) {
+  width: 34px;
 }
 
 #crmSection table.crm-captaciones-table th:nth-child(2),
 #crmSection table.crm-captaciones-table td:nth-child(2) {
-  width: 290px;
+  width: 34px;
+  text-align: center;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(3),
+#crmSection table.crm-captaciones-table td:nth-child(3) {
+  width: 320px;
 }
 
 #crmSection table.crm-captaciones-table th:nth-child(4),
 #crmSection table.crm-captaciones-table td:nth-child(4) {
-  width: 110px;
+  width: 200px;
 }
 
-#crmSection table.crm-captaciones-table th:nth-child(8),
-#crmSection table.crm-captaciones-table td:nth-child(8) {
+#crmSection table.crm-captaciones-table th:nth-child(5),
+#crmSection table.crm-captaciones-table td:nth-child(5) {
   width: 120px;
 }
 
-#crmSection table.crm-captaciones-table th:nth-child(10),
-#crmSection table.crm-captaciones-table td:nth-child(10) {
-  width: 92px;
+#crmSection table.crm-captaciones-table th:nth-child(9),
+#crmSection table.crm-captaciones-table td:nth-child(9) {
+  width: 120px;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(11),
+#crmSection table.crm-captaciones-table td:nth-child(11) {
+  width: 110px;
 }
 
 #crmSection table.crm-captaciones-table td {
@@ -3735,6 +3752,11 @@ body.crm-fin #companySummary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#crmSection table.crm-mapa-table tr.active td,
+#crmSection table.crm-relaciones-table tr.active td {
+  background: rgba(var(--gold-rgb), 0.12);
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(1),

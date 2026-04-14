@@ -2623,9 +2623,10 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmClientesInfo = document.getElementById("crmClientesInfo");
 		const crmClientesAz = document.getElementById("crmClientesAz");
 		const crmClientesPrintBtn = document.getElementById("crmClientesPrintBtn");
-		const crmViewAnalisis = document.getElementById("crmViewAnalisis");
-		const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
-			const crmViewInmuebles = document.getElementById("crmViewInmuebles");
+			const crmViewAnalisis = document.getElementById("crmViewAnalisis");
+			const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
+			const crmCaptacionesTitle = document.getElementById("crmCaptacionesTitle");
+				const crmViewInmuebles = document.getElementById("crmViewInmuebles");
 			const crmViewMapaInmuebles = document.getElementById("crmViewMapaInmuebles");
 			const crmMapaInmueblesTipo = document.getElementById("crmMapaInmueblesTipo");
 			const crmMapaInmueblesRefresh = document.getElementById("crmMapaInmueblesRefresh");
@@ -2787,15 +2788,15 @@ const crmVisitaEstadoFilter = document.getElementById("crmVisitaEstadoFilter");
 const crmKanban = document.getElementById("crmKanban");
 const crmCaptacionesKanban = document.getElementById("crmCaptacionesKanban");
 const crmPipeline = document.getElementById("crmPipeline");
-	const crmEtapaFilter = document.getElementById("crmEtapaFilter");
-	const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
-	const crmCaptacionesQuickFilter = document.getElementById("crmCaptacionesQuickFilter");
-	const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
-	const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
-	const crmCaptacionesNewBtn = document.getElementById("crmCaptacionesNewBtn");
-	const crmInmueblesOps = document.getElementById("crmInmueblesOps");
-	const crmDemandasPriority = document.getElementById("crmDemandasPriority");
-	const crmVisitasAgenda = document.getElementById("crmVisitasAgenda");
+		const crmEtapaFilter = document.getElementById("crmEtapaFilter");
+		const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
+		const crmCaptacionesQuickFilter = document.getElementById("crmCaptacionesQuickFilter");
+		const crmCaptacionesSearch = document.getElementById("crmCaptacionesSearch");
+		const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
+		const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
+		const crmInmueblesOps = document.getElementById("crmInmueblesOps");
+		const crmDemandasPriority = document.getElementById("crmDemandasPriority");
+		const crmVisitasAgenda = document.getElementById("crmVisitasAgenda");
 	const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
 const crmKpiInmuebles = document.getElementById("crmKpiInmuebles");
 const crmKpiEtapa = document.getElementById("crmKpiEtapa");
@@ -30396,44 +30397,54 @@ const resolveCaptacionDotTone = (row = {}) => {
 const buildCrmCaptacionesDenseTableNode = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) return null;
-  const table = document.createElement("table");
-  table.className = "crm-dense-table crm-captaciones-table";
-  const thead = document.createElement("thead");
-  thead.innerHTML = `
-    <tr>
-      <th></th>
-      <th>Inmueble</th>
-      <th>Propietario</th>
-      <th>Tel.</th>
-      <th>Subtipología</th>
-      <th>Motivación</th>
-      <th>Necesidad</th>
-      <th>Precio</th>
-      <th>Próxima acción</th>
-      <th>Etapa</th>
-    </tr>
-  `;
+	  const table = document.createElement("table");
+	  table.className = "crm-dense-table crm-captaciones-table";
+	  const thead = document.createElement("thead");
+	  thead.innerHTML = `
+	    <tr>
+	      <th style="width:34px;"></th>
+	      <th style="width:34px;"></th>
+	      <th>Inmueble</th>
+	      <th>Propietario</th>
+	      <th>Tel.</th>
+	      <th>Subtipología</th>
+	      <th>Motivación</th>
+	      <th>Necesidad</th>
+	      <th>Precio</th>
+	      <th>Próxima acción</th>
+	      <th>Etapa</th>
+	    </tr>
+	  `;
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
-  items.forEach((row) => {
-    const tr = document.createElement("tr");
-    const captacionId = String(row.id || "").trim();
-    const inmuebleId = String(row.inmueble_id || "").trim();
-    tr.addEventListener("click", () => {
-      ensureCrmOpen(() => {
+	  items.forEach((row) => {
+	    const tr = document.createElement("tr");
+	    const captacionId = String(row.id || "").trim();
+	    const inmuebleId = String(row.inmueble_id || "").trim();
+	    tr.addEventListener("click", () => {
+	      ensureCrmOpen(() => {
         if (inmuebleId) {
           openInmuebleDetail(inmuebleId, "captaciones");
           return;
         }
         if (captacionId) {
           openInmuebleFromCaptacion(captacionId, "captaciones");
-        }
-      });
-    });
+	        }
+	      });
+	    });
 
-    const dotTd = document.createElement("td");
-    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(resolveCaptacionDotTone(row))}" aria-hidden="true"></span>`;
-    tr.appendChild(dotTd);
+	    const selectTd = document.createElement("td");
+	    selectTd.className = "crm-dense-select";
+	    const checkbox = document.createElement("input");
+	    checkbox.type = "checkbox";
+	    checkbox.addEventListener("click", (event) => event.stopPropagation());
+	    selectTd.appendChild(checkbox);
+	    tr.appendChild(selectTd);
+
+	    const dotTd = document.createElement("td");
+	    dotTd.className = "crm-dense-select";
+	    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(resolveCaptacionDotTone(row))}" aria-hidden="true"></span>`;
+	    tr.appendChild(dotTd);
 
     const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
     const prefix = resolveCaptacionCodePrefix(stage);
@@ -30527,14 +30538,23 @@ const loadCrmCaptaciones = () => {
         if (!Array.isArray(row)) return;
         row[etapaIndex] = normalizeCrmMainEtapa(row[etapaIndex] || "") || "Inmueble";
       });
-    }
-    const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
-    if (crmEtapaFilter) crmEtapaFilter.value = activeEtapa;
-    if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = activeEtapa;
-    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
-    const parseDateMs = (value) => {
-      const dateText = String(value || "").trim();
-      if (!dateText) return 0;
+	    }
+	    const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
+	    if (crmEtapaFilter) crmEtapaFilter.value = activeEtapa;
+	    if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = activeEtapa;
+	    if (crmCaptacionesTitle) {
+	      const etapaLabel = String(activeEtapa || "").trim();
+	      crmCaptacionesTitle.textContent = etapaLabel === "Noticia"
+	        ? "Noticias"
+	        : etapaLabel === "Encargo"
+	          ? "Encargos"
+	          : "Nuevas oportunidades";
+	    }
+	    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
+	    const localQ = String(crmCaptacionesSearch?.value || "").trim().toLowerCase();
+	    const parseDateMs = (value) => {
+	      const dateText = String(value || "").trim();
+	      if (!dateText) return 0;
       let year = 0;
       let month = 0;
       let day = 0;
@@ -30582,14 +30602,33 @@ const loadCrmCaptaciones = () => {
       }
       return true;
     };
-    const baseRowMaps = rowMaps.filter((rowMap) => matchQuick(rowMap));
-    const filteredRowMaps = baseRowMaps.filter((rowMap) => {
-      if (!activeEtapa) return true;
-      return String(rowMap?.etapa || "") === String(activeEtapa || "");
-    });
-    const counts = {};
-    baseRowMaps.forEach((row) => {
-      const etapa = row?.etapa || "Sin etapa";
+	    const baseRowMaps = rowMaps.filter((rowMap) => matchQuick(rowMap));
+	    let filteredRowMaps = baseRowMaps.filter((rowMap) => {
+	      if (!activeEtapa) return true;
+	      return String(rowMap?.etapa || "") === String(activeEtapa || "");
+	    });
+	    if (localQ) {
+	      filteredRowMaps = filteredRowMaps.filter((rowMap) => {
+	        const haystack = [
+	          rowMap?.direccion,
+	          rowMap?.propietario,
+	          rowMap?.propietario_telefono,
+	          rowMap?.poblacion,
+	          rowMap?.provincia,
+	          rowMap?.subtipologia,
+	          rowMap?.motivacion,
+	          rowMap?.necesidad_venta_alquiler,
+	          rowMap?.proxima_accion,
+	          rowMap?.etapa,
+	        ]
+	          .map((value) => String(value || "").toLowerCase())
+	          .join(" ");
+	        return haystack.includes(localQ);
+	      });
+	    }
+	    const counts = {};
+	    baseRowMaps.forEach((row) => {
+	      const etapa = row?.etapa || "Sin etapa";
       counts[etapa] = (counts[etapa] || 0) + 1;
     });
     renderCrmPipeline(counts, activeEtapa);
@@ -30696,20 +30735,27 @@ const loadCrmAlquileres = () => {
   }
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
-    cachedCrmAlquileres = rows;
-    const activos = rows.filter((row) => {
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const rowMaps = rows.map((row) => buildRowMap(row, columns));
+    rowMaps.forEach((row) => {
+      if (!row) return;
+      if (!row.fecha_inicio && row.fecha) row.fecha_inicio = row.fecha;
+      if (!row.estado && row.tipo) row.estado = row.tipo;
+    });
+    cachedCrmAlquileres = rowMaps;
+    const activos = rowMaps.filter((row) => {
       const status = normalizeSimple(row.estado || row.situacion || row.estado_operacion || "");
       return status && !status.includes("cerr") && !status.includes("baja") && !status.includes("cancel");
     }).length;
-    const conRenta = rows.filter((row) => {
+    const conRenta = rowMaps.filter((row) => {
       const rent = Number(row.renta || row.renta_mensual || row.precio || 0);
       return Number.isFinite(rent) && rent > 0;
     }).length;
-    const conInquilino = rows.filter((row) => String(row.inquilino || row.arrendatario || "").trim()).length;
+    const conInquilino = rowMaps.filter((row) => String(row.inquilino || row.arrendatario || "").trim()).length;
     renderCrmMiniCards(crmAlquileresMini, [
       {
         title: "Alquileres totales",
-        value: rows.length,
+        value: rowMaps.length,
         meta: "Operaciones",
         summary: "Expedientes activos e históricos de alquiler.",
       },
@@ -30732,7 +30778,71 @@ const loadCrmAlquileres = () => {
         summary: "Expedientes todavía abiertos o en gestión.",
       },
     ]);
-    renderTableInto(data, crmAlquileresTable, crmAlquileresInfo, "Alquileres");
+    const buildAlquileresTable = (items = []) => {
+      if (!crmAlquileresTable) return;
+      crmAlquileresTable.innerHTML = "";
+      if (!items.length) {
+        crmAlquileresTable.innerHTML = "<p class='muted'>Sin alquileres.</p>";
+        if (crmAlquileresInfo) crmAlquileresInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      table.className = "crm-dense-table crm-alquileres-table";
+      const thead = document.createElement("thead");
+      thead.innerHTML = `
+        <tr>
+          <th style="width:34px;"></th>
+          <th>Fecha</th>
+          <th>Dirección</th>
+          <th>Propietario</th>
+          <th>Tel.</th>
+          <th>Precio</th>
+          <th>Inquilino</th>
+          <th>Tel.</th>
+          <th>Agente</th>
+          <th>Oficina</th>
+          <th>Tipo</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      items.forEach((row) => {
+        const tr = document.createElement("tr");
+        const selectTd = document.createElement("td");
+        selectTd.className = "crm-dense-select";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.addEventListener("click", (event) => event.stopPropagation());
+        selectTd.appendChild(checkbox);
+        tr.appendChild(selectTd);
+
+        const cells = [
+          ["fecha", row.fecha],
+          ["direccion", row.direccion],
+          ["propietario", row.propietario],
+          ["telefono", row.telefono],
+          ["precio", row.precio],
+          ["inquilino", row.inquilino],
+          ["telefono2", row.telefono2],
+          ["agente", row.agente],
+          ["oficina", row.oficina],
+          ["tipo", row.tipo],
+        ];
+        cells.forEach(([col, value]) => {
+          const td = document.createElement("td");
+          const formatted = formatCell(col, value);
+          td.textContent = formatted === null ? "" : String(formatted || "").trim();
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      crmAlquileresTable.appendChild(table);
+      if (crmAlquileresInfo) {
+        crmAlquileresInfo.textContent = `Mostrando ${items.length} alquileres.`;
+      }
+    };
+    buildAlquileresTable(rowMaps);
     renderCrmResumenDashboard();
   });
 };
@@ -33506,31 +33616,62 @@ const renderCrmMapaInmuebles = (rows = []) => {
 
   const selectRow = (row) => {
     state.crmMapaInmueblesSelectedId = String(row?.id || "").trim();
-    crmMapaInmueblesList.querySelectorAll("[data-map-row]").forEach((btn) => {
-      btn.classList.toggle("active", String(btn.dataset.mapRow || "") === state.crmMapaInmueblesSelectedId);
+    crmMapaInmueblesList.querySelectorAll("tr[data-map-row]").forEach((tr) => {
+      tr.classList.toggle("active", String(tr.dataset.mapRow || "") === state.crmMapaInmueblesSelectedId);
     });
     const address = buildInmuebleDisplayAddress(row) || String(row?.direccion || "").trim();
     renderMapPreview(crmMapaInmueblesMap, Number(row.lat) || null, Number(row.lon) || null, address);
   };
 
+  const table = document.createElement("table");
+  table.className = "crm-dense-table crm-mapa-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th style="width:34px;"></th>
+      <th>Inmueble</th>
+      <th>Localidad</th>
+      <th>Estado</th>
+      <th>Propietarios</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
   filtered.forEach((row) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "crm-map-row";
-    btn.dataset.mapRow = String(row.id || "");
+    const tr = document.createElement("tr");
+    tr.className = "crm-map-row";
+    tr.dataset.mapRow = String(row.id || "");
+    tr.addEventListener("click", () => selectRow(row));
+
+    const hasCoords = Boolean(Number(row.lat) && Number(row.lon));
+    const dotTd = document.createElement("td");
+    dotTd.className = "crm-dense-select";
+    dotTd.innerHTML = `<span class="crm-dot tone-${hasCoords ? "ok" : "neutral"}" aria-label="Posición"></span>`;
+    tr.appendChild(dotTd);
+
     const ref = String(row.referencia || "").trim();
     const address = buildInmuebleDisplayAddress(row) || String(row.direccion || "").trim() || "Sin dirección";
-    const localidad = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
-    const etapa = normalizeCrmMainEtapa(row?.estado || "") || "";
-    const owner = String(row.propietarios || "").trim();
-    btn.innerHTML = `
-      <strong>${escapeHtml(ref ? `${ref} · ${address}` : address)}</strong>
-      <div class="muted">${escapeHtml([localidad, etapa].filter(Boolean).join(" · ") || "-")}</div>
-      ${owner ? `<div class="muted">${escapeHtml(owner)}</div>` : ""}
-    `;
-    btn.addEventListener("click", () => selectRow(row));
-    crmMapaInmueblesList.appendChild(btn);
+    const mainTd = document.createElement("td");
+    mainTd.className = "crm-dense-main";
+    mainTd.innerHTML = `<strong>${escapeHtml(ref ? `${ref} - ${address}` : address)}</strong>`;
+    tr.appendChild(mainTd);
+
+    const locTd = document.createElement("td");
+    locTd.textContent = [row.poblacion || row.localidad || "", row.provincia || ""].filter(Boolean).join(" · ");
+    tr.appendChild(locTd);
+
+    const etapaTd = document.createElement("td");
+    etapaTd.textContent = normalizeCrmMainEtapa(row?.estado || "") || "";
+    tr.appendChild(etapaTd);
+
+    const propTd = document.createElement("td");
+    propTd.textContent = String(row.propietarios || "").trim().replace(/\s+\|\s+/g, " · ");
+    tr.appendChild(propTd);
+
+    tbody.appendChild(tr);
   });
+  table.appendChild(tbody);
+  crmMapaInmueblesList.appendChild(table);
 
   const initial = pickInitial();
   if (initial) selectRow(initial);
@@ -33671,40 +33812,48 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
         return hay.includes(q);
       });
 
-      const table = document.createElement("table");
-      table.className = "crm-dense-table";
-      const thead = document.createElement("thead");
-      thead.innerHTML = `
-        <tr>
-          <th>Pedido</th>
-          <th>Cliente</th>
-          <th>Requisitos</th>
-          <th>Inmueble</th>
-          <th>Precio</th>
-          <th>m²</th>
-          <th>Hab</th>
-          <th>Baños</th>
-          <th>Score</th>
-          <th></th>
-        </tr>
-      `;
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
+	      const table = document.createElement("table");
+	      table.className = "crm-dense-table crm-relaciones-table";
+	      const thead = document.createElement("thead");
+	      thead.innerHTML = `
+	        <tr>
+	          <th style="width:34px;"></th>
+	          <th>Pedido</th>
+	          <th>Cliente</th>
+	          <th>Requisitos</th>
+	          <th>Inmueble</th>
+	          <th>Precio</th>
+	          <th>m²</th>
+	          <th>Hab</th>
+	          <th>Baños</th>
+	          <th>Score</th>
+	          <th>Acción</th>
+	        </tr>
+	      `;
+	      table.appendChild(thead);
+	      const tbody = document.createElement("tbody");
       filteredPairs
         .slice()
         .sort((a, b) => b.score - a.score)
-        .slice(0, 250)
-        .forEach((pair) => {
-          const tr = document.createElement("tr");
-          tr.addEventListener("click", () => {
-            const inmuebleId = String(pair?.inmueble?.id || "").trim();
-            if (inmuebleId) openInmuebleDetail(inmuebleId, "relaciones");
-          });
-          const demandaTitle = pair?.demanda?.pedido || pair?.demanda?.tipo || "Pedido";
-          const demandaMeta = [pair?.demanda?.fase, pair?.demanda?.estado].filter(Boolean).join(" · ");
-          const pedidoTd = document.createElement("td");
-          pedidoTd.className = "crm-dense-main";
-          pedidoTd.innerHTML = `<strong>${escapeHtml(demandaTitle)}</strong>${demandaMeta ? `<div class="muted">${escapeHtml(demandaMeta)}</div>` : ""}`;
+	        .slice(0, 250)
+	        .forEach((pair) => {
+	          const tr = document.createElement("tr");
+	          tr.addEventListener("click", () => {
+	            const inmuebleId = String(pair?.inmueble?.id || "").trim();
+	            if (inmuebleId) openInmuebleDetail(inmuebleId, "relaciones");
+	          });
+	          const selectTd = document.createElement("td");
+	          selectTd.className = "crm-dense-select";
+	          const checkbox = document.createElement("input");
+	          checkbox.type = "checkbox";
+	          checkbox.addEventListener("click", (event) => event.stopPropagation());
+	          selectTd.appendChild(checkbox);
+	          tr.appendChild(selectTd);
+	          const demandaTitle = pair?.demanda?.pedido || pair?.demanda?.tipo || "Pedido";
+	          const demandaMeta = [pair?.demanda?.fase, pair?.demanda?.estado].filter(Boolean).join(" · ");
+	          const pedidoTd = document.createElement("td");
+	          pedidoTd.className = "crm-dense-main";
+	          pedidoTd.innerHTML = `<strong>${escapeHtml(demandaTitle)}</strong>${demandaMeta ? `<div class="muted">${escapeHtml(demandaMeta)}</div>` : ""}`;
           tr.appendChild(pedidoTd);
 
           const clienteTd = document.createElement("td");
@@ -33820,7 +33969,7 @@ const loadCrmCompraventas = () => {
       const documental = normalizeSimple(row.estado_documental || "");
       return documental && !documental.includes("pendiente");
     }).length;
-    renderCrmMiniCards(crmCompraventasMini, [
+	    renderCrmMiniCards(crmCompraventasMini, [
       {
         title: "Compraventas totales",
         value: rows.length,
@@ -33845,15 +33994,17 @@ const loadCrmCompraventas = () => {
         meta: "Cierre",
         summary: `${conDocumentacion} con documentación avanzada o cerrada.`,
       },
-    ]);
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    [
-      "direccion",
-      "responsable_gestion",
-      "agente",
-      "estado",
+	    ]);
+	    const table = document.createElement("table");
+	    table.className = "crm-dense-table crm-compraventas-table";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
+	    [
+	      "",
+	      "direccion",
+	      "responsable_gestion",
+	      "agente",
+	      "estado",
       "origen",
       "vendedores",
       "compradores",
@@ -33867,16 +34018,16 @@ const loadCrmCompraventas = () => {
       "desviacion_porcentaje",
       "dias_hasta_venta",
       "num_visitas",
-      "estado_documental",
-      "docs",
-      "accion",
-    ].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
+	      "estado_documental",
+	      "docs",
+	      "accion",
+	    ].forEach((col) => {
+	      const th = document.createElement("th");
+	      th.textContent = col ? formatHeader(col) : "";
+	      trHead.appendChild(th);
+	    });
+	    thead.appendChild(trHead);
+	    table.appendChild(thead);
     const tbody = document.createElement("tbody");
     const docsPrefix = "/uploads/inmuebles_vendidos/";
     const docUrl = (value) => {
@@ -33887,23 +34038,37 @@ const loadCrmCompraventas = () => {
       }
       return docsPrefix + encodeURI(raw.replace(/^[\\/]+/, ""));
     };
-    const addDocLink = (container, label, value) => {
-      const url = docUrl(value);
-      if (!url) return;
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.className = "pill";
-      a.textContent = label;
-      container.appendChild(a);
-    };
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      const rowValues = [
-        row.direccion || "-",
-        row.responsable_gestion || "-",
-        row.agente || "-",
+	    const addDocLink = (container, label, value) => {
+	      const url = docUrl(value);
+	      if (!url) return;
+	      const a = document.createElement("a");
+	      a.href = url;
+	      a.target = "_blank";
+	      a.rel = "noopener";
+	      a.className = "pill";
+	      a.textContent = label;
+	      a.addEventListener("click", (event) => event.stopPropagation());
+	      container.appendChild(a);
+	    };
+	    rows.forEach((row) => {
+	      const tr = document.createElement("tr");
+	      tr.addEventListener("click", () => {
+	        const recordId = String(row.id || "").trim();
+	        if (recordId) openCompraventaEditor(recordId);
+	      });
+
+	      const selectTd = document.createElement("td");
+	      selectTd.className = "crm-dense-select";
+	      const checkbox = document.createElement("input");
+	      checkbox.type = "checkbox";
+	      checkbox.addEventListener("click", (event) => event.stopPropagation());
+	      selectTd.appendChild(checkbox);
+	      tr.appendChild(selectTd);
+
+	      const rowValues = [
+	        row.direccion || "-",
+	        row.responsable_gestion || "-",
+	        row.agente || "-",
         row.estado || "-",
         row.origen || "-",
         row.vendedores || "-",
@@ -33966,28 +34131,32 @@ const loadCrmCompraventas = () => {
           fichaBtn.className = "secondary ghost button-inline";
           fichaBtn.textContent = "Abrir ficha";
 
-          const editBtn = document.createElement("button");
-          editBtn.type = "button";
-          editBtn.className = "secondary ghost button-inline";
-          editBtn.textContent = "Editar";
+	          const editBtn = document.createElement("button");
+	          editBtn.type = "button";
+	          editBtn.className = "secondary ghost button-inline";
+	          editBtn.textContent = "Editar";
 
-          fichaBtn.addEventListener("click", () => {
-            const inmuebleId = String(row.inmueble_id || "").trim();
-            if (!inmuebleId) {
-              alert("Esta compraventa no tiene inmueble vinculado.");
-              return;
+	          fichaBtn.addEventListener("click", (event) => {
+	            event.preventDefault();
+	            event.stopPropagation();
+	            const inmuebleId = String(row.inmueble_id || "").trim();
+	            if (!inmuebleId) {
+	              alert("Esta compraventa no tiene inmueble vinculado.");
+	              return;
             }
             ensureCrmOpen(() => {
               setCrmWorkspaceView("inmuebles");
-              openInmuebleDetail(inmuebleId, "compraventas");
-            });
-          });
+	              openInmuebleDetail(inmuebleId, "compraventas");
+	            });
+	          });
 
-          editBtn.addEventListener("click", () => {
-            const recordId = String(row.id || "").trim();
-            if (!recordId) {
-              alert("Id de compraventa no disponible.");
-              return;
+	          editBtn.addEventListener("click", (event) => {
+	            event.preventDefault();
+	            event.stopPropagation();
+	            const recordId = String(row.id || "").trim();
+	            if (!recordId) {
+	              alert("Id de compraventa no disponible.");
+	              return;
             }
             openCompraventaEditor(recordId);
           });
@@ -34418,7 +34587,7 @@ const loadCrmVisitas = () => {
         summary: "Visitas ya completadas con resultado.",
       },
     ]);
-    if (crmVisitasAgenda) {
+	    if (crmVisitasAgenda) {
       const agendaItems = filteredRows
         .slice()
         .sort((a, b) => parseCrmDateTime(a.fecha, a.hora) - parseCrmDateTime(b.fecha, b.hora))
@@ -34430,31 +34599,44 @@ const loadCrmVisitas = () => {
           summary: `${row.fecha || "-"} ${row.hora || ""} · ${row.estado || "Pendiente"}`.trim(),
         }));
       renderCrmActionList(crmVisitasAgenda, agendaItems, "Sin visitas programadas.");
-    }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    ["fecha", "hora", "estado", "inmueble", "cliente", "asesor"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    filteredRows
+	    }
+	    const table = document.createElement("table");
+	    table.className = "crm-dense-table crm-visitas-table";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
+	    ["", "fecha", "hora", "estado", "inmueble", "cliente", "asesor"].forEach((col) => {
+	      const th = document.createElement("th");
+	      th.textContent = col ? formatHeader(col) : "";
+	      trHead.appendChild(th);
+	    });
+	    thead.appendChild(trHead);
+	    table.appendChild(thead);
+	    const tbody = document.createElement("tbody");
+	    filteredRows
       .slice()
       .sort((a, b) => parseCrmDateTime(b.fecha, b.hora) - parseCrmDateTime(a.fecha, a.hora))
-      .forEach((row) => {
-      const tr = document.createElement("tr");
-      const values = [
-        row.fecha || "-",
-        row.hora || "-",
-        row.estado || "-",
-        row.inmueble || "-",
-        row.cliente || "-",
-        row.asesor || "-",
-      ];
+	      .forEach((row) => {
+	      const tr = document.createElement("tr");
+	      tr.addEventListener("click", () => {
+	        const inmuebleId = String(row.inmueble_id || "").trim();
+	        if (!inmuebleId) return;
+	        openInmuebleDetail(inmuebleId, "visitas");
+	      });
+	      const selectTd = document.createElement("td");
+	      selectTd.className = "crm-dense-select";
+	      const checkbox = document.createElement("input");
+	      checkbox.type = "checkbox";
+	      checkbox.addEventListener("click", (event) => event.stopPropagation());
+	      selectTd.appendChild(checkbox);
+	      tr.appendChild(selectTd);
+	      const values = [
+	        row.fecha || "-",
+	        row.hora || "-",
+	        row.estado || "-",
+	        row.inmueble || "-",
+	        row.cliente || "-",
+	        row.asesor || "-",
+	      ];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const colName = ["fecha", "hora", "estado", "inmueble", "cliente", "asesor"][idx];
@@ -35369,11 +35551,12 @@ const loadCrmInformadores = async () => {
     return true;
   });
   const table = document.createElement("table");
+  table.className = "crm-dense-table crm-informadores-table";
   const thead = document.createElement("thead");
   const trh = document.createElement("tr");
-  ["nombre", "telefono", "movil", "email", "id_personal", "accion"].forEach((col) => {
+  ["", "nombre", "telefono", "movil", "email", "id_personal"].forEach((col) => {
     const th = document.createElement("th");
-    th.textContent = formatHeader(col);
+    th.textContent = col ? formatHeader(col) : "";
     trh.appendChild(th);
   });
   thead.appendChild(trh);
@@ -35381,18 +35564,24 @@ const loadCrmInformadores = async () => {
   const tbody = document.createElement("tbody");
   items.forEach((row) => {
     const tr = document.createElement("tr");
+    const recordId = String(row.id || "").trim();
+    if (recordId) {
+      tr.addEventListener("click", () => openClienteDetail(recordId));
+    }
+
+    const selectTd = document.createElement("td");
+    selectTd.className = "crm-dense-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    selectTd.appendChild(checkbox);
+    tr.appendChild(selectTd);
+
     [row.nombre, row.telefono, row.movil, row.email, row.id_personal].forEach((val) => {
       const td = document.createElement("td");
       td.textContent = String(val || "");
       tr.appendChild(td);
     });
-    const tdAction = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Abrir";
-    btn.addEventListener("click", () => openClienteDetail(row.id));
-    tdAction.appendChild(btn);
-    tr.appendChild(tdAction);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -35431,11 +35620,12 @@ const loadCrmEdificios = async () => {
     return tipo.includes("edific") || tipo.includes("complej") || categoria;
   });
   const table = document.createElement("table");
+  table.className = "crm-dense-table crm-edificios-table";
   const thead = document.createElement("thead");
   const trh = document.createElement("tr");
-  ["inmueble", "direccion", "localidad", "anio_construccion", "anio_reforma", "categoria", "responsable", "accion"].forEach((col) => {
+  ["", "inmueble", "direccion", "localidad", "categoria", "responsable", "año"].forEach((col) => {
     const th = document.createElement("th");
-    th.textContent = formatHeader(col);
+    th.textContent = col ? formatHeader(col) : "";
     trh.appendChild(th);
   });
   thead.appendChild(trh);
@@ -35443,27 +35633,33 @@ const loadCrmEdificios = async () => {
   const tbody = document.createElement("tbody");
   items.forEach((row) => {
     const tr = document.createElement("tr");
+    const recordId = String(row.id || "").trim();
+    if (recordId) {
+      tr.addEventListener("click", () => openInmuebleDetail(recordId, "edificios"));
+    }
+
+    const selectTd = document.createElement("td");
+    selectTd.className = "crm-dense-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    selectTd.appendChild(checkbox);
+    tr.appendChild(selectTd);
+
+    const year = row.anio_construccion || row.anio_reforma || "";
     const cells = [
       row.titulo || row.direccion || "",
       row.direccion || "",
       row.localidad || row.poblacion || "",
-      row.anio_construccion || "",
-      row.anio_reforma || "",
       row.categoria || "",
       row.responsable || "",
+      year || "",
     ];
     cells.forEach((val) => {
       const td = document.createElement("td");
       td.textContent = String(val || "");
       tr.appendChild(td);
     });
-    const tdAction = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Abrir";
-    btn.addEventListener("click", () => openInmuebleDetail(row.id, "edificios"));
-    tdAction.appendChild(btn);
-    tr.appendChild(tdAction);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -48054,17 +48250,17 @@ if (crmEtapaFilterMirror) {
   });
 }
 
-if (crmCaptacionesQuickFilter) {
-  crmCaptacionesQuickFilter.addEventListener("change", () => {
-    loadCrmCaptaciones();
-  });
-}
+	if (crmCaptacionesQuickFilter) {
+	  crmCaptacionesQuickFilter.addEventListener("change", () => {
+	    loadCrmCaptaciones();
+	  });
+	}
 
-if (crmCaptacionesNewBtn) {
-  crmCaptacionesNewBtn.addEventListener("click", () => {
-    setCrmCaptacionModalOpen(true);
-  });
-}
+	if (crmCaptacionesSearch) {
+	  crmCaptacionesSearch.addEventListener("input", () => {
+	    scheduleSave("crm-captaciones-search", () => loadCrmCaptaciones(), 220);
+	  });
+	}
 
 if (crmInmueblesPreset) {
   crmInmueblesPreset.addEventListener("change", () => {

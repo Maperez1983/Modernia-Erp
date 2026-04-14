@@ -2635,53 +2635,53 @@
                   </div>
                 </div>
               </div>
-	              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
-	                <div class="crm-split crm-ops-split">
-	                  <div class="form-card">
-	                    <div class="section-head">
-	                      <div>
-	                        <h3>Pipeline inmobiliario (lista)</h3>
-	                        <p class="muted">Vista tipo Tecnocloud para operar rápido y con máxima claridad.</p>
-	                      </div>
-	                      <div class="inline-actions">
-		                      <select id="crmEtapaFilterMirror">
-		                        <option value="">Todas las etapas</option>
-		                        <option>Inmueble</option>
-		                        <option>Noticia</option>
-		                        <option>Encargo</option>
-		                        <option>Propuesta</option>
-		                        <option>Reservado</option>
-		                        <option>Contrato de arras</option>
-		                        <option>Vendido</option>
-		                        <option>Cerrado negativamente</option>
-		                        <option>Alquiler</option>
-		                      </select>
-		                      <select id="crmCaptacionesQuickFilter">
-		                        <option value="">Búsquedas rápidas</option>
-		                        <option value="quick_pisos_vacios">Pisos vacíos</option>
-		                        <option value="quick_alquilados">Alquilados (inquilinos)</option>
-		                        <option value="quick_sin_contacto_120">Sin contacto &gt;120 días</option>
-		                        <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
-		                        <option value="quick_sin_proxima_accion">Sin próxima acción</option>
-		                      </select>
-	                        <button type="button" class="secondary" id="crmCaptacionesNewBtn">+ Nuevo inmueble</button>
-	                      </div>
+		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
+		                <div class="crm-split crm-ops-split">
+		                  <div class="tc-listview">
+		                    <div class="tc-listhead">
+		                      <div class="tc-listleft">
+		                        <strong class="tc-title" id="crmCaptacionesTitle">Nuevas oportunidades</strong>
+		                        <select id="crmEtapaFilterMirror" title="Etapa">
+		                          <option value="">Todas las etapas</option>
+		                          <option>Inmueble</option>
+		                          <option>Noticia</option>
+		                          <option>Encargo</option>
+		                          <option>Propuesta</option>
+		                          <option>Reservado</option>
+		                          <option>Contrato de arras</option>
+		                          <option>Vendido</option>
+		                          <option>Cerrado negativamente</option>
+		                          <option>Alquiler</option>
+		                        </select>
+		                      </div>
+		                      <div class="tc-listright">
+		                        <select id="crmCaptacionesQuickFilter" title="Búsquedas rápidas">
+		                          <option value="">Búsquedas rápidas</option>
+		                          <option value="quick_pisos_vacios">Pisos vacíos</option>
+		                          <option value="quick_alquilados">Alquilados (inquilinos)</option>
+		                          <option value="quick_sin_contacto_120">Sin contacto &gt;120 días</option>
+		                          <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
+		                          <option value="quick_sin_proxima_accion">Sin próxima acción</option>
+		                        </select>
+		                        <input id="crmCaptacionesSearch" placeholder="Buscar en la lista..." />
+		                      </div>
 		                    </div>
-	                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
-	                    <div id="crmCaptacionesTable"></div>
-	                    <div class="footer" id="crmCaptacionesInfo"></div>
-	                  </div>
-		                  <div class="form-card">
-		                    <div class="section-head">
-		                      <div>
-		                        <h3>Pendientes</h3>
-		                        <p class="muted">Acciones rápidas para limpiar y mover el pipeline.</p>
+		                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
+		                    <div id="crmCaptacionesTable"></div>
+		                    <div class="tc-listfoot">
+		                      <div class="footer" id="crmCaptacionesInfo"></div>
+		                    </div>
+		                  </div>
+		                  <div class="tc-listview">
+		                    <div class="tc-listhead">
+		                      <div class="tc-listleft">
+		                        <strong class="tc-title">Pendientes</strong>
 		                      </div>
 		                    </div>
 		                    <div id="crmCaptacionesOps" class="crm-focus-list"></div>
 		                  </div>
-                </div>
-	              </div>
+		                </div>
+		              </div>
 		              <div id="crmViewClientes" class="crm-workspace-view hidden">
 		                <div class="tc-listview">
 		                  <div class="tc-listhead">
@@ -2768,34 +2768,40 @@
 			                  </div>
 			                </div>
 			              </div>
-              <div id="crmViewAlquileres" class="crm-workspace-view hidden">
-                <div id="crmAlquileresMini" class="crm-mini-list"></div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Alquileres</h3>
-                        <p class="muted">Operaciones alquiladas convertidas desde el pipeline o dadas de alta manualmente.</p>
-                      </div>
-                    <input id="crmAlquilerSearch" placeholder="Buscar por dirección, propietario o inquilino..." />
-                  </div>
-                  <div id="crmAlquileresTable"></div>
-                  <div class="footer" id="crmAlquileresInfo"></div>
-                </div>
-              </div>
-              <div id="crmViewCompraventas" class="crm-workspace-view hidden">
-                <div id="crmCompraventasMini" class="crm-mini-list"></div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Compraventas</h3>
-                      <p class="muted">Ventas históricas importadas y operaciones nuevas dadas de alta por formulario.</p>
-                    </div>
-                    <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
-                  </div>
-                  <div id="crmCompraventasTable"></div>
-                  <div class="footer" id="crmCompraventasInfo"></div>
-                </div>
-              </div>
+		              <div id="crmViewAlquileres" class="crm-workspace-view hidden">
+		                <div id="crmAlquileresMini" class="crm-mini-list hidden"></div>
+		                <div class="tc-listview">
+	                  <div class="tc-listhead">
+	                    <div class="tc-listleft">
+	                      <strong class="tc-title">Alquileres</strong>
+	                    </div>
+	                    <div class="tc-listright">
+	                      <input id="crmAlquilerSearch" placeholder="Buscar por dirección, propietario o inquilino..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmAlquileresTable"></div>
+	                  <div class="tc-listfoot">
+	                    <div class="footer" id="crmAlquileresInfo"></div>
+	                  </div>
+	                </div>
+	              </div>
+		              <div id="crmViewCompraventas" class="crm-workspace-view hidden">
+		                <div id="crmCompraventasMini" class="crm-mini-list hidden"></div>
+		                <div class="tc-listview">
+	                  <div class="tc-listhead">
+	                    <div class="tc-listleft">
+	                      <strong class="tc-title">Compraventas</strong>
+	                    </div>
+	                    <div class="tc-listright">
+	                      <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmCompraventasTable"></div>
+	                  <div class="tc-listfoot">
+	                    <div class="footer" id="crmCompraventasInfo"></div>
+	                  </div>
+	                </div>
+	              </div>
 			              <div id="crmViewDemandas" class="crm-workspace-view hidden">
 			                <div class="tc-listview">
 			                  <div class="tc-stagebar" id="crmDemandasSteps" role="tablist" aria-label="Fases de pedidos"></div>
@@ -2842,33 +2848,34 @@
 				                  </div>
 				                </div>
 				              </div>
-              <div id="crmViewVisitas" class="crm-workspace-view hidden">
-                <div class="crm-split crm-ops-split">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Visitas</h3>
-                        <p class="muted">Agenda comercial y trazabilidad de las visitas realizadas.</p>
-                      </div>
-                      <div class="inline-actions">
-                        <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
-                        <select id="crmVisitaEstadoFilter">
-                          <option value="">Todos los estados</option>
-                          <option value="pendiente">Pendiente</option>
-                          <option value="realizada">Realizada</option>
-                          <option value="cancelada">Cancelada</option>
-                          <option value="no interesa">No interesa</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div id="crmVisitasMini" class="crm-mini-list"></div>
-                    <div id="crmVisitasTable"></div>
-                    <div class="footer" id="crmVisitasInfo"></div>
-                  </div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Agenda y seguimiento</h3>
+		              <div id="crmViewVisitas" class="crm-workspace-view hidden">
+		                <div class="crm-split crm-ops-split">
+		                  <div class="tc-listview">
+	                    <div class="tc-listhead">
+	                      <div class="tc-listleft">
+	                        <strong class="tc-title">Visitas</strong>
+	                      </div>
+	                      <div class="tc-listright">
+	                        <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
+	                        <select id="crmVisitaEstadoFilter" title="Estado">
+	                          <option value="">Todos los estados</option>
+	                          <option value="pendiente">Pendiente</option>
+	                          <option value="realizada">Realizada</option>
+	                          <option value="cancelada">Cancelada</option>
+	                          <option value="no interesa">No interesa</option>
+	                        </select>
+	                      </div>
+	                    </div>
+		                    <div id="crmVisitasMini" class="crm-mini-list hidden"></div>
+		                    <div id="crmVisitasTable"></div>
+	                    <div class="tc-listfoot">
+	                      <div class="footer" id="crmVisitasInfo"></div>
+	                    </div>
+	                  </div>
+	                  <div class="form-card">
+	                    <div class="section-head">
+	                      <div>
+	                        <h3>Agenda y seguimiento</h3>
                         <p class="muted">Próximas citas, cierres pendientes y visitas que requieren reacción comercial.</p>
                       </div>
                     </div>
@@ -2994,42 +3001,44 @@
                   </div>
                 </div>
               </div>
-              <div id="crmViewInformadores" class="crm-workspace-view hidden">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Informadores</h3>
-                        <p class="muted">Contactos que alimentan el pipeline (perfil Informador).</p>
-                      </div>
-                    <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
-                  </div>
-                  <div class="inline-row">
-                    <input id="crmInformadoresSearch" placeholder="Buscar por nombre, teléfono, email..." />
-                  </div>
-                  <div id="crmInformadoresTable"></div>
-                  <div class="footer" id="crmInformadoresInfo"></div>
-                </div>
-              </div>
-              <div id="crmViewEdificios" class="crm-workspace-view hidden">
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Edificios y complejos</h3>
-                      <p class="muted">Agrupaciones de inmuebles (listados de Edificios/Complejos).</p>
-                    </div>
-                    <select id="crmEdificiosTipoFilter">
-                      <option value="">Todos</option>
-                      <option value="edificios">Edificios</option>
-                      <option value="complejos">Complejos</option>
-                    </select>
-                  </div>
-                  <div class="inline-row">
-                    <input id="crmEdificiosSearch" placeholder="Buscar por inmueble o responsable..." />
-                  </div>
-                  <div id="crmEdificiosTable"></div>
-                  <div class="footer" id="crmEdificiosInfo"></div>
-                </div>
-              </div>
+	              <div id="crmViewInformadores" class="crm-workspace-view hidden">
+	                <div class="tc-listview">
+	                  <div class="tc-listhead">
+	                    <div class="tc-listleft">
+	                      <strong class="tc-title">Informadores</strong>
+	                    </div>
+	                    <div class="tc-listright">
+	                      <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
+	                      <input id="crmInformadoresSearch" placeholder="Buscar por nombre, teléfono, email..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmInformadoresTable"></div>
+	                  <div class="tc-listfoot">
+	                    <div class="footer" id="crmInformadoresInfo"></div>
+	                  </div>
+	                </div>
+	              </div>
+	              <div id="crmViewEdificios" class="crm-workspace-view hidden">
+	                <div class="tc-listview">
+	                  <div class="tc-listhead">
+	                    <div class="tc-listleft">
+	                      <strong class="tc-title">Edificios y complejos</strong>
+	                      <select id="crmEdificiosTipoFilter" title="Tipo">
+	                        <option value="">Todos</option>
+	                        <option value="edificios">Edificios</option>
+	                        <option value="complejos">Complejos</option>
+	                      </select>
+	                    </div>
+	                    <div class="tc-listright">
+	                      <input id="crmEdificiosSearch" placeholder="Buscar por inmueble o responsable..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmEdificiosTable"></div>
+	                  <div class="tc-listfoot">
+	                    <div class="footer" id="crmEdificiosInfo"></div>
+	                  </div>
+	                </div>
+	              </div>
               <div id="crmViewLegal" class="crm-workspace-view hidden">
                 <div class="crm-summary-grid">
                   <div class="form-card crm-focus-card">
