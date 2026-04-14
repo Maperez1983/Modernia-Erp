@@ -1,12 +1,12 @@
 {
-  "name": "Verifika² · CRM",
-  "short_name": "Verifika²",
+  "name": "Grupo Modernia · CRM",
+  "short_name": "Modernia",
   "id": "/",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#F5F7FB",
-  "theme_color": "#0B1D33",
+  "background_color": "#F7F7F3",
+  "theme_color": "#1C2620",
   "icons": [
     {
       "src": "/icons/ios/v23/icon-192.png",

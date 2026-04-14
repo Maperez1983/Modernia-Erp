@@ -20372,10 +20372,10 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
   const {
     width = 240,
     height = 72,
-    bg = "#f7f4eb",
-    bg2 = "#eef3ea",
-    text = "#213129",
-    accent = "#c7a24a",
+    bg = "#F7F7F3",
+    bg2 = "#EEF0EA",
+    text = "#1C2620",
+    accent = "#998B5F",
   } = options;
   const safeLabel = String(label || "")
     .replace(/&/g, "&amp;")
@@ -20401,13 +20401,12 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
 
 const COMPANY_LOGOS = {
   "FINCAS VELAZQUEZ": "/assets/logos/fincas-velazquez.png",
-  // Rebranding: evitamos mostrar el logo legacy "Grupo Modernia" en dashboards del CRM (identidad Verifika²).
-  "FINANCIACIONES MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
+  "FINANCIACIONES MODERNIA": "/assets/grupo_modernia_logo.png",
   "INVERSURE HOMES": "/assets/logos/inversure-homes.svg",
   "INMOVERE PROYECT": "/assets/logos/xp-renova.svg",
   "XP RENOVA": "/assets/logos/xp-renova.svg",
-  "MODERNIA ASESORES": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
-  "GRUPO MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
+  "MODERNIA ASESORES": "/assets/grupo_modernia_logo.png",
+  "GRUPO MODERNIA": "/assets/grupo_modernia_logo.png",
   ALLIANZ: "/assets/logos/allianz.svg",
   ARAG: "/assets/logos/arag.svg",
   AXA: "/assets/logos/axa.svg",
@@ -21538,6 +21537,7 @@ const getPostalInfo = (value) => {
 };
 
 const postalCache = new Map();
+const postalCodesCache = new Map();
 
 const fetchPostalLookup = (value) => {
   const code = normalizePostalCode(value);
@@ -21557,6 +21557,60 @@ const fetchPostalLookup = (value) => {
     .catch(() => null);
 };
 
+const fetchPostalCodesByPoblacion = (poblacion, provincia = "") => {
+  const pobl = String(poblacion || "").trim();
+  const prov = String(provincia || "").trim();
+  if (!pobl) return Promise.resolve([]);
+  const key = `${normalizeSimple(prov)}|${normalizeSimple(pobl)}`;
+  if (postalCodesCache.has(key)) {
+    return Promise.resolve(postalCodesCache.get(key) || []);
+  }
+  const params = new URLSearchParams({ poblacion: pobl });
+  if (prov) params.set("provincia", prov);
+  return api(`/api/postal_codes?${params.toString()}`)
+    .then((data) => {
+      const codes = Array.isArray(data?.codes) ? data.codes.map(normalizePostalCode).filter(Boolean) : [];
+      const unique = Array.from(new Set(codes));
+      postalCodesCache.set(key, unique);
+      return unique;
+    })
+    .catch(() => []);
+};
+
+const inferDireccionExtras = (direccion) => {
+  const raw = String(direccion || "").replace(/\s+/g, " ").trim();
+  if (!raw) return {};
+  const out = {};
+
+  const mNum = raw.match(/\b(?:nº|no\.?|num\.?|numero)\s*(\d{1,5}[A-Za-z]?)\b/i);
+  if (mNum) out.direccion_numero = mNum[1];
+  const mPlanta = raw.match(/\b(?:piso|planta)\s*(\d{1,2})\b/i);
+  if (mPlanta) out.planta = mPlanta[1];
+  const mPuerta = raw.match(/\b(?:pta\.?|puerta)\s*([A-Za-z0-9]{1,3})\b/i);
+  if (mPuerta) out.puerta = mPuerta[1];
+
+  // Sufijo típico: "... 2 14D" => número 2, planta 14, puerta D
+  if (!out.direccion_numero || !out.planta || !out.puerta) {
+    const m = raw.match(/(?:\s|,)(\d{1,5})\s+(\d{1,2})\s*([A-Za-z])\s*$/);
+    if (m) {
+      out.direccion_numero ||= m[1];
+      out.planta ||= m[2];
+      out.puerta ||= m[3];
+    }
+  }
+
+  // Variante: "... 2 14" (sin puerta)
+  if (!out.direccion_numero || !out.planta) {
+    const m = raw.match(/(?:\s|,)(\d{1,5})\s+(\d{1,2})\s*$/);
+    if (m) {
+      out.direccion_numero ||= m[1];
+      out.planta ||= m[2];
+    }
+  }
+
+  return out;
+};
+
 const setMultiSelectValues = (selectEl, values = []) => {
   if (!selectEl) return;
   const wanted = new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean));
@@ -21570,8 +21624,10 @@ const bindPostalLookup = (formEl) => {
   const postalInput = formEl.querySelector('[name="codigo_postal"]');
   const poblacionInput = formEl.querySelector('[name="poblacion"]');
   const provinciaInput = formEl.querySelector('[name="provincia"]');
+  const localidadInput = formEl.querySelector('[name="localidad"]');
   if (!postalInput || !poblacionInput || !provinciaInput) return;
   let poblacionSelect = null;
+  let postalSelect = null;
   const label = poblacionInput.closest("label");
   if (label) {
     poblacionSelect = document.createElement("select");
@@ -21588,9 +21644,56 @@ const bindPostalLookup = (formEl) => {
       }
     });
   }
+  const postalLabel = postalInput.closest("label");
+  if (postalLabel) {
+    postalSelect = document.createElement("select");
+    postalSelect.className = "postal-options hidden";
+    postalSelect.appendChild(createOption("", "Selecciona código postal"));
+    postalLabel.appendChild(postalSelect);
+    postalSelect.addEventListener("change", () => {
+      const value = normalizePostalCode(postalSelect.value);
+      if (!value) return;
+      postalInput.value = value;
+      postalInput.dataset.auto = "0";
+      try {
+        postalInput.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {}
+    });
+  }
   poblacionInput.addEventListener("input", () => {
     poblacionInput.dataset.auto = "0";
   });
+  postalInput.addEventListener("input", () => {
+    postalInput.dataset.auto = "0";
+  });
+
+  const applyPostalCodesFromPoblacion = () => {
+    const poblacion = String(poblacionInput.value || "").trim();
+    const provincia = String(provinciaInput.value || "").trim();
+    if (!poblacion || !postalSelect) return;
+    fetchPostalCodesByPoblacion(poblacion, provincia).then((codes) => {
+      const unique = Array.isArray(codes) ? codes.filter(Boolean) : [];
+      postalSelect.innerHTML = "";
+      postalSelect.appendChild(createOption("", "Selecciona código postal"));
+      unique.forEach((cp) => postalSelect.appendChild(createOption(cp, cp)));
+      if (unique.length > 1) {
+        postalSelect.classList.remove("hidden");
+      } else {
+        postalSelect.classList.add("hidden");
+      }
+      if (unique.length === 1) {
+        const cp = unique[0];
+        const shouldAuto = !postalInput.value || postalInput.dataset.auto === "1";
+        if (shouldAuto && cp) {
+          postalInput.value = cp;
+          postalInput.dataset.auto = "1";
+          try {
+            postalInput.dispatchEvent(new Event("input", { bubbles: true }));
+          } catch {}
+        }
+      }
+    });
+  };
   const applyPostal = () => {
     const fallback = getPostalInfo(postalInput.value);
     fetchPostalLookup(postalInput.value).then((info) => {
@@ -21612,6 +21715,12 @@ const bindPostalLookup = (formEl) => {
           poblacionInput.dataset.auto = "1";
         }
       }
+      if (localidadInput) {
+        const current = String(localidadInput.value || "").trim();
+        if (!current && (poblacionInput?.value || poblacionValue)) {
+          localidadInput.value = String(poblacionInput?.value || poblacionValue || "").trim();
+        }
+      }
       if (poblacionSelect) {
         const options = (info && info.opciones) || [];
         const unique = Array.from(
@@ -21630,6 +21739,7 @@ const bindPostalLookup = (formEl) => {
           poblacionSelect.dataset.provincia = "";
         }
       }
+      applyPostalCodesFromPoblacion();
     });
   };
   postalInput.addEventListener("input", () => {
@@ -21640,6 +21750,22 @@ const bindPostalLookup = (formEl) => {
     postalInput.value = normalizePostalCode(postalInput.value);
     applyPostal();
   });
+
+  poblacionInput.addEventListener("blur", () => {
+    applyPostalCodesFromPoblacion();
+    if (localidadInput && !String(localidadInput.value || "").trim()) {
+      localidadInput.value = String(poblacionInput.value || "").trim();
+    }
+  });
+
+  try {
+    provinciaInput.addEventListener("change", () => {
+      applyPostalCodesFromPoblacion();
+    });
+  } catch {}
+
+  applyPostalCodesFromPoblacion();
+  applyPostal();
 };
 
 const GESTORIA_SUBTIPOS = {
