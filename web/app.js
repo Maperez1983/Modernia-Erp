@@ -22,8 +22,19 @@ const normalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE
   const raw = String(value || "").trim();
   if (!raw) return fallback;
   const normalized = normalizeSlugLike(raw);
-  if (LEGACY_TENANT_WORKSPACE_SLUGS.has(normalized)) return fallback;
-  return raw;
+  // Compat legacy: durante mucho tiempo "modernia/grupomodernia" apuntaban al workspace por defecto.
+  // Pero si en la instancia existen workspaces reales con ese slug, NO debemos colapsarlos a "verifika2"
+  // o se mezcla RRHH/configuración entre workspaces.
+  if (LEGACY_TENANT_WORKSPACE_SLUGS.has(normalized)) {
+    try {
+      const rows = (typeof state !== "undefined" && Array.isArray(state?.workspaces)) ? state.workspaces : [];
+      const exists = rows.some((row) => normalizeSlugLike(row?.slug || row?.nombre || "") === normalized);
+      if (!exists) return fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return normalized || fallback;
 };
 
 const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
