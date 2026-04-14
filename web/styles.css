@@ -3501,13 +3501,13 @@ body.crm-fin #companySummary {
 #crmSection table.crm-dense-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 12px;
   table-layout: fixed;
 }
 
 #crmSection table.crm-dense-table th,
 #crmSection table.crm-dense-table td {
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.10);
   vertical-align: top;
 }
@@ -3546,7 +3546,7 @@ body.crm-fin #companySummary {
 #crmSection .crm-dense-select {
   display: grid;
   place-items: center;
-  width: 24px;
+  width: 34px;
 }
 
 #crmSection .crm-dense-select input[type="checkbox"] {
@@ -3560,7 +3560,7 @@ body.crm-fin #companySummary {
   height: 10px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.18);
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 #crmSection .crm-dot.tone-ok {
@@ -3697,7 +3697,7 @@ body.crm-fin #companySummary {
 
 #crmSection table.crm-clientes-table th:nth-child(1),
 #crmSection table.crm-clientes-table td:nth-child(1) {
-  width: 380px;
+  width: 34px;
 }
 
 #crmSection table.crm-clientes-table th:nth-child(2),
@@ -3706,13 +3706,27 @@ body.crm-fin #companySummary {
 }
 
 #crmSection table.crm-clientes-table th:nth-child(3),
-#crmSection table.crm-clientes-table td:nth-child(3) {
-  width: 160px;
+#crmSection table.crm-clientes-table td:nth-child(3),
+#crmSection table.crm-clientes-table th:nth-child(4),
+#crmSection table.crm-clientes-table td:nth-child(4),
+#crmSection table.crm-clientes-table th:nth-child(5),
+#crmSection table.crm-clientes-table td:nth-child(5) {
+  width: 140px;
 }
 
-#crmSection table.crm-clientes-table th:nth-child(4),
-#crmSection table.crm-clientes-table td:nth-child(4) {
-  width: 180px;
+#crmSection table.crm-clientes-table th:nth-child(6),
+#crmSection table.crm-clientes-table td:nth-child(6) {
+  width: 340px;
+}
+
+#crmSection table.crm-clientes-table th:nth-child(7),
+#crmSection table.crm-clientes-table td:nth-child(7) {
+  width: 70px;
+}
+
+#crmSection table.crm-clientes-table th:nth-child(8),
+#crmSection table.crm-clientes-table td:nth-child(8) {
+  width: 170px;
 }
 
 #crmSection table.crm-inmuebles-table td,
@@ -3725,47 +3739,48 @@ body.crm-fin #companySummary {
 
 #crmSection table.crm-inmuebles-table th:nth-child(1),
 #crmSection table.crm-inmuebles-table td:nth-child(1) {
-  width: 18px;
+  width: 34px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(2),
 #crmSection table.crm-inmuebles-table td:nth-child(2) {
-  width: 110px;
+  width: 34px;
+  text-align: center;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(3),
 #crmSection table.crm-inmuebles-table td:nth-child(3) {
-  width: 360px;
+  width: 320px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(4),
 #crmSection table.crm-inmuebles-table td:nth-child(4) {
-  width: 170px;
+  width: 220px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(5),
 #crmSection table.crm-inmuebles-table td:nth-child(5) {
-  width: 130px;
+  width: 150px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(6),
 #crmSection table.crm-inmuebles-table td:nth-child(6) {
-  width: 140px;
+  width: 170px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(7),
 #crmSection table.crm-inmuebles-table td:nth-child(7) {
-  width: 150px;
+  width: 190px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(8),
 #crmSection table.crm-inmuebles-table td:nth-child(8) {
-  width: 160px;
+  width: 190px;
 }
 
 #crmSection table.crm-inmuebles-table th:nth-child(9),
 #crmSection table.crm-inmuebles-table td:nth-child(9) {
-  width: 120px;
+  width: 140px;
 }
 
 #crmSection table.crm-demandas-table th:nth-child(1),
@@ -3789,83 +3804,62 @@ body.crm-fin #companySummary {
 }
 
 #crmSection table.crm-demandas-table th:nth-child(5),
-#crmSection table.crm-demandas-table td:nth-child(5) {
-  width: 90px;
-}
-
+#crmSection table.crm-demandas-table td:nth-child(5),
 #crmSection table.crm-demandas-table th:nth-child(6),
-#crmSection table.crm-demandas-table td:nth-child(6) {
-  width: 160px;
-}
-
+#crmSection table.crm-demandas-table td:nth-child(6),
 #crmSection table.crm-demandas-table th:nth-child(7),
 #crmSection table.crm-demandas-table td:nth-child(7) {
-  width: 220px;
+  width: 120px;
 }
 
 #crmSection table.crm-demandas-table th:nth-child(8),
 #crmSection table.crm-demandas-table td:nth-child(8) {
-  width: 120px;
+  width: 160px;
 }
 
 #crmSection table.crm-demandas-table th:nth-child(9),
 #crmSection table.crm-demandas-table td:nth-child(9) {
-  width: 120px;
-}
-
-#crmSection table.crm-demandas-table th:nth-child(10),
-#crmSection table.crm-demandas-table td:nth-child(10) {
-  width: 180px;
-}
-
-#crmSection table.crm-demandas-table th:nth-child(5),
-#crmSection table.crm-demandas-table td:nth-child(5) {
-  width: 110px;
-}
-
-#crmSection table.crm-demandas-table th:nth-child(6),
-#crmSection table.crm-demandas-table td:nth-child(6) {
-  width: 200px;
-}
-
-#crmSection table.crm-demandas-table th:nth-child(7),
-#crmSection table.crm-demandas-table td:nth-child(7) {
-  width: 110px;
+  width: 220px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(1),
 #crmSection table.crm-agenda-table td:nth-child(1) {
-  width: 110px;
+  width: 34px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(2),
 #crmSection table.crm-agenda-table td:nth-child(2) {
-  width: 80px;
+  width: 110px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(3),
 #crmSection table.crm-agenda-table td:nth-child(3) {
-  width: 340px;
+  width: 80px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(4),
 #crmSection table.crm-agenda-table td:nth-child(4) {
-  width: 220px;
+  width: 260px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(5),
 #crmSection table.crm-agenda-table td:nth-child(5) {
-  width: 170px;
+  width: 220px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(6),
 #crmSection table.crm-agenda-table td:nth-child(6) {
-  width: 170px;
+  width: 320px;
 }
 
 #crmSection table.crm-agenda-table th:nth-child(7),
 #crmSection table.crm-agenda-table td:nth-child(7) {
-  width: 120px;
+  width: 170px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(8),
+#crmSection table.crm-agenda-table td:nth-child(8) {
+  width: 130px;
 }
 
 #crmSection .crm-dense-icon {

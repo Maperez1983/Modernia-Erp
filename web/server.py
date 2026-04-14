@@ -47953,12 +47953,14 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                  COALESCE(i.direccion, '') AS inmueble,
                   a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
                   a.documento_tipo, a.importe_propuesta,
                   a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
                   a.related_id, a.related_tipo
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
+                LEFT JOIN inmuebles i ON i.id = a.inmueble_id
                 WHERE LOWER(a.servicio) = LOWER(?)
                   AND (? = '' OR a.empresa_id = ?)
                   AND (? = '' OR a.cliente_id = ?)
