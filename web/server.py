@@ -19491,9 +19491,6 @@ def ensure_tables(db_path):
         pass
     try:
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
-        ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
-        ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
-        ensure_column(conn, "hipotecas", "liquidacion_json", "liquidacion_json TEXT")
     except Exception:
         pass
     conn.execute(
@@ -38797,9 +38794,6 @@ class Handler(BaseHTTPRequestHandler):
                 "asesor",
                 "estado",
                 "anio",
-                "cliente_inmueble_json",
-                "hipoteca_detalle_json",
-                "liquidacion_json",
             )
             updates = {}
             for key in allowed:
@@ -38823,28 +38817,6 @@ class Handler(BaseHTTPRequestHandler):
                     updates["cliente_id"] = incoming_cliente_id
                 else:
                     updates["cliente_id"] = None
-
-            for json_field in ("cliente_inmueble_json", "hipoteca_detalle_json", "liquidacion_json"):
-                if json_field not in updates:
-                    continue
-                value = updates.get(json_field)
-                if value in (None, ""):
-                    updates[json_field] = None
-                    continue
-                if isinstance(value, (dict, list)):
-                    updates[json_field] = json.dumps(value, ensure_ascii=False)
-                    continue
-                raw = str(value).strip()
-                if not raw:
-                    updates[json_field] = None
-                    continue
-                try:
-                    json.loads(raw)
-                except Exception:
-                    json_response(self, {"error": f"{json_field} no es JSON válido"}, status=400)
-                    return
-                updates[json_field] = raw
-
             effective_comision = (
                 updates.get("comision")
                 if updates.get("comision") not in (None, "")
