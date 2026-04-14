@@ -23615,7 +23615,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
           codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
         });
         const url = buildCatastroUrl(ref, address);
-        window.open(url, "_blank", "noopener");
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (!win) window.location.assign(url);
       });
       actions.appendChild(openBtn);
       const lookupBtn = document.createElement("button");
