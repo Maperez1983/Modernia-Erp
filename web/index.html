@@ -2872,23 +2872,32 @@
 			                  <div id="crmDemandasPriority" class="crm-focus-list hidden"></div>
 			                </div>
 			              </div>
-				              <div id="crmViewRelaciones" class="crm-workspace-view hidden">
-				                <div class="tc-listview">
-				                  <div class="tc-listhead">
-				                    <div class="tc-listleft">
-				                      <strong class="tc-title">Relaciones Cruce</strong>
-				                    </div>
-				                    <div class="tc-listright">
-				                      <button type="button" class="secondary ghost" id="crmRelacionesRefresh">Actualizar</button>
-				                      <input id="crmRelacionesSearch" placeholder="Buscar..." />
-				                    </div>
-				                  </div>
-				                  <div id="crmRelacionesTable"></div>
-				                  <div class="tc-listfoot">
-				                    <div class="footer" id="crmRelacionesInfo"></div>
-				                  </div>
-				                </div>
-				              </div>
+					              <div id="crmViewRelaciones" class="crm-workspace-view hidden">
+					                <div class="tc-listview">
+					                  <div class="tc-listhead">
+					                    <div class="tc-listleft">
+					                      <select id="crmRelacionesPreset" title="Relaciones Cruce">
+					                        <option value="recientes">Relaciones Cruce (recientes)</option>
+					                        <option value="gestionar">-gestionar/ Visto y gusta / Enc.Rebajado / Int.ver...</option>
+					                        <option value="no_gusta">No gusta por precio / No gusta el inmueble</option>
+					                        <option value="propuesta">El comprador quiere hacer una propuesta</option>
+					                        <option value="negociacion">Negociación avanzada</option>
+					                        <option value="cerradas">Cerradas</option>
+					                      </select>
+					                    </div>
+					                    <div class="tc-listright">
+					                      <button type="button" class="secondary ghost" id="crmRelacionesPrintBtn">Impresiones</button>
+					                      <button type="button" class="secondary ghost" id="crmRelacionesRefresh">Actualizar</button>
+					                      <input id="crmRelacionesSearch" placeholder="Buscar..." />
+					                    </div>
+					                  </div>
+					                  <div class="tc-azbar" id="crmRelacionesAz" aria-label="Filtrar por letra"></div>
+					                  <div id="crmRelacionesTable"></div>
+					                  <div class="tc-listfoot">
+					                    <div class="footer" id="crmRelacionesInfo"></div>
+					                  </div>
+					                </div>
+					              </div>
 		              <div id="crmViewVisitas" class="crm-workspace-view hidden">
 		                <div class="crm-split crm-ops-split">
 		                  <div class="tc-listview">
@@ -2924,18 +2933,27 @@
                   </div>
                 </div>
               </div>
-			              <div id="crmViewAgenda" class="crm-workspace-view hidden">
-			                <div class="tc-listview">
-			                  <div class="tc-listhead">
-			                    <div class="tc-listleft">
-				                      <strong class="tc-title">Act./Citas</strong>
-				                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
-				                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
-				                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
-				                      </div>
-			                      <div class="tc-agenda-nav hidden" id="crmAgendaNav" aria-label="Navegación agenda">
-			                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
-			                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>
+				              <div id="crmViewAgenda" class="crm-workspace-view hidden">
+				                <div class="tc-listview">
+				                  <div class="tc-listhead">
+				                    <div class="tc-listleft">
+					                      <select id="crmAgendaPreset" title="Act./Citas">
+					                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
+					                        <option value="citas_hoy">Citas Personales (hoy)</option>
+					                        <option value="citas_7dias">Citas Personales (7 días)</option>
+					                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
+					                        <option value="citas">Citas Personales</option>
+					                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
+					                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
+					                      </select>
+					                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
+					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="list">Lista</button>
+					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
+					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
+					                      </div>
+				                      <div class="tc-agenda-nav hidden" id="crmAgendaNav" aria-label="Navegación agenda">
+				                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
+				                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>
 			                        <button type="button" class="secondary ghost" id="crmAgendaNext" title="Siguiente">›</button>
 			                        <input id="crmAgendaDay" type="date" />
 			                      </div>
@@ -8451,12 +8469,12 @@
 	    <footer class="app-footer">
 	      <div>Verifika²</div>
 	    </footer>
-    <div id="actionModal" class="modal hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>Editar acción</h3>
-          <button type="button" id="actionModalClose" class="ghost">✕</button>
-        </div>
+	    <div id="actionModal" class="modal hidden">
+	      <div class="modal-content">
+	        <div class="modal-header">
+	          <h3>Editar acción</h3>
+	          <button type="button" id="actionModalClose" class="ghost">✕</button>
+	        </div>
         <div class="modal-body form-grid">
           <label>
             Cliente
@@ -8515,14 +8533,65 @@
           <button type="button" id="actionModalSave">Guardar cambios</button>
           <span id="actionModalStatus" class="muted"></span>
         </div>
-      </div>
-    </div>
+	      </div>
+	    </div>
 
-    <div id="workspaceCustomerModal" class="modal hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>Nuevo cliente (workspace)</h3>
-          <button type="button" id="workspaceCustomerModalClose" class="ghost">✕</button>
+	    <div id="inmuebleGuidedModal" class="modal hidden">
+	      <div class="modal-content">
+	        <div class="modal-header">
+	          <h3>Proceso guiado</h3>
+	          <button type="button" id="inmuebleGuidedClose" class="ghost">✕</button>
+	        </div>
+	        <div class="modal-body">
+	          <div id="inmuebleGuidedHeader" class="crm-mini-list"></div>
+
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Validaciones</h3>
+	                <p class="muted">Requisitos mínimos para la etapa actual.</p>
+	              </div>
+	            </div>
+	            <div id="inmuebleGuidedRequirements" class="crm-mini-list"></div>
+	          </div>
+
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Checklist</h3>
+	                <p class="muted">Tareas sugeridas para avanzar de etapa.</p>
+	              </div>
+	              <div class="form-actions">
+	                <button type="button" class="secondary ghost" id="inmuebleGuidedGenerateChecklist">Generar</button>
+	                <button type="button" class="secondary" id="inmuebleGuidedOpenChecklist">Abrir</button>
+	              </div>
+	            </div>
+	            <div id="inmuebleGuidedChecklistPreview"></div>
+	          </div>
+
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Próxima acción</h3>
+	                <p class="muted">Crea la siguiente acción para mantener el seguimiento vivo.</p>
+	              </div>
+	              <div class="form-actions">
+	                <button type="button" class="secondary" id="inmuebleGuidedCreateAction">Crear acción</button>
+	                <button type="button" class="secondary ghost" id="inmuebleGuidedGoActividad">Ir a citas</button>
+	              </div>
+	            </div>
+	            <div id="inmuebleGuidedActionsPreview"></div>
+	          </div>
+	          <div class="footer muted" id="inmuebleGuidedStatus"></div>
+	        </div>
+	      </div>
+	    </div>
+
+	    <div id="workspaceCustomerModal" class="modal hidden">
+	      <div class="modal-content">
+	        <div class="modal-header">
+	          <h3>Nuevo cliente (workspace)</h3>
+	          <button type="button" id="workspaceCustomerModalClose" class="ghost">✕</button>
         </div>
         <form id="workspaceCustomerForm" class="modal-body form-grid">
           <label class="span-2">
