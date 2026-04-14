@@ -21220,8 +21220,7 @@ const INMUEBLE_FIELDS = [
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Precio" },
 
   // Equipo y origen
-  { key: "asesor", label: "Asesor", type: "select", options: INMOBILIARIA_ASESORES, section: "Equipo" },
-  { key: "responsable", label: "Responsable", type: "text", section: "Equipo" },
+  { key: "asesor", label: "Responsable", type: "select", options: INMOBILIARIA_ASESORES, section: "Equipo" },
   { key: "informador_nombre", label: "Informador relacionado", type: "text", section: "Equipo" },
   { key: "focalizacion", label: "Focalización", type: "text", section: "Equipo" },
 
@@ -21322,7 +21321,6 @@ const INMUEBLE_FIELDS_ENCARGO = [
   "planificacion_encargo",
   // Equipo
   "asesor",
-  "responsable",
   // Contacto propietario
   "propietario_telefono",
   "propietario_email",
@@ -21357,12 +21355,11 @@ const filterInmuebleFieldsForOperacion = (fields, tipoOperacion = "venta") => {
 const CAPTACION_FIELDS = [
   {
     key: "asesor",
-    label: "Asesor",
+    label: "Responsable",
     type: "select",
     options: INMOBILIARIA_ASESORES,
     section: "Propiedad y origen",
   },
-  { key: "responsable", label: "Responsable", type: "text", section: "Propiedad y origen" },
   { key: "focalizacion", label: "Foco", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
@@ -22830,6 +22827,11 @@ const saveInmuebleField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
   }
+  if (field === "asesor") {
+    // En este CRM, asesor y responsable son el mismo concepto (Tecnocloud-like): guardamos ambos para mantener compatibilidad.
+    void saveInmuebleFields({ asesor: value, responsable: value });
+    return;
+  }
   if (field === "estado") {
     const inmueble = { ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}), estado: value };
     const captacion = state.currentInmuebleContext?.captacion || {};
@@ -22845,6 +22847,32 @@ const saveInmuebleField = (field, value) => {
 
 const saveCaptacionField = (field, value) => {
   if (!state.currentInmuebleId) {
+    return;
+  }
+  if (field === "asesor") {
+    // En este CRM, asesor y responsable son el mismo concepto: guardamos ambos.
+    setInmuebleSaveStatus("Guardando...");
+    postJsonWithDbRetry(
+      "/api/captacion_update",
+      { inmueble_id: state.currentInmuebleId, asesor: value, responsable: value },
+      { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
+    )
+      .then((data) => {
+        if (data?.error) {
+          setInmuebleSaveStatus(data.error);
+          return;
+        }
+        if (state.currentInmuebleContext?.captacion) {
+          state.currentInmuebleContext.captacion.asesor = value;
+          state.currentInmuebleContext.captacion.responsable = value;
+        }
+        clearPendingInlineEdits("captacion", ["asesor", "responsable"]);
+        setInmuebleSaveStatus("Guardado · cambios aplicados");
+        refreshCurrentInmuebleProfile();
+      })
+      .catch((error) => {
+        setInmuebleSaveStatus(error?.message || "Error al guardar.");
+      });
     return;
   }
   if (field === "etapa") {
@@ -22868,12 +22896,12 @@ const saveCaptacionField = (field, value) => {
 	        setInmuebleSaveStatus(data.error);
 	        return;
 	      }
-	      if (state.currentInmuebleContext?.captacion) {
-	        state.currentInmuebleContext.captacion[field] = value;
-	      }
-	      clearPendingInlineEdits("captacion", [field]);
-	      setInmuebleSaveStatus("Guardado · cambios aplicados");
-	      refreshCurrentInmuebleProfile();
+      if (state.currentInmuebleContext?.captacion) {
+        state.currentInmuebleContext.captacion[field] = value;
+      }
+      clearPendingInlineEdits("captacion", [field]);
+      setInmuebleSaveStatus("Guardado · cambios aplicados");
+      refreshCurrentInmuebleProfile();
 	    })
 	    .catch((error) => {
 	      setInmuebleSaveStatus(error?.message || "Error al guardar.");
@@ -35791,7 +35819,7 @@ const renderInmuebleTecnocloudPanels = ({
       .filter(Boolean);
     const uniqueBuyers = Array.from(new Set(buyerNames));
     const informador = String(captacion?.informador_nombre || "").trim();
-    const asesor = String(inmueble?.asesor || captacion?.asesor || "").trim();
+    const responsable = String(inmueble?.asesor || captacion?.asesor || inmueble?.responsable || captacion?.responsable || "").trim();
 
     const personasRows = [
       {
@@ -35803,7 +35831,7 @@ const renderInmuebleTecnocloudPanels = ({
         value: uniqueBuyers.length ? uniqueBuyers.slice(0, 2).join(", ") + (uniqueBuyers.length > 2 ? ` · +${uniqueBuyers.length - 2} más` : "") : "-",
       },
       { label: "Informador", value: informador || "-" },
-      { label: "Asesor", value: asesor || "-" },
+      { label: "Responsable", value: responsable || "-" },
     ];
 
     if (inmuebleTecnoSidePersonasCount) {
@@ -36328,22 +36356,22 @@ const refreshCurrentInmuebleProfile = () => {
           ["Antigüedad", inmueble.anio_construccion],
         ],
       },
-      {
-        title: "Comercial y seguimiento",
-        items: [
-          ["Propietarios", ownerNames.length ? ownerNames.join(", ") : ""],
-          ["Situación", captacion.situacion_comercial],
-          ["Canal", captacion.canal],
-          ["Honorarios", inmueble.honorarios],
-          ["Ocupación", inmueble.situacion_ocupacion],
-          ["Urgencia", captacion.urgencia],
-          ["Asesor", inmueble.asesor || captacion.asesor],
-          ["Demandas", demandas.length],
-          ["Visitas", visitas.length],
-          ["Documentos", docs.length],
-          ["Próxima acción", captacion.proxima_accion],
-        ],
-      },
+	      {
+	        title: "Comercial y seguimiento",
+	        items: [
+	          ["Propietarios", ownerNames.length ? ownerNames.join(", ") : ""],
+	          ["Situación", captacion.situacion_comercial],
+	          ["Canal", captacion.canal],
+	          ["Honorarios", inmueble.honorarios],
+	          ["Ocupación", inmueble.situacion_ocupacion],
+	          ["Urgencia", captacion.urgencia],
+	          ["Responsable", inmueble.asesor || captacion.asesor || inmueble.responsable || captacion.responsable],
+	          ["Demandas", demandas.length],
+	          ["Visitas", visitas.length],
+	          ["Documentos", docs.length],
+	          ["Próxima acción", captacion.proxima_accion],
+	        ],
+	      },
     ];
     inmuebleFactsPanel.innerHTML = cards
       .map(
@@ -40209,6 +40237,12 @@ if (inmuebleManualSaveBtn) {
     if (!state.currentInmuebleId) return;
     const inmuebleUpdates = Object.fromEntries(pendingInlineEdits.inmueble.entries());
     const captacionUpdates = Object.fromEntries(pendingInlineEdits.captacion.entries());
+    if (Object.prototype.hasOwnProperty.call(inmuebleUpdates, "asesor") && !Object.prototype.hasOwnProperty.call(inmuebleUpdates, "responsable")) {
+      inmuebleUpdates.responsable = inmuebleUpdates.asesor;
+    }
+    if (Object.prototype.hasOwnProperty.call(captacionUpdates, "asesor") && !Object.prototype.hasOwnProperty.call(captacionUpdates, "responsable")) {
+      captacionUpdates.responsable = captacionUpdates.asesor;
+    }
     if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
       setInmuebleSaveStatus("No hay cambios pendientes.");
       syncInmuebleManualSaveButton();
