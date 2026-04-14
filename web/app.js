@@ -27870,8 +27870,16 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_gastos" inputmode="decimal" readonly />
               </label>
               <label>
-                <span>Seguros hogar/vida</span>
-                <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguros_nota" placeholder="Nota" />
+                <span>Seguro hogar</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_hogar" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Seguro vida</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_vida" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Total seguros (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_seguros" inputmode="decimal" readonly />
               </label>
             </div>
           </div>
@@ -28416,6 +28424,9 @@ const computeHipotecaLiquidacionComputed = (data) => {
     Number(hip.seguro_proteccion_pago || 0);
   hip.total_gastos = round2(totalHip);
 
+  const totalSeguros = Number(hip.seguro_hogar || 0) + Number(hip.seguro_vida || 0);
+  hip.total_seguros = round2(totalSeguros);
+
   const sumaNecesaria =
     Number(comprador.precio_compra || 0) +
     Number(gastosCv.total || 0) +
@@ -28628,6 +28639,7 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
   const targets = [
     "comprador.gastos_compraventa.total",
     "comprador.hipoteca.total_gastos",
+    "comprador.hipoteca.total_seguros",
     "comprador.suma_total_necesaria",
     "comprador.suma_total_entregada",
     "comprador.sobran_en_cuenta",
