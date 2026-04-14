@@ -3727,6 +3727,161 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
     return wb
 
 
+def _safe_json_object(raw):
+    try:
+        if raw is None:
+            return {}
+        text = str(raw or "").strip()
+        if not text:
+            return {}
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _get_nested(obj, path, default=""):
+    cur = obj
+    for part in str(path or "").split("."):
+        if not part:
+            continue
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur.get(part)
+    return cur if cur is not None else default
+
+
+def _set_nested(obj, path, value):
+    cur = obj
+    parts = [p for p in str(path or "").split(".") if p]
+    if not parts:
+        return
+    for part in parts[:-1]:
+        nxt = cur.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[part] = nxt
+        cur = nxt
+    cur[parts[-1]] = value
+
+
+def _is_financiado(value):
+    return normalize_lookup_text(value) in {"si", "sí", "s", "true", "1", "financiado", "financiada"}
+
+
+def _round2(value):
+    try:
+        return round(float(value or 0), 2)
+    except Exception:
+        return 0.0
+
+
+def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
+    liq = liquidacion_raw if isinstance(liquidacion_raw, dict) else {}
+    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
+    gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
+    hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
+    entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
+    prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+
+    # Defaults desde ficha (si el JSON está incompleto).
+    precio_base = parse_money_value(export_row.get("precio") or 0)
+    hipoteca_base = parse_money_value(export_row.get("importe_hipoteca") or 0)
+    if not str(comprador.get("precio_compra") or "").strip() and precio_base:
+        comprador["precio_compra"] = precio_base
+    if not str(comprador.get("escriturado") or "").strip() and (comprador.get("precio_compra") or precio_base):
+        comprador["escriturado"] = comprador.get("precio_compra") or precio_base
+    if not str(hip.get("capital") or "").strip() and hipoteca_base:
+        hip["capital"] = hipoteca_base
+    if not str(entregas.get("prestamo_concedido") or "").strip() and hipoteca_base:
+        entregas["prestamo_concedido"] = hipoteca_base
+
+    precio = parse_money_value(comprador.get("precio_compra") or comprador.get("escriturado") or 0)
+    escriturado = parse_money_value(comprador.get("escriturado") or precio or 0)
+
+    # Totales gastos compraventa.
+    gastos_cv_notaria = parse_money_value(gastos_cv.get("notaria") or 0)
+    gastos_cv_registro = parse_money_value(gastos_cv.get("registro") or 0)
+    gastos_cv_itp = parse_money_value(gastos_cv.get("itp") or 0)
+    gastos_cv_gestoria = parse_money_value(gastos_cv.get("gestoria") or 0)
+    total_cv = _round2(gastos_cv_notaria + gastos_cv_registro + gastos_cv_itp + gastos_cv_gestoria)
+    gastos_cv["total"] = total_cv
+
+    # Gastos constitución hipoteca.
+    hip_notaria_impuestos_gestoria = parse_money_value(hip.get("notaria_impuestos_gestoria") or 0)
+    hip_com_apertura = parse_money_value(hip.get("comision_apertura") or 0)
+    hip_cuota_socio = parse_money_value(hip.get("cuota_socio") or 0)
+    hip_com_cheques = parse_money_value(hip.get("comision_cheques") or 0)
+    hip_seg_proteccion = parse_money_value(hip.get("seguro_proteccion_pago") or 0)
+    hip_seg_hogar = parse_money_value(hip.get("seguro_hogar") or 0)
+    hip_seg_vida = parse_money_value(hip.get("seguro_vida") or 0)
+
+    prot_fin = _is_financiado(hip.get("seguro_proteccion_financiado") or "No")
+    hogar_fin = _is_financiado(hip.get("seguro_hogar_financiado") or "No")
+    vida_fin = _is_financiado(hip.get("seguro_vida_financiado") or "No")
+
+    prot_cash = 0.0 if prot_fin else hip_seg_proteccion
+    hogar_cash = 0.0 if hogar_fin else hip_seg_hogar
+    vida_cash = 0.0 if vida_fin else hip_seg_vida
+
+    total_hip_cash = _round2(
+        hip_notaria_impuestos_gestoria + hip_com_apertura + hip_cuota_socio + hip_com_cheques + prot_cash
+    )
+    hip["total_gastos"] = total_hip_cash
+    total_bloque = _round2(
+        hip_notaria_impuestos_gestoria
+        + hip_com_apertura
+        + hip_cuota_socio
+        + hip_com_cheques
+        + hip_seg_proteccion
+        + hip_seg_hogar
+        + hip_seg_vida
+    )
+    hip["total_bloque"] = total_bloque
+    total_necesario = _round2(total_hip_cash + hogar_cash + vida_cash)
+    hip["total_necesario"] = total_necesario
+
+    gestion_inmo = parse_money_value(comprador.get("gestion_inmobiliaria") or 0)
+    gestion_fin = parse_money_value(comprador.get("gestion_financiacion") or 0)
+    suma_total_necesaria = _round2(precio + total_cv + total_necesario + gestion_inmo + gestion_fin)
+    comprador["suma_total_necesaria"] = suma_total_necesaria
+
+    # Entregas (A ingresar en banco autocalculado como Excel si está vacío).
+    senal = parse_money_value(entregas.get("senal") or 0)
+    transf_modernia = parse_money_value(entregas.get("transf_modernia") or 0)
+    prestamo_concedido = parse_money_value(entregas.get("prestamo_concedido") or 0)
+    ingresar_banco_raw = entregas.get("ingresar_banco")
+    ingresar_banco = parse_money_value(ingresar_banco_raw or 0)
+    if (ingresar_banco_raw is None) or (str(ingresar_banco_raw).strip() == ""):
+        base = max(suma_total_necesaria - prestamo_concedido - senal - transf_modernia, 0)
+        ingresar_banco = float((int((base + 99) // 100) * 100)) if base > 0 else 0.0
+        entregas["ingresar_banco"] = _round2(ingresar_banco)
+
+    suma_entregada = _round2(senal + transf_modernia + ingresar_banco)
+    comprador["suma_total_entregada"] = suma_entregada
+
+    sobran = _round2(prestamo_concedido + suma_entregada - suma_total_necesaria)
+    comprador["sobran_en_cuenta"] = sobran
+
+    # Persist computed back into structure for rendering.
+    comprador["precio_compra"] = precio
+    comprador["escriturado"] = escriturado
+    comprador["gastos_compraventa"] = gastos_cv
+    comprador["hipoteca"] = hip
+    comprador["entregas"] = entregas
+    liq["comprador"] = comprador
+    liq["prestamo"] = prestamo
+
+    return {
+        "liq": liq,
+        "flags": {
+            "proteccion_financiado": prot_fin,
+            "hogar_financiado": hogar_fin,
+            "vida_financiado": vida_fin,
+        },
+    }
+
+
 def render_hipoteca_print_html(payload, auto_print=False):
     cliente = html.escape(payload["cliente"] or "Cliente")
     banco = html.escape(payload["banco"] or "-")
@@ -3743,11 +3898,89 @@ def render_hipoteca_print_html(payload, auto_print=False):
     precio = html.escape(format_export_money(payload["precio"]))
     entrada = html.escape(format_export_money(payload["entrada"]))
     honorarios = html.escape(format_export_money(payload["honorarios"]))
+    liq_payload = payload.get("liquidacion_print") if isinstance(payload.get("liquidacion_print"), dict) else {}
+    liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
+    flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
     print_script = (
         "<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script>"
         if auto_print
         else ""
     )
+
+    def money(value):
+        return html.escape(format_export_money(parse_money_value(value or 0)))
+
+    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
+    gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
+    hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
+    entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
+    prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+
+    liq_section = ""
+    if liq:
+        prot_tag = " (Financiado)" if flags.get("proteccion_financiado") else ""
+        hogar_tag = " (Financiado)" if flags.get("hogar_financiado") else ""
+        vida_tag = " (Financiado)" if flags.get("vida_financiado") else ""
+        liq_section = f"""
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Liquidación comprador</h2>
+        <dl>
+          <dt>Precio compra vivienda</dt><dd>{money(comprador.get("precio_compra"))}</dd>
+          <dt>Escriturado</dt><dd>{money(comprador.get("escriturado"))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Concepto</th>
+              <th style="text-align:right; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding: 8px 0;">Notaría (compraventa)</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(gastos_cv.get("notaria"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Registro propiedad</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(gastos_cv.get("registro"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Impuesto transmisiones</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(gastos_cv.get("itp"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Gestoría</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(gastos_cv.get("gestoria"))}</td></tr>
+            <tr><td style="padding: 10px 0; border-top: 1px solid var(--line); font-weight:800;">Total gastos compraventa</td><td style="padding: 10px 0; border-top: 1px solid var(--line); text-align:right; font-weight:800;">{money(gastos_cv.get("total"))}</td></tr>
+            <tr><td colspan="2" style="padding: 6px 0;"></td></tr>
+            <tr><td style="padding: 8px 0;">Notaría, impuestos y gestoría (hipoteca)</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("notaria_impuestos_gestoria"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Comisión apertura</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("comision_apertura"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Cuota socio caja</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("cuota_socio"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Comisión cheques/OMF</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("comision_cheques"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Seguro hogar{hogar_tag}</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("seguro_hogar"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Seguro vida{vida_tag}</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("seguro_vida"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Seguro protección de pago{prot_tag}</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(hip.get("seguro_proteccion_pago"))}</td></tr>
+            <tr><td style="padding: 10px 0; border-top: 1px solid var(--line); font-weight:800;">Total gastos bloque (informativo)</td><td style="padding: 10px 0; border-top: 1px solid var(--line); text-align:right; font-weight:800;">{money(hip.get("total_bloque"))}</td></tr>
+            <tr><td style="padding: 8px 0; color: var(--muted);">Total que entra en suma necesaria (no financiado)</td><td style="padding: 8px 0; text-align:right; font-weight:700; color: var(--muted);">{money(hip.get("total_necesario"))}</td></tr>
+          </tbody>
+        </table>
+        <div style="height: 14px;"></div>
+        <dl>
+          <dt>Gestión inmobiliaria</dt><dd>{money(comprador.get("gestion_inmobiliaria"))}</dd>
+          <dt>Gestión financiación</dt><dd>{money(comprador.get("gestion_financiacion"))}</dd>
+          <dt>Suma total necesaria</dt><dd>{money(comprador.get("suma_total_necesaria"))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <h2 style="margin-top: 0;">Cantidades entregadas</h2>
+        <dl>
+          <dt>Señal</dt><dd>{money(entregas.get("senal"))}</dd>
+          <dt>Transf. a Modernia</dt><dd>{money(entregas.get("transf_modernia"))}</dd>
+          <dt>A ingresar en banco</dt><dd>{money(entregas.get("ingresar_banco"))}</dd>
+          <dt>Suma total entregada</dt><dd>{money(comprador.get("suma_total_entregada"))}</dd>
+          <dt>Préstamo concedido</dt><dd>{money(entregas.get("prestamo_concedido"))}</dd>
+          <dt>Sobran en cuenta</dt><dd>{money(comprador.get("sobran_en_cuenta"))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <h2 style="margin-top: 0;">Condiciones del préstamo</h2>
+        <dl>
+          <dt>Tipo salida</dt><dd>{html.escape(str(prestamo.get("tipo_salida") or "-"))}</dd>
+          <dt>Revisión</dt><dd>{money(prestamo.get("revision"))}</dd>
+          <dt>Interés</dt><dd>{money(prestamo.get("interes"))}</dd>
+          <dt>Plazo (años)</dt><dd>{html.escape(str(prestamo.get("plazo_anos") or "-"))}</dd>
+          <dt>Cuota inicial</dt><dd>{money(prestamo.get("cuota_inicial"))}</dd>
+        </dl>
+      </div>
+"""
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3930,6 +4163,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
           </dl>
         </div>
       </div>
+      {liq_section}
       <div class="footer-note">Documento generado desde CRM Financiaciones · {html.escape(datetime.now().strftime("%d/%m/%Y %H:%M"))}</div>
     </div>
   </div>
@@ -51261,8 +51495,16 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
                 return
+            liquidacion_raw = {}
+            try:
+                if "liquidacion_json" in row.keys():
+                    liquidacion_raw = _safe_json_object(row["liquidacion_json"] or "{}")
+            except Exception:
+                liquidacion_raw = {}
+            export_row = build_hipoteca_export_row(conn, row)
+            export_row["liquidacion_print"] = compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw)
             content = render_hipoteca_print_html(
-                build_hipoteca_export_row(conn, row),
+                export_row,
                 auto_print=auto_print,
             ).encode("utf-8")
             self.send_response(200)
