@@ -17042,6 +17042,28 @@ const maybeReturnToCrmCaptacionCreate = () => {
   }, 0);
 };
 
+const maybeReturnToAltaCaptacion = () => {
+  if (peekReturnDraftCtx() !== "alta_captacion") return;
+  const restored = consumeReturnDraft("alta_captacion");
+  try {
+    setTab("alta");
+  } catch {}
+  try {
+    if (altaSection) altaSection.dataset.estudioActive = "captacion";
+    updateEstudioAltaTabs();
+  } catch {}
+  if (captacionForm && restored?.payload) {
+    applyDraftToForm(captacionForm, restored.payload);
+    const focusName = String(restored?.focusName || "").trim();
+    if (focusName) {
+      try {
+        const el = captacionForm.querySelector(`[name="${CSS.escape(focusName)}"]`);
+        if (el && el.focus) window.setTimeout(() => el.focus(), 0);
+      } catch {}
+    }
+  }
+};
+
 const setCrmClienteModalOpen = (open = false) => {
   if (!crmClienteModal) return;
   const next = Boolean(open);
@@ -46841,6 +46863,7 @@ const closeClienteDetail = () => {
   );
   // Si veníamos de un alta rápida (duplicados / comprobación), reabrimos el modal con los datos intactos.
   maybeReturnToCrmCaptacionCreate();
+  maybeReturnToAltaCaptacion();
 };
 
 const loadTable = () => {
@@ -51939,6 +51962,7 @@ if (inmuebleBackBtn) {
     state.currentInmuebleOriginView = "inmuebles";
     // Si el usuario estaba creando un inmueble y abrió una ficha para comprobar duplicado, reabrimos el alta con su borrador.
     maybeReturnToCrmCaptacionCreate();
+    maybeReturnToAltaCaptacion();
   });
 }
 
@@ -54387,6 +54411,15 @@ const submitInmobiliariaWithDuplicateCheck = async ({
       if (choice?.action === "open" && choice?.inmuebleId) {
         if (statusEl) statusEl.textContent = "Duplicado detectado: abriendo la ficha existente…";
         try {
+          // Preserva lo que el usuario llevaba escrito para volver sin perderlo.
+          try {
+            const active = document.activeElement;
+            const focusName =
+              active && captacionForm && captacionForm.contains(active) && active.name
+                ? String(active.name || "").trim()
+                : "";
+            setReturnDraft("alta_captacion", payload, { focusName });
+          } catch {}
           openInmuebleDetail(choice.inmuebleId, "captaciones");
         } catch {}
         if (typeof onSuccess === "function") onSuccess({ duplicated: true, opened: true, inmueble_id: choice.inmuebleId });
@@ -54405,6 +54438,14 @@ const submitInmobiliariaWithDuplicateCheck = async ({
         }
         if (statusEl) statusEl.textContent = "Ficha renovada.";
         try {
+          try {
+            const active = document.activeElement;
+            const focusName =
+              active && captacionForm && captacionForm.contains(active) && active.name
+                ? String(active.name || "").trim()
+                : "";
+            setReturnDraft("alta_captacion", payload, { focusName });
+          } catch {}
           openInmuebleDetail(renewData.inmueble_id || choice.inmuebleId, "captaciones");
         } catch {}
         if (typeof onSuccess === "function") onSuccess({ renewed: true, ...renewData });
