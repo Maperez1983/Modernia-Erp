@@ -6604,6 +6604,11 @@ body.crm-context-inmo .crm-resumen-compact-note {
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
 }
 
+#inmuebleDetail .inmueble-profile,
+#inmuebleDetail .inmueble-profile-top {
+  grid-template-columns: 1fr;
+}
+
 .inmueble-profile-side {
   display: grid;
   gap: 10px;

@@ -21274,7 +21274,7 @@ const CAPTACION_FIELDS = [
     section: "Propiedad y origen",
   },
   { key: "responsable", label: "Responsable", type: "text", section: "Propiedad y origen" },
-  { key: "focalizacion", label: "Foco (zona/segmento)", type: "text", section: "Propiedad y origen" },
+  { key: "focalizacion", label: "Foco", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
   { key: "motivo", label: "Motivo (qué necesita)", type: "text", section: "Propiedad y origen" },
@@ -31223,6 +31223,8 @@ const renderClientesDashboardList = (container, items, emptyText, labelFormatter
 
 const renderClientesDashboard = (rows = [], dataColumns = []) => {
   if (!clientesDashboardPanel) return;
+  clientesDashboardPanel.classList.add("hidden");
+  return;
   const isClientesModule = state.currentModule === "clientes" && state.currentPage !== "cliente";
   clientesDashboardPanel.classList.toggle("hidden", !isClientesModule);
   if (!isClientesModule) return;
@@ -31306,6 +31308,8 @@ const renderClientesDashboard = (rows = [], dataColumns = []) => {
 
 const loadClientesDashboard = () => {
   if (!clientesDashboardPanel) return Promise.resolve();
+  clientesDashboardPanel.classList.add("hidden");
+  return Promise.resolve();
   if (state.currentModule !== "clientes" || state.currentPage === "cliente") {
     clientesDashboardPanel.classList.add("hidden");
     return Promise.resolve();
@@ -40124,7 +40128,7 @@ const renderInmuebleCompradores = (rows = [], inmuebleId = "") => {
     tr.appendChild(compradorCell);
 
     const demandaCell = document.createElement("td");
-    const demandaParts = [row.demanda_tipo, row.demanda_zona, row.demanda_fase, row.demanda_estado].filter(Boolean);
+    const demandaParts = [row.demanda_tipo, row.demanda_fase, row.demanda_estado].filter(Boolean);
     demandaCell.innerHTML = demandaParts.length ? demandaParts.map((p) => `<div>${escapeHtml(p)}</div>`).join("") : "<span class='muted'>-</span>";
     tr.appendChild(demandaCell);
 

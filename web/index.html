@@ -2620,24 +2620,24 @@
 					                  </div>
 					                </div>
 					              </div>
-              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
-                <div class="tc-listview">
-                  <div class="tc-listhead">
-                    <div class="tc-listleft">
-                      <strong class="tc-title">Búsq./Informes</strong>
-                    </div>
-                  </div>
-                  <div class="tc-quickgrid">
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
-                  </div>
-                  <div class="footer muted">Vista depurada para mantener la sencillez visual tipo Tecnocloud (sin KPIs ni “calidad/control operativo”).</div>
-                </div>
-              </div>
+	              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
+	                <div class="tc-listview">
+	                  <div class="tc-listhead">
+	                    <div class="tc-listleft">
+	                      <strong class="tc-title">Búsq./Informes</strong>
+	                    </div>
+	                  </div>
+	                  <div class="tc-quickgrid">
+	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
+	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
+	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
+	                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
+	                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
+	                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
+	                  </div>
+	                  <div class="footer muted">Vista depurada para mantener la sencillez visual tipo Tecnocloud (sin KPIs ni “calidad/control operativo”).</div>
+	                </div>
+	              </div>
 		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
 		                <div class="tc-listview">
 		                    <div class="tc-listhead">
@@ -3744,7 +3744,7 @@
                 </div>
                 <div id="inmuebleEstadoInfo" class="muted"></div>
               </div>
-	              <div class="form-card inmueble-advanced">
+	              <div class="form-card inmueble-advanced hidden">
                 <div class="section-head">
                   <div>
                     <h3>Validación del estado</h3>
@@ -3753,7 +3753,7 @@
                 </div>
                 <div id="inmuebleEstadoValidation" class="crm-mini-list"></div>
               </div>
-	              <div class="form-card inmueble-advanced">
+	              <div class="form-card inmueble-advanced hidden">
                 <div class="section-head">
                   <div>
                     <h3>Checklist por etapa</h3>
@@ -8755,11 +8755,11 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
-	    <script src="ui-foundation.js?v=3"></script>
-	    <script src="app-auth.js?v=10"></script>
-	    <script src="app-routing.js?v=7"></script>
-	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=496"></script>
+		    <script src="ui-foundation.js?v=3"></script>
+		    <script src="app-auth.js?v=10"></script>
+		    <script src="app-routing.js?v=7"></script>
+		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+			    <script src="app.js?v=496"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8787,7 +8787,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=116").catch(function () {});
+			          navigator.serviceWorker.register("/sw.js?v=116").catch(function () {});
         });
       })();
     </script>
