@@ -42124,7 +42124,7 @@ class Handler(BaseHTTPRequestHandler):
 	                      propietario_telefono, propietario_email,
 	                      asesor, responsable, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42175,13 +42175,13 @@ class Handler(BaseHTTPRequestHandler):
                         parse_boolish(payload.get("no_molestar")),
                         parse_boolish(payload.get("planificado")),
                         payload.get("fecha_planificacion"),
-	                        payload.get("prioridad_noticia"),
-	                        parse_boolish(payload.get("encargo_competencia")),
-	                        payload.get("encargo_competencia_agencia"),
-	                        payload.get("encargo_competencia_hasta"),
-	                        payload.get("planificacion_encargo"),
-	                        payload.get("fecha_ultima_renov_rebaja"),
-	                        payload.get("propietario_telefono"),
+                        payload.get("prioridad_noticia"),
+                        parse_boolish(payload.get("encargo_competencia")),
+                        payload.get("encargo_competencia_agencia"),
+                        payload.get("encargo_competencia_hasta"),
+                        payload.get("planificacion_encargo"),
+                        payload.get("fecha_ultima_renov_rebaja"),
+                        payload.get("propietario_telefono"),
                         payload.get("propietario_email"),
                         asesor_value or None,
                         responsable_value or None,
@@ -42410,15 +42410,15 @@ class Handler(BaseHTTPRequestHandler):
                 "estado_contacto",
                 "no_molestar",
                 "planificado",
-	                "fecha_planificacion",
-	                "prioridad_noticia",
-	                "encargo_competencia",
-	                "encargo_competencia_agencia",
-	                "encargo_competencia_hasta",
-	                "planificacion_encargo",
-	                "fecha_ultima_renov_rebaja",
-	                "asesor",
-	                "responsable",
+                "fecha_planificacion",
+                "prioridad_noticia",
+                "encargo_competencia",
+                "encargo_competencia_agencia",
+                "encargo_competencia_hasta",
+                "planificacion_encargo",
+                "fecha_ultima_renov_rebaja",
+                "asesor",
+                "responsable",
                 "notas",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}

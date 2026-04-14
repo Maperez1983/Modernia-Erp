@@ -4795,8 +4795,8 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   z-index: 70;
   display: block;
   padding: 0;
-  background: transparent;
-  backdrop-filter: none;
+  background: rgba(11, 29, 51, 0.28);
+  backdrop-filter: blur(2px);
 }
 
 #crmSection .crm-insert-modal--anchored .crm-insert-card {

@@ -17465,16 +17465,16 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
-  if (next) {
-    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
-    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
-    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
-    crmInsertModal.classList.toggle("crm-insert-modal--dropdown", !isAnchored);
-    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
-    if (isAnchored) {
-      positionCrmInsertModal(anchorEl);
-    } else {
-      crmInsertModal.style.removeProperty("--crm-insert-left");
+	  if (next) {
+	    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+	    const isAnchored = Boolean(anchorEl);
+	    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+	    crmInsertModal.classList.toggle("crm-insert-modal--dropdown", !isAnchored);
+	    // Cuando se abre desde un botón, lo mostramos como dropdown flotante (evita invadir el sidebar).
+	    if (isAnchored) {
+	      positionCrmInsertModal(anchorEl);
+	    } else {
+	      crmInsertModal.style.removeProperty("--crm-insert-left");
       crmInsertModal.style.removeProperty("--crm-insert-top");
     }
     setCrmRecentOpen(false);
@@ -61196,5 +61196,108 @@ document.addEventListener("change", (event) => {
     const form = target.closest("form");
     const pop = form?.querySelector?.('input[list="inmoPoblacionOptions"][name="poblacion"]');
     if (pop) renderInmoPoblacionDatalist(String(target.value || "").trim());
+  } catch {}
+});
+
+// --- Inmobiliaria: códigos postales por población (datalist) ---
+const INMO_POSTAL_CODES_CACHE = new Map();
+let INMO_POSTAL_DATALIST_FILTER_KEY = "";
+
+const normalizeInmoPostalKey = (poblacion = "", provincia = "") =>
+  `${normalizeSimple(poblacion || "")}||${normalizeSimple(provincia || "")}`;
+
+const loadInmoPostalCodesCatalog = async (poblacion = "", provincia = "") => {
+  const pop = String(poblacion || "").trim();
+  if (!pop) return [];
+  const prov = String(provincia || "").trim();
+  const key = normalizeInmoPostalKey(pop, prov);
+  if (INMO_POSTAL_CODES_CACHE.has(key)) return INMO_POSTAL_CODES_CACHE.get(key);
+  const qs = new URLSearchParams({ poblacion: pop });
+  if (prov) qs.set("provincia", prov);
+  const data = await api(`/api/postal_codes?${qs.toString()}`);
+  const codes = Array.isArray(data?.codes) ? data.codes : [];
+  const cleaned = codes.map((c) => normalizePostalCode(c)).filter(Boolean).slice(0, 500);
+  INMO_POSTAL_CODES_CACHE.set(key, cleaned);
+  return cleaned;
+};
+
+const getInmoPoblacionFromContext = (el) => {
+  try {
+    const form = el?.closest?.("form");
+    const input = form?.querySelector?.('input[name="poblacion"]');
+    return String(input?.value || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const getInmoPostalContext = (el) => {
+  try {
+    const form = el?.closest?.("form");
+    const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
+    const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
+    return { form, poblacion, provincia };
+  } catch {
+    return { form: null, poblacion: "", provincia: "" };
+  }
+};
+
+const renderInmoPostalDatalist = async (poblacion = "", provincia = "") => {
+  const datalist = document.getElementById("inmoPostalOptions");
+  if (!datalist) return;
+  const key = normalizeInmoPostalKey(poblacion, provincia);
+  if (INMO_POSTAL_DATALIST_FILTER_KEY === key && datalist.childElementCount > 0) return;
+  let codes = [];
+  try {
+    codes = await loadInmoPostalCodesCatalog(poblacion, provincia);
+  } catch {
+    codes = [];
+  }
+  datalist.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  codes.forEach((cp) => {
+    const opt = document.createElement("option");
+    opt.value = cp;
+    frag.appendChild(opt);
+  });
+  datalist.appendChild(frag);
+  INMO_POSTAL_DATALIST_FILTER_KEY = key;
+};
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!target || !target.getAttribute) return;
+  const list = target.getAttribute("list");
+  if (list !== "inmoPostalOptions") return;
+  const { poblacion, provincia } = getInmoPostalContext(target);
+  if (!poblacion) return;
+  renderInmoPostalDatalist(poblacion, provincia);
+});
+
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!target) return;
+  if (target.name !== "poblacion") return;
+  const form = target.closest?.("form");
+  const postalInput = form?.querySelector?.('input[list="inmoPostalOptions"][name="codigo_postal"]');
+  if (!postalInput) return;
+  const provincia = getInmoProvinciaFromContext(target);
+  const poblacion = getInmoPoblacionFromContext(target);
+  if (!poblacion) return;
+  renderInmoPostalDatalist(poblacion, provincia);
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!target) return;
+  if (!target.classList || !target.classList.contains("inmo-province-select")) return;
+  try {
+    const form = target.closest("form");
+    const postalInput = form?.querySelector?.('input[list="inmoPostalOptions"][name="codigo_postal"]');
+    const poblacionInput = form?.querySelector?.('input[name="poblacion"]');
+    if (!postalInput || !poblacionInput) return;
+    const poblacion = String(poblacionInput.value || "").trim();
+    if (!poblacion) return;
+    renderInmoPostalDatalist(poblacion, String(target.value || "").trim());
   } catch {}
 });

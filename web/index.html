@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=188" />
+    <link rel="stylesheet" href="styles.css?v=189" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2369,10 +2369,10 @@
 		                      Puerta
 		                      <input name="puerta" placeholder="Ej. B" />
 		                    </label>
-		                    <label>
-		                      Código postal
-		                      <input name="codigo_postal" placeholder="Ej. 29001" inputmode="numeric" />
-		                    </label>
+			                    <label>
+			                      Código postal
+			                      <input name="codigo_postal" list="inmoPostalOptions" placeholder="Ej. 29001" inputmode="numeric" />
+			                    </label>
 		                    <label>
 		                      Población
 		                      <input name="poblacion" list="inmoPoblacionOptions" placeholder="Ej. Málaga" />
@@ -2503,8 +2503,9 @@
 		                  </form>
 		                </div>
 		              </div>
-		              <datalist id="inmoPoblacionOptions"></datalist>
-		              <datalist id="inmoEstadoContactoOptions">
+			              <datalist id="inmoPoblacionOptions"></datalist>
+			              <datalist id="inmoPostalOptions"></datalist>
+			              <datalist id="inmoEstadoContactoOptions">
 		                <option value="Sin gestionar"></option>
 		                <option value="Gestionado"></option>
 		                <option value="Pendiente de contacto"></option>
@@ -9001,7 +9002,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=505"></script>
+		    <script src="app.js?v=506"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
