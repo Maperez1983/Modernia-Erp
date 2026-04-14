@@ -46457,6 +46457,50 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/catalogo_poblaciones":
+            limit_raw = (params.get("limit", [""])[0] or "").strip()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            q = (params.get("q", [""])[0] or "").strip()
+            try:
+                limit = int(limit_raw) if limit_raw else 50000
+            except Exception:
+                limit = 50000
+            limit = max(1, min(limit, 80000))
+
+            where = ["poblacion IS NOT NULL", "TRIM(poblacion) <> ''"]
+            values = []
+            if provincia:
+                where.append("TRIM(provincia) = ?")
+                values.append(provincia)
+            if q:
+                where.append("LOWER(poblacion) LIKE ?")
+                values.append(f"%{q.lower()}%")
+
+            sql = f"""
+                SELECT DISTINCT
+                  TRIM(poblacion) AS poblacion,
+                  TRIM(provincia) AS provincia
+                FROM postal_catalogo
+                WHERE {' AND '.join(where)}
+                ORDER BY poblacion COLLATE NOCASE
+                LIMIT ?
+            """
+            values.append(limit)
+            rows = conn.execute(sql, tuple(values)).fetchall()
+            items = []
+            for row in rows:
+                poblacion = (row["poblacion"] or "").strip()
+                if not poblacion:
+                    continue
+                items.append(
+                    {
+                        "poblacion": poblacion,
+                        "provincia": (row["provincia"] or "").strip(),
+                    }
+                )
+            json_response(self, {"items": items, "total": len(items), "limit": limit})
+            return
+
         if path == "/api/geocode_lookup":
             query = (params.get("q", [""])[0] or "").strip()
             municipio = (params.get("municipio", [""])[0] or "").strip()
