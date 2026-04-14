@@ -36498,16 +36498,29 @@ const loadCrmInmuebles = () => {
     const allRows = data.rows || [];
     cachedCrmInmuebles = allRows;
     const az = String(state.crmAz?.inmuebles || "").trim().toUpperCase();
-    const presetKey = normalizeSimple(crmInmueblesPreset?.value || "inmuebles_recientes");
-    const presetFiltered = (() => {
-      // Tecnocloud: selector de vistas (Inmuebles recientes / Inmuebles / Noticias / Encargos).
-      const stage = (row) => normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
-      const tipo = (row) => normalizeSimple(row?.tipo_inmueble || "");
-      if (presetKey === "inmuebles") return allRows.filter((row) => stage(row) === "Inmueble");
-      if (presetKey === "noticias") return allRows.filter((row) => stage(row) === "Noticia");
-      if (presetKey === "encargos") return allRows.filter((row) => stage(row) === "Encargo");
-      if (presetKey === "edificios") return allRows.filter((row) => tipo(row).includes("edificio"));
-      if (presetKey === "complejos") return allRows.filter((row) => tipo(row).includes("complejo"));
+	    const presetKey = normalizeSimple(crmInmueblesPreset?.value || "inmuebles_recientes");
+	    const presetFiltered = (() => {
+	      // Tecnocloud: selector de vistas (Inmuebles recientes / Inmuebles / Noticias / Encargos).
+	      const stage = (row) => normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+	      const tipo = (row) => normalizeSimple(row?.tipo_inmueble || "");
+	      if (presetKey === "inmuebles_recientes") {
+	        const recent = loadCrmRecentItems()
+	          .filter((item) => String(item?.kind || "").trim() === "inmueble" && String(item?.inmuebleId || "").trim())
+	          .slice()
+	          .sort((a, b) => Number(b?.ts || 0) - Number(a?.ts || 0));
+	        const idOrder = recent.map((item) => String(item.inmuebleId).trim());
+	        const wanted = new Set(idOrder);
+	        const byId = new Map(allRows.map((row) => [String(row?.id || "").trim(), row]));
+	        const ordered = idOrder.map((id) => byId.get(id)).filter(Boolean);
+	        if (ordered.length) return ordered;
+	        // Si no hay recientes aún, usamos todo el catálogo.
+	        return allRows;
+	      }
+	      if (presetKey === "inmuebles") return allRows;
+	      if (presetKey === "noticias") return allRows.filter((row) => stage(row) === "Noticia");
+	      if (presetKey === "encargos") return allRows.filter((row) => stage(row) === "Encargo");
+	      if (presetKey === "edificios") return allRows.filter((row) => tipo(row).includes("edificio"));
+	      if (presetKey === "complejos") return allRows.filter((row) => tipo(row).includes("complejo"));
       if (presetKey === "potencial_adquisicion") {
         return allRows.filter((row) => {
           const foc = normalizeSimple(row?.focalizacion || "");
