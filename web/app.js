@@ -21240,7 +21240,13 @@ const INMUEBLE_FIELDS = [
   },
   { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Contacto propietario" },
   { key: "propietario_email", label: "Email propietario", type: "text", section: "Contacto propietario" },
-  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Contacto propietario", list: "inmoEstadoContactoOptions" },
+  {
+    key: "estado_contacto",
+    label: "Estado de contacto",
+    type: "select",
+    options: ["", "Sin gestionar", "Gestionado", "Pendiente de contacto", "Contactado", "Cita pendiente", "Descartado"],
+    section: "Contacto propietario",
+  },
   { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Contacto propietario" },
   {
     key: "no_molestar",
@@ -21431,7 +21437,13 @@ const CAPTACION_FIELDS = [
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
   { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Pipeline" },
   { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Pipeline" },
-  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Pipeline" },
+  {
+    key: "estado_contacto",
+    label: "Estado de contacto",
+    type: "select",
+    options: ["", "Sin gestionar", "Gestionado", "Pendiente de contacto", "Contactado", "Cita pendiente", "Descartado"],
+    section: "Pipeline",
+  },
   {
     key: "no_molestar",
     label: "No molestar",
@@ -21476,7 +21488,13 @@ const CAPTACION_FIELDS_ENCARGO = [
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Seguimiento" },
   { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Seguimiento" },
   { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Seguimiento" },
-  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Seguimiento" },
+  {
+    key: "estado_contacto",
+    label: "Estado de contacto",
+    type: "select",
+    options: ["", "Sin gestionar", "Gestionado", "Pendiente de contacto", "Contactado", "Cita pendiente", "Descartado"],
+    section: "Seguimiento",
+  },
   {
     key: "encargo_competencia",
     label: "Encargo de competencia",
