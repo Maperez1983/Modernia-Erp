@@ -932,6 +932,17 @@ body.crm-fin #companySummary {
   display: none !important;
 }
 
+/* En Seguros/Financiaciones usamos el mismo shell Tecnocloud, pero sin sidebar inmobiliaria. */
+body.crm-seguros #crmSection .crm-lightning-shell,
+body.crm-fin #crmSection .crm-lightning-shell {
+  grid-template-columns: 1fr;
+}
+
+body.crm-seguros #crmSection .crm-lightning-sidebar,
+body.crm-fin #crmSection .crm-lightning-sidebar {
+  display: none;
+}
+
 .form-card {
   border: 1px solid var(--line);
   border-radius: 16px;

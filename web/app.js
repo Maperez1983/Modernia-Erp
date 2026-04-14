@@ -2682,9 +2682,13 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmAgendaNext = document.getElementById("crmAgendaNext");
 			const crmAgendaDay = document.getElementById("crmAgendaDay");
 			const crmAgendaCalendar = document.getElementById("crmAgendaCalendar");
-			const crmViewInformadores = document.getElementById("crmViewInformadores");
-			const crmViewEdificios = document.getElementById("crmViewEdificios");
-			const crmViewLegal = document.getElementById("crmViewLegal");
+		const crmViewInformadores = document.getElementById("crmViewInformadores");
+		const crmViewEdificios = document.getElementById("crmViewEdificios");
+		const crmViewLegal = document.getElementById("crmViewLegal");
+		const crmViewSeguros = document.getElementById("crmViewSeguros");
+		const crmSegurosMount = document.getElementById("crmSegurosMount");
+		const crmViewFin = document.getElementById("crmViewFin");
+		const crmFinMount = document.getElementById("crmFinMount");
 		const crmResumenPulse = document.getElementById("crmResumenPulse");
 		const crmResumenHoy = document.getElementById("crmResumenHoy");
 			const crmResumenAlertas = document.getElementById("crmResumenAlertas");
@@ -17188,6 +17192,86 @@ const syncCrmInmoBrand = (empresaNombre = "") => {
   crmBrandSubtitle.textContent = "CRM inmobiliario";
 };
 
+const resolveCrmTecnocloudVertical = () => {
+  let crmContext = "";
+  try {
+    crmContext = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+  } catch {
+    crmContext = "";
+  }
+  if (currentTab === "seguros-crm" || crmContext === "seguros") return "seguros";
+  if (
+    currentTab === "fin-crm" ||
+    currentTab === "fin-sim" ||
+    crmContext === "fin" ||
+    crmContext === "financiaciones" ||
+    crmContext === "hipotecas"
+  ) {
+    return "fin";
+  }
+  return "inmo";
+};
+
+const syncCrmTecnocloudVerticalNav = () => {
+  const vertical = resolveCrmTecnocloudVertical();
+  const allowedViews =
+    vertical === "seguros"
+      ? new Set(["seguros"])
+      : vertical === "fin"
+        ? new Set(["fin"])
+        : new Set([
+          "resumen",
+          "clientes",
+          "analisis",
+          "captaciones",
+          "inmuebles",
+          "mapa_inmuebles",
+          "alquileres",
+          "compraventas",
+          "demandas",
+          "relaciones",
+          "visitas",
+          "agenda",
+          "informadores",
+          "edificios",
+          "legal",
+        ]);
+
+  const applyToRoot = (root) => {
+    if (!root) return;
+    root.querySelectorAll("[data-crm-view]").forEach((btn) => {
+      const key = String(btn.dataset.crmView || "").trim();
+      if (!key) return;
+      btn.classList.toggle("hidden-context", !allowedViews.has(key));
+    });
+  };
+
+  applyToRoot(crmWorkspaceTabs);
+  applyToRoot(crmLightningSidebar);
+
+  const showInmoChrome = vertical === "inmo";
+  [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
+    if (btn) btn.classList.toggle("hidden", !showInmoChrome);
+  });
+  if (!showInmoChrome) {
+    setCrmQuickNewOpen(false);
+    setCrmRecentOpen(false);
+  }
+
+  if (crmBrandTitle && crmBrandSubtitle) {
+    const company = String(state.currentEmpresaName || "").trim();
+    if (vertical === "seguros") {
+      crmBrandTitle.textContent = company || "Seguros";
+      crmBrandSubtitle.textContent = "CRM seguros";
+    } else if (vertical === "fin") {
+      crmBrandTitle.textContent = company || "Financiaciones";
+      crmBrandSubtitle.textContent = "CRM financiaciones";
+    } else {
+      syncCrmInmoBrand(company);
+    }
+  }
+};
+
 const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
@@ -17293,6 +17377,8 @@ const getCrmSearchTargetForView = (view = "") => {
   if (nextView === "agenda") return crmAgendaSearch;
   if (nextView === "informadores") return crmInformadoresSearch;
   if (nextView === "edificios") return crmEdificiosSearch;
+  if (nextView === "seguros") return segurosCrmSearch;
+  if (nextView === "fin") return finAsesoramientosSearch;
   return null;
 };
 
@@ -17339,6 +17425,10 @@ const applyCrmGlobalSearchToCurrentView = () => {
     loadCrmInformadores();
   } else if (view === "edificios") {
     loadCrmEdificios();
+  } else if (view === "seguros") {
+    loadSegurosCrm();
+  } else if (view === "fin") {
+    loadFinCrm();
   }
 };
 
@@ -18721,12 +18811,7 @@ const openSegurosCrm = () => {
   if (segurosCrmClienteId) segurosCrmClienteId.value = "";
   setCrmMode("seguros");
   setSegurosTab("dashboard");
-  if (viewTabs) viewTabs.classList.add("hidden");
-  if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
-  if (tableToolbar) tableToolbar.classList.add("hidden");
-  if (tableContainer) tableContainer.classList.add("hidden");
-  if (tableInfo) tableInfo.classList.add("hidden");
-  loadSegurosCrm();
+  setCrmWorkspaceView("seguros");
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
@@ -18788,13 +18873,8 @@ const openFinCrm = () => {
   } catch {}
   updateTableVisibility();
   setCrmMode("fin");
-  if (viewTabs) viewTabs.classList.add("hidden");
-  if (finCrmSection) finCrmSection.classList.add("hidden");
-  if (tableToolbar) tableToolbar.classList.add("hidden");
-  if (tableContainer) tableContainer.classList.add("hidden");
-  if (tableInfo) tableInfo.classList.add("hidden");
   setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
-  loadFinCrm();
+  setCrmWorkspaceView("fin");
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
@@ -19485,7 +19565,6 @@ const goHome = () => {
   setTab("operativa");
   if (crmSection) crmSection.classList.add("hidden");
   if (gestoriaCrmSection) gestoriaCrmSection.classList.add("hidden");
-  if (segurosCrmSection) segurosCrmSection.classList.add("hidden");
   if (finCrmSection) finCrmSection.classList.add("hidden");
   if (gestoriaFactSection) gestoriaFactSection.classList.add("hidden");
   explorerSection.classList.add("hidden");
@@ -19675,6 +19754,15 @@ const setTab = (tabName) => {
     tablaSelect.value = "clientes";
   }
   updateTableVisibility();
+  if (normalized === "crm") {
+    setCrmMode("");
+  } else if (normalized === "seguros-crm") {
+    setCrmMode("seguros");
+    setCrmWorkspaceView("seguros");
+  } else if (normalized === "fin-crm") {
+    setCrmMode("fin");
+    setCrmWorkspaceView("fin");
+  }
   if (state.currentModule === "clientes" && tabName === "alta") {
     refreshClientesAltaSelects();
   }
@@ -26576,6 +26664,7 @@ const updateTableVisibility = () => {
     "crm-context-inmo",
     currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria"
   );
+  syncCrmTecnocloudVerticalNav();
 
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
@@ -26586,8 +26675,12 @@ const updateTableVisibility = () => {
     state.currentEmpresaName ||
     state.empresas.find((e) => e.id === empresaSelect.value)?.nombre ||
     "";
-  const isSegurosCrmVisible = segurosCrmSection && !segurosCrmSection.classList.contains("hidden");
-  const isFinCrmVisible = finCrmSection && !finCrmSection.classList.contains("hidden");
+  const isSegurosCrmVisible = currentTab === "seguros-crm" || crmContext === "seguros";
+  const isFinCrmVisible =
+    currentTab === "fin-crm" ||
+    crmContext === "fin" ||
+    crmContext === "financiaciones" ||
+    crmContext === "hipotecas";
 
   // Contexto de servicio: cuando estás dentro de un CRM vertical, el header no debe mostrar
   // pestañas de otros servicios (Seguros/Financiaciones/Campañas/etc) porque confunde.
@@ -26753,7 +26846,10 @@ const updateTableVisibility = () => {
     bdtSection.classList.toggle("hidden", !showTable || isClientePage || isServiceCrm);
   }
   if (crmSection) {
-    crmSection.classList.toggle("hidden", currentTab !== "crm" || isClientePage);
+    crmSection.classList.toggle(
+      "hidden",
+      isClientePage || !["crm", "seguros-crm", "fin-crm"].includes(currentTab)
+    );
   }
   if (gestoriaCrmSection) {
     gestoriaCrmSection.classList.toggle(
@@ -26794,12 +26890,7 @@ const updateTableVisibility = () => {
       currentTab !== "gestoria-fact" || isClientePage
     );
   }
-  if (segurosCrmSection) {
-    segurosCrmSection.classList.toggle(
-      "hidden",
-      currentTab !== "seguros-crm" || isClientePage
-    );
-  }
+  // `segurosCrmSection` se monta dentro del CRM Tecnocloud (views), no se controla por `currentTab`.
   if (finCrmSection) {
     finCrmSection.classList.add("hidden");
   }
@@ -26820,12 +26911,7 @@ const updateTableVisibility = () => {
   if (aieSection) {
     aieSection.classList.toggle("hidden", currentTab !== "aie" || isClientePage);
   }
-  if (hipotecaSection) {
-    hipotecaSection.classList.toggle(
-      "hidden",
-      isClientePage || currentTab !== "fin-crm"
-    );
-  }
+  // `hipotecaSection` se monta dentro del CRM Tecnocloud (views), no se controla por `currentTab`.
   updateFincasBdtTabs();
   updateEstudioAltaTabs();
   updateHipotecaAltaTabs();
@@ -26932,11 +27018,16 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	    "informadores",
     "edificios",
     "legal",
+    "seguros",
+    "fin",
 	  ]);
   let nextView = allowed.has(view) ? view : "resumen";
   if (nextView === "legal" && !canUseLegalCopilot()) {
     nextView = "resumen";
   }
+  const vertical = resolveCrmTecnocloudVertical();
+  if (vertical === "seguros") nextView = "seguros";
+  if (vertical === "fin") nextView = "fin";
   state.crmWorkspaceView = nextView;
   syncCrmLegalAvailability();
   syncCrmTecnocloudChrome();
@@ -26969,6 +27060,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		    informadores: crmViewInformadores,
 		    edificios: crmViewEdificios,
 		    legal: crmViewLegal,
+		    seguros: crmViewSeguros,
+		    fin: crmViewFin,
 		  };
   Object.entries(viewMap).forEach(([key, node]) => {
     if (node) {
@@ -27018,6 +27111,10 @@ const setCrmWorkspaceView = (view = "resumen") => {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
     }
     loadLegalCatalog().then(() => loadLegalRadarItems());
+	  } else if (nextView === "seguros") {
+	    loadSegurosCrm();
+	  } else if (nextView === "fin") {
+	    loadFinCrm();
 	  } else {
 		  loadCrmCaptaciones();
 		  loadCrmClientes();
@@ -27033,6 +27130,21 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	    loadCrmEdificios();
 	  }
 	};
+
+const mountCrmVerticalViews = () => {
+  try {
+    if (crmSegurosMount && segurosCrmSection && segurosCrmSection.parentElement !== crmSegurosMount) {
+      crmSegurosMount.appendChild(segurosCrmSection);
+      segurosCrmSection.classList.remove("hidden");
+    }
+  } catch {}
+  try {
+    if (crmFinMount && hipotecaSection && hipotecaSection.parentElement !== crmFinMount) {
+      crmFinMount.appendChild(hipotecaSection);
+      hipotecaSection.classList.remove("hidden");
+    }
+  } catch {}
+};
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -30192,7 +30304,11 @@ const updateHipotecaAltaTabs = () => {
   if (!hipotecaSection || !hipotecaTabs) {
     return;
   }
-  if (hipotecaSection.classList.contains("hidden")) {
+  const finVisible =
+    state.crmWorkspaceView === "fin" &&
+    crmViewFin &&
+    !crmViewFin.classList.contains("hidden");
+  if (!finVisible) {
     return;
   }
   setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
@@ -59451,6 +59567,7 @@ if (authActivateForm) {
 }
 
 initDensityToggle();
+mountCrmVerticalViews();
 UI?.boot(state);
 // Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
 renderCompanyCards();
