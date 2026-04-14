@@ -17465,14 +17465,14 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
-  if (next) {
-    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
-    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
-    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
-    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
-    if (isAnchored) {
-      positionCrmInsertModal(anchorEl);
-    } else {
+	  if (next) {
+	    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+	    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
+	    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+	    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
+	    if (isAnchored) {
+	      positionCrmInsertModal(anchorEl);
+	    } else {
       crmInsertModal.style.removeProperty("--crm-insert-left");
       crmInsertModal.style.removeProperty("--crm-insert-top");
     }
@@ -17483,13 +17483,13 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
       crmInsertSearch.value = "";
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
-    filterCrmInsertList();
-  } else {
-    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-    crmInsertModal.style.removeProperty("--crm-insert-left");
-    crmInsertModal.style.removeProperty("--crm-insert-top");
-  }
-};
+	    filterCrmInsertList();
+	  } else {
+	    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+	    crmInsertModal.style.removeProperty("--crm-insert-left");
+	    crmInsertModal.style.removeProperty("--crm-insert-top");
+	  }
+	};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -21224,7 +21224,6 @@ const INMUEBLE_FIELDS = [
   // Equipo y origen
   { key: "asesor", label: "Responsable", type: "select", options: INMOBILIARIA_ASESORES, section: "Equipo" },
   { key: "informador_nombre", label: "Informador relacionado", type: "text", section: "Equipo" },
-  { key: "focalizacion", label: "Focalización", type: "text", section: "Equipo" },
 
   // Contacto propietario
   {
@@ -21362,7 +21361,6 @@ const CAPTACION_FIELDS = [
     options: INMOBILIARIA_ASESORES,
     section: "Propiedad y origen",
   },
-  { key: "focalizacion", label: "Foco", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
   { key: "motivo", label: "Motivo (qué necesita)", type: "text", section: "Propiedad y origen" },
@@ -36886,9 +36884,8 @@ const loadCrmInmuebles = () => {
 	      if (presetKey === "complejos") return allRows.filter((row) => tipo(row).includes("complejo"));
       if (presetKey === "potencial_adquisicion") {
         return allRows.filter((row) => {
-          const foc = normalizeSimple(row?.focalizacion || "");
           const mot = normalizeSimple(row?.motivacion || "");
-          return foc.includes("adquis") || mot.includes("adquis") || stage(row) === "Noticia";
+          return mot.includes("adquis") || stage(row) === "Noticia";
         });
       }
       return allRows;
@@ -36963,12 +36960,12 @@ const loadCrmInmuebles = () => {
         ],
         "Inventario saneado."
       );
-    }
-    [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
-      target.textContent = estadoFilter === "todos"
-        ? `Mostrando ${rows.length} inmuebles.`
-        : `Mostrando ${rows.length} de ${allRows.length} inmuebles.`;
-    });
+	    }
+	    [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
+	      target.textContent = estadoFilter === "todos"
+	        ? `Mostrando ${rows.length} inmuebles.`
+	        : `Mostrando ${rows.length} de ${allRows.length} inmuebles.`;
+	    });
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
     }
