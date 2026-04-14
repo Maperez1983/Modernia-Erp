@@ -2270,7 +2270,7 @@
 			                <span class="crm-side-ico" aria-hidden="true">+</span>
 			                <span class="crm-side-txt">Crear nuevo</span>
 			              </button>
-		              <div id="crmInsertModal" class="crm-insert-modal crm-insert-modal--dropdown hidden" role="dialog" aria-modal="false" aria-label="Insertar">
+			              <div id="crmInsertModal" class="crm-insert-modal hidden" role="dialog" aria-modal="false" aria-label="Insertar">
 		                <div class="crm-insert-card">
 		                  <div class="crm-insert-head">
 		                    <strong>Insertar</strong>
@@ -3700,6 +3700,7 @@
                     <input id="inmuebleActividadClienteInput" list="inmuebleActividadClientes" />
                     <datalist id="inmuebleActividadClientes"></datalist>
                     <input type="hidden" name="cliente_id" id="inmuebleActividadClienteId" />
+                    <select id="inmuebleActividadClienteQuick" class="inline-input hidden"></select>
                   </label>
                   <label>
                     Fecha
@@ -9002,7 +9003,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=512"></script>
+			    <script src="app.js?v=513"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
