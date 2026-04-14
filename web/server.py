@@ -19491,6 +19491,9 @@ def ensure_tables(db_path):
         pass
     try:
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
+        ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
+        ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
+        ensure_column(conn, "hipotecas", "liquidacion_json", "liquidacion_json TEXT")
     except Exception:
         pass
     conn.execute(
@@ -20874,18 +20877,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-	          id TEXT PRIMARY KEY,
-	          workspace_id TEXT NOT NULL,
-	          empresa_id TEXT,
-	          nombre TEXT NOT NULL,
-	          referencia_catastral TEXT,
-	          cif TEXT,
-	          direccion TEXT,
-	          foto_edificio_key TEXT,
-	          presidente TEXT,
-	          secretario TEXT,
-	          estado TEXT NOT NULL DEFAULT 'Activa',
+            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT,
+              nombre TEXT NOT NULL,
+              referencia_catastral TEXT,
+              cif TEXT,
+              direccion TEXT,
+              foto_edificio_key TEXT,
+              presidente TEXT,
+              secretario TEXT,
+              estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -25847,13 +25850,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-	          c.cif,
-	          c.direccion,
-	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-	          c.presidente,
-	          c.secretario,
-	          c.estado,
+              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+              c.cif,
+              c.direccion,
+              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+              c.presidente,
+              c.secretario,
+              c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -30803,11 +30806,28 @@ class Handler(BaseHTTPRequestHandler):
                 register_login_attempt(ip, usuario_raw, ok=False)
                 json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                 return
+            row = None
             if len(matches) > 1:
-                register_login_attempt(ip, usuario_raw, ok=False)
-                json_response(self, {"error": "Usuario duplicado. Contacta con administración."}, status=409)
-                return
-            row = matches[0]
+                # Email genérico duplicado (info@...) => desambiguamos por contraseña si solo 1 coincide.
+                # Si no, devolvemos un error más claro para que entren por "usuario" (login).
+                valid = []
+                for candidate in matches:
+                    stored = candidate["password_hash"]
+                    if stored and verify_password(password, stored):
+                        valid.append(candidate)
+                if len(valid) == 1:
+                    row = valid[0]
+                else:
+                    register_login_attempt(ip, usuario_raw, ok=False)
+                    message = (
+                        "Email duplicado. Inicia sesión con tu usuario (login) o contacta con administración."
+                        if "@" in usuario_raw
+                        else "Usuario duplicado. Contacta con administración."
+                    )
+                    json_response(self, {"error": message}, status=409)
+                    return
+            else:
+                row = matches[0]
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
@@ -35450,6 +35470,93 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_members": int(deleted_members or 0)})
             return
+        elif parsed.path == "/api/workspace_rrhh_cleanup":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if confirm != "BORRAR":
+                json_response(self, {"error": "confirm inválido (usa BORRAR)"}, status=400)
+                return
+            keep_ids_raw = payload.get("keep_persona_ids")
+            keep_ids = []
+            if isinstance(keep_ids_raw, list):
+                keep_ids = [str(x or "").strip() for x in keep_ids_raw]
+            elif isinstance(keep_ids_raw, str):
+                keep_ids = [x.strip() for x in keep_ids_raw.split(",")]
+            keep_ids = [x for x in keep_ids if x]
+            if not keep_ids:
+                json_response(self, {"error": "keep_persona_ids requerido (>=1)"}, status=400)
+                return
+            # Seguridad: evita borrar si los ids no pertenecen al workspace.
+            try:
+                existing = conn.execute(
+                    f"SELECT id FROM workspace_registro_personal WHERE workspace_id = ? AND id IN ({','.join('?' for _ in keep_ids)})",
+                    (workspace_id, *keep_ids),
+                ).fetchall()
+            except Exception:
+                existing = []
+            keep_ids_existing = {
+                str(row_value(r, "id") or row_value(r, 0) or "").strip()
+                for r in (existing or [])
+                if str(row_value(r, "id") or row_value(r, 0) or "").strip()
+            }
+            if not keep_ids_existing:
+                json_response(self, {"error": "Ninguna persona a mantener existe en este workspace."}, status=400)
+                return
+            keep_ids = sorted(keep_ids_existing)
+            placeholders = ",".join("?" for _ in keep_ids)
+            removed_personas = 0
+            try:
+                removed_row = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})",
+                    (workspace_id, *keep_ids),
+                ).fetchone()
+                removed_personas = int(row_value(removed_row, "total", 0) or row_value(removed_row, 0) or 0)
+            except Exception:
+                removed_personas = 0
+            try:
+                # Borra RRHH/registro asociado a personas NO incluidas.
+                statements = [
+                    (f"DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_turnos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                ]
+                for sql, params in statements:
+                    try:
+                        conn.execute(sql, params)
+                    except Exception:
+                        pass
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo limpiar RRHH"}, status=500)
+                return
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "workspace_id": workspace_id,
+                    "kept": keep_ids,
+                    "removed_personas": int(removed_personas or 0),
+                },
+            )
+            return
         elif parsed.path == "/api/workspace_registro_usuario_toggle":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -38658,6 +38765,13 @@ class Handler(BaseHTTPRequestHandler):
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            # Evita carreras con instalaciones legacy sin las columnas nuevas.
+            try:
+                ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
+                ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
+                ensure_column(conn, "hipotecas", "liquidacion_json", "liquidacion_json TEXT")
+            except Exception:
+                pass
             req_empresa_id = str(payload.get("empresa_id") or "").strip()
             if req_empresa_id:
                 empresa_exists = conn.execute(
@@ -38707,6 +38821,9 @@ class Handler(BaseHTTPRequestHandler):
                 "asesor",
                 "estado",
                 "anio",
+                "cliente_inmueble_json",
+                "hipoteca_detalle_json",
+                "liquidacion_json",
             )
             updates = {}
             for key in allowed:
@@ -38730,6 +38847,51 @@ class Handler(BaseHTTPRequestHandler):
                     updates["cliente_id"] = incoming_cliente_id
                 else:
                     updates["cliente_id"] = None
+
+            # Normaliza numéricos: Postgres no acepta "" en columnas REAL/INTEGER.
+            try:
+                for key in (
+                    "precio",
+                    "importe_hipoteca",
+                    "porcentaje",
+                    "entrada",
+                    "comision",
+                    "cesion",
+                    "comision_juan",
+                    "comision_modernia",
+                ):
+                    if key in updates:
+                        updates[key] = parse_optional_float(updates.get(key))
+                if "anio" in updates:
+                    raw_year = updates.get("anio")
+                    if raw_year in (None, ""):
+                        updates["anio"] = None
+                    else:
+                        updates["anio"] = int(str(raw_year).strip())
+            except Exception:
+                pass
+
+            for json_field in ("cliente_inmueble_json", "hipoteca_detalle_json", "liquidacion_json"):
+                if json_field not in updates:
+                    continue
+                value = updates.get(json_field)
+                if value in (None, ""):
+                    updates[json_field] = None
+                    continue
+                if isinstance(value, (dict, list)):
+                    updates[json_field] = json.dumps(value, ensure_ascii=False)
+                    continue
+                raw = str(value).strip()
+                if not raw:
+                    updates[json_field] = None
+                    continue
+                try:
+                    json.loads(raw)
+                except Exception:
+                    json_response(self, {"error": f"{json_field} no es JSON válido"}, status=400)
+                    return
+                updates[json_field] = raw
+
             effective_comision = (
                 updates.get("comision")
                 if updates.get("comision") not in (None, "")
