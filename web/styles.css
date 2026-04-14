@@ -4192,6 +4192,95 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   font-size: 10.5px;
 }
 
+.tc-modulebar.tc-modulebar--micro {
+  gap: 8px;
+}
+
+.tc-modulebar.tc-modulebar--micro .tab.tc-module {
+  width: 86px;
+  min-width: 86px;
+  height: 64px;
+  padding: 8px 8px;
+  border-radius: 14px;
+}
+
+.tc-modulebar.tc-modulebar--micro .tc-mod-ico {
+  width: 26px;
+  height: 26px;
+}
+
+.tc-modulebar.tc-modulebar--micro .tc-mod-ico svg {
+  width: 24px;
+  height: 24px;
+}
+
+.tc-modulebar.tc-modulebar--micro .tc-mod-label {
+  font-size: 10.5px;
+}
+
+.tc-modulebar.tc-modulebar--flat .tab.tc-module {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: rgba(var(--ink-rgb), 0.90);
+}
+
+.tc-modulebar.tc-modulebar--flat .tab.tc-module:hover {
+  border-color: rgba(15, 23, 42, 0.20);
+}
+
+.tc-modulebar.tc-modulebar--flat .tab.tc-module.active {
+  outline-color: rgba(var(--gold-rgb), 0.25);
+}
+
+.tc-modulebar.tc-modulebar--list {
+  display: grid;
+  gap: 10px;
+  overflow: visible;
+}
+
+.tc-modulebar.tc-modulebar--list .tab.tc-module {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  color: rgba(var(--ink-rgb), 0.92);
+  transform: none;
+}
+
+.tc-modulebar.tc-modulebar--list .tab.tc-module:hover {
+  transform: none;
+  border-color: rgba(15, 23, 42, 0.22);
+  box-shadow: 0 14px 28px rgba(11, 29, 51, 0.10);
+}
+
+.tc-modulebar.tc-modulebar--list .tc-mod-ico {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.72));
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+.tc-modulebar.tc-modulebar--list .tc-mod-ico svg {
+  width: 22px;
+  height: 22px;
+}
+
+.tc-modulebar.tc-modulebar--list .tc-mod-label {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.25px;
+  text-align: left;
+}
+
 #viewTabs.tc-modulebar {
   padding: 4px 0 0;
   gap: 8px;
@@ -5836,7 +5925,12 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   gap: 18px;
 }
 
-#inmuebleDetail #inmuebleTabs .tab {
+#inmuebleDetail #inmuebleTabs.tc-modulebar {
+  gap: 10px;
+  overflow: visible;
+}
+
+#inmuebleDetail #inmuebleTabs:not(.tc-modulebar) .tab {
   min-width: max-content;
   background: transparent;
   border: none;
@@ -5849,11 +5943,11 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   color: rgba(var(--ink-rgb), 0.74);
 }
 
-#inmuebleDetail #inmuebleTabs .tab:hover {
+#inmuebleDetail #inmuebleTabs:not(.tc-modulebar) .tab:hover {
   color: rgba(var(--ink-rgb), 0.92);
 }
 
-#inmuebleDetail #inmuebleTabs .tab.active {
+#inmuebleDetail #inmuebleTabs:not(.tc-modulebar) .tab.active {
   color: rgba(var(--ink-rgb), 0.92);
   border-bottom-color: rgba(var(--gold-rgb), 0.92);
 }

@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=187" />
+    <link rel="stylesheet" href="styles.css?v=188" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -6117,35 +6117,39 @@
                       <option value="1">Sí</option>
                     </select>
                   </label>
-                  <label>
-                    Prioridad noticia
-                    <select name="prioridad_noticia">
-                      <option value=""></option>
-                      <option>Alta</option>
-                      <option>Media</option>
-                      <option>Baja</option>
-                    </select>
-                  </label>
-                  <label>
-                    Planificación encargo
-                    <input name="planificacion_encargo" placeholder="Ej. Llamada semanal / Seguimiento quincenal" />
-                  </label>
-                  <label>
-                    Última renov./rebaja
-                    <input name="fecha_ultima_renov_rebaja" type="date" />
-                  </label>
-                  <label>
-                    Encargo competencia
-                    <select name="encargo_competencia">
-                      <option value="0">No</option>
-                      <option value="1">Sí</option>
-                    </select>
-                  </label>
-                  <label class="span-2">
-                    Necesidad venta/alquiler
-                    <select name="necesidad_venta_alquiler">
-                      <option value=""></option>
-                      <option>Venta</option>
+	                  <label>
+	                    Prioridad noticia
+	                    <select name="prioridad_noticia">
+	                      <option value=""></option>
+	                      <option>Alta</option>
+	                      <option>Media</option>
+	                      <option>Baja</option>
+	                    </select>
+	                  </label>
+	                  <label>
+	                    Última renov./rebaja
+	                    <input name="fecha_ultima_renov_rebaja" type="date" />
+	                  </label>
+	                  <label>
+	                    Encargo de competencia
+	                    <select name="encargo_competencia">
+	                      <option value="0">No</option>
+	                      <option value="1">Sí</option>
+	                    </select>
+	                  </label>
+	                  <label>
+	                    Agencia competencia
+	                    <input name="encargo_competencia_agencia" />
+	                  </label>
+	                  <label>
+	                    Vigente hasta
+	                    <input name="encargo_competencia_hasta" type="date" />
+	                  </label>
+	                  <label class="span-2">
+	                    Necesidad venta/alquiler
+	                    <select name="necesidad_venta_alquiler">
+	                      <option value=""></option>
+	                      <option>Venta</option>
                       <option>Alquiler</option>
                       <option>Alquiler con opción a compra</option>
                       <option>Traspaso</option>
@@ -9025,7 +9029,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=126").catch(function () {});
+		          navigator.serviceWorker.register("/sw.js?v=127").catch(function () {});
         });
       })();
     </script>
