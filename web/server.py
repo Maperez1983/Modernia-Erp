@@ -38765,6 +38765,13 @@ class Handler(BaseHTTPRequestHandler):
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            # Evita carreras con instalaciones legacy sin las columnas nuevas.
+            try:
+                ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
+                ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
+                ensure_column(conn, "hipotecas", "liquidacion_json", "liquidacion_json TEXT")
+            except Exception:
+                pass
             req_empresa_id = str(payload.get("empresa_id") or "").strip()
             if req_empresa_id:
                 empresa_exists = conn.execute(
@@ -38840,6 +38847,29 @@ class Handler(BaseHTTPRequestHandler):
                     updates["cliente_id"] = incoming_cliente_id
                 else:
                     updates["cliente_id"] = None
+
+            # Normaliza numéricos: Postgres no acepta "" en columnas REAL/INTEGER.
+            try:
+                for key in (
+                    "precio",
+                    "importe_hipoteca",
+                    "porcentaje",
+                    "entrada",
+                    "comision",
+                    "cesion",
+                    "comision_juan",
+                    "comision_modernia",
+                ):
+                    if key in updates:
+                        updates[key] = parse_optional_float(updates.get(key))
+                if "anio" in updates:
+                    raw_year = updates.get("anio")
+                    if raw_year in (None, ""):
+                        updates["anio"] = None
+                    else:
+                        updates["anio"] = int(str(raw_year).strip())
+            except Exception:
+                pass
 
             for json_field in ("cliente_inmueble_json", "hipoteca_detalle_json", "liquidacion_json"):
                 if json_field not in updates:
