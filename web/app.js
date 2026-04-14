@@ -27907,8 +27907,8 @@ const ensureHipotecaFichaPanel = () => {
               <label>
                 <span>Protección pago · Financiado</span>
                 <select data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_proteccion_financiado">
-                  <option>Sí</option>
                   <option>No</option>
+                  <option>Sí</option>
                 </select>
               </label>
               <label>
@@ -27920,8 +27920,22 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_hogar" inputmode="decimal" />
               </label>
               <label>
+                <span>Hogar · Financiado</span>
+                <select data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_hogar_financiado">
+                  <option>No</option>
+                  <option>Sí</option>
+                </select>
+              </label>
+              <label>
                 <span>Seguro vida</span>
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_vida" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Vida · Financiado</span>
+                <select data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_vida_financiado">
+                  <option>No</option>
+                  <option>Sí</option>
+                </select>
               </label>
               <label>
                 <span>Total gastos bloque (auto)</span>
@@ -28462,10 +28476,15 @@ const computeHipotecaLiquidacionComputed = (data) => {
     Number(gastosCv.gestoria || 0);
   gastosCv.total = round2(totalCv);
 
-  const proteccionFinanciado = ["si", "sí", "s", "true", "1"].includes(
-    normalizeSimple(hip.seguro_proteccion_financiado || "Sí")
-  );
+  const isFinanciado = (value) => ["si", "sí", "s", "true", "1"].includes(normalizeSimple(value || "No"));
+
+  const proteccionFinanciado = isFinanciado(hip.seguro_proteccion_financiado);
+  const hogarFinanciado = isFinanciado(hip.seguro_hogar_financiado);
+  const vidaFinanciado = isFinanciado(hip.seguro_vida_financiado);
+
   const proteccionCash = proteccionFinanciado ? 0 : Number(hip.seguro_proteccion_pago || 0);
+  const hogarCash = hogarFinanciado ? 0 : Number(hip.seguro_hogar || 0);
+  const vidaCash = vidaFinanciado ? 0 : Number(hip.seguro_vida || 0);
 
   const totalHip =
     Number(hip.notaria_impuestos_gestoria || 0) +
@@ -28488,6 +28507,9 @@ const computeHipotecaLiquidacionComputed = (data) => {
       Number(hip.seguro_vida || 0)
   );
 
+  // Total que entra en "Suma total necesaria": solo lo NO financiado.
+  hip.total_necesario = round2(Number(hip.total_gastos || 0) + hogarCash + vidaCash);
+
   // Precio: si solo rellenan "Escriturado" (muy habitual), usarlo como precio de compra.
   if ((comprador.precio_compra ?? "") === "" && (comprador.escriturado ?? "") !== "") {
     comprador.precio_compra = comprador.escriturado;
@@ -28499,7 +28521,7 @@ const computeHipotecaLiquidacionComputed = (data) => {
   const sumaNecesaria =
     Number(comprador.precio_compra || comprador.escriturado || 0) +
     Number(gastosCv.total || 0) +
-    Number(hip.total_gastos || 0) +
+    Number(hip.total_necesario || 0) +
     Number(comprador.gestion_inmobiliaria || 0) +
     Number(comprador.gestion_financiacion || 0);
   comprador.suma_total_necesaria = round2(sumaNecesaria);
@@ -29109,7 +29131,13 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
     setNestedValue(liquidacion, "comprador.hipoteca.capital", importeHipoteca);
   }
   if (!String(getNestedValue(liquidacion, "comprador.hipoteca.seguro_proteccion_financiado") || "").trim()) {
-    setNestedValue(liquidacion, "comprador.hipoteca.seguro_proteccion_financiado", "Sí");
+    setNestedValue(liquidacion, "comprador.hipoteca.seguro_proteccion_financiado", "No");
+  }
+  if (!String(getNestedValue(liquidacion, "comprador.hipoteca.seguro_hogar_financiado") || "").trim()) {
+    setNestedValue(liquidacion, "comprador.hipoteca.seguro_hogar_financiado", "No");
+  }
+  if (!String(getNestedValue(liquidacion, "comprador.hipoteca.seguro_vida_financiado") || "").trim()) {
+    setNestedValue(liquidacion, "comprador.hipoteca.seguro_vida_financiado", "No");
   }
   if ((getNestedValue(liquidacion, "comprador.entregas.prestamo_concedido") ?? "") === "" && importeHipoteca !== null) {
     setNestedValue(liquidacion, "comprador.entregas.prestamo_concedido", importeHipoteca);
