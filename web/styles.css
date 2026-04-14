@@ -4543,6 +4543,17 @@ body.crm-fin #companySummary {
   min-width: 0;
 }
 
+#crmSection .tc-titleblock {
+  display: grid;
+  gap: 2px;
+}
+
+#crmSection .tc-subtitle {
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.62);
+  font-weight: 700;
+}
+
 #crmSection .tc-listleft select,
 #crmSection .tc-listright select {
   padding: 7px 10px;
@@ -4993,27 +5004,70 @@ body.crm-fin #companySummary {
 
 #crmSection .tc-stagebar {
   display: flex;
-  gap: 10px;
+  gap: 0;
   align-items: center;
   flex-wrap: wrap;
-  padding: 4px 2px 10px;
+  padding: 6px 6px 10px;
 }
 
-#crmSection .tc-stagebar button {
-  padding: 7px 12px;
-  border-radius: 999px;
+#crmSection #crmDemandasSteps.tc-stagebar {
   border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #fff;
-  color: var(--ink-soft);
+  background: rgba(248, 250, 252, 0.92);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+#crmSection #crmDemandasSteps.tc-stagebar button {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(var(--ink-rgb), 0.72);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
-#crmSection .tc-stagebar button.active {
-  background: rgba(212, 175, 55, 0.16);
-  border-color: rgba(212, 175, 55, 0.55);
-  color: var(--ink);
+#crmSection #crmDemandasSteps.tc-stagebar button.active {
+  background: #ffffff;
+  border-color: rgba(var(--gold-rgb), 0.45);
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#crmSection #crmDemandasSteps.tc-stagebar button:hover {
+  border-color: rgba(15, 23, 42, 0.16);
+  color: rgba(var(--ink-rgb), 0.9);
+}
+
+#crmSection table.crm-demandas-table th:nth-child(1),
+#crmSection table.crm-demandas-table td:nth-child(1) {
+  width: 34px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(4),
+#crmSection table.crm-demandas-table td:nth-child(4) {
+  width: 110px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(5),
+#crmSection table.crm-demandas-table td:nth-child(5),
+#crmSection table.crm-demandas-table th:nth-child(6),
+#crmSection table.crm-demandas-table td:nth-child(6),
+#crmSection table.crm-demandas-table th:nth-child(7),
+#crmSection table.crm-demandas-table td:nth-child(7) {
+  width: 120px;
+  text-align: center;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(8),
+#crmSection table.crm-demandas-table td:nth-child(8) {
+  width: 120px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(9),
+#crmSection table.crm-demandas-table td:nth-child(9) {
+  width: 140px;
 }
 
 #crmSection .crm-recent-menu {

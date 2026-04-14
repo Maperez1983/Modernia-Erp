@@ -2767,11 +2767,12 @@ const crmCompraventasMini = document.getElementById("crmCompraventasMini");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
-const crmDemandasMini = document.getElementById("crmDemandasMini");
-const crmDemandasTable = document.getElementById("crmDemandasTable");
-const crmDemandasInfo = document.getElementById("crmDemandasInfo");
-const crmDemandaSearch = document.getElementById("crmDemandaSearch");
-const crmDemandaEstadoFilter = document.getElementById("crmDemandaEstadoFilter");
+	const crmDemandasMini = document.getElementById("crmDemandasMini");
+	const crmDemandasTable = document.getElementById("crmDemandasTable");
+	const crmDemandasInfo = document.getElementById("crmDemandasInfo");
+	const crmDemandasSubtitle = document.getElementById("crmDemandasSubtitle");
+	const crmDemandaSearch = document.getElementById("crmDemandaSearch");
+	const crmDemandaEstadoFilter = document.getElementById("crmDemandaEstadoFilter");
 const demandaDetail = document.getElementById("demandaDetail");
 const demandaBackBtn = document.getElementById("demandaBackBtn");
 const demandaMatching = document.getElementById("demandaMatching");
@@ -34511,13 +34512,13 @@ const loadCrmDemandas = () => {
     crmDemandasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-	  const DEMANDAS_STEPS = [
-	    { key: "a_analizar", label: "1 · Pedidos a analizar" },
-	    { key: "en_gestion", label: "2 · En gestión" },
-	    { key: "en_visita", label: "3 · En visita" },
-	    { key: "negociacion", label: "4 · En negociación avanzada" },
-	    { key: "otras", label: "Otras búsquedas" },
-	  ];
+		  const DEMANDAS_STEPS = [
+		    { key: "a_analizar", label: "1.- Pedidos a analizar" },
+		    { key: "en_gestion", label: "2.- En gestión" },
+		    { key: "en_visita", label: "3.- En visita" },
+		    { key: "negociacion", label: "4.- En negociación avanzada" },
+		    { key: "otras", label: "Otras búsquedas" },
+		  ];
   const normalizeDemandaFaseKey = (raw) => {
     const value = normalizeSimple(raw || "");
     if (!value) return "a_analizar";
@@ -34536,52 +34537,65 @@ const loadCrmDemandas = () => {
       localStorage.setItem("crm.demandas.step", String(key || "a_analizar"));
     } catch {}
   };
-  const renderDemandasSteps = (rows = []) => {
-    if (!crmDemandasSteps) return;
-    const active = resolveDemandasStep();
-    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
-    const base = rows.filter((row) => {
-      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-      return true;
-    });
+	  const renderDemandasSteps = (rows = []) => {
+	    if (!crmDemandasSteps) return;
+	    const active = resolveDemandasStep();
+	    if (crmDemandasSubtitle) {
+	      crmDemandasSubtitle.textContent =
+	        active === "a_analizar"
+	          ? "Análisis datos pedidos"
+	          : active === "en_gestion"
+	            ? "Pedidos en gestión"
+	            : active === "en_visita"
+	              ? "Pedidos en visita"
+	              : active === "negociacion"
+	                ? "Pedidos en negociación avanzada"
+	                : "Otras búsquedas";
+	    }
+	    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
+	    const base = rows.filter((row) => {
+	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+	      return true;
+	    });
     const counts = {};
     DEMANDAS_STEPS.forEach((s) => (counts[s.key] = 0));
     base.forEach((row) => {
       const key = normalizeDemandaFaseKey(row.fase);
       counts[key] = (counts[key] || 0) + 1;
     });
-    crmDemandasSteps.innerHTML = "";
-    DEMANDAS_STEPS.forEach((step) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "crm-stage-step";
-      btn.classList.toggle("active", step.key === active);
-      const total = counts[step.key] || 0;
-      btn.textContent = `${step.label} (${total})`;
-      btn.addEventListener("click", () => {
-        state.crmDemandasStep = step.key;
-        persistDemandasStep(step.key);
-        loadCrmDemandas();
-      });
-      crmDemandasSteps.appendChild(btn);
-    });
-  };
+	    crmDemandasSteps.innerHTML = "";
+	    DEMANDAS_STEPS.forEach((step) => {
+	      const btn = document.createElement("button");
+	      btn.type = "button";
+	      btn.className = "crm-stage-step";
+	      btn.classList.toggle("active", step.key === active);
+	      const total = counts[step.key] || 0;
+	      btn.textContent = step.label;
+	      btn.title = `${total}`;
+	      btn.addEventListener("click", () => {
+	        state.crmDemandasStep = step.key;
+	        persistDemandasStep(step.key);
+	        loadCrmDemandas();
+	      });
+	      crmDemandasSteps.appendChild(btn);
+	    });
+	  };
 		  const renderDemandasDenseTable = (rows = []) => {
 		    const table = document.createElement("table");
 		    table.className = "crm-dense-table crm-demandas-table";
 		    const thead = document.createElement("thead");
 		    const trHead = document.createElement("tr");
-		    [
-		      "",
-		      "Pedido",
-		      "Cliente",
-		      "Fecha creación",
-		      "Pedido WEB",
-		      "Relativo a un enc.",
-		      "Cliente propiet.",
-		      "Motivo",
-		      "Tipología inmu.",
-		    ].forEach((label) => {
+			    [
+			      "",
+			      "Pedido",
+			      "Cliente",
+			      "Fecha de creación",
+			      "Pedido WEB",
+			      "Relativo a un enc...",
+			      "Cliente propieta...",
+			      "Motivo",
+			      "Tipología inmu.",
+			    ].forEach((label) => {
 		      const th = document.createElement("th");
 		      th.textContent = label;
 		      trHead.appendChild(th);
@@ -34602,13 +34616,31 @@ const loadCrmDemandas = () => {
 		      selectTd.appendChild(checkbox);
 		      tr.appendChild(selectTd);
 
-		      const pedidoCell = document.createElement("td");
-		      pedidoCell.textContent = String(row.pedido || row.tipo || "Pedido").trim();
-		      tr.appendChild(pedidoCell);
+			      const pedidoCell = document.createElement("td");
+			      const pedidoLabel = String(row.pedido || row.tipo || "Pedido").trim();
+			      pedidoCell.innerHTML = `<a class="tc-link" href="#" data-open-demanda="1">${escapeHtml(pedidoLabel)}</a>`;
+			      const pedidoLink = pedidoCell.querySelector('a[data-open-demanda]');
+			      if (pedidoLink) {
+			        pedidoLink.addEventListener("click", (event) => {
+			          event.preventDefault();
+			          event.stopPropagation();
+			          tr.click();
+			        });
+			      }
+			      tr.appendChild(pedidoCell);
 
-		      const clienteTd = document.createElement("td");
-		      clienteTd.textContent = String(row.cliente || "-");
-		      tr.appendChild(clienteTd);
+			      const clienteTd = document.createElement("td");
+			      const clienteLabel = String(row.cliente || "-");
+			      clienteTd.innerHTML = `<a class="tc-link" href="#" data-open-demanda="1">${escapeHtml(clienteLabel)}</a>`;
+			      const clienteLink = clienteTd.querySelector('a[data-open-demanda]');
+			      if (clienteLink) {
+			        clienteLink.addEventListener("click", (event) => {
+			          event.preventDefault();
+			          event.stopPropagation();
+			          tr.click();
+			        });
+			      }
+			      tr.appendChild(clienteTd);
 
 		      const createdTd = document.createElement("td");
 		      const created = String(row.created_at || row.fecha_insercion || "").trim();
@@ -34621,15 +34653,15 @@ const loadCrmDemandas = () => {
 			      webTd.innerHTML = `<span class="tc-flag tc-flag--${isWeb ? "ok" : "bad"}" aria-label="Pedido web">${isWeb ? "✓" : "✕"}</span>`;
 			      tr.appendChild(webTd);
 
-		      const relTd = document.createElement("td");
-		      const rel = Boolean(Number(row.anuncio_mi_cartera || 0));
-		      relTd.innerHTML = `<span class="tc-flag tc-flag--${rel ? "ok" : "neutral"}" aria-label="Relativo a encargo">${rel ? "✓" : ""}</span>`;
-		      tr.appendChild(relTd);
+			      const relTd = document.createElement("td");
+			      const rel = Boolean(Number(row.anuncio_mi_cartera || 0));
+			      relTd.innerHTML = `<span class="tc-flag tc-flag--${rel ? "ok" : "bad"}" aria-label="Relativo a un encargo">${rel ? "✓" : "✕"}</span>`;
+			      tr.appendChild(relTd);
 
-		      const propTd = document.createElement("td");
-		      const isProp = Boolean(Number(row.cliente_propietario || 0));
-		      propTd.innerHTML = `<span class="tc-flag tc-flag--${isProp ? "ok" : "neutral"}" aria-label="Cliente propietario">${isProp ? "✓" : ""}</span>`;
-		      tr.appendChild(propTd);
+			      const propTd = document.createElement("td");
+			      const isProp = Boolean(Number(row.cliente_propietario || 0));
+			      propTd.innerHTML = `<span class="tc-flag tc-flag--${isProp ? "ok" : "bad"}" aria-label="Cliente propietario">${isProp ? "✓" : "✕"}</span>`;
+			      tr.appendChild(propTd);
 
 		      const motivoTd = document.createElement("td");
 		      motivoTd.textContent = String(row.tipo || row.motivo || "").trim();
@@ -34713,14 +34745,14 @@ const loadCrmDemandas = () => {
         }));
       renderCrmActionList(crmDemandasPriority, priorityItems, "Sin demandas priorizadas.");
     }
-    renderDemandasDenseTable(filteredRows);
-    if (crmDemandasInfo) {
-      const stepLabel = DEMANDAS_STEPS.find((s) => s.key === activeStep)?.label || "Pedidos";
-      crmDemandasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length} · ${stepLabel}${estadoFilter ? ` · estado ${estadoFilter}` : ""}.`;
-    }
-    renderCrmResumenDashboard();
-  });
-};
+	    renderDemandasDenseTable(filteredRows);
+	    if (crmDemandasInfo) {
+	      const start = filteredRows.length ? 1 : 0;
+	      crmDemandasInfo.textContent = `desde ${start} a ${filteredRows.length} de ${filteredRows.length}${estadoFilter ? ` · estado ${estadoFilter}` : ""}`;
+	    }
+	    renderCrmResumenDashboard();
+	  });
+	};
 
 const loadCrmVisitas = () => {
   if (!crmVisitasTable) {
