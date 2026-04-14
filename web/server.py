@@ -30806,11 +30806,28 @@ class Handler(BaseHTTPRequestHandler):
                 register_login_attempt(ip, usuario_raw, ok=False)
                 json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                 return
+            row = None
             if len(matches) > 1:
-                register_login_attempt(ip, usuario_raw, ok=False)
-                json_response(self, {"error": "Usuario duplicado. Contacta con administración."}, status=409)
-                return
-            row = matches[0]
+                # Email genérico duplicado (info@...) => desambiguamos por contraseña si solo 1 coincide.
+                # Si no, devolvemos un error más claro para que entren por "usuario" (login).
+                valid = []
+                for candidate in matches:
+                    stored = candidate["password_hash"]
+                    if stored and verify_password(password, stored):
+                        valid.append(candidate)
+                if len(valid) == 1:
+                    row = valid[0]
+                else:
+                    register_login_attempt(ip, usuario_raw, ok=False)
+                    message = (
+                        "Email duplicado. Inicia sesión con tu usuario (login) o contacta con administración."
+                        if "@" in usuario_raw
+                        else "Usuario duplicado. Contacta con administración."
+                    )
+                    json_response(self, {"error": message}, status=409)
+                    return
+            else:
+                row = matches[0]
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
