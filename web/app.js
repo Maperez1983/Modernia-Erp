@@ -28436,8 +28436,16 @@ const computeHipotecaLiquidacionComputed = (data) => {
   hip.total_seguros = round2(totalSeguros);
   hip.total_bloque = round2(Number(hip.total_gastos || 0) + Number(hip.total_seguros || 0));
 
+  // Precio: si solo rellenan "Escriturado" (muy habitual), usarlo como precio de compra.
+  if ((comprador.precio_compra ?? "") === "" && (comprador.escriturado ?? "") !== "") {
+    comprador.precio_compra = comprador.escriturado;
+  }
+  if ((comprador.escriturado ?? "") === "" && (comprador.precio_compra ?? "") !== "") {
+    comprador.escriturado = comprador.precio_compra;
+  }
+
   const sumaNecesaria =
-    Number(comprador.precio_compra || 0) +
+    Number(comprador.precio_compra || comprador.escriturado || 0) +
     Number(gastosCv.total || 0) +
     Number(hip.total_gastos || 0) +
     Number(comprador.gestion_inmobiliaria || 0) +
