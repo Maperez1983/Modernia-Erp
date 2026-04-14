@@ -40089,12 +40089,18 @@ const openInmuebleDetail = (id, originView = "") => {
     api(`/api/inmueble?id=${id}`),
     loadClientesList().catch(() => null),
   ])
-    .then(([data]) => {
-      const inmueble = data.inmueble || {};
-      // Normaliza nombres de usuario (evita duplicados tipo "MPerez" vs "Miguel Angel Pérez").
-      const normalizedInmueble = {
-        ...inmueble,
-        titulo: String(inmueble.titulo || "").trim() ? inmueble.titulo : (inmueble.direccion || inmueble.referencia || ""),
+	    .then(([data]) => {
+	      const inmueble = data.inmueble || {};
+	      const empresaId = String(
+	        inmueble.empresa_id ||
+	        empresaSelect?.value ||
+	        state.currentWorkspaceCompanyId ||
+	        ""
+	      ).trim();
+	      // Normaliza nombres de usuario (evita duplicados tipo "MPerez" vs "Miguel Angel Pérez").
+	      const normalizedInmueble = {
+	        ...inmueble,
+	        titulo: String(inmueble.titulo || "").trim() ? inmueble.titulo : (inmueble.direccion || inmueble.referencia || ""),
         planta: String(inmueble.planta || "").trim() ? inmueble.planta : "",
         puerta: String(inmueble.puerta || "").trim() ? inmueble.puerta : (String(inmueble.interior || "").trim() || ""),
         asesor: normalizeInmobiliariaPersona(inmueble.asesor),
@@ -40168,13 +40174,12 @@ const openInmuebleDetail = (id, originView = "") => {
       if (inmuebleDemandaCliente) {
         populateClientesSelect(inmuebleDemandaCliente);
       }
-      if (inmuebleVisitaDemanda) {
-        // Demandas: cargamos en background usando empresa_id del inmueble (evita depender de constantes).
-        const empresaId = String(inmueble.empresa_id || "").trim();
-        loadDemandasList(empresaId)
-          .then(() => populateDemandasSelect(inmuebleVisitaDemanda))
-          .catch(() => populateDemandasSelect(inmuebleVisitaDemanda));
-      }
+	      if (inmuebleVisitaDemanda) {
+	        // Demandas: cargamos en background usando empresa_id del inmueble (evita depender de constantes).
+	        loadDemandasList(empresaId)
+	          .then(() => populateDemandasSelect(inmuebleVisitaDemanda))
+	          .catch(() => populateDemandasSelect(inmuebleVisitaDemanda));
+	      }
       if (inmuebleActividadClientes) {
         refreshInmuebleActividadClientesCandidates(
           inmuebleActividadForm?.querySelector('select[name="tipo"]')?.value || ""
