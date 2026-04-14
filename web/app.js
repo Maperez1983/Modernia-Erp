@@ -23624,17 +23624,17 @@ const renderEditableGrid = (grid, fields, data, target) => {
       openBtn.type = "button";
       openBtn.className = "secondary catastro-button";
       openBtn.innerHTML = buildCatastroButtonInner("Abrir Catastro");
-	      openBtn.addEventListener("click", () => {
-	        const ref = String(refInput ? refInput.value : "").trim();
-	        const address = buildInmuebleDisplayAddress({
-	          direccion: String(inputMap?.direccion?.value || "").trim(),
-	          poblacion: String(inputMap?.poblacion?.value || "").trim(),
-	          provincia: String(inputMap?.provincia?.value || "").trim(),
-	          codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
-	        });
-	        const url = buildCatastroUrl(ref, address);
-	        openExternalUrl(url);
-	      });
+		      openBtn.addEventListener("click", () => {
+		        const ref = String(inputMap?.referencia_catastral?.value || input.value || "").trim();
+		        const address = buildInmuebleDisplayAddress({
+		          direccion: String(inputMap?.direccion?.value || "").trim(),
+		          poblacion: String(inputMap?.poblacion?.value || "").trim(),
+		          provincia: String(inputMap?.provincia?.value || "").trim(),
+		          codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
+		        });
+		        const url = buildCatastroUrl(ref, address);
+		        openExternalUrl(url);
+		      });
       actions.appendChild(openBtn);
       const lookupBtn = document.createElement("button");
       lookupBtn.type = "button";
