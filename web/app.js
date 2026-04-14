@@ -3334,7 +3334,8 @@ const normalizeSimple = (value) =>
 
 const parseServiceList = (value) =>
   String(value || "")
-    .split(/[|,/;]+/)
+    // Compat: algunos flujos guardan servicios como "Gestoría - Administración Fincas" o con separador "·".
+    .split(/(?:\s+-\s+|[|,/;·]+)/)
     .map((item) => normalizeSimple(item))
     .filter(Boolean);
 
@@ -9653,6 +9654,25 @@ const renderWorkspaceRrhhHub = () => {
 			    const renderMemberDetail = (m) => {
 			      const employee = m?.employee || null;
 			      const user = m?.user || null;
+            const resolveSuggestedUser = () => {
+              if (user) return null;
+              const email = normalizeSimple(employee?.email || "");
+              if (!email) return null;
+              const users = Array.isArray(usersAll) ? usersAll : [];
+              const matches = users.filter((u) => Number(u.activo ?? 1) === 1 && normalizeSimple(u?.email || "") === email);
+              if (matches.length !== 1) return null;
+              const candidate = matches[0];
+              const candidateId = String(candidate?.id || "").trim();
+              if (!candidateId) return null;
+              // Evita sugerir usuarios ya vinculados manualmente a otra ficha.
+              const alreadyLinked = (employees || []).some(
+                (row) => Number(row?.usuario_manual || 0) === 1 && String(row?.usuario_id || "").trim() === candidateId
+              );
+              if (alreadyLinked) return null;
+              return candidate;
+            };
+            const suggestedUser = resolveSuggestedUser();
+            const effectiveUser = user || suggestedUser;
 			      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
 	      const safeKey = String(m?.key || "member").replace(/[^a-z0-9_-]/gi, "_");
 	      const autoSection = `section-rrhh-${safeKey}`;
@@ -9664,7 +9684,7 @@ const renderWorkspaceRrhhHub = () => {
               .normalize("NFD")
               .replace(/[\u0300-\u036f]/g, "")
               .replace(/\s+/g, " ");
-          const userFullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim();
+          const userFullName = `${effectiveUser?.nombre || ""} ${effectiveUser?.apellido || ""}`.trim();
           const fichaName = String(employee?.nombre || "").trim();
           const displayName = fichaName || userFullName || String(m?.nombre || "").trim() || "Miembro";
           const mismatch =
@@ -9735,7 +9755,7 @@ const renderWorkspaceRrhhHub = () => {
 		            </label>
 		            <label>
 		              Email
-		              <input name="email" autocomplete="${escapeHtml(autoSection)} email" value="${escapeHtml(String(employee?.email || user?.email || ""))}" />
+		              <input name="email" autocomplete="${escapeHtml(autoSection)} email" value="${escapeHtml(String(employee?.email || effectiveUser?.email || ""))}" />
 		            </label>
 		            <label>
 		              Teléfono
@@ -9798,8 +9818,8 @@ const renderWorkspaceRrhhHub = () => {
 	            <div class="workspace-rrhh-row">
 	              <div>
 	                <strong>Usuario del sistema</strong>
-	                <div class="muted">${escapeHtml(user?.usuario || user?.email || "—")}</div>
-	                <div class="muted" data-rrhh-user-service-label="${escapeHtml(String(user?.id || ""))}">${escapeHtml(user?.rol || "—")}${user?.servicio ? ` · ${escapeHtml(user.servicio)}` : ""}</div>
+	                <div class="muted">${escapeHtml(effectiveUser?.usuario || effectiveUser?.email || "—")}${suggestedUser ? ` · Sugerido` : ""}</div>
+	                <div class="muted" data-rrhh-user-service-label="${escapeHtml(String(user?.id || ""))}">${escapeHtml(effectiveUser?.rol || "—")}${effectiveUser?.servicio ? ` · ${escapeHtml(effectiveUser.servicio)}` : ""}</div>
 	              </div>
 	              <div class="workspace-rrhh-row-actions">
 	                ${user?.id ? `<button type="button" class="secondary ghost button-inline" data-rrhh-member-toggle-registro="${escapeHtml(String(user.id))}" data-rrhh-member-toggle-next="${Number(user.registro_horario_activo || 0) === 1 ? "0" : "1"}">${Number(user.registro_horario_activo || 0) === 1 ? "Desactivar registro" : "Activar registro"}</button>` : ""}
@@ -9841,7 +9861,7 @@ const renderWorkspaceRrhhHub = () => {
                           </label>
                           <label>
                             Email
-                            <input id="rrhhAccessCreateEmail" autocomplete="off" placeholder="email@empresa.com" />
+                          <input id="rrhhAccessCreateEmail" autocomplete="off" placeholder="email@empresa.com" value="${escapeHtml(String(employee?.email || ""))}" />
                           </label>
                           <label>
                             Rol
@@ -9916,7 +9936,7 @@ const renderWorkspaceRrhhHub = () => {
 		              <div class="workspace-rrhh-row">
 		                <div>
 		                  <strong>Vínculo</strong>
-	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
+	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : (suggestedUser ? "Sin vincular · Usuario sugerido por email" : "Sin vincular")}</div>
 	                </div>
 	                <div class="workspace-rrhh-row-actions">
                   ${employee?.usuario_manual ? `
@@ -9929,7 +9949,11 @@ const renderWorkspaceRrhhHub = () => {
                         ${usersAll
                           .filter((u) => Number(u.activo ?? 1) === 1)
                           .sort((a, b) => `${a.nombre || ""} ${a.apellido || ""}`.localeCompare(`${b.nombre || ""} ${b.apellido || ""}`, "es", { sensitivity: "base" }))
-                          .map((u) => `<option value="${escapeHtml(String(u.id || ""))}">${escapeHtml(`${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario")}</option>`)
+                          .map((u) => {
+                            const uid = String(u.id || "").trim();
+                            const selected = suggestedUser && uid && uid === String(suggestedUser?.id || "").trim() ? "selected" : "";
+                            return `<option value="${escapeHtml(uid)}" ${selected}>${escapeHtml(`${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario")}</option>`;
+                          })
                           .join("")}
                       </select>
                     </label>

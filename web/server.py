@@ -1276,7 +1276,8 @@ def normalize_phone(value):
 def parse_services_param(raw):
     if not raw:
         return []
-    parts = re.split(r"[|,;/]+", str(raw))
+    # Compat: algunos flujos guardan servicios como "Gestoría - Administración Fincas" o con separador "·".
+    parts = re.split(r"(?:\s+-\s+|[|,;/·]+)", str(raw))
     services = [p.strip().lower() for p in parts if p and p.strip()]
     aliases = {
         "gestoria": "gestoría",
@@ -23792,9 +23793,10 @@ def _normalize_service_tokens(value):
     if not raw.strip():
         return set()
     # servicios puede venir como string con comas: "Gestoría, Seguros"
+    # o como "Gestoría - Administración Fincas"
     tokens = []
-    for chunk in raw.replace(";", ",").split(","):
-        token = normalize_lookup_text(chunk)
+    for chunk in re.split(r"(?:\s+-\s+|[|,;/·]+)", raw):
+        token = normalize_lookup_text(chunk or "")
         if token:
             tokens.append(token)
     return set(tokens)
