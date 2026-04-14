@@ -21240,7 +21240,7 @@ const INMUEBLE_FIELDS = [
   },
   { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Contacto propietario" },
   { key: "propietario_email", label: "Email propietario", type: "text", section: "Contacto propietario" },
-  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Contacto propietario" },
+  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Contacto propietario", list: "inmoEstadoContactoOptions" },
   { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Contacto propietario" },
   {
     key: "no_molestar",

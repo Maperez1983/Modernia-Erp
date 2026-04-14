@@ -2504,6 +2504,14 @@
 		                </div>
 		              </div>
 		              <datalist id="inmoPoblacionOptions"></datalist>
+		              <datalist id="inmoEstadoContactoOptions">
+		                <option value="Sin gestionar"></option>
+		                <option value="Gestionado"></option>
+		                <option value="Pendiente de contacto"></option>
+		                <option value="Contactado"></option>
+		                <option value="Cita pendiente"></option>
+		                <option value="Descartado"></option>
+		              </datalist>
 
 		              <div class="crm-side-sep" aria-hidden="true"></div>
 		              <button type="button" class="crm-side-item" data-crm-view="captaciones" title="Nuevas oportunidades">
@@ -8989,7 +8997,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=503"></script>
+		    <script src="app.js?v=504"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -9017,7 +9025,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=125").catch(function () {});
+		          navigator.serviceWorker.register("/sw.js?v=126").catch(function () {});
         });
       })();
     </script>
