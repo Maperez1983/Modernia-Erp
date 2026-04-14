@@ -2973,20 +2973,28 @@
 				                <div class="tc-listview">
 				                  <div class="tc-listhead">
 				                    <div class="tc-listleft">
-					                      <select id="crmAgendaPreset" title="Act./Citas">
-					                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
-					                        <option value="citas_hoy">Citas Personales (hoy)</option>
-					                        <option value="citas_7dias">Citas Personales (7 días)</option>
-					                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
-					                        <option value="citas">Citas Personales</option>
-					                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
-					                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
-					                      </select>
-					                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
-					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="list">Lista</button>
-					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
-					                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
-					                      </div>
+						                      <select id="crmAgendaPreset" title="Act./Citas">
+						                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
+						                        <option value="citas_hoy">Citas Personales (hoy)</option>
+						                        <option value="citas_7dias">Citas Personales (7 días)</option>
+						                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
+						                        <option value="citas">Citas Personales</option>
+						                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
+						                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
+						                      </select>
+						                      <select id="crmAgendaAmbitoFilter" title="Ámbito">
+						                        <option value="">Ámbito (todos)</option>
+						                        <option value="pedidos">Pedidos</option>
+						                        <option value="inmuebles">Inmuebles</option>
+						                        <option value="clientes">Clientes</option>
+						                        <option value="financiacion">Financiación</option>
+						                        <option value="otros">Otros</option>
+						                      </select>
+						                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
+						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="list">Lista</button>
+						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
+						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
+						                      </div>
 				                      <div class="tc-agenda-nav hidden" id="crmAgendaNav" aria-label="Navegación agenda">
 				                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
 				                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>

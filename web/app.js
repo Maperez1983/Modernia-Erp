@@ -2719,12 +2719,13 @@ const crmYtdComisionesChart = document.getElementById("crmYtdComisionesChart");
 const crmYtdEmbudoChart = document.getElementById("crmYtdEmbudoChart");
 const crmResumenProximas = document.getElementById("crmResumenProximas");
 const crmResumenPendientes = document.getElementById("crmResumenPendientes");
-const crmAgendaSearch = document.getElementById("crmAgendaSearch");
-const crmAgendaEstadoFilter = document.getElementById("crmAgendaEstadoFilter");
-const crmAgendaPreset = document.getElementById("crmAgendaPreset");
-const crmAgendaTable = document.getElementById("crmAgendaTable");
-const crmAgendaInfo = document.getElementById("crmAgendaInfo");
-	const crmAgendaForm = document.getElementById("crmAgendaForm");
+	const crmAgendaSearch = document.getElementById("crmAgendaSearch");
+	const crmAgendaEstadoFilter = document.getElementById("crmAgendaEstadoFilter");
+	const crmAgendaPreset = document.getElementById("crmAgendaPreset");
+	const crmAgendaAmbitoFilter = document.getElementById("crmAgendaAmbitoFilter");
+	const crmAgendaTable = document.getElementById("crmAgendaTable");
+	const crmAgendaInfo = document.getElementById("crmAgendaInfo");
+		const crmAgendaForm = document.getElementById("crmAgendaForm");
 	const crmAgendaStatus = document.getElementById("crmAgendaStatus");
 	const crmAgendaCliente = document.getElementById("crmAgendaCliente");
 	const crmAgendaInmueble = document.getElementById("crmAgendaInmueble");
@@ -37328,10 +37329,49 @@ const normalizeCrmAgendaView = (raw) => {
   return "week";
 };
 
+const normalizeCrmAgendaAmbito = (raw) => {
+  const value = normalizeSimple(raw || "");
+  if (!value) return "";
+  if (value.includes("pedido") || value.includes("demanda")) return "pedidos";
+  if (value.includes("inmueble") || value.includes("encargo") || value.includes("noticia") || value.includes("captacion") || value.includes("captación")) {
+    return "inmuebles";
+  }
+  if (value.includes("cliente") || value.includes("contact")) return "clientes";
+  if (value.includes("finan") || value.includes("hipotec") || value.includes("kiron") || value.includes("banco")) return "financiacion";
+  if (value.includes("otro")) return "otros";
+  if (["pedidos", "inmuebles", "clientes", "financiacion", "otros"].includes(value)) return value;
+  return value;
+};
+
+const resolveCrmAgendaAmbitoKey = (row = {}) => {
+  const relatedTipo = normalizeSimple(row?.related_tipo || "");
+  const relatedId = String(row?.related_id || "").trim();
+  const servicio = normalizeSimple(row?.servicio || "");
+  if (relatedTipo.includes("hipotec") || servicio === "financiaciones") return "financiacion";
+  if (relatedTipo.includes("demanda") || relatedTipo.includes("pedido")) return "pedidos";
+  if (relatedTipo.includes("captacion") || relatedTipo.includes("captación") || relatedTipo.includes("inmueble")) return "inmuebles";
+  if (relatedTipo.includes("cliente")) return "clientes";
+  if (String(row?.inmueble_id || "").trim()) return "inmuebles";
+  if (String(row?.asesoramiento_id || "").trim()) return servicio === "financiaciones" ? "financiacion" : "otros";
+  if (String(row?.cliente_id || "").trim()) return "clientes";
+  if (relatedId) return "otros";
+  return "otros";
+};
+
+const resolveCrmAgendaAmbitoLabel = (row = {}) => {
+  const key = resolveCrmAgendaAmbitoKey(row);
+  if (key === "pedidos") return "Pedido";
+  if (key === "inmuebles") return "Inmueble";
+  if (key === "clientes") return "Cliente";
+  if (key === "financiacion") return "Financiación";
+  return "Otro";
+};
+
 const initCrmAgendaPrefsIfNeeded = () => {
   if (!state.crmAgendaView) {
     let view = "list";
     let day = formatAgendaDate(new Date());
+    let ambito = "";
     try {
       view = normalizeCrmAgendaView(localStorage.getItem("crm.agenda.view") || view);
     } catch {}
@@ -37339,14 +37379,27 @@ const initCrmAgendaPrefsIfNeeded = () => {
       const storedDay = String(localStorage.getItem("crm.agenda.day") || "").trim();
       if (storedDay) day = storedDay;
     } catch {}
+    try {
+      ambito = String(localStorage.getItem("crm.agenda.ambito") || "").trim();
+    } catch {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
+    state.crmAgendaAmbito = ambito;
   }
   if (!state.crmAgendaAnchorDay) {
     state.crmAgendaAnchorDay = formatAgendaDate(new Date());
   }
+  if (state.crmAgendaAmbito === undefined || state.crmAgendaAmbito === null) {
+    state.crmAgendaAmbito = "";
+  }
   if (crmAgendaDay) {
     crmAgendaDay.value = String(state.crmAgendaAnchorDay || "").trim();
+  }
+  if (crmAgendaAmbitoFilter) {
+    const key = String(state.crmAgendaAmbito || "").trim();
+    if (crmAgendaAmbitoFilter.value !== key) {
+      crmAgendaAmbitoFilter.value = key;
+    }
   }
 };
 
@@ -37354,6 +37407,7 @@ const persistCrmAgendaPrefs = () => {
   try {
     localStorage.setItem("crm.agenda.view", String(state.crmAgendaView || "week"));
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
+    localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
   } catch {}
 };
 
@@ -37457,7 +37511,13 @@ const buildCrmAgendaDenseTableNode = (rows = []) => {
     tr.appendChild(clienteTd);
 
     const relTd = document.createElement("td");
-    relTd.textContent = String(row.inmueble || "").trim();
+    const relId = String(row.related_id || row.inmueble_id || row.asesoramiento_id || "").trim();
+    const relTipo = String(row.related_tipo || "").trim();
+    const relParts = [];
+    if (relTipo) relParts.push(relTipo);
+    if (relId) relParts.push(relId);
+    const relText = relParts.join(" · ") || relId || "";
+    relTd.textContent = relText;
     tr.appendChild(relTd);
 
     const finTd = document.createElement("td");
@@ -38084,6 +38144,9 @@ const loadCrmAgenda = () => {
     const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
     const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
 		  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_caducadas") || "citas_caducadas";
+		  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
+		  state.crmAgendaAmbito = ambitoFilter;
+		  persistCrmAgendaPrefs();
 	  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
 	  const meKey = normalizePersonKey(getCurrentUser());
 	  const isMine = (row) => {
@@ -38132,14 +38195,20 @@ const loadCrmAgenda = () => {
 		    if (!isMine(row)) return false;
 		    const tipoKey = normalizeTipoKey(row);
 		    const fechaKey = String(row?.fecha || "").trim();
-	    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
-	    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === todayKey;
-	    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
-	    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
-	    if (preset === "citas") return tipoKey === "cita";
-	    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
-	    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === todayKey;
+		    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
+		    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === todayKey;
+		    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
+		    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
+		    if (preset === "citas") return tipoKey === "cita";
+		    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
+		    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === todayKey;
 		    return true;
+		  };
+		  const matchAmbito = (row) => {
+		    if (!ambitoFilter) return true;
+		    const key = resolveCrmAgendaAmbitoKey(row);
+		    if (ambitoFilter === "otros") return key === "otros";
+		    return key === ambitoFilter;
 		  };
 	    const matchQuery = createAdvancedSearchMatcher(qRaw, {
 	      text: (row) =>
@@ -38152,6 +38221,9 @@ const loadCrmAgenda = () => {
 	          row?.estado,
 	          row?.fecha,
 	          row?.hora,
+	          row?.related_tipo,
+	          row?.related_id,
+	          row?.inmueble_id,
 	        ]
 	          .map((v) => String(v || ""))
 	          .join(" "),
@@ -38162,10 +38234,19 @@ const loadCrmAgenda = () => {
 	        responsable: (row) => row?.responsable,
 	        estado: { get: (row) => row?.estado, match: "equals" },
 	        fecha: (row) => row?.fecha,
+	        ambito: {
+	          test: (row, valueNorm) => {
+	            const key = normalizeCrmAgendaAmbito(valueNorm || "");
+	            if (!key) return true;
+	            return resolveCrmAgendaAmbitoKey(row) === key;
+	          },
+	        },
+	        relacion: (row) => row?.related_id || row?.inmueble_id || "",
 	      },
 	    });
 	    state.crmAgendaRowsFiltered = rows.filter((row) => {
 	      if (!matchPreset(row)) return false;
+	      if (!matchAmbito(row)) return false;
 	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
 	      if (!matchQuery(row)) return false;
 	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
@@ -51272,6 +51353,14 @@ if (crmAgendaSearch) {
 
 if (crmAgendaPreset) {
   crmAgendaPreset.addEventListener("change", () => {
+    loadCrmAgenda();
+  });
+}
+
+if (crmAgendaAmbitoFilter) {
+  crmAgendaAmbitoFilter.addEventListener("change", () => {
+    state.crmAgendaAmbito = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter.value || "");
+    persistCrmAgendaPrefs();
     loadCrmAgenda();
   });
 }
