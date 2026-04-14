@@ -28444,7 +28444,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
             [
                 ("Fecha emisión", format_export_date(datetime.now(timezone.utc).date().isoformat())),
                 ("Dirección", inmueble.get("direccion") or "-"),
-                ("Zona / población", " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "-"),
+                ("Población / provincia", " · ".join([part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "-"),
                 ("Tipo", inmueble.get("tipo_inmueble") or "-"),
                 ("Estado comercial", captacion.get("situacion_comercial") or inmueble.get("estado") or "-"),
                 ("Precio objetivo", format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)),
@@ -28457,7 +28457,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
                 ("DNI / NIF", buyer_nif),
                 ("Teléfono", buyer_phone),
                 ("Email", buyer_email),
-                ("Demanda vinculada", f"{(demanda or {}).get('tipo') or '-'} · {(demanda or {}).get('zona') or '-'}"),
+                ("Demanda vinculada", f"{(demanda or {}).get('tipo') or '-'}"),
             ],
         ),
         (
@@ -29120,7 +29120,7 @@ def build_workspace_contract_pdf(template_key, company, client, payload=None):
 
 def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
-    locality = " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
+    locality = " · ".join([part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
     docs_text = ", ".join(
         str(item.get("tipo") or item.get("nombre") or "").strip()
         for item in (docs or [])
@@ -29132,7 +29132,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
             [
                 ("Dirección", inmueble.get("direccion") or "Pendiente"),
                 ("Tipo de inmueble", inmueble.get("tipo_inmueble") or "Pendiente"),
-                ("Zona / población", locality),
+                ("Población / provincia", locality),
                 ("Referencia catastral", inmueble.get("referencia_catastral") or "Pendiente"),
                 ("Superficie / distribución", f"{_pdf_format_number(inmueble.get('m2'), 2) if inmueble.get('m2') not in (None, '') else 'Pendiente'} m² · {inmueble.get('habitaciones') or '-'} hab. · {inmueble.get('banos') or '-'} baños"),
             ],
@@ -29218,7 +29218,7 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
 
 def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
     rent_amount = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
-    locality = " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
+    locality = " · ".join([part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
     docs_text = ", ".join(
         str(item.get("tipo") or item.get("nombre") or "").strip()
         for item in (docs or [])
@@ -29230,7 +29230,7 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
             [
                 ("Dirección", inmueble.get("direccion") or "Pendiente"),
                 ("Tipo de inmueble", inmueble.get("tipo_inmueble") or "Pendiente"),
-                ("Zona / población", locality),
+                ("Población / provincia", locality),
                 ("Superficie / distribución", f"{_pdf_format_number(inmueble.get('m2'), 2) if inmueble.get('m2') not in (None, '') else 'Pendiente'} m² · {inmueble.get('habitaciones') or '-'} hab. · {inmueble.get('banos') or '-'} baños"),
                 ("Inventario / mobiliario", "Pendiente de concretar en expediente"),
             ],
@@ -29283,7 +29283,7 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
             [
                 ("Dirección", inmueble.get("direccion") or "Pendiente"),
                 ("Tipo", inmueble.get("tipo_inmueble") or "Pendiente"),
-                ("Zona", " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion")] if part]) or "Pendiente"),
+                ("Población / provincia", " · ".join([part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"),
                 ("Referencia", inmueble.get("referencia") or inmueble.get("referencia_catastral") or "Pendiente"),
             ],
         ),

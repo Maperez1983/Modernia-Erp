@@ -2383,10 +2383,6 @@
 			                <span class="crm-side-ico" aria-hidden="true">🎓</span>
 			                <span class="crm-side-txt">Escuela</span>
 			              </button>
-			              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Objetivos">
-			                <span class="crm-side-ico" aria-hidden="true">📈</span>
-			                <span class="crm-side-txt">Objetivos</span>
-			              </button>
 
 		              <div class="crm-side-grow" aria-hidden="true"></div>
 
@@ -2414,9 +2410,7 @@
 		                <div class="tc-sidebox">
 		                  <div class="tc-sidebox-title">Gestión / Control</div>
 		                  <div class="tc-sidebox-links">
-		                    <button type="button" class="tc-sidelink" data-crm-view="analisis">Informe análisis de datos</button>
 		                    <button type="button" class="tc-sidelink" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Acciones/Actividades</button>
-		                    <button type="button" class="tc-sidelink" data-crm-view="analisis">Objetivos</button>
 		                  </div>
 		                </div>
 		                <div class="tc-sidebox">
@@ -2603,17 +2597,6 @@
 					                        </div>
 					                        <div id="crmHomePanelPedidos" class="crm-focus-list"></div>
 					                      </div>
-					                      <div class="tc-listview tc-home-panel">
-					                        <div class="tc-listhead">
-					                          <div class="tc-listleft">
-					                            <strong class="tc-title">Gestión objetivos</strong>
-					                          </div>
-					                          <div class="tc-listright">
-					                            <button type="button" class="secondary ghost kpi-clickable" data-crm-view="analisis">Ir</button>
-					                          </div>
-					                        </div>
-					                        <div id="crmHomePanelObjetivos" class="crm-focus-list"></div>
-					                      </div>
 					                    </div>
 					                  </div>
 						                  <div class="crm-home-right">
@@ -2643,73 +2626,25 @@
 					                </div>
 					              </div>
               <div id="crmViewAnalisis" class="crm-workspace-view hidden">
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>KPIs dirección</h3>
-                      <p class="muted">Comisión, desviación, plazo y visitas por operación. Ajusta filtros para analizar ventas.</p>
+                <div class="tc-listview">
+                  <div class="tc-listhead">
+                    <div class="tc-listleft">
+                      <strong class="tc-title">Búsq./Informes</strong>
                     </div>
                   </div>
-                  <div class="crm-resumen-toolbar">
-                    <label>
-                      Periodo
-                      <select id="crmResumenRange">
-                        <option value="mtd">Mes actual</option>
-                        <option value="30d">Últimos 30 días</option>
-                        <option value="ytd">Año actual</option>
-                        <option value="12m" selected>Últimos 12 meses</option>
-                        <option value="all">Todo</option>
-                        <option value="custom">Personalizado</option>
-                      </select>
-                    </label>
-                    <label class="crm-resumen-date hidden" id="crmResumenDesdeWrap">
-                      Desde
-                      <input id="crmResumenDesde" type="date" />
-                    </label>
-                    <label class="crm-resumen-date hidden" id="crmResumenHastaWrap">
-                      Hasta
-                      <input id="crmResumenHasta" type="date" />
-                    </label>
-                    <label>
-                      Responsable
-                      <select id="crmResumenResponsable">
-                        <option value="">Todos</option>
-                      </select>
-                    </label>
-                    <label>
-                      Origen
-                      <select id="crmResumenOrigen">
-                        <option value="">Todos</option>
-                      </select>
-                    </label>
-                    <button type="button" class="secondary" id="crmResumenReset">Reset</button>
+                  <div class="tc-quickgrid">
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
                   </div>
-                  <div id="crmResumenDireccionKpis" class="crm-mini-list"></div>
-                  <div class="crm-split">
-                    <div>
-                      <div class="section-head compact">
-                        <div>
-                          <h4>Top desviación</h4>
-                          <p class="muted">Operaciones con mayor diferencia entre precio de encargo y precio de venta.</p>
-                        </div>
-                      </div>
-                      <div id="crmResumenTopDesviacion" class="crm-focus-list"></div>
-                    </div>
-                    <div>
-                      <div class="section-head compact">
-                        <div>
-                          <h4>Top plazo / visitas</h4>
-                          <p class="muted">Ventas más lentas y operaciones con más visitas registradas.</p>
-                        </div>
-                      </div>
-                      <div id="crmResumenTopPlazo" class="crm-focus-list"></div>
-                    </div>
-                  </div>
+                  <div class="footer muted">Vista depurada para mantener la sencillez visual tipo Tecnocloud (sin KPIs ni “calidad/control operativo”).</div>
                 </div>
               </div>
 		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
-		                <div class="crm-split crm-ops-split">
-		                  <div class="tc-listview">
+		                <div class="tc-listview">
 		                    <div class="tc-listhead">
 		                      <div class="tc-listleft">
 		                        <strong class="tc-title" id="crmCaptacionesTitle">Nuevas oportunidades</strong>
@@ -2744,15 +2679,6 @@
 		                      <div class="footer" id="crmCaptacionesInfo"></div>
 		                    </div>
 		                  </div>
-		                  <div class="tc-listview">
-		                    <div class="tc-listhead">
-		                      <div class="tc-listleft">
-		                        <strong class="tc-title">Pendientes</strong>
-		                      </div>
-		                    </div>
-		                    <div id="crmCaptacionesOps" class="crm-focus-list"></div>
-		                  </div>
-		                </div>
 		              </div>
 		              <div id="crmViewClientes" class="crm-workspace-view hidden">
 		                <div class="tc-listview">

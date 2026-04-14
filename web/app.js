@@ -36405,7 +36405,6 @@ const renderCrmMapaInmuebles = (rows = []) => {
         row?.codigo_postal,
         row?.poblacion,
         row?.provincia,
-        row?.zona,
         row?.estado,
         row?.propietarios,
       ]
@@ -36648,7 +36647,6 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
 	            pair?.inmueble?.referencia_catastral,
 	            pair?.inmueble?.poblacion,
 	            pair?.inmueble?.provincia,
-	            pair?.inmueble?.zona,
 	          ]
 	            .map((v) => String(v || ""))
 	            .join(" "),

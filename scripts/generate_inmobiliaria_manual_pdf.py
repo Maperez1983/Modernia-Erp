@@ -143,7 +143,7 @@ def main() -> int:
     img, draw, y = new_page(cover_title, cover_sub)
     intro = [
         "Este manual se estructura como un flujo de trabajo:",
-        "  1) Revisar Resumen y convertir KPIs en acciones.",
+        "  1) Revisar Resumen y convertir pendientes en acciones.",
         "  2) Gestionar Pipeline por etapa (Noticia, Encargo, Propuesta, ...).",
         "  3) Trabajar expediente (propietarios, documentos, checklist).",
         "  4) Gestionar Demandas y Matching.",
@@ -174,7 +174,7 @@ def main() -> int:
             1: [
                 "Revisar avisos, visitas del dia y propuestas sin respuesta.",
                 "Crear acciones (agenda) desde pendientes para que el pipeline sea accionable.",
-                "KPI esperado: todo lo importante debe tener proxima accion y responsable.",
+                "Esperado: todo lo importante debe tener proxima accion y responsable.",
             ],
             2: [
                 "Pipeline refleja etapa comercial. Mueve por etapa desde la ficha (Estado).",
@@ -182,9 +182,9 @@ def main() -> int:
                 "Error tipico: estados inconsistentes entre captacion e inmueble (botones desaparecen).",
             ],
             3: [
-                "Listado: busca por direccion, ref catastral o zona.",
+                "Listado: busca por direccion o ref catastral.",
                 "Esperado: abrir ficha siempre funciona; no debe volver a Home por routing.",
-                "Calidad de datos: m2/hab/banos/precio deben estar para matching fiable.",
+                "Esperado: completar m2/hab/banos/precio mejora matching y reporting.",
             ],
             4: [
                 "Expediente: datos + propietarios + compradores + docs + checklist + auditoria.",
@@ -192,7 +192,7 @@ def main() -> int:
                 "Mapa: completa lat/lon para ubicacion; ref catastral para catastro/documentos.",
             ],
             5: [
-                "Demandas: zona, presupuesto, requisitos (m2/hab/banos), fase y estado.",
+                "Demandas: presupuesto, requisitos (m2/hab/banos), fase y estado.",
                 "Matching: debe filtrar por empresa y aplicar reglas basicas; revisar campos vacios.",
                 "Trabajo diario: convertir matching en visitas y acciones con fecha.",
             ],
