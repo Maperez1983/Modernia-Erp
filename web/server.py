@@ -44649,6 +44649,7 @@ class Handler(BaseHTTPRequestHandler):
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
             estado_siguiente = str(payload.get("estado_siguiente") or "").strip()
             servicio_norm = normalize_lookup_text(servicio)
+            servicio_store = str(servicio).strip().lower()
             if servicio_norm == "financiaciones":
                 validation_error = validate_fin_action_result(tipo, estado, resultado_cierre)
             else:
@@ -44672,7 +44673,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     action_id,
                     empresa["id"],
-                    servicio,
+                    servicio_store,
                     payload.get("cliente_id"),
                     payload.get("inmueble_id"),
                     payload.get("asesoramiento_id"),
@@ -47763,11 +47764,58 @@ class Handler(BaseHTTPRequestHandler):
             asesoramiento_id = params.get("asesoramiento_id", [""])[0]
             related_id = params.get("related_id", [""])[0]
             related_tipo = params.get("related_tipo", [""])[0]
-            if not servicio:
+            limit = params.get("limit", [""])[0]
+            offset = params.get("offset", [""])[0]
+            servicio_key = str(servicio or "").strip().lower()
+            if not servicio_key:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
+            try:
+                limit_val = int(str(limit or "").strip() or "300")
+            except Exception:
+                limit_val = 300
+            try:
+                offset_val = int(str(offset or "").strip() or "0")
+            except Exception:
+                offset_val = 0
+            if limit_val <= 0:
+                limit_val = 300
+            if limit_val > 2000:
+                limit_val = 2000
+            if offset_val < 0:
+                offset_val = 0
+            if offset_val > 100000:
+                offset_val = 100000
+
+            where = ["a.servicio = ?"]
+            values = [servicio_key]
+            empresa_id = str(empresa_id or "").strip()
+            cliente_id = str(cliente_id or "").strip()
+            inmueble_id = str(inmueble_id or "").strip()
+            asesoramiento_id = str(asesoramiento_id or "").strip()
+            related_id = str(related_id or "").strip()
+            related_tipo = str(related_tipo or "").strip()
+            if empresa_id:
+                where.append("a.empresa_id = ?")
+                values.append(empresa_id)
+            if cliente_id:
+                where.append("a.cliente_id = ?")
+                values.append(cliente_id)
+            if inmueble_id:
+                where.append("a.inmueble_id = ?")
+                values.append(inmueble_id)
+            if asesoramiento_id:
+                where.append("a.asesoramiento_id = ?")
+                values.append(asesoramiento_id)
+            if related_id:
+                where.append("a.related_id = ?")
+                values.append(related_id)
+            if related_tipo:
+                where.append("LOWER(COALESCE(a.related_tipo, '')) = LOWER(?)")
+                values.append(related_tipo)
+            where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                   a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
@@ -47777,33 +47825,22 @@ class Handler(BaseHTTPRequestHandler):
                   a.related_id, a.related_tipo
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
-                WHERE LOWER(a.servicio) = LOWER(?)
-                  AND (? = '' OR a.empresa_id = ?)
-                  AND (? = '' OR a.cliente_id = ?)
-                  AND (? = '' OR a.inmueble_id = ?)
-                  AND (? = '' OR a.asesoramiento_id = ?)
-                  AND (? = '' OR a.related_id = ?)
-                  AND (? = '' OR LOWER(COALESCE(a.related_tipo, '')) = LOWER(?))
+                WHERE {where_clause}
                 ORDER BY a.fecha DESC, a.hora DESC
-                LIMIT 300
+                LIMIT ? OFFSET ?
                 """,
-                (
-                    servicio,
-                    empresa_id,
-                    empresa_id,
-                    cliente_id,
-                    cliente_id,
-                    inmueble_id,
-                    inmueble_id,
-                    asesoramiento_id,
-                    asesoramiento_id,
-                    related_id,
-                    related_id,
-                    related_tipo,
-                    related_tipo,
-                ),
+                tuple(values + [limit_val, offset_val]),
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            json_response(
+                self,
+                {
+                    "rows": [dict(r) for r in rows],
+                    "limit": limit_val,
+                    "offset": offset_val,
+                    "returned": len(rows),
+                    "truncated": len(rows) >= limit_val,
+                },
+            )
             return
 
         if path == "/api/fin_asesoramientos":
