@@ -26955,6 +26955,13 @@ const ensureHipotecaFichaPanel = () => {
                 <span>C2 · Domicilio</span>
                 <input data-json="cliente_inmueble_json" data-path="comprador.c2.domicilio" />
               </label>
+              <label class="span-2">
+                <span>C2 · Mismo domicilio que C1</span>
+                <select data-json="cliente_inmueble_json" data-path="comprador.c2.mismo_domicilio">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </label>
             </div>
           </div>
           <div class="form-card">
@@ -27007,14 +27014,11 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Banco / entidad</span>
                 <input name="banco" list="bankList" />
               </label>
-              <label>
-                <span>Oficina</span>
+              <label class="span-2">
+                <span>Oficina / Inmobiliaria compra</span>
                 <input name="oficina" list="officeList" />
               </label>
-              <label>
-                <span>Inmobiliaria compra</span>
-                <input name="inmobiliaria_compra" />
-              </label>
+              <input name="inmobiliaria_compra" type="hidden" />
               <label>
                 <span>Asesor</span>
                 <input name="asesor" />
@@ -27075,7 +27079,7 @@ const ensureHipotecaFichaPanel = () => {
               </label>
               <label>
                 <span>% financiación</span>
-                <input name="porcentaje" inputmode="decimal" />
+                <input name="porcentaje" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Entrada</span>
@@ -27354,11 +27358,11 @@ const ensureHipotecaFichaPanel = () => {
               </label>
               <label>
                 <span>Subtotal pte. percibir</span>
-                <input data-json="liquidacion_json" data-path="vendedor.subtotal_pte_percibir" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="vendedor.subtotal_pte_percibir" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Total a percibir</span>
-                <input data-json="liquidacion_json" data-path="vendedor.total_a_percibir" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="vendedor.total_a_percibir" inputmode="decimal" readonly />
               </label>
             </div>
           </div>
@@ -27401,14 +27405,15 @@ const ensureHipotecaFichaPanel = () => {
           <div id="hipotecaLiquidacionPanelCheques" class="stack hidden">
           <div class="form-card">
             <h4>Cuadre de cheques</h4>
+            <p class="muted">Se autocompleta con los datos de “Comprador” y “Vendedor”.</p>
             <div class="form-grid">
               <label>
                 <span>Préstamo concedido</span>
-                <input data-json="liquidacion_json" data-path="cuadre.prestamo_concedido" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.prestamo_concedido" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Ingreso en cuenta</span>
-                <input data-json="liquidacion_json" data-path="cuadre.ingreso_en_cuenta" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.ingreso_en_cuenta" inputmode="decimal" readonly />
               </label>
               <label class="span-2">
                 <span>Cheque 1 (beneficiario)</span>
@@ -27428,39 +27433,47 @@ const ensureHipotecaFichaPanel = () => {
               </label>
               <label class="span-2">
                 <span>Cancelación económica préstamo</span>
-                <input data-json="liquidacion_json" data-path="cuadre.cancelacion_economica" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.cancelacion_economica" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Retención cancelación registral</span>
-                <input data-json="liquidacion_json" data-path="cuadre.retencion_cancelacion_registral" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_cancelacion_registral" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Retención deuda IBI</span>
-                <input data-json="liquidacion_json" data-path="cuadre.retencion_ibi" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_ibi" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Retención 3% no residente</span>
-                <input data-json="liquidacion_json" data-path="cuadre.retencion_no_residente" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_no_residente" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Gestión no residente</span>
-                <input data-json="liquidacion_json" data-path="cuadre.gestion_no_residente" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.gestion_no_residente" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Gastos escritura · Compraventa</span>
-                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.compraventa" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.compraventa" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Gastos escritura · Hipoteca</span>
-                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.hipoteca" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.hipoteca" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Gastos escritura · Com. apertura</span>
-                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.com_apertura" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.com_apertura" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Comisión cheques/OMF</span>
+                <input data-json="liquidacion_json" data-path="cuadre.comision_cheques" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Cuota socio caja</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cuota_socio" inputmode="decimal" readonly />
               </label>
               <label>
                 <span>Sobran en cuenta</span>
-                <input data-json="liquidacion_json" data-path="cuadre.sobran_en_cuenta" inputmode="decimal" />
+                <input data-json="liquidacion_json" data-path="cuadre.sobran_en_cuenta" inputmode="decimal" readonly />
               </label>
             </div>
           </div>
@@ -27472,7 +27485,7 @@ const ensureHipotecaFichaPanel = () => {
             <div class="form-grid">
               <label class="span-2">
                 <span>Notaría</span>
-                <input data-json="liquidacion_json" data-path="notaria.nombre" />
+                <input data-json="liquidacion_json" data-path="notaria.nombre" list="notariaMalagaList" />
               </label>
               <label class="span-2">
                 <span>Persona de contacto</span>
@@ -27551,6 +27564,19 @@ const ensureHipotecaFichaPanel = () => {
           <span id="hipotecaFichaStatus" class="muted"></span>
         </div>
       </form>
+      <datalist id="notariaMalagaList">
+        <option value="Miguel Ángel Delgado"></option>
+        <option value="Notaría de Don Pedro Díaz Serrano"></option>
+        <option value="Notaría (Málaga)"></option>
+        <option value="Notaría (Vélez-Málaga)"></option>
+        <option value="Notaría (Torrox)"></option>
+        <option value="Notaría (Rincón de la Victoria)"></option>
+        <option value="Notaría (Marbella)"></option>
+        <option value="Notaría (Fuengirola)"></option>
+        <option value="Notaría (Torremolinos)"></option>
+        <option value="Notaría (Benalmádena)"></option>
+        <option value="Notaría (Estepona)"></option>
+      </datalist>
     </div>
   `;
   document.body.appendChild(panel);
@@ -27722,26 +27748,39 @@ const normalizeMoneyLike = (value) => {
   return parsed === null ? "" : parsed;
 };
 
+const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+
 const computeHipotecaLiquidacionComputed = (data) => {
   const liq = data && typeof data === "object" ? data : {};
   const comprador = liq.comprador && typeof liq.comprador === "object" ? liq.comprador : {};
   const gastosCv = comprador.gastos_compraventa && typeof comprador.gastos_compraventa === "object" ? comprador.gastos_compraventa : {};
   const hip = comprador.hipoteca && typeof comprador.hipoteca === "object" ? comprador.hipoteca : {};
   const entregas = comprador.entregas && typeof comprador.entregas === "object" ? comprador.entregas : {};
+  const vendedor = liq.vendedor && typeof liq.vendedor === "object" ? liq.vendedor : {};
+  const vendedorDeducciones =
+    vendedor.deducciones && typeof vendedor.deducciones === "object" ? vendedor.deducciones : {};
+  const vendedorVendedores =
+    vendedor.vendedores && typeof vendedor.vendedores === "object" ? vendedor.vendedores : {};
+  const cuadre = liq.cuadre && typeof liq.cuadre === "object" ? liq.cuadre : {};
+  const cuadreCheq1 = cuadre.cheque1 && typeof cuadre.cheque1 === "object" ? cuadre.cheque1 : {};
+  const cuadreCheq2 = cuadre.cheque2 && typeof cuadre.cheque2 === "object" ? cuadre.cheque2 : {};
+  const cuadreGastos =
+    cuadre.gastos_escrituras && typeof cuadre.gastos_escrituras === "object" ? cuadre.gastos_escrituras : {};
 
   const totalCv =
     Number(gastosCv.notaria || 0) +
     Number(gastosCv.registro || 0) +
     Number(gastosCv.itp || 0) +
     Number(gastosCv.gestoria || 0);
-  gastosCv.total = Math.round(totalCv * 100) / 100;
+  gastosCv.total = round2(totalCv);
 
   const totalHip =
     Number(hip.notaria_impuestos_gestoria || 0) +
     Number(hip.comision_apertura || 0) +
     Number(hip.cuota_socio || 0) +
-    Number(hip.comision_cheques || 0);
-  hip.total_gastos = Math.round(totalHip * 100) / 100;
+    Number(hip.comision_cheques || 0) +
+    Number(hip.seguro_proteccion_pago || 0);
+  hip.total_gastos = round2(totalHip);
 
   const sumaNecesaria =
     Number(comprador.precio_compra || 0) +
@@ -27749,24 +27788,110 @@ const computeHipotecaLiquidacionComputed = (data) => {
     Number(hip.total_gastos || 0) +
     Number(comprador.gestion_inmobiliaria || 0) +
     Number(comprador.gestion_financiacion || 0);
-  comprador.suma_total_necesaria = Math.round(sumaNecesaria * 100) / 100;
+  comprador.suma_total_necesaria = round2(sumaNecesaria);
 
   const sumaEntregada =
     Number(entregas.senal || 0) +
     Number(entregas.transf_modernia || 0) +
     Number(entregas.ingresar_banco || 0);
-  comprador.suma_total_entregada = Math.round(sumaEntregada * 100) / 100;
+  comprador.suma_total_entregada = round2(sumaEntregada);
 
   const sobra =
     Number(entregas.prestamo_concedido || 0) +
     Number(comprador.suma_total_entregada || 0) -
     Number(comprador.suma_total_necesaria || 0);
-  comprador.sobran_en_cuenta = Math.round(sobra * 100) / 100;
+  comprador.sobran_en_cuenta = round2(sobra);
+
+  // Vendedor (estilo Excel)
+  if ((vendedor.precio_vivienda ?? "") === "" && (comprador.precio_compra ?? "") !== "") {
+    vendedor.precio_vivienda = comprador.precio_compra;
+  }
+  if ((vendedor.direccion ?? "") === "") {
+    vendedor.direccion = comprador.vivienda || vendedor.direccion || "";
+  }
+  if ((vendedor.localidad ?? "") === "") {
+    vendedor.localidad = comprador.localidad || vendedor.localidad || "";
+  }
+  if ((vendedorDeducciones.senal ?? "") === "" && (entregas.senal ?? "") !== "") {
+    vendedorDeducciones.senal = entregas.senal;
+  }
+
+  const subtotalPtePercibir =
+    Number(vendedor.precio_vivienda || 0) -
+    Number(vendedorDeducciones.senal || 0) -
+    Number(vendedorDeducciones.cancelacion_economica || 0) -
+    Number(vendedorDeducciones.cancelacion_registral || 0) -
+    Number(vendedorDeducciones.deuda_ibi || 0) -
+    Number(vendedorDeducciones.plusvalia || 0);
+  vendedor.subtotal_pte_percibir = round2(subtotalPtePercibir);
+
+  const totalPercibir =
+    Number(vendedor.subtotal_pte_percibir || 0) -
+    Number(vendedorDeducciones.retencion_no_residente || 0) -
+    Number(vendedorDeducciones.gestion_no_residente || 0);
+  vendedor.total_a_percibir = round2(totalPercibir);
+
+  // Cuadre de cheques (autorrelleno desde comprador/vendedor).
+  cuadre.prestamo_concedido = entregas.prestamo_concedido ?? "";
+  cuadre.ingreso_en_cuenta = entregas.ingresar_banco ?? "";
+  cuadre.cancelacion_economica = vendedorDeducciones.cancelacion_economica ?? "";
+  cuadre.retencion_cancelacion_registral = vendedorDeducciones.cancelacion_registral ?? "";
+  cuadre.retencion_ibi = vendedorDeducciones.deuda_ibi ?? "";
+  cuadre.retencion_no_residente = vendedorDeducciones.retencion_no_residente ?? "";
+  cuadre.gestion_no_residente = vendedorDeducciones.gestion_no_residente ?? "";
+
+  cuadreGastos.compraventa = gastosCv.total ?? "";
+  cuadreGastos.hipoteca = hip.notaria_impuestos_gestoria ?? "";
+  cuadreGastos.com_apertura = hip.comision_apertura ?? "";
+  cuadre.comision_cheques = hip.comision_cheques ?? "";
+  cuadre.cuota_socio = hip.cuota_socio ?? "";
+  cuadre.sobran_en_cuenta = comprador.sobran_en_cuenta ?? "";
+
+  if (
+    (cuadreCheq1.beneficiario ?? "") === "" &&
+    String(vendedorVendedores?.v1?.nombre || "").trim()
+  ) {
+    cuadreCheq1.beneficiario = `OMF ${String(vendedorVendedores.v1.nombre).trim()}`;
+  }
+  if (
+    (cuadreCheq2.beneficiario ?? "") === "" &&
+    String(vendedorVendedores?.v2?.nombre || "").trim()
+  ) {
+    cuadreCheq2.beneficiario = `OMF ${String(vendedorVendedores.v2.nombre).trim()}`;
+  }
+
+  // Cheques: reparto por defecto del total_a_percibir.
+  const totalPercibirNum = Number(vendedor.total_a_percibir || 0);
+  const cheq1Has = (cuadreCheq1.importe ?? "") !== "";
+  const cheq2Has = (cuadreCheq2.importe ?? "") !== "";
+  const v2Exists = !!String(vendedorVendedores?.v2?.nombre || "").trim();
+  if (totalPercibirNum > 0) {
+    if (!cheq1Has && !cheq2Has) {
+      if (v2Exists) {
+        const half = round2(totalPercibirNum / 2);
+        cuadreCheq1.importe = half;
+        cuadreCheq2.importe = round2(totalPercibirNum - half);
+      } else {
+        cuadreCheq1.importe = round2(totalPercibirNum);
+      }
+    } else if (v2Exists && cheq1Has && !cheq2Has) {
+      cuadreCheq2.importe = round2(totalPercibirNum - Number(cuadreCheq1.importe || 0));
+    } else if (v2Exists && !cheq1Has && cheq2Has) {
+      cuadreCheq1.importe = round2(totalPercibirNum - Number(cuadreCheq2.importe || 0));
+    }
+  }
 
   liq.comprador = comprador;
   comprador.gastos_compraventa = gastosCv;
   comprador.hipoteca = hip;
   comprador.entregas = entregas;
+  liq.vendedor = vendedor;
+  vendedor.deducciones = vendedorDeducciones;
+  vendedor.vendedores = vendedorVendedores;
+  liq.cuadre = cuadre;
+  cuadre.cheque1 = cuadreCheq1;
+  cuadre.cheque2 = cuadreCheq2;
+  cuadre.gastos_escrituras = cuadreGastos;
   return liq;
 };
 
@@ -27837,12 +27962,27 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
     "comprador.suma_total_necesaria",
     "comprador.suma_total_entregada",
     "comprador.sobran_en_cuenta",
+    "vendedor.subtotal_pte_percibir",
+    "vendedor.total_a_percibir",
+    "cuadre.prestamo_concedido",
+    "cuadre.ingreso_en_cuenta",
+    "cuadre.cancelacion_economica",
+    "cuadre.retencion_cancelacion_registral",
+    "cuadre.retencion_ibi",
+    "cuadre.retencion_no_residente",
+    "cuadre.gestion_no_residente",
+    "cuadre.gastos_escrituras.compraventa",
+    "cuadre.gastos_escrituras.hipoteca",
+    "cuadre.gastos_escrituras.com_apertura",
+    "cuadre.comision_cheques",
+    "cuadre.cuota_socio",
+    "cuadre.sobran_en_cuenta",
   ];
   targets.forEach((path) => {
     const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);
     if (!el) return;
     const val = getNestedValue(computed, path);
-    el.value = val === null || val === undefined || val === "" ? "" : String(val);
+    el.value = val === null || val === undefined || val === "" ? "" : formatMoneyInputValue(val);
   });
 };
 
@@ -27866,7 +28006,20 @@ const fillHipotecaFichaJson = (panel, jsonKey, obj) => {
     const path = el.dataset.path;
     if (!path) return;
     const value = getNestedValue(source, path);
-    if (el.inputMode === "decimal" || el.type === "number") {
+    if (el.inputMode === "decimal") {
+      if (value === null || value === undefined || value === "") {
+        el.value = "";
+        return;
+      }
+      const text = String(value);
+      const isMoney =
+        jsonKey === "liquidacion_json" &&
+        !path.startsWith("prestamo.") &&
+        (path.startsWith("comprador.") || path.startsWith("vendedor.") || path.startsWith("cuadre."));
+      el.value = isMoney ? formatMoneyInputValue(text) : text;
+      return;
+    }
+    if (el.type === "number") {
       el.value = value === null || value === undefined || value === "" ? "" : String(value);
       return;
     }
@@ -27927,6 +28080,173 @@ const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
   button.title = enabled
     ? ""
     : "Disponible solo para hipotecas firmadas con fecha de firma.";
+};
+
+const setupHipotecaFichaMoneyInputs = (panel) => {
+  if (!panel) return;
+  if (panel.dataset.moneyFormatListeners === "1") return;
+  panel.dataset.moneyFormatListeners = "1";
+  panel
+    .querySelectorAll(
+      [
+        // Campos base (columnas) y liquidación (comprador/vendedor/cuadre).
+        '#hipotecaFichaForm input[inputmode="decimal"]:not([name="porcentaje"])',
+        '#hipotecaFichaForm input[type="number"][step="0.01"]',
+      ].join(",")
+    )
+    .forEach((el) => {
+      const path = el.dataset.path || "";
+      const jsonKey = el.dataset.json || "";
+      const isLiquidacionMoney =
+        jsonKey === "liquidacion_json" &&
+        (path.startsWith("comprador.") || path.startsWith("vendedor.") || path.startsWith("cuadre.")) &&
+        !path.startsWith("prestamo.");
+      const isHipotecaMoney = !jsonKey && !path; // inputs name=... de la ficha (precio, comision, etc).
+      if (!isLiquidacionMoney && !isHipotecaMoney) return;
+      el.addEventListener("blur", () => {
+        const next = formatMoneyInputValue(el.value ?? "");
+        if (String(next || "").trim()) el.value = next;
+      });
+    });
+};
+
+const setupHipotecaFichaDomicilioSync = (panel) => {
+  if (!panel) return;
+  if (typeof panel._hipotecaFichaApplyDomicilioSync === "function") {
+    panel._hipotecaFichaApplyDomicilioSync();
+    return;
+  }
+  panel.dataset.domicilioSyncListeners = "1";
+
+  const c1Dom = panel.querySelector('[data-json="cliente_inmueble_json"][data-path="comprador.c1.domicilio"]');
+  const c2Dom = panel.querySelector('[data-json="cliente_inmueble_json"][data-path="comprador.c2.domicilio"]');
+  const same = panel.querySelector('[data-json="cliente_inmueble_json"][data-path="comprador.c2.mismo_domicilio"]');
+  if (!c1Dom || !c2Dom || !same) return;
+
+  const normalizeYes = (value) => ["si", "sí", "s"].includes(normalizeSimple(value));
+
+  const apply = () => {
+    const c1 = String(c1Dom.value || "").trim();
+    const c2 = String(c2Dom.value || "").trim();
+    if (!String(same.value || "").trim()) {
+      same.value = !c2 || c2 === c1 ? "Sí" : "No";
+    }
+    const isSame = normalizeYes(same.value);
+    if (isSame) {
+      if (c1) c2Dom.value = c1;
+      c2Dom.disabled = true;
+    } else {
+      c2Dom.disabled = false;
+    }
+  };
+
+  same.addEventListener("change", apply);
+  c1Dom.addEventListener("input", () => {
+    if (normalizeYes(same.value)) apply();
+  });
+  c2Dom.addEventListener("input", () => {
+    if (!c2Dom.disabled) same.value = "No";
+  });
+  panel._hipotecaFichaApplyDomicilioSync = apply;
+  apply();
+};
+
+const setupHipotecaFichaComputedInputs = (panel) => {
+  if (!panel) return;
+  if (typeof panel._hipotecaFichaUpdateComputed === "function") {
+    panel._hipotecaFichaUpdateComputed();
+    return;
+  }
+  panel.dataset.hipotecaComputedListeners = "1";
+
+  const precioInput = panel.querySelector('[name="precio"]');
+  const hipotecaInput = panel.querySelector('[name="importe_hipoteca"]');
+  const porcentajeInput = panel.querySelector('[name="porcentaje"]');
+  const comisionInput = panel.querySelector('[name="comision"]');
+  const comisionJuanInput = panel.querySelector('[name="comision_juan"]');
+  const cesionInput = panel.querySelector('[name="cesion"]');
+  const comisionModerniaInput = panel.querySelector('[name="comision_modernia"]');
+  const oficinaInput = panel.querySelector('[name="oficina"]');
+  const inmobiliariaHidden = panel.querySelector('[name="inmobiliaria_compra"]');
+  const cesionHint = panel.querySelector("#hipotecaCesionHint");
+
+  const normalizeText = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .replace(/\s+/g, " ");
+
+  const MALAGA_BONUS_OFFICES = new Set([
+    "modernia norte",
+    "modernia oeste",
+    "modernia centro",
+    "verifika2 norte",
+    "verifika2 oeste",
+    "verifika2 centro",
+    "malaga norte",
+    "malaga oeste",
+    "malaga centro",
+  ]);
+
+  const updateOficinaInmobiliaria = () => {
+    if (!oficinaInput || !inmobiliariaHidden) return;
+    const oficina = String(oficinaInput.value || "").trim();
+    const inmo = String(inmobiliariaHidden.value || "").trim();
+    if (!oficina && inmo) {
+      oficinaInput.value = inmo;
+    }
+    if (oficina && inmo !== oficina) {
+      inmobiliariaHidden.value = oficina;
+    }
+  };
+
+  const updateFinanciacionPct = () => {
+    if (!porcentajeInput) return;
+    const precio = toNumber(precioInput?.value);
+    const hipoteca = toNumber(hipotecaInput?.value);
+    if (precio !== null && precio > 0 && hipoteca !== null) {
+      porcentajeInput.value = ((hipoteca / precio) * 100).toFixed(2);
+    } else {
+      porcentajeInput.value = "";
+    }
+  };
+
+  const updateCommissions = () => {
+    if (!comisionInput) return;
+    const total = toNumber(comisionInput.value);
+    const oficina = normalizeText(oficinaInput?.value);
+    const hasBonus = MALAGA_BONUS_OFFICES.has(oficina);
+    const cesionRate = hasBonus ? 0.25 : 0.2;
+    if (cesionHint) {
+      cesionHint.textContent = hasBonus ? "Aplicando 25% (Centro/Norte/Oeste)." : "Aplicando 20% general.";
+    }
+    if (total === null) return;
+    const juan = round2(total * 0.2);
+    const cesion = round2(total * cesionRate);
+    const modernia = round2(Math.max(total - juan - cesion, 0));
+    if (comisionJuanInput) comisionJuanInput.value = formatMoneyInputValue(juan);
+    if (cesionInput) cesionInput.value = formatMoneyInputValue(cesion);
+    if (comisionModerniaInput) comisionModerniaInput.value = formatMoneyInputValue(modernia);
+  };
+
+  ["input", "change"].forEach((evt) => {
+    precioInput?.addEventListener(evt, updateFinanciacionPct);
+    hipotecaInput?.addEventListener(evt, updateFinanciacionPct);
+    oficinaInput?.addEventListener(evt, () => {
+      updateOficinaInmobiliaria();
+      updateCommissions();
+    });
+    comisionInput?.addEventListener(evt, updateCommissions);
+  });
+
+  panel._hipotecaFichaUpdateComputed = () => {
+    updateOficinaInmobiliaria();
+    updateFinanciacionPct();
+    updateCommissions();
+  };
+  panel._hipotecaFichaUpdateComputed();
 };
 
 const openHipotecaFicha = async (recordId, prefetched = null) => {
@@ -28030,10 +28350,14 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
   autofillHipotecaLiquidacionFromFicha(panel);
   refreshHipotecaLiquidacionComputedControls(panel);
+  setupHipotecaFichaMoneyInputs(panel);
+  setupHipotecaFichaDomicilioSync(panel);
+  setupHipotecaFichaComputedInputs(panel);
 
   if (panel.dataset.liquidacionListeners !== "1") {
     panel.dataset.liquidacionListeners = "1";
     panel.querySelectorAll('[data-json="liquidacion_json"][data-path]:not([readonly])').forEach((el) => {
+      el.addEventListener("input", () => refreshHipotecaLiquidacionComputedControls(panel));
       el.addEventListener("change", () => refreshHipotecaLiquidacionComputedControls(panel));
     });
   }
@@ -59019,10 +59343,15 @@ if (hipotecaForm) {
 
   const hasMalagaBonusOffice = (value) => MALAGA_BONUS_OFFICES.has(canonicalOffice(value));
 
+  const syncInmobiliariaCompra = () => {
+    if (!inmobiliariaCompraInput || !oficinaInput) return;
+    inmobiliariaCompraInput.value = String(oficinaInput.value || "").trim();
+  };
+
   const updateCommissions = () => {
     if (!comisionInput) return;
     const total = Number(comisionInput.value);
-    const oficina = oficinaInput?.value || inmobiliariaCompraInput?.value || "";
+    const oficina = oficinaInput?.value || "";
     const hasBonus = hasMalagaBonusOffice(oficina);
     const cesionRate = hasBonus ? 0.25 : 0.2;
     if (cesionHint) {
@@ -59054,6 +59383,8 @@ if (hipotecaForm) {
       if (porcentajeInput) {
         porcentajeInput.value = ((hipoteca / precio) * 100).toFixed(2);
       }
+    } else if (porcentajeInput) {
+      porcentajeInput.value = "";
     }
   };
 
@@ -59061,12 +59392,12 @@ if (hipotecaForm) {
     comisionInput.addEventListener("input", updateCommissions);
   }
   if (oficinaInput) {
-    oficinaInput.addEventListener("input", updateCommissions);
+    oficinaInput.addEventListener("input", () => {
+      syncInmobiliariaCompra();
+      updateCommissions();
+    });
   }
-  if (inmobiliariaCompraInput) {
-    inmobiliariaCompraInput.addEventListener("input", updateCommissions);
-    inmobiliariaCompraInput.addEventListener("change", updateCommissions);
-  }
+  syncInmobiliariaCompra();
   if (precioInput) {
     precioInput.addEventListener("input", updateFinanciacion);
   }
