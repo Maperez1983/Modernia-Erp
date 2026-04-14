@@ -9864,6 +9864,10 @@ const renderWorkspaceRrhhHub = () => {
                           <input id="rrhhAccessCreateEmail" autocomplete="off" placeholder="email@empresa.com" value="${escapeHtml(String(employee?.email || ""))}" />
                           </label>
                           <label>
+                            Contraseña
+                            <input id="rrhhAccessCreatePassword" type="password" autocomplete="new-password" placeholder="Opcional (mín. 8 caracteres)" />
+                          </label>
+                          <label>
                             Rol
                             <select id="rrhhAccessCreateRol">
                               ${ADMIN_ROLE_OPTIONS.map((r) => `<option ${r === "Lectura" ? "selected" : ""}>${escapeHtml(r)}</option>`).join("")}
@@ -9888,13 +9892,23 @@ const renderWorkspaceRrhhHub = () => {
                 `}
 	              ${user?.id ? `
 	                <div class="workspace-rrhh-row">
-	                  <div>
-	                    <strong>Invitación (enlace de acceso)</strong>
+                  <div>
+                    <strong>Invitación (enlace de acceso)</strong>
                     <div class="muted">Envía un link para activar el acceso y definir contraseña.</div>
                     <div class="muted" id="rrhhMemberInviteLink"></div>
                   </div>
                   <div class="workspace-rrhh-row-actions">
                     <button type="button" class="secondary ghost button-inline" data-rrhh-member-invite="${escapeHtml(String(user.id))}">Enviar invitación</button>
+                  </div>
+                </div>
+                <div class="workspace-rrhh-row">
+                  <div>
+                    <strong>Establecer contraseña</strong>
+                    <div class="muted">Guarda una contraseña manual para este usuario (mínimo 8 caracteres).</div>
+                    <input id="rrhhMemberManualPassword" class="rrhh-inline-input" type="password" value="" placeholder="Nueva contraseña..." autocomplete="new-password" />
+                  </div>
+                  <div class="workspace-rrhh-row-actions">
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-set="${escapeHtml(String(user.id))}">Guardar</button>
                   </div>
                 </div>
                 <div class="workspace-rrhh-row">
@@ -11250,16 +11264,21 @@ const renderWorkspaceRrhhHub = () => {
       }
       const usuario = String(document.getElementById("rrhhAccessCreateUsuario")?.value || "").trim();
       const email = String(document.getElementById("rrhhAccessCreateEmail")?.value || "").trim();
+      const password = String(document.getElementById("rrhhAccessCreatePassword")?.value || "");
       const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "Lectura").trim();
       const scope = workspaceRrhhHub.querySelector('[data-rrhh-service-scope="new"]');
       const keys = scope
         ? Array.from(scope.querySelectorAll('input[type="checkbox"][data-rrhh-service-check]'))
             .filter((input) => input.checked)
-            .map((input) => normalizeSimple(String(input.dataset.rrhhServiceCheck || "")))
+            .map((input) => normalizeWorkspaceServiceKey(String(input.dataset.rrhhServiceCheck || "")))
             .filter(Boolean)
         : [];
       if (!usuario || !email) {
         if (status) status.textContent = "Usuario y email requeridos.";
+        return;
+      }
+      if (password && password.trim() && password.trim().length < 8) {
+        if (status) status.textContent = "La contraseña debe tener al menos 8 caracteres.";
         return;
       }
       if (!keys.length) {
@@ -11278,6 +11297,7 @@ const renderWorkspaceRrhhHub = () => {
           apellido,
           usuario,
           email,
+          password: password && password.trim() ? password : "",
           servicio: keys.join(", "),
           rol,
           registro_horario_activo: 1,
@@ -11355,6 +11375,36 @@ const renderWorkspaceRrhhHub = () => {
         if (accessStatus) accessStatus.textContent = error.message || "No se pudo generar la contraseña.";
       } finally {
         passBtn.disabled = false;
+      }
+    });
+  }
+  const passSetBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-set]");
+  if (passSetBtn) {
+    passSetBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(passSetBtn.dataset.rrhhMemberPassSet || "").trim();
+      if (!userId) return;
+      const input = document.getElementById("rrhhMemberManualPassword");
+      const password = String(input?.value || "");
+      if (!password.trim()) {
+        if (accessStatus) accessStatus.textContent = "Introduce una contraseña.";
+        return;
+      }
+      if (password.trim().length < 8) {
+        if (accessStatus) accessStatus.textContent = "La contraseña debe tener al menos 8 caracteres.";
+        return;
+      }
+      passSetBtn.disabled = true;
+      if (accessStatus) accessStatus.textContent = "Guardando contraseña...";
+      try {
+        const resp = await apiPost("/api/usuarios_update", { id: userId, password, workspace_id: state.currentWorkspaceId });
+        if (resp?.error) throw new Error(resp.error);
+        if (input) input.value = "";
+        if (accessStatus) accessStatus.textContent = "Contraseña guardada.";
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo guardar la contraseña.";
+      } finally {
+        passSetBtn.disabled = false;
       }
     });
   }
