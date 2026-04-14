@@ -19752,7 +19752,7 @@ const formatMoneyInputValue = (value) => {
   return `${number.toLocaleString("es-ES", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })} €`;
+  })}€`;
 };
 
 const isLegacySeguroRow = (row, columns = []) => {
