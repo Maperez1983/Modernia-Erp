@@ -47038,6 +47038,50 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/postal_codes":
+            poblacion = (params.get("poblacion", [""])[0] or "").strip()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            if not poblacion:
+                json_response(self, {"error": "poblacion requerida"}, status=400)
+                return
+            poblacion_norm = poblacion.lower()
+
+            def _query(with_provincia: bool):
+                where = ["LOWER(TRIM(poblacion)) = ?"]
+                values = [poblacion_norm]
+                if with_provincia and provincia:
+                    where.append("TRIM(provincia) = ?")
+                    values.append(provincia)
+                sql = f"""
+                    SELECT DISTINCT codigo_postal
+                    FROM postal_catalogo
+                    WHERE {' AND '.join(where)}
+                    ORDER BY codigo_postal
+                    LIMIT 500
+                """
+                rows = conn.execute(sql, tuple(values)).fetchall()
+                codes = []
+                for row in rows:
+                    cp = normalize_postal_code(row["codigo_postal"])
+                    if cp and cp not in codes:
+                        codes.append(cp)
+                return codes
+
+            codes = _query(True)
+            if not codes:
+                codes = _query(False)
+
+            json_response(
+                self,
+                {
+                    "poblacion": poblacion,
+                    "provincia": provincia,
+                    "codes": codes,
+                    "total": len(codes),
+                },
+            )
+            return
+
         if path == "/api/catalogo_poblaciones":
             limit_raw = (params.get("limit", [""])[0] or "").strip()
             provincia = (params.get("provincia", [""])[0] or "").strip()
