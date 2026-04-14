@@ -17313,10 +17313,18 @@ const isTcAzOther = (value) => String(value || "").trim().toUpperCase() === "OTR
 const renderTcAzBar = (container, scope, onChange) => {
   if (!container) return;
   const current = String(state.crmAz?.[scope] || "").trim().toUpperCase();
+  const mkSep = () => {
+    const sep = document.createElement("span");
+    sep.className = "tc-az-sep";
+    sep.textContent = "|";
+    sep.setAttribute("aria-hidden", "true");
+    return sep;
+  };
   const mkBtn = (label, value) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
+    btn.dataset.azValue = String(value || "");
     btn.classList.toggle("active", String(current || "") === String(value || ""));
     btn.addEventListener("click", () => {
       const next = String(value || "").trim().toUpperCase();
@@ -17330,6 +17338,7 @@ const renderTcAzBar = (container, scope, onChange) => {
   };
   container.innerHTML = "";
   TC_AZ_LETTERS.forEach((letter) => container.appendChild(mkBtn(letter, letter)));
+  container.appendChild(mkSep());
   container.appendChild(mkBtn("OTROS", "OTROS"));
   container.appendChild(mkBtn("TODO", ""));
 };
@@ -30342,19 +30351,19 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
   if (!items.length) return null;
   const table = document.createElement("table");
   table.className = "crm-dense-table crm-clientes-table";
-  const thead = document.createElement("thead");
-  thead.innerHTML = `
-    <tr>
-      <th style="width:34px;"></th>
-      <th>Cliente</th>
-      <th>Teléfono</th>
-      <th>Móvil</th>
-      <th>Otro tel.</th>
-      <th>Dirección</th>
-      <th>Nº</th>
-      <th>Localidad</th>
-    </tr>
-  `;
+	  const thead = document.createElement("thead");
+	  thead.innerHTML = `
+	    <tr>
+	      <th style="width:34px;"></th>
+	      <th>Cliente</th>
+	      <th>Teléfono</th>
+	      <th>Móvil</th>
+	      <th>Otro teléfono</th>
+	      <th>Dirección</th>
+	      <th>Número</th>
+	      <th>Localidad</th>
+	    </tr>
+	  `;
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
   const splitDireccionNumero = (raw) => {
@@ -30388,12 +30397,21 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
     checkbox.type = "checkbox";
     checkbox.dataset.clienteId = id;
     checkbox.addEventListener("click", (event) => event.stopPropagation());
-    selectTd.appendChild(checkbox);
-    tr.appendChild(selectTd);
+	    selectTd.appendChild(checkbox);
+	    tr.appendChild(selectTd);
 
-    const nameCell = document.createElement("td");
-    nameCell.textContent = String(row.nombre || "Sin nombre").trim();
-    tr.appendChild(nameCell);
+	    const nameCell = document.createElement("td");
+	    const nombre = String(row.nombre || "Sin nombre").trim();
+	    nameCell.innerHTML = `<a class="tc-link" href="#" data-open-cliente="1">${escapeHtml(nombre)}</a>`;
+	    const anchor = nameCell.querySelector('a[data-open-cliente]');
+	    if (anchor) {
+	      anchor.addEventListener("click", (event) => {
+	        event.preventDefault();
+	        event.stopPropagation();
+	        open();
+	      });
+	    }
+	    tr.appendChild(nameCell);
 
     const telCell = document.createElement("td");
     telCell.textContent = String(row.telefono || "").trim();
@@ -33396,17 +33414,17 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   table.className = "crm-dense-table crm-inmuebles-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  [
-    "",
-    "Focalización",
-    "Inmueble",
-    "Propietario",
-    "Inmueble: Tel. pr.",
-    "Subtipología",
-    "Motivación",
-    "Necesidad",
-    "Precio encargo",
-  ].forEach((label) => {
+	  [
+	    "",
+	    "Focalización",
+	    "Inmueble",
+	    "Propietario",
+	    "Inmueble: Tel. pr.",
+	    "Subtipología inm.",
+	    "Motivación",
+	    "Necesidad de vta.",
+	    "Precio encargo",
+	  ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
     trHead.appendChild(th);
@@ -33453,12 +33471,20 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     focoTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(tone)}" aria-label="Focalización"></span>`;
     tr.appendChild(focoTd);
 
-    const inmuebleTd = document.createElement("td");
-    const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
-    const prefix = resolveCaptacionCodePrefix(stage);
-    const address = String(row.direccion || "").trim() || "Sin dirección";
-    inmuebleTd.textContent = `${prefix} - ${address}`;
-    tr.appendChild(inmuebleTd);
+	    const inmuebleTd = document.createElement("td");
+	    const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+	    const prefix = resolveCaptacionCodePrefix(stage);
+	    const address = String(row.direccion || "").trim() || "Sin dirección";
+	    inmuebleTd.innerHTML = `<a class="tc-link" href="#" data-open-inmueble="1">${escapeHtml(`${prefix} - ${address}`)}</a>`;
+	    const link = inmuebleTd.querySelector('a[data-open-inmueble]');
+	    if (link) {
+	      link.addEventListener("click", (event) => {
+	        event.preventDefault();
+	        event.stopPropagation();
+	        tr.click();
+	      });
+	    }
+	    tr.appendChild(inmuebleTd);
 
     const propTd = document.createElement("td");
     propTd.textContent = String(row.propietario_principal || row.propietarios || row.propietario || "")

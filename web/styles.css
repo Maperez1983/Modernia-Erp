@@ -3509,7 +3509,13 @@ body.crm-fin #companySummary {
 #crmSection table.crm-dense-table td {
   padding: 4px 8px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.10);
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
   vertical-align: top;
+}
+
+#crmSection table.crm-dense-table th:last-child,
+#crmSection table.crm-dense-table td:last-child {
+  border-right: none;
 }
 
 #crmSection table.crm-dense-table td.crm-dense-main {
@@ -3566,6 +3572,7 @@ body.crm-fin #companySummary {
   height: 10px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(15, 23, 42, 0.22);
   margin-top: 0;
 }
 
@@ -4925,26 +4932,51 @@ body.crm-fin #companySummary {
 #crmSection .tc-azbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 0;
   align-items: center;
-  padding: 10px 2px 12px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  padding: 6px 2px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  font-family: var(--font-ui);
 }
 
 #crmSection .tc-azbar button {
-  padding: 4px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #fff;
-  color: var(--ink-soft);
-  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: rgba(var(--ink-rgb), 0.62);
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
+  line-height: 1.2;
+}
+
+#crmSection .tc-azbar button:hover {
+  text-decoration: underline;
+  color: rgba(var(--ink-rgb), 0.86);
 }
 
 #crmSection .tc-azbar button.active {
-  border-color: rgba(212, 175, 55, 0.6);
-  color: var(--ink);
-  background: rgba(212, 175, 55, 0.14);
+  color: rgba(var(--ink-rgb), 0.92);
+  background: rgba(var(--gold-rgb), 0.14);
+}
+
+#crmSection .tc-azbar .tc-az-sep {
+  display: inline-block;
+  margin: 0 8px;
+  color: rgba(var(--ink-rgb), 0.35);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#crmSection .tc-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#crmSection .tc-link:hover {
+  color: #1e40af;
 }
 
 #crmSection .tc-listfoot {
