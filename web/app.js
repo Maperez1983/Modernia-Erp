@@ -27647,6 +27647,14 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Sobran en cuenta</span>
                 <input data-json="liquidacion_json" data-path="cuadre.sobran_en_cuenta" inputmode="decimal" readonly />
               </label>
+              <label>
+                <span>Total medios de pago (auto)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.total_medios_pago" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Diferencia vs escriturado (auto)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.diferencia_medios_pago" inputmode="decimal" readonly />
+              </label>
             </div>
           </div>
           </div>
@@ -27975,7 +27983,9 @@ const computeHipotecaLiquidacionComputed = (data) => {
       Number(entregas.senal || 0) -
       Number(entregas.transf_modernia || 0);
     if (Number.isFinite(autoIngresar)) {
-      entregas.ingresar_banco = round2(Math.max(autoIngresar, 0));
+      const base = Math.max(autoIngresar, 0);
+      const rounded100 = Math.ceil(base / 100) * 100;
+      entregas.ingresar_banco = round2(rounded100);
     }
   }
 
@@ -28069,6 +28079,20 @@ const computeHipotecaLiquidacionComputed = (data) => {
       cuadreCheq1.importe = round2(totalPercibirNum - Number(cuadreCheq2.importe || 0));
     }
   }
+
+  // Total medios de pago (como en el Excel): señal + deducciones vendedor + cheques.
+  const totalMediosPago =
+    Number(entregas.senal || 0) +
+    Number(vendedorDeducciones.cancelacion_economica || 0) +
+    Number(vendedorDeducciones.cancelacion_registral || 0) +
+    Number(vendedorDeducciones.deuda_ibi || 0) +
+    Number(vendedorDeducciones.retencion_no_residente || 0) +
+    Number(vendedorDeducciones.gestion_no_residente || 0) +
+    Number(cuadreCheq1.importe || 0) +
+    Number(cuadreCheq2.importe || 0);
+  cuadre.total_medios_pago = round2(totalMediosPago);
+  const escrituradoRef = Number(comprador.escriturado || comprador.precio_compra || 0);
+  cuadre.diferencia_medios_pago = round2(escrituradoRef - Number(cuadre.total_medios_pago || 0));
 
   liq.comprador = comprador;
   comprador.gastos_compraventa = gastosCv;
@@ -28166,6 +28190,8 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
     "cuadre.comision_cheques",
     "cuadre.cuota_socio",
     "cuadre.sobran_en_cuenta",
+    "cuadre.total_medios_pago",
+    "cuadre.diferencia_medios_pago",
   ];
   targets.forEach((path) => {
     const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);
