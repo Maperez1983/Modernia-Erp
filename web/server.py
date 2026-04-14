@@ -19491,6 +19491,9 @@ def ensure_tables(db_path):
         pass
     try:
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
+        ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
+        ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
+        ensure_column(conn, "hipotecas", "liquidacion_json", "liquidacion_json TEXT")
     except Exception:
         pass
     conn.execute(
@@ -20874,18 +20877,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-	          id TEXT PRIMARY KEY,
-	          workspace_id TEXT NOT NULL,
-	          empresa_id TEXT,
-	          nombre TEXT NOT NULL,
-	          referencia_catastral TEXT,
-	          cif TEXT,
-	          direccion TEXT,
-	          foto_edificio_key TEXT,
-	          presidente TEXT,
-	          secretario TEXT,
-	          estado TEXT NOT NULL DEFAULT 'Activa',
+            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT,
+              nombre TEXT NOT NULL,
+              referencia_catastral TEXT,
+              cif TEXT,
+              direccion TEXT,
+              foto_edificio_key TEXT,
+              presidente TEXT,
+              secretario TEXT,
+              estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -25847,13 +25850,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-	          c.cif,
-	          c.direccion,
-	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-	          c.presidente,
-	          c.secretario,
-	          c.estado,
+              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+              c.cif,
+              c.direccion,
+              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+              c.presidente,
+              c.secretario,
+              c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -38773,28 +38776,31 @@ class Handler(BaseHTTPRequestHandler):
                 "entidad": "banco",
                 "inmobiliaria": "inmobiliaria_compra",
             }
-	            allowed = (
-	                "cliente",
-	                "cliente_id",
-	                "banco",
-	                "precio",
-	                "importe_hipoteca",
-	                "porcentaje",
-	                "entrada",
-	                "comision",
-	                "oficina",
-	                "fecha_encargo",
-	                "encargo",
-	                "tipo_hipoteca",
-	                "fecha_firma",
-	                "cesion",
-	                "comision_juan",
-	                "comision_modernia",
-	                "inmobiliaria_compra",
-	                "asesor",
-	                "estado",
-	                "anio",
-	            )
+            allowed = (
+                "cliente",
+                "cliente_id",
+                "banco",
+                "precio",
+                "importe_hipoteca",
+                "porcentaje",
+                "entrada",
+                "comision",
+                "oficina",
+                "fecha_encargo",
+                "encargo",
+                "tipo_hipoteca",
+                "fecha_firma",
+                "cesion",
+                "comision_juan",
+                "comision_modernia",
+                "inmobiliaria_compra",
+                "asesor",
+                "estado",
+                "anio",
+                "cliente_inmueble_json",
+                "hipoteca_detalle_json",
+                "liquidacion_json",
+            )
             updates = {}
             for key in allowed:
                 if key in payload:
@@ -38817,10 +38823,32 @@ class Handler(BaseHTTPRequestHandler):
                     updates["cliente_id"] = incoming_cliente_id
                 else:
                     updates["cliente_id"] = None
-	            effective_comision = (
-	                updates.get("comision")
-	                if updates.get("comision") not in (None, "")
-	                else current_row["comision"]
+
+            for json_field in ("cliente_inmueble_json", "hipoteca_detalle_json", "liquidacion_json"):
+                if json_field not in updates:
+                    continue
+                value = updates.get(json_field)
+                if value in (None, ""):
+                    updates[json_field] = None
+                    continue
+                if isinstance(value, (dict, list)):
+                    updates[json_field] = json.dumps(value, ensure_ascii=False)
+                    continue
+                raw = str(value).strip()
+                if not raw:
+                    updates[json_field] = None
+                    continue
+                try:
+                    json.loads(raw)
+                except Exception:
+                    json_response(self, {"error": f"{json_field} no es JSON válido"}, status=400)
+                    return
+                updates[json_field] = raw
+
+            effective_comision = (
+                updates.get("comision")
+                if updates.get("comision") not in (None, "")
+                else current_row["comision"]
             )
             effective_agencia = (
                 updates.get("oficina")
