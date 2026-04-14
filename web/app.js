@@ -2609,12 +2609,13 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 		const crmLightningSidebar = document.getElementById("crmLightningSidebar");
 		const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
 			const crmInsertModal = document.getElementById("crmInsertModal");
-			const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
-			const crmInsertSearch = document.getElementById("crmInsertSearch");
-			const crmInsertList = document.getElementById("crmInsertList");
-			const crmClienteModal = document.getElementById("crmClienteModal");
-			const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
-			const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
+				const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
+				const crmInsertSearch = document.getElementById("crmInsertSearch");
+				const crmInsertList = document.getElementById("crmInsertList");
+				let crmInsertAnchorEl = null;
+				const crmClienteModal = document.getElementById("crmClienteModal");
+				const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
+				const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
 			const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
 			const crmClienteCreateDuplicates = document.getElementById("crmClienteCreateDuplicates");
 			const crmCaptacionModal = document.getElementById("crmCaptacionModal");
@@ -17470,33 +17471,37 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
-	  if (next) {
-	    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
-	    const isAnchored = Boolean(anchorEl);
-	    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
-	    crmInsertModal.classList.toggle("crm-insert-modal--dropdown", !isAnchored);
-	    // Cuando se abre desde un botón, lo mostramos como dropdown flotante (evita invadir el sidebar).
-	    if (isAnchored) {
-	      positionCrmInsertModal(anchorEl);
-	    } else {
-	      crmInsertModal.style.removeProperty("--crm-insert-left");
-      crmInsertModal.style.removeProperty("--crm-insert-top");
-    }
-    setCrmRecentOpen(false);
-    setCrmClienteModalOpen(false);
-    setCrmCaptacionModalOpen(false);
-    if (crmInsertSearch) {
+		  if (next) {
+		    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+		    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+		    const preferAnchored = viewportW >= 821; // iPad+ / escritorio: menú flotante, móvil: modal completo
+		    const isAnchored = Boolean(anchorEl && preferAnchored);
+		    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+		    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+		    if (isAnchored) {
+		      crmInsertAnchorEl = anchorEl;
+		      positionCrmInsertModal(anchorEl);
+		    } else {
+		      crmInsertAnchorEl = null;
+		      crmInsertModal.style.removeProperty("--crm-insert-left");
+		      crmInsertModal.style.removeProperty("--crm-insert-top");
+		    }
+	    setCrmRecentOpen(false);
+	    setCrmClienteModalOpen(false);
+	    setCrmCaptacionModalOpen(false);
+	    if (crmInsertSearch) {
       crmInsertSearch.value = "";
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
     filterCrmInsertList();
-  } else {
-    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-    crmInsertModal.classList.add("crm-insert-modal--dropdown");
-    crmInsertModal.style.removeProperty("--crm-insert-left");
-    crmInsertModal.style.removeProperty("--crm-insert-top");
-  }
-};
+	  } else {
+	    crmInsertAnchorEl = null;
+	    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+	    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+	    crmInsertModal.style.removeProperty("--crm-insert-left");
+	    crmInsertModal.style.removeProperty("--crm-insert-top");
+	  }
+	};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -52459,11 +52464,11 @@ if (crmInsertModal && (crmQuickNewBtn || crmTopNewBtn)) {
     setCrmQuickNewOpen(false);
   });
 
-  window.addEventListener("resize", () => {
-    if (crmInsertModal.classList.contains("hidden")) return;
-    if (!crmInsertModal.classList.contains("crm-insert-modal--anchored")) return;
-    positionCrmInsertModal(crmTopNewBtn);
-  });
+	  window.addEventListener("resize", () => {
+	    if (crmInsertModal.classList.contains("hidden")) return;
+	    if (!crmInsertModal.classList.contains("crm-insert-modal--anchored")) return;
+	    positionCrmInsertModal(crmInsertAnchorEl || crmTopNewBtn || crmQuickNewBtn);
+	  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
