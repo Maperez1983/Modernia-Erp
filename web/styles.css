@@ -4801,8 +4801,141 @@ body.crm-fin #companySummary {
 #crmSection .crm-agenda-calendar .tc-day-scroll {
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 8px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #fff;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-users {
+  display: grid;
+  gap: 14px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-user-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.78);
+  margin: 0 0 6px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-user-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-user-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--gold-rgb), 0.45);
+  background: rgba(var(--gold-rgb), 0.14);
+  color: rgba(var(--ink-rgb), 0.86);
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-scroll,
+#crmSection .crm-agenda-calendar .tc-dayone-scroll {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-grid,
+#crmSection .crm-agenda-calendar .tc-dayone-grid {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-corner,
+#crmSection .crm-agenda-calendar .tc-dayone-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: rgba(248, 250, 252, 0.95);
+  border-right: 1px solid rgba(15, 23, 42, 0.12);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-head,
+#crmSection .crm-agenda-calendar .tc-dayone-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(248, 250, 252, 0.95);
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  border-right: 1px solid rgba(15, 23, 42, 0.12);
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-col,
+#crmSection .crm-agenda-calendar .tc-dayone-col {
+  position: relative;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 1) 0,
+      rgba(255, 255, 255, 1) 25px,
+      rgba(15, 23, 42, 0.06) 25px,
+      rgba(15, 23, 42, 0.06) 26px
+    );
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-event,
+#crmSection .crm-agenda-calendar .tc-dayone-event {
+  position: absolute;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 6px 8px;
+  background: rgba(248, 250, 252, 0.95);
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+#crmSection .crm-agenda-calendar .tc-weektime-event.cancelled,
+#crmSection .crm-agenda-calendar .tc-dayone-event.cancelled {
+  opacity: 0.55;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-event-time {
+  font-weight: 900;
+  font-size: 11px;
+  color: rgba(var(--ink-rgb), 0.76);
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-event-title {
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-event-meta {
+  font-size: 11px;
+  color: rgba(var(--ink-rgb), 0.62);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #crmSection .crm-agenda-calendar .tc-day-grid {
