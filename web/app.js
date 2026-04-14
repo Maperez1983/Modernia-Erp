@@ -23606,18 +23606,17 @@ const renderEditableGrid = (grid, fields, data, target) => {
       openBtn.type = "button";
       openBtn.className = "secondary catastro-button";
       openBtn.innerHTML = buildCatastroButtonInner("Abrir Catastro");
-      openBtn.addEventListener("click", () => {
-        const ref = String(refInput ? refInput.value : "").trim();
-        const address = buildInmuebleDisplayAddress({
-          direccion: String(inputMap?.direccion?.value || "").trim(),
-          poblacion: String(inputMap?.poblacion?.value || "").trim(),
-          provincia: String(inputMap?.provincia?.value || "").trim(),
-          codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
-        });
-        const url = buildCatastroUrl(ref, address);
-        const win = window.open(url, "_blank", "noopener,noreferrer");
-        if (!win) window.location.assign(url);
-      });
+	      openBtn.addEventListener("click", () => {
+	        const ref = String(refInput ? refInput.value : "").trim();
+	        const address = buildInmuebleDisplayAddress({
+	          direccion: String(inputMap?.direccion?.value || "").trim(),
+	          poblacion: String(inputMap?.poblacion?.value || "").trim(),
+	          provincia: String(inputMap?.provincia?.value || "").trim(),
+	          codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
+	        });
+	        const url = buildCatastroUrl(ref, address);
+	        openExternalUrl(url);
+	      });
       actions.appendChild(openBtn);
       const lookupBtn = document.createElement("button");
       lookupBtn.type = "button";
@@ -24158,6 +24157,55 @@ const CATASTRO_ICON_HTML = `
 
 const buildCatastroButtonInner = (label) =>
   `<span class="catastro-icon catastro-icon--catastro" aria-hidden="true">${CATASTRO_ICON_HTML}</span><span>${label}</span>`;
+
+const openExternalUrl = (url) => {
+  const href = String(url || "").trim();
+  if (!href) return;
+
+  const isStandalone =
+    Boolean(window.navigator && window.navigator.standalone) ||
+    Boolean(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+
+  // iOS PWA/standalone: abrir pestañas suele fallar, mejor navegar en la misma.
+  if (isStandalone) {
+    try {
+      window.location.assign(href);
+    } catch {
+      window.location.href = href;
+    }
+    return;
+  }
+
+  let win = null;
+  try {
+    win = window.open(href, "_blank", "noopener,noreferrer");
+  } catch {
+    win = null;
+  }
+
+  window.setTimeout(() => {
+    try {
+      if (!win || win.closed) {
+        window.location.assign(href);
+        return;
+      }
+      // Algunos navegadores devuelven una ventana "about:blank" aunque bloqueen navegación.
+      try {
+        if (win.location && String(win.location.href || "") === "about:blank") {
+          win.location.href = href;
+        }
+      } catch {
+        window.location.assign(href);
+      }
+    } catch {
+      try {
+        window.location.assign(href);
+      } catch {
+        window.location.href = href;
+      }
+    }
+  }, 160);
+};
 
 const buildCatastroUrl = (ref, address) => {
   const cleanRef = String(ref || "")
@@ -24773,11 +24821,11 @@ const syncInmuebleCatastroFicha = async (inputMap = {}) => {
         ? "Ficha Catastro generada, datos sincronizados y documento guardado."
         : "Datos catastrales sincronizados."
     );
-    if (docUrl) {
-      window.open(docUrl, "_blank", "noopener");
-    }
-    return data;
-  } catch {
+	    if (docUrl) {
+	      openExternalUrl(docUrl);
+	    }
+	    return data;
+	  } catch {
     setInmuebleSaveStatus("No se pudo sincronizar Catastro.");
     return null;
   }
@@ -52019,39 +52067,20 @@ if (crmCaptacionCloseBtn) {
 
 if (crmCaptacionCatastroOpen) {
   crmCaptacionCatastroOpen.addEventListener("click", () => {
-    const safeOpenExternal = (url) => {
-      const href = String(url || "").trim();
-      if (!href) return;
-      let win = null;
-      try {
-        win = window.open(href, "_blank", "noopener,noreferrer");
-      } catch {
-        win = null;
-      }
-      window.setTimeout(() => {
-        try {
-          if (!win || win.closed) {
-            window.location.assign(href);
-          }
-        } catch {
-          window.location.assign(href);
-        }
-      }, 150);
-    };
     try {
       const form = crmCaptacionCreateForm;
       const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
       const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
       const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
-	      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
-	      const url = buildCatastroUrl("", address);
-	      safeOpenExternal(url);
-	    } catch {
-	      const fallback = "https://www.sedecatastro.gob.es/";
-	      safeOpenExternal(fallback);
-	    }
-	  });
-	}
+		      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
+		      const url = buildCatastroUrl("", address);
+		      openExternalUrl(url);
+		    } catch {
+		      const fallback = "https://www.sedecatastro.gob.es/";
+		      openExternalUrl(fallback);
+		    }
+		  });
+		}
 
 if (crmCaptacionCreateForm) {
   crmCaptacionCreateForm.addEventListener("submit", async (event) => {
@@ -56831,17 +56860,17 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    }, 120);
 	  };
 
-	  const openCatastroForCurrent = () => {
-	    try {
-	      const ctx = state.currentInmuebleContext || {};
-	      const inmueble = ctx.inmueble || {};
-	      const address = [inmueble.direccion, inmueble.poblacion, inmueble.provincia, "España"].filter(Boolean).join(", ");
-	      const url = buildCatastroUrl(String(inmueble.referencia_catastral || "").trim(), address);
-	      safeOpenExternal(url || "https://www.sedecatastro.gob.es/");
-	    } catch {
-	      safeOpenExternal("https://www.sedecatastro.gob.es/");
-	    }
-	  };
+		  const openCatastroForCurrent = () => {
+		    try {
+		      const ctx = state.currentInmuebleContext || {};
+		      const inmueble = ctx.inmueble || {};
+		      const address = [inmueble.direccion, inmueble.poblacion, inmueble.provincia, "España"].filter(Boolean).join(", ");
+		      const url = buildCatastroUrl(String(inmueble.referencia_catastral || "").trim(), address);
+		      openExternalUrl(url || "https://www.sedecatastro.gob.es/");
+		    } catch {
+		      openExternalUrl("https://www.sedecatastro.gob.es/");
+		    }
+		  };
 
 	  const renderChecklistPreview = (rows = []) => {
 	    if (!inmuebleGuidedChecklistPreview) return;
@@ -60078,8 +60107,7 @@ if (captacionForm) {
       const direccion = String(getCaptacionField("direccion")?.value || "").trim();
       const ref = String(getCaptacionField("referencia_catastral")?.value || "").trim();
       const url = buildCatastroUrl(ref, direccion);
-      const win = window.open(url, "_blank", "noopener,noreferrer");
-      if (!win) window.location.href = url;
+      openExternalUrl(url);
     });
   }
   captacionForm.addEventListener("submit", async (event) => {
