@@ -17465,14 +17465,15 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
-	  if (next) {
-	    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
-	    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
-	    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
-	    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
-	    if (isAnchored) {
-	      positionCrmInsertModal(anchorEl);
-	    } else {
+  if (next) {
+    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+    const isAnchored = Boolean(anchorEl && anchorEl === crmTopNewBtn);
+    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+    crmInsertModal.classList.toggle("crm-insert-modal--dropdown", !isAnchored);
+    // Cuando se abre desde la topbar, lo mostramos como dropdown flotante (no dentro del sidebar).
+    if (isAnchored) {
+      positionCrmInsertModal(anchorEl);
+    } else {
       crmInsertModal.style.removeProperty("--crm-insert-left");
       crmInsertModal.style.removeProperty("--crm-insert-top");
     }
@@ -17483,13 +17484,14 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
       crmInsertSearch.value = "";
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
-	    filterCrmInsertList();
-	  } else {
-	    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-	    crmInsertModal.style.removeProperty("--crm-insert-left");
-	    crmInsertModal.style.removeProperty("--crm-insert-top");
-	  }
-	};
+    filterCrmInsertList();
+  } else {
+    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+    crmInsertModal.classList.add("crm-insert-modal--dropdown");
+    crmInsertModal.style.removeProperty("--crm-insert-left");
+    crmInsertModal.style.removeProperty("--crm-insert-top");
+  }
+};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -22161,7 +22163,7 @@ const setInmuebleSaveStatus = (text) => {
     return;
   }
   inmuebleSaveStatus.textContent = text || "";
-  if (text === "Guardado") {
+  if (String(text || "").trim().startsWith("Guardado")) {
     window.clearTimeout(inmuebleSaveStatus._timer);
     inmuebleSaveStatus._timer = window.setTimeout(() => {
       inmuebleSaveStatus.textContent = "";
@@ -22169,9 +22171,12 @@ const setInmuebleSaveStatus = (text) => {
   }
 };
 
+const getPendingInlineEditsCount = () =>
+  pendingInlineEdits.inmueble.size + pendingInlineEdits.captacion.size;
+
 const syncInmuebleManualSaveButton = () => {
   if (!inmuebleManualSaveBtn) return;
-  const pending = pendingInlineEdits.inmueble.size + pendingInlineEdits.captacion.size;
+  const pending = getPendingInlineEditsCount();
   inmuebleManualSaveBtn.disabled = pending === 0 || !state.currentInmuebleId;
   inmuebleManualSaveBtn.textContent = pending ? `Guardar (${pending})` : "Guardar";
 };
@@ -22180,6 +22185,10 @@ const markPendingInlineEdit = (target, field, value) => {
   if (target !== "inmueble" && target !== "captacion") return;
   pendingInlineEdits[target].set(field, value);
   syncInmuebleManualSaveButton();
+  const currentStatus = String(inmuebleSaveStatus?.textContent || "").trim();
+  if (!currentStatus || currentStatus === "Sin cambios" || currentStatus === "No hay cambios pendientes.") {
+    setInmuebleSaveStatus("Cambios pendientes");
+  }
 };
 
 const clearPendingInlineEdits = (target, fields = []) => {
@@ -22187,6 +22196,12 @@ const clearPendingInlineEdits = (target, fields = []) => {
   const keys = Array.isArray(fields) ? fields : Object.keys(fields || {});
   keys.forEach((key) => pendingInlineEdits[target].delete(key));
   syncInmuebleManualSaveButton();
+  if (getPendingInlineEditsCount() === 0 && state.currentInmuebleId) {
+    const currentStatus = String(inmuebleSaveStatus?.textContent || "").trim();
+    if (!currentStatus || currentStatus === "Cambios pendientes" || currentStatus === "No hay cambios pendientes.") {
+      setInmuebleSaveStatus("Sin cambios");
+    }
+  }
 };
 
 const scheduleSave = (key, fn, delay = 500) => {
@@ -36960,12 +36975,13 @@ const loadCrmInmuebles = () => {
         ],
         "Inventario saneado."
       );
-	    }
-	    [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
-	      target.textContent = estadoFilter === "todos"
-	        ? `Mostrando ${rows.length} inmuebles.`
-	        : `Mostrando ${rows.length} de ${allRows.length} inmuebles.`;
-	    });
+    }
+    [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
+      const azHint = az ? ` (A‑Z: ${az === "OTROS" ? "OTROS" : az} — pulsa TODO)` : "";
+      target.textContent = (estadoFilter === "todos"
+        ? `Mostrando ${rows.length} inmuebles.`
+        : `Mostrando ${rows.length} de ${allRows.length} inmuebles.`) + azHint;
+    });
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
     }
@@ -40409,6 +40425,7 @@ const openInmuebleDetail = (id, originView = "") => {
         crmWorkspaceShell.classList.add("hidden");
       }
       inmuebleDetail.classList.remove("hidden");
+      setInmuebleSaveStatus(getPendingInlineEditsCount() ? "Cambios pendientes" : "Sin cambios");
       if (!hasPendingPrefill) {
         setInmuebleTab("datos");
       }
@@ -40430,7 +40447,7 @@ if (inmuebleManualSaveBtn) {
       captacionUpdates.responsable = captacionUpdates.asesor;
     }
     if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
-      setInmuebleSaveStatus("No hay cambios pendientes.");
+      setInmuebleSaveStatus("Sin cambios");
       syncInmuebleManualSaveButton();
       return;
     }

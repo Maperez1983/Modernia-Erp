@@ -4091,6 +4091,123 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   line-height: 1.1;
 }
 
+/* Tecnocloud-like module bar (reusable fuera del CRM inmobiliaria) */
+.tc-modulebar {
+  position: static;
+  top: auto;
+  z-index: auto;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 10px;
+}
+
+.tc-modulebar::-webkit-scrollbar {
+  height: 0;
+}
+
+.tc-modulebar button {
+  box-shadow: none;
+}
+
+.tc-modulebar .tab.tc-module {
+  position: relative;
+  width: 92px;
+  height: 76px;
+  min-width: 92px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.74));
+  color: rgba(var(--ink-rgb), 0.94);
+}
+
+.tc-modulebar .tab.tc-module:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 23, 42, 0.22);
+}
+
+.tc-modulebar .tab.tc-module.active {
+  outline: 3px solid rgba(var(--sage-rgb), 0.25);
+  outline-offset: 2px;
+}
+
+.tc-modulebar .tc-mod-ico {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+}
+
+.tc-modulebar .tc-mod-ico svg {
+  width: 28px;
+  height: 28px;
+  stroke: currentColor;
+}
+
+.tc-modulebar .tc-mod-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  line-height: 1.05;
+}
+
+.tc-modulebar.tc-modulebar--compact {
+  gap: 8px;
+}
+
+.tc-modulebar.tc-modulebar--compact .tab.tc-module {
+  width: 104px;
+  min-width: 104px;
+  height: 66px;
+  padding: 8px 8px;
+  border-radius: 14px;
+}
+
+.tc-modulebar.tc-modulebar--compact .tc-mod-ico {
+  width: 26px;
+  height: 26px;
+}
+
+.tc-modulebar.tc-modulebar--compact .tc-mod-ico svg {
+  width: 24px;
+  height: 24px;
+}
+
+.tc-modulebar.tc-modulebar--compact .tc-mod-label {
+  font-size: 10.5px;
+}
+
+#viewTabs.tc-modulebar {
+  padding: 4px 0 0;
+  gap: 8px;
+}
+
+#viewTabs.tc-modulebar .tab.tc-module {
+  width: 96px;
+  min-width: 96px;
+  height: 74px;
+}
+
+#workspaceFincasTabs.tc-modulebar .tab.tc-module {
+  width: 102px;
+  min-width: 102px;
+}
+
 #crmSection .crm-workspace-tabs.crm-lightning-tabs {
   position: static;
   top: auto;
@@ -5395,7 +5512,7 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 #crmSection .tc-azbar button {
   padding: 2px 6px;
   border-radius: 4px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: rgba(var(--ink-rgb), 0.62);
   font-size: 11px;
@@ -5411,7 +5528,9 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 
 #crmSection .tc-azbar button.active {
   color: rgba(var(--ink-rgb), 0.92);
-  background: rgba(var(--gold-rgb), 0.14);
+  background: rgba(var(--gold-rgb), 0.26);
+  border: 1px solid rgba(var(--gold-rgb), 0.55);
+  box-shadow: 0 10px 18px rgba(242, 193, 78, 0.18);
 }
 
 #crmSection .tc-azbar .tc-az-sep {

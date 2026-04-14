@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=186" />
+    <link rel="stylesheet" href="styles.css?v=187" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -69,17 +69,52 @@
           <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
         </div>
         <div class="crm-workspace-shell">
-          <div class="crm-workspace-tabs" id="workspaceViewTabs">
-            <button class="tab active" type="button" data-workspace-view-tab="overview">Resumen</button>
-            <button class="tab" type="button" data-workspace-view-tab="tenant">Configuración</button>
+          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--compact" id="workspaceViewTabs" role="navigation" aria-label="Workspace">
+            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v6H4z" stroke="currentColor" stroke-width="2"/><path d="M4 14h8v6H4z" stroke="currentColor" stroke-width="2"/><path d="M14 14h6v6h-6z" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span class="tc-mod-label">Resumen</span>
+            </button>
+            <button class="tab tc-module" type="button" data-workspace-view-tab="tenant" title="Configuración">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3h-6L8.7 5.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.8 7.8 0 0 0-.1 1 7.8 7.8 0 0 0 .1 1l-2 1.5 2 3.5 2.4-1a7.4 7.4 0 0 0 1.7 1L9 21h6l.3-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Config</span>
+            </button>
           </div>
           <div class="crm-workspace-view" data-workspace-view="tenant">
-            <div class="crm-workspace-tabs" id="workspaceTenantTabs">
-              <button class="tab active" type="button" data-workspace-tenant-tab="general">General</button>
-              <button class="tab" type="button" data-workspace-tenant-tab="permisos">Permisos</button>
-              <button class="tab" type="button" data-workspace-tenant-tab="empresas">Empresas</button>
-              <button class="tab" type="button" data-workspace-tenant-tab="usuarios">Usuarios</button>
-              <button class="tab" type="button" data-workspace-tenant-tab="modulos">Módulos</button>
+            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--compact" id="workspaceTenantTabs" role="navigation" aria-label="Configuración workspace">
+              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
+                <span class="tc-mod-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span class="tc-mod-label">General</span>
+              </button>
+              <button class="tab tc-module" type="button" data-workspace-tenant-tab="permisos" title="Permisos">
+                <span class="tc-mod-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                </span>
+                <span class="tc-mod-label">Permisos</span>
+              </button>
+              <button class="tab tc-module" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
+                <span class="tc-mod-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V7h10v14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 10h6v11h-6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7 11h3M7 15h3M7 19h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span class="tc-mod-label">Empresas</span>
+              </button>
+              <button class="tab tc-module" type="button" data-workspace-tenant-tab="usuarios" title="Usuarios">
+                <span class="tc-mod-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
+                </span>
+                <span class="tc-mod-label">Usuarios</span>
+              </button>
+              <button class="tab tc-module" type="button" data-workspace-tenant-tab="modulos" title="Módulos">
+                <span class="tc-mod-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" stroke="currentColor" stroke-width="2"/></svg>
+                </span>
+                <span class="tc-mod-label">Módulos</span>
+              </button>
             </div>
           </div>
         <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
@@ -1471,14 +1506,49 @@
               <p class="muted">Dashboard, comunidades, incidencias, proveedores, juntas, contabilidad y presupuestos.</p>
             </div>
           </div>
-          <div class="crm-workspace-tabs" id="workspaceFincasTabs">
-            <button class="tab active" type="button" data-fincas-tab-btn="dashboard">Dashboard</button>
-            <button class="tab" type="button" data-fincas-tab-btn="comunidades">Comunidades</button>
-            <button class="tab" type="button" data-fincas-tab-btn="incidencias">Incidencias</button>
-            <button class="tab" type="button" data-fincas-tab-btn="proveedores">Proveedores</button>
-            <button class="tab" type="button" data-fincas-tab-btn="juntas">Juntas</button>
-            <button class="tab" type="button" data-fincas-tab-btn="contabilidad">Contabilidad</button>
-            <button class="tab" type="button" data-fincas-tab-btn="presupuestos">Presupuestos</button>
+          <div class="crm-workspace-tabs tc-modulebar" id="workspaceFincasTabs" role="navigation" aria-label="Fincas">
+            <button class="tab tc-module active" type="button" data-fincas-tab-btn="dashboard" title="Dashboard">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v7H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Dashboard</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="comunidades" title="Comunidades">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V10l8-5 8 5v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-6h6v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Comunidad</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="incidencias" title="Incidencias">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 9v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3h3.4l8.3 14H2l8.3-14Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Incid.</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="proveedores" title="Proveedores">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 20V10l6-4 6 4v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20v-6h4v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Prov.</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="juntas" title="Juntas">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span class="tc-mod-label">Juntas</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="contabilidad" title="Contabilidad">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/><path d="M9 8h6M9 12h6M9 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Conta.</span>
+            </button>
+            <button class="tab tc-module" type="button" data-fincas-tab-btn="presupuestos" title="Presupuestos">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h10v18H7z" stroke="currentColor" stroke-width="2"/><path d="M9 7h6M9 11h6M9 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Presup.</span>
+            </button>
           </div>
         </div>
 
@@ -2113,20 +2183,85 @@
           </div>
           <div class="company-summary-meta" id="companySummaryMeta"></div>
         </div>
-        <div class="tabs" id="viewTabs">
-          <button class="tab active" data-tab="operativa">Dashboard</button>
-          <button class="tab hidden" data-tab="crm" id="crmTab">Inmobiliaria</button>
-          <button class="tab hidden" data-tab="gestoria-dash" id="gestoriaDashTab">Panel</button>
-          <button class="tab hidden" data-tab="gestoria-crm" id="fincasCrmTab">Clientes</button>
-          <button class="tab hidden" data-tab="gestoria-docs" id="gestoriaDocsTab">Inbox documental</button>
-          <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Campañas</button>
-          <button class="tab hidden" data-tab="seguros-crm" id="segurosCrmTab">CRM Seguros</button>
-          <button class="tab hidden" data-tab="fin-crm" id="finCrmTab">CRM Financiaciones</button>
-          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Presupuestos</button>
-          <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad</button>
-	          <button class="tab" data-tab="alta">Alta</button>
-          <button class="tab hidden" data-tab="fin-sim" id="finSimTab">Simulador</button>
-          <button class="tab hidden" data-tab="aie" id="aieTab">Personal AIE</button>
+        <div class="tabs tc-modulebar" id="viewTabs" role="navigation" aria-label="Menú principal">
+          <button class="tab tc-module active" data-tab="operativa" title="Dashboard">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v7H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Dashboard</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="crm" id="crmTab" title="Inmobiliaria">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Inmobiliaria</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-dash" id="gestoriaDashTab" title="Panel gestoría">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 15v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 15V8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 15V11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Panel</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-crm" id="fincasCrmTab" title="Clientes gestoría">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
+            </span>
+            <span class="tc-mod-label">Clientes</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-docs" id="gestoriaDocsTab" title="Inbox documental">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v12H4z" stroke="currentColor" stroke-width="2"/><path d="m4 7 8 7 8-7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Inbox</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab" title="Campañas">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M7 11h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Campañas</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="seguros-crm" id="segurosCrmTab" title="CRM Seguros">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Seguros</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="fin-crm" id="finCrmTab" title="CRM Financiaciones">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 21V10l5-3 5 3v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Finan.</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-fact" id="gestoriaFactTab" title="Presupuestos">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h10v18H7z" stroke="currentColor" stroke-width="2"/><path d="M9 7h6M9 11h6M9 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Presup.</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="gestoria-conta" id="gestoriaContaTab" title="Contabilidad">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/><path d="M9 8h6M9 12h6M9 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Conta.</span>
+          </button>
+          <button class="tab tc-module" data-tab="alta" title="Alta">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Alta</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="fin-sim" id="finSimTab" title="Simulador">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10v20H7z" stroke="currentColor" stroke-width="2"/><path d="M9 6h6M9 10h2M13 10h2M9 14h2M13 14h2M9 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Simul.</span>
+          </button>
+          <button class="tab tc-module hidden" data-tab="aie" id="aieTab" title="Personal AIE">
+            <span class="tc-mod-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="2"/><path d="M12 9h6M12 13h6M6 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="tc-mod-label">Personal</span>
+          </button>
         </div>
 	          <div id="crmSection" class="hidden">
 	          <div class="crm-lightning-shell">
@@ -2372,17 +2507,23 @@
 
 		              <div class="crm-side-sep" aria-hidden="true"></div>
 		              <button type="button" class="crm-side-item" data-crm-view="captaciones" title="Nuevas oportunidades">
-		                <span class="crm-side-ico" aria-hidden="true">🏠</span>
+		                <span class="crm-side-ico" aria-hidden="true">
+		                  <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+		                </span>
 		                <span class="crm-side-txt">Nuevas<br />Oport.</span>
 		              </button>
 			              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-agenda-open="day" title="Agenda">
-			                <span class="crm-side-ico" aria-hidden="true">📅</span>
+			                <span class="crm-side-ico" aria-hidden="true">
+			                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                </span>
 			                <span class="crm-side-txt">Agenda</span>
 			              </button>
 			              <div class="crm-side-grow" aria-hidden="true"></div>
 
 		              <button class="crm-side-item hidden" id="crmRecentBtn" type="button" title="Recientes" aria-haspopup="dialog" aria-controls="crmRecentMenu">
-		                <span class="crm-side-ico" aria-hidden="true">🕘</span>
+		                <span class="crm-side-ico" aria-hidden="true">
+		                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+		                </span>
 		                <span class="crm-side-txt">Recientes</span>
 		              </button>
 		              <div id="crmRecentMenu" class="crm-recent-menu hidden" role="dialog" aria-label="Elementos recientes">
@@ -5650,10 +5791,6 @@
               <form id="captacionForm">
                 <div class="form-grid inmo-grid">
                   <label>
-                    Focalización
-                    <input name="focalizacion" />
-                  </label>
-                  <label>
                     Responsable
                     <input name="responsable" />
                   </label>
@@ -6212,10 +6349,6 @@
               <p class="muted">Registro de compradores e inquilinos.</p>
               <form id="demandaForm">
                 <div class="form-grid">
-                  <label>
-                    Focalización
-                    <input name="focalizacion" />
-                  </label>
                   <label>
                     Pedido
                     <input name="pedido" placeholder="Código o referencia interna" />
@@ -8856,7 +8989,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=502"></script>
+		    <script src="app.js?v=503"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8884,7 +9017,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=124").catch(function () {});
+		          navigator.serviceWorker.register("/sw.js?v=125").catch(function () {});
         });
       })();
     </script>
