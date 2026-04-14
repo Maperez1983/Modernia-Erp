@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-			    <link rel="stylesheet" href="styles.css?v=181" />
+	    <link rel="stylesheet" href="styles.css?v=181" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2506,7 +2506,7 @@
 		                <div class="crm-lightning-topbar-right">
 		                  <button type="button" class="secondary ghost" id="crmExitBtn" title="Volver al panel">Volver</button>
 		                  <div class="crm-global-searchbox">
-		                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
+		                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" title="Búsqueda avanzada: escribe términos o filtros (ej: provincia:Málaga tel:! estado:activa &quot;Calle Larios&quot; -cancelada). Pulsa Enter para filtrar la vista actual." />
 	                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
                   </div>
                 </div>
@@ -2714,7 +2714,7 @@
 		                          <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
 		                          <option value="quick_sin_proxima_accion">Sin próxima acción</option>
 		                        </select>
-		                        <input id="crmCaptacionesSearch" placeholder="Buscar en la lista..." />
+		                        <input id="crmCaptacionesSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: términos y filtros (ej: etapa:Noticia poblacion:Málaga tel:! &quot;Calle Molina&quot;)." />
 		                      </div>
 		                    </div>
 		                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
@@ -2748,7 +2748,7 @@
 		                    </div>
 		                    <div class="tc-listright">
 		                      <button type="button" class="secondary ghost" id="crmClientesPrintBtn">Impresiones</button>
-		                      <input id="crmClientesSearch" placeholder="Buscar en la lista..." />
+		                      <input id="crmClientesSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: nombre:Juan tel:600 email:gmail nif:! provincia:Málaga)." />
 		                    </div>
 		                  </div>
 		                  <div class="tc-azbar" id="crmClientesAz" aria-label="Filtrar por letra"></div>
@@ -2775,7 +2775,7 @@
 			                    <div class="tc-listright">
 			                      <button type="button" class="secondary ghost" id="crmInmueblesPrintBtn">Impresiones</button>
 			                      <button type="button" class="secondary ghost" id="crmInmueblesMapBtn">Mapa inmuebles</button>
-			                      <input id="crmInmuebleSearchMirror" placeholder="Buscar en la lista..." />
+			                      <input id="crmInmuebleSearchMirror" placeholder="Buscar en la lista..." title="Buscar por referencia, dirección, ref. catastral, código postal, población, provincia o propietario." />
 			                      <select id="crmInmuebleEstadoFilterMirror" class="hidden" title="Filtrar por estado">
 			                        <option value="activos">Activos</option>
 			                        <option value="vendidos">Vendidos (incl. histórico)</option>
@@ -2805,7 +2805,7 @@
 			                      </select>
 			                      <button type="button" class="secondary ghost" id="crmMapaInmueblesRefresh">Actualizar lista</button>
 			                      <button type="button" class="secondary ghost" id="crmMapaInmueblesPrint">Impresiones</button>
-			                      <input id="crmMapaInmueblesSearch" placeholder="Buscar en la lista..." />
+			                      <input id="crmMapaInmueblesSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: provincia:Málaga refcat:123456 &quot;Calle&quot;)." />
 			                    </div>
 			                  </div>
 			                  <div class="crm-map-split">
@@ -2833,7 +2833,7 @@
 	                    </div>
 	                    <div class="tc-listright">
 	                      <button type="button" class="secondary ghost" id="crmAlquilerPrintBtn">Impresiones</button>
-	                      <input id="crmAlquilerSearch" placeholder="Buscar en la lista..." />
+	                      <input id="crmAlquilerSearch" placeholder="Buscar en la lista..." title="Buscar por dirección, propietario, inquilino, agente u oficina." />
 	                    </div>
 	                  </div>
 	                  <div id="crmAlquileresTable"></div>
@@ -2856,7 +2856,7 @@
 	                    </div>
 	                    <div class="tc-listright">
 	                      <button type="button" class="secondary ghost" id="crmCompraventasPrintBtn">Impresiones</button>
-	                      <input id="crmCompraventaSearch" placeholder="Buscar en la lista..." />
+	                      <input id="crmCompraventaSearch" placeholder="Buscar en la lista..." title="Buscar por dirección, comprador, vendedor o estado." />
 	                    </div>
 	                  </div>
 	                  <div id="crmCompraventasTable"></div>
@@ -2884,7 +2884,7 @@
 					                        <option value="agencias">Agencias</option>
 					                      </select>
 					                      <button type="button" class="secondary ghost" id="crmDemandasPrintBtn">Impresiones</button>
-					                      <input id="crmDemandaSearch" placeholder="Buscar en la lista..." />
+						                      <input id="crmDemandaSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: cliente:María estado:activa origen:web fase:&quot;En gestión&quot; tipologia:Piso)." />
 					                      <select id="crmDemandaEstadoFilter" title="Estado">
 					                        <option value="">Todos</option>
 					                        <option value="activa">Activa</option>
@@ -2918,7 +2918,7 @@
 					                    <div class="tc-listright">
 					                      <button type="button" class="secondary ghost" id="crmRelacionesPrintBtn">Impresiones</button>
 					                      <button type="button" class="secondary ghost" id="crmRelacionesRefresh">Actualizar</button>
-					                      <input id="crmRelacionesSearch" placeholder="Buscar..." />
+					                      <input id="crmRelacionesSearch" placeholder="Buscar..." title="Búsqueda avanzada: (ej: cliente:María provincia:Málaga refcat:123456 fase:gestionar)." />
 					                    </div>
 					                  </div>
 					                  <div class="tc-azbar" id="crmRelacionesAz" aria-label="Filtrar por letra"></div>
@@ -2942,7 +2942,7 @@
 	                      </div>
 	                      <div class="tc-listright">
 	                        <button type="button" class="secondary ghost" id="crmVisitasPrintBtn">Impresiones</button>
-	                        <input id="crmVisitaSearch" placeholder="Buscar en la lista..." />
+	                        <input id="crmVisitaSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: cliente:María estado:pendiente &quot;Calle&quot;)." />
 	                        <select id="crmVisitaEstadoFilter" title="Estado">
 	                          <option value="">Todos</option>
 	                          <option value="pendiente">Pendiente</option>
@@ -2996,7 +2996,7 @@
 			                    </div>
 			                    <div class="tc-listright">
 			                      <button type="button" class="secondary ghost" id="crmAgendaPrintBtn">Impresiones</button>
-			                      <input id="crmAgendaSearch" placeholder="Buscar en la lista..." />
+			                      <input id="crmAgendaSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: cliente:María estado:Pendiente responsable:MPerez cita -cancelada)." />
 			                      <select id="crmAgendaEstadoFilter" title="Estado">
 		                        <option value="">Todos</option>
 		                        <option>Pendiente</option>
@@ -3104,7 +3104,7 @@
 	                    </div>
 	                    <div class="tc-listright">
 	                      <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
-	                      <input id="crmInformadoresSearch" placeholder="Buscar en la lista..." />
+	                      <input id="crmInformadoresSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: nombre:Juan tel:600 email:gmail)." />
 	                    </div>
 	                  </div>
 	                  <div id="crmInformadoresTable"></div>
@@ -3125,7 +3125,7 @@
 	                      </select>
 	                    </div>
 	                    <div class="tc-listright">
-	                      <input id="crmEdificiosSearch" placeholder="Buscar en la lista..." />
+	                      <input id="crmEdificiosSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: provincia:Málaga &quot;Edificio&quot;)." />
 	                    </div>
 	                  </div>
 	                  <div id="crmEdificiosTable"></div>

@@ -2653,7 +2653,7 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmInmueblesMapBtn = document.getElementById("crmInmueblesMapBtn");
 		const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 		const crmViewCompraventas = document.getElementById("crmViewCompraventas");
-					const crmViewDemandas = document.getElementById("crmViewDemandas");
+						const crmViewDemandas = document.getElementById("crmViewDemandas");
 						const crmDemandasAz = document.getElementById("crmDemandasAz");
 						const crmDemandasAcceptBtn = document.getElementById("crmDemandasAcceptBtn");
 						const crmDemandasDiscardBtn = document.getElementById("crmDemandasDiscardBtn");
@@ -2683,7 +2683,7 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmViewLegal = document.getElementById("crmViewLegal");
 		const crmResumenPulse = document.getElementById("crmResumenPulse");
 		const crmResumenHoy = document.getElementById("crmResumenHoy");
-		const crmResumenAlertas = document.getElementById("crmResumenAlertas");
+			const crmResumenAlertas = document.getElementById("crmResumenAlertas");
 			const crmHomePanelNoticias = document.getElementById("crmHomePanelNoticias");
 			const crmHomePanelEncargos = document.getElementById("crmHomePanelEncargos");
 			const crmHomePanelPedidos = document.getElementById("crmHomePanelPedidos");
@@ -2691,7 +2691,7 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmHomeOportunidades = document.getElementById("crmHomeOportunidades");
 			const crmBadgeNoticias = document.getElementById("crmBadgeNoticias");
 			const crmBadgePedidos = document.getElementById("crmBadgePedidos");
-		const crmInicioNoticias = document.getElementById("crmInicioNoticias");
+			const crmInicioNoticias = document.getElementById("crmInicioNoticias");
 		const crmInicioEncargos = document.getElementById("crmInicioEncargos");
 		const crmInicioPedidos = document.getElementById("crmInicioPedidos");
 		const crmInicioInmuebles = document.getElementById("crmInicioInmuebles");
@@ -3355,6 +3355,165 @@ const normalizeSimple = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+
+const tokenizeSearchQuery = (raw = "") => {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+  const tokens = [];
+  let buf = "";
+  let quote = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = "";
+        continue;
+      }
+      buf += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (buf) tokens.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf) tokens.push(buf);
+  return tokens;
+};
+
+const normalizeAdvancedSearchKey = (rawKey = "") => {
+  const key = normalizeSimple(rawKey);
+  if (!key) return "";
+  if (["tel", "tlf", "tlfno", "telefono", "telefono1", "telefono2", "phone"].includes(key)) return "tel";
+  if (["movil", "mobile", "celular", "cell"].includes(key)) return "movil";
+  if (["mail", "correo", "email", "e-mail"].includes(key)) return "email";
+  if (["dni", "nif", "cif", "doc", "documento"].includes(key)) return "nif";
+  if (["cp", "postal", "codigo_postal", "codigopostal"].includes(key)) return "codigo_postal";
+  if (["prov", "provincia"].includes(key)) return "provincia";
+  if (["pob", "poblacion", "localidad", "ciudad", "municipio"].includes(key)) return "poblacion";
+  if (["ref", "referencia"].includes(key)) return "referencia";
+  if (["refcat", "refcatastral", "catastral", "referencia_catastral"].includes(key)) return "referencia_catastral";
+  return key;
+};
+
+const isAdvancedSearchEmptyValue = (valueRaw = "", valueNorm = "") => {
+  const raw = String(valueRaw || "").trim();
+  if (!raw) return true;
+  if (raw === "!") return true;
+  const norm = String(valueNorm || "").trim();
+  return ["vacio", "vacío", "empty", "null", "none"].includes(norm);
+};
+
+const createAdvancedSearchMatcher = (
+  raw = "",
+  {
+    text = null,
+    fields = {},
+  } = {}
+) => {
+  const tokens = tokenizeSearchQuery(raw);
+  if (!tokens.length) return () => true;
+
+  const termSpecs = [];
+  const filterSpecs = [];
+  tokens.forEach((token) => {
+    if (!token) return;
+    let rawToken = String(token || "").trim();
+    if (!rawToken) return;
+    let neg = false;
+    if (rawToken.startsWith("-")) {
+      neg = true;
+      rawToken = rawToken.slice(1);
+    }
+    if (!rawToken) return;
+
+    const idx = rawToken.indexOf(":");
+    if (idx > 0) {
+      const key = normalizeAdvancedSearchKey(rawToken.slice(0, idx));
+      const valueRaw = rawToken.slice(idx + 1);
+      if (key && fields && Object.prototype.hasOwnProperty.call(fields, key)) {
+        filterSpecs.push({
+          key,
+          neg,
+          valueRaw,
+          valueNorm: normalizeSimple(valueRaw),
+        });
+        return;
+      }
+    }
+
+    termSpecs.push({
+      neg,
+      valueNorm: normalizeSimple(rawToken),
+    });
+  });
+
+  const resolveText = (row) => {
+    try {
+      const value = text ? text(row) : "";
+      return normalizeSimple(value);
+    } catch {
+      return "";
+    }
+  };
+
+  const resolveField = (row, key) => {
+    const entry = fields?.[key];
+    if (!entry) return "";
+    try {
+      if (typeof entry === "function") return String(entry(row) || "");
+      if (entry && typeof entry.get === "function") return String(entry.get(row) || "");
+      return String(entry || "");
+    } catch {
+      return "";
+    }
+  };
+
+  const matchField = (row, key, valueNorm) => {
+    const entry = fields?.[key];
+    if (!entry) return false;
+    if (entry && typeof entry.test === "function") {
+      try {
+        return Boolean(entry.test(row, valueNorm));
+      } catch {
+        return false;
+      }
+    }
+    const rawValue = resolveField(row, key);
+    const rowNorm = normalizeSimple(rawValue);
+    if (entry && typeof entry === "object" && entry.match === "equals") {
+      return rowNorm === valueNorm;
+    }
+    return rowNorm.includes(valueNorm);
+  };
+
+  return (row) => {
+    const hay = resolveText(row);
+    for (const spec of termSpecs) {
+      if (!spec.valueNorm) continue;
+      const hit = hay.includes(spec.valueNorm);
+      if (spec.neg ? hit : !hit) return false;
+    }
+    for (const spec of filterSpecs) {
+      const empty = isAdvancedSearchEmptyValue(spec.valueRaw, spec.valueNorm);
+      if (empty) {
+        const rawValue = String(resolveField(row, spec.key) || "").trim();
+        const hit = !rawValue;
+        if (spec.neg ? hit : !hit) return false;
+        continue;
+      }
+      const hit = matchField(row, spec.key, spec.valueNorm);
+      if (spec.neg ? hit : !hit) return false;
+    }
+    return true;
+  };
+};
 
 const parseServiceList = (value) =>
   String(value || "")
@@ -31731,25 +31890,43 @@ const loadCrmClientes = async ({ force = false } = {}) => {
   }
 
   const filterKey = String(crmClientesFilter?.value || "recientes").trim().toLowerCase();
-  const q = String(crmClientesSearch?.value || "").trim().toLowerCase();
+  const qRaw = String(crmClientesSearch?.value || "").trim();
   const all = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
 
-  const byQuery = (row) => {
-    if (!q) return true;
-    const hay = [
-      row.nombre,
-      row.nif,
-      row.telefono,
-      row.movil,
-      row.email,
-      row.direccion,
-      row.poblacion,
-      row.provincia,
-    ]
-      .map((v) => String(v || "").toLowerCase())
-      .join(" ");
-    return hay.includes(q);
-  };
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) =>
+      [
+        row?.id,
+        row?.nombre,
+        row?.nif,
+        row?.telefono,
+        row?.movil,
+        row?.email,
+        row?.direccion,
+        row?.codigo_postal,
+        row?.poblacion,
+        row?.provincia,
+        row?.perfil,
+        row?.tipo_persona,
+      ]
+        .map((v) => String(v || ""))
+        .join(" "),
+    fields: {
+      id: (row) => row?.id,
+      nombre: (row) => row?.nombre,
+      nif: (row) => row?.nif,
+      tel: (row) => row?.telefono || row?.movil,
+      movil: (row) => row?.movil,
+      email: (row) => row?.email,
+      direccion: (row) => row?.direccion,
+      codigo_postal: (row) => row?.codigo_postal,
+      poblacion: (row) => row?.poblacion,
+      provincia: (row) => row?.provincia,
+      perfil: (row) => row?.perfil,
+      tipo: (row) => row?.tipo_persona,
+    },
+  });
+  const byQuery = (row) => matchQuery(row);
 
   const applyPresetFilter = (rows) => {
     if (filterKey === "todos") return rows;
@@ -31978,8 +32155,39 @@ const loadCrmCaptaciones = () => {
 	          ? "Encargos"
 	          : "Nuevas oportunidades";
 	    }
-	    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
-	    const localQ = String(crmCaptacionesSearch?.value || "").trim().toLowerCase();
+		    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
+		    const localQRaw = String(crmCaptacionesSearch?.value || "").trim();
+		    const matchLocalQuery = createAdvancedSearchMatcher(localQRaw, {
+		      text: (rowMap) =>
+		        [
+		          rowMap?.id,
+		          rowMap?.direccion,
+		          rowMap?.propietario,
+		          rowMap?.propietario_telefono,
+		          rowMap?.poblacion,
+		          rowMap?.provincia,
+		          rowMap?.subtipologia,
+		          rowMap?.motivacion,
+		          rowMap?.necesidad_venta_alquiler,
+		          rowMap?.proxima_accion,
+		          rowMap?.etapa,
+		          rowMap?.situacion_ocupacion,
+		          rowMap?.ocupado_por,
+		        ]
+		          .map((value) => String(value || ""))
+		          .join(" "),
+		      fields: {
+		        id: (rowMap) => rowMap?.id,
+		        direccion: (rowMap) => rowMap?.direccion,
+		        tel: (rowMap) => rowMap?.propietario_telefono,
+		        poblacion: (rowMap) => rowMap?.poblacion,
+		        provincia: (rowMap) => rowMap?.provincia,
+		        etapa: { get: (rowMap) => rowMap?.etapa, match: "equals" },
+		        necesidad: (rowMap) => rowMap?.necesidad_venta_alquiler,
+		        motivacion: (rowMap) => rowMap?.motivacion,
+		        ocupacion: (rowMap) => rowMap?.situacion_ocupacion,
+		      },
+		    });
 	    const parseDateMs = (value) => {
 	      const dateText = String(value || "").trim();
 	      if (!dateText) return 0;
@@ -32035,25 +32243,7 @@ const loadCrmCaptaciones = () => {
 	      if (!activeEtapa) return true;
 	      return String(rowMap?.etapa || "") === String(activeEtapa || "");
 	    });
-	    if (localQ) {
-	      filteredRowMaps = filteredRowMaps.filter((rowMap) => {
-	        const haystack = [
-	          rowMap?.direccion,
-	          rowMap?.propietario,
-	          rowMap?.propietario_telefono,
-	          rowMap?.poblacion,
-	          rowMap?.provincia,
-	          rowMap?.subtipologia,
-	          rowMap?.motivacion,
-	          rowMap?.necesidad_venta_alquiler,
-	          rowMap?.proxima_accion,
-	          rowMap?.etapa,
-	        ]
-	          .map((value) => String(value || "").toLowerCase())
-	          .join(" ");
-	        return haystack.includes(localQ);
-	      });
-	    }
+		    filteredRowMaps = filteredRowMaps.filter((rowMap) => matchLocalQuery(rowMap));
 	    const counts = {};
 	    baseRowMaps.forEach((row) => {
 	      const etapa = row?.etapa || "Sin etapa";
@@ -35130,22 +35320,34 @@ const filterCrmMapaByTipo = (rows = [], tipo = "inmuebles") => {
 const renderCrmMapaInmuebles = (rows = []) => {
   if (!crmMapaInmueblesList) return;
   const tipo = normalizeCrmMapaTipo(crmMapaInmueblesTipo?.value || "inmuebles");
-  const q = String(crmMapaInmueblesSearch?.value || "").trim().toLowerCase();
+  const qRaw = String(crmMapaInmueblesSearch?.value || "").trim();
   const base = filterCrmMapaByTipo(rows, tipo);
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) =>
+      [
+        row?.referencia,
+        row?.direccion,
+        row?.referencia_catastral,
+        row?.codigo_postal,
+        row?.poblacion,
+        row?.provincia,
+        row?.zona,
+        row?.estado,
+        row?.propietarios,
+      ]
+        .map((v) => String(v || ""))
+        .join(" "),
+    fields: {
+      referencia: (row) => row?.referencia,
+      referencia_catastral: (row) => row?.referencia_catastral,
+      codigo_postal: (row) => row?.codigo_postal,
+      poblacion: (row) => row?.poblacion,
+      provincia: (row) => row?.provincia,
+      estado: { get: (row) => row?.estado, match: "equals" },
+    },
+  });
   const filtered = base.filter((row) => {
-    if (!q) return true;
-    const hay = [
-      row.referencia,
-      row.direccion,
-      row.referencia_catastral,
-      row.poblacion,
-      row.provincia,
-      row.zona,
-      row.propietarios,
-    ]
-      .map((v) => String(v || "").toLowerCase())
-      .join(" ");
-    return hay.includes(q);
+    return matchQuery(row);
   });
 
   crmMapaInmueblesList.innerHTML = "";
@@ -35281,9 +35483,9 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
       cachedCrmInmuebles = inmuebles;
       cachedCrmDemandas = demandas;
 
-      const q = String(crmRelacionesSearch?.value || "").trim().toLowerCase();
-	    const preset = normalizeSimple(crmRelacionesPreset?.value || "recientes") || "recientes";
-	    const az = String(state.crmAz?.relaciones || "").trim().toUpperCase();
+	      const qRaw = String(crmRelacionesSearch?.value || "").trim();
+		    const preset = normalizeSimple(crmRelacionesPreset?.value || "recientes") || "recientes";
+		    const az = String(state.crmAz?.relaciones || "").trim().toUpperCase();
       const isClosed = (row) => normalizeSimple(row?.estado || "").includes("cerrad");
       const baseDemandas = preset === "cerradas" ? demandas.filter((d) => isClosed(d)) : demandas.filter((d) => !isClosed(d));
 
@@ -35357,25 +35559,41 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
         });
       });
 
-      const filteredPairs = pairs.filter((pair) => {
-        if (!matchTcAz(az, pair?.demanda?.cliente || pair?.demanda?.pedido || pair?.demanda?.tipo || "")) return false;
-        if (!q) return true;
-        const hay = [
-          pair?.demanda?.cliente,
-          pair?.demanda?.pedido,
-          pair?.demanda?.tipo,
-          pair?.demanda?.tipologia,
-          pair?.demanda?.subtipologia,
-          pair?.inmueble?.referencia,
-          pair?.inmueble?.direccion,
-          pair?.inmueble?.poblacion,
-          pair?.inmueble?.provincia,
-          pair?.inmueble?.zona,
-        ]
-          .map((v) => String(v || "").toLowerCase())
-          .join(" ");
-        return hay.includes(q);
-      });
+	      const matchQuery = createAdvancedSearchMatcher(qRaw, {
+	        text: (pair) =>
+	          [
+	            pair?.demanda?.cliente,
+	            pair?.demanda?.pedido,
+	            pair?.demanda?.tipo,
+	            pair?.demanda?.tipologia,
+	            pair?.demanda?.subtipologia,
+	            pair?.demanda?.fase,
+	            pair?.demanda?.estado,
+	            pair?.inmueble?.referencia,
+	            pair?.inmueble?.direccion,
+	            pair?.inmueble?.referencia_catastral,
+	            pair?.inmueble?.poblacion,
+	            pair?.inmueble?.provincia,
+	            pair?.inmueble?.zona,
+	          ]
+	            .map((v) => String(v || ""))
+	            .join(" "),
+	        fields: {
+	          cliente: (pair) => pair?.demanda?.cliente,
+	          pedido: (pair) => pair?.demanda?.pedido,
+	          tipo: (pair) => pair?.demanda?.tipo,
+	          fase: { get: (pair) => pair?.demanda?.fase, match: "equals" },
+	          estado: { get: (pair) => pair?.demanda?.estado, match: "equals" },
+	          referencia: (pair) => pair?.inmueble?.referencia,
+	          referencia_catastral: (pair) => pair?.inmueble?.referencia_catastral,
+	          poblacion: (pair) => pair?.inmueble?.poblacion,
+	          provincia: (pair) => pair?.inmueble?.provincia,
+	        },
+	      });
+	      const filteredPairs = pairs.filter((pair) => {
+	        if (!matchTcAz(az, pair?.demanda?.cliente || pair?.demanda?.pedido || pair?.demanda?.tipo || "")) return false;
+	        return matchQuery(pair);
+	      });
 
       const table = document.createElement("table");
       table.className = "crm-dense-table crm-relaciones-table";
@@ -35939,25 +36157,25 @@ const loadCrmDemandas = () => {
 	    } catch {}
 	  };
 	  const origenFilter = normalizeSimple(crmDemandaOrigenFilter?.value || "");
-	  const matchesOrigen = (row) => {
-	    if (!origenFilter) return true;
-	    if (origenFilter === "web") {
-	      const pedidoWeb = String(row.pedido_web || "").trim() === "1";
-	      const origen = normalizeSimple(row.origen || "");
-	      return pedidoWeb || origen.includes("web");
-	    }
-	    if (origenFilter === "agencias") {
-	      const agencia = String(row.agencia_insercion || "").trim();
-	      return Boolean(agencia);
-	    }
-	    return true;
-	  };
+		  const matchesOrigen = (row) => {
+		    if (!origenFilter) return true;
+		    if (origenFilter === "web") {
+		      const pedidoWeb = String(row.pedido_web || "").trim() === "1";
+		      const origen = normalizeSimple(row.origen || "");
+		      return pedidoWeb || origen.includes("web");
+		    }
+		    if (origenFilter === "agencias") {
+		      const agencia = String(row.agencia_insercion || "").trim();
+		      return Boolean(agencia);
+		    }
+		    return true;
+		  };
 		  const renderDemandasSteps = (rows = []) => {
 		    if (!crmDemandasSteps) return;
 		    const active = resolveDemandasStep();
-	    if (crmDemandasSubtitle) {
-	      crmDemandasSubtitle.textContent =
-	        active === "a_analizar"
+		    if (crmDemandasSubtitle) {
+		      crmDemandasSubtitle.textContent =
+		        active === "a_analizar"
 	          ? "Análisis datos pedidos"
 	          : active === "en_gestion"
 	            ? "Pedidos en gestión"
@@ -36096,32 +36314,67 @@ const loadCrmDemandas = () => {
 	  };
   const params = new URLSearchParams({ empresa_id: empresa.id });
   api(`/api/demandas?${params.toString()}`).then((data) => {
-    const rows = data.rows || [];
-    cachedCrmDemandas = rows;
+	    const rows = data.rows || [];
+	    cachedCrmDemandas = rows;
 		    renderDemandasSteps(rows);
-		    const q = String(crmDemandaSearch?.value || "").trim().toLowerCase();
+		    const qRaw = String(crmDemandaSearch?.value || "").trim();
 		    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
 		    const az = String(state.crmAz?.demandas || "").trim().toUpperCase();
 		    const activeStep = resolveDemandasStep();
-	    persistDemandasStep(activeStep);
-	    const filteredRows = rows.filter((row) => {
-	      if (!matchTcAz(az, row.cliente || row.pedido || row.tipo || "")) return false;
-	      const haystack = [
-	        row.cliente,
-	        row.tipo,
-	        row.pedido,
-        row.tipologia,
-        row.subtipologia,
-        row.fase,
-        row.estado,
-        row.prioridad,
-      ]
-        .map((value) => String(value || "").toLowerCase())
-        .join(" ");
-	      if (q && !haystack.includes(q)) return false;
-	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-	      if (origenFilter && !matchesOrigen(row)) return false;
-	      if (activeStep !== "otras" && normalizeDemandaFaseKey(row.fase) !== activeStep) return false;
+		    persistDemandasStep(activeStep);
+	    const matchQuery = createAdvancedSearchMatcher(qRaw, {
+	      text: (row) =>
+	        [
+	          row?.id,
+	          row?.cliente,
+	          row?.tipo,
+	          row?.pedido,
+	          row?.tipologia,
+	          row?.subtipologia,
+	          row?.fase,
+	          row?.estado,
+	          row?.prioridad,
+	          row?.origen,
+	          row?.agencia_insercion,
+	        ]
+	          .map((v) => String(v || ""))
+	          .join(" "),
+	      fields: {
+	        id: (row) => row?.id,
+	        cliente: (row) => row?.cliente,
+	        tipo: (row) => row?.tipo || row?.motivo,
+	        pedido: (row) => row?.pedido,
+	        tipologia: (row) => row?.tipologia,
+	        subtipologia: (row) => row?.subtipologia,
+	        fase: { get: (row) => row?.fase, match: "equals" },
+	        estado: { get: (row) => row?.estado, match: "equals" },
+	        prioridad: { get: (row) => row?.prioridad, match: "equals" },
+	        origen: {
+	          test: (row, valueNorm) => {
+	            const key = normalizeSimple(valueNorm || "");
+	            if (!key) return true;
+	            if (key === "web") {
+	              const pedidoWeb = String(row?.pedido_web || "").trim() === "1";
+	              const origen = normalizeSimple(row?.origen || "");
+	              return pedidoWeb || origen.includes("web");
+	            }
+	            if (key === "agencias" || key === "agencia") {
+	              const agencia = String(row?.agencia_insercion || "").trim();
+	              return Boolean(agencia);
+	            }
+	            const origen = normalizeSimple(row?.origen || "");
+	            return origen.includes(key);
+	          },
+	        },
+	        agencia: (row) => row?.agencia_insercion,
+	      },
+		    });
+		    const filteredRows = rows.filter((row) => {
+		      if (!matchTcAz(az, row.cliente || row.pedido || row.tipo || "")) return false;
+		      if (!matchQuery(row)) return false;
+		      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+		      if (origenFilter && !matchesOrigen(row)) return false;
+		      if (activeStep !== "otras" && normalizeDemandaFaseKey(row.fase) !== activeStep) return false;
 	      return true;
 	    });
     renderVisitaSelects();
@@ -36185,9 +36438,22 @@ const normalizeCrmVisitasPreset = (value) => {
 
 const filterCrmVisitasRows = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
-  const q = String(crmVisitaSearch?.value || "").trim().toLowerCase();
+  const qRaw = String(crmVisitaSearch?.value || "").trim();
   const estadoFilter = normalizeSimple(crmVisitaEstadoFilter?.value || "");
   const preset = normalizeCrmVisitasPreset(crmVisitasPreset?.value || "");
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) =>
+      [row?.inmueble, row?.cliente, row?.asesor, row?.estado, row?.fecha, row?.hora]
+        .map((value) => String(value || ""))
+        .join(" "),
+    fields: {
+      inmueble: (row) => row?.inmueble,
+      cliente: (row) => row?.cliente,
+      asesor: (row) => row?.asesor,
+      estado: { get: (row) => row?.estado, match: "equals" },
+      fecha: (row) => row?.fecha,
+    },
+  });
 
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -36198,10 +36464,7 @@ const filterCrmVisitasRows = (rows = []) => {
   const weekEnd = weekStart + 7 * 86400000 - 1;
 
   return items.filter((row) => {
-    const haystack = [row.inmueble, row.cliente, row.asesor, row.estado, row.fecha, row.hora]
-      .map((value) => String(value || "").toLowerCase())
-      .join(" ");
-    if (q && !haystack.includes(q)) return false;
+    if (!matchQuery(row)) return false;
     if (estadoFilter && !normalizeSimple(row.estado || "").includes(estadoFilter)) return false;
 
     if (preset === "pendientes") {
@@ -37352,10 +37615,10 @@ const loadCrmAgenda = () => {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     state.crmAgendaRowsAll = rows;
     renderCrmHomeAgendaPreview();
-    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
+    const qRaw = String(crmAgendaSearch?.value || "").trim();
     const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
     const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-	  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_caducadas") || "citas_caducadas";
+		  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_caducadas") || "citas_caducadas";
 	  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
 	  const meKey = normalizePersonKey(getCurrentUser());
 	  const isMine = (row) => {
@@ -37400,10 +37663,10 @@ const loadCrmAgenda = () => {
 	    const ts = parseRowTs(row);
 	    return ts > 0 && ts < Date.now();
 	  };
-	  const matchPreset = (row) => {
-	    if (!isMine(row)) return false;
-	    const tipoKey = normalizeTipoKey(row);
-	    const fechaKey = String(row?.fecha || "").trim();
+		  const matchPreset = (row) => {
+		    if (!isMine(row)) return false;
+		    const tipoKey = normalizeTipoKey(row);
+		    const fechaKey = String(row?.fecha || "").trim();
 	    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
 	    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === todayKey;
 	    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
@@ -37411,25 +37674,38 @@ const loadCrmAgenda = () => {
 	    if (preset === "citas") return tipoKey === "cita";
 	    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
 	    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === todayKey;
-	    return true;
-	  };
-    state.crmAgendaRowsFiltered = rows.filter((row) => {
-      if (!matchPreset(row)) return false;
-      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
-      const haystack = [
-        row.asunto,
-        row.cliente,
-        row.tipo,
-        row.responsable,
-        row.modalidad_contacto,
-        row.estado,
-      ]
-        .map((v) => String(v || "").toLowerCase())
-        .join(" ");
-      if (q && !haystack.includes(q)) return false;
-      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-      return true;
-    });
+		    return true;
+		  };
+	    const matchQuery = createAdvancedSearchMatcher(qRaw, {
+	      text: (row) =>
+	        [
+	          row?.asunto,
+	          row?.cliente,
+	          row?.tipo,
+	          row?.responsable,
+	          row?.modalidad_contacto,
+	          row?.estado,
+	          row?.fecha,
+	          row?.hora,
+	        ]
+	          .map((v) => String(v || ""))
+	          .join(" "),
+	      fields: {
+	        asunto: (row) => row?.asunto,
+	        cliente: (row) => row?.cliente,
+	        tipo: (row) => row?.tipo || row?.asunto,
+	        responsable: (row) => row?.responsable,
+	        estado: { get: (row) => row?.estado, match: "equals" },
+	        fecha: (row) => row?.fecha,
+	      },
+	    });
+	    state.crmAgendaRowsFiltered = rows.filter((row) => {
+	      if (!matchPreset(row)) return false;
+	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
+	      if (!matchQuery(row)) return false;
+	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+	      return true;
+	    });
     renderCrmAgendaWorkspace();
   });
 };
@@ -37464,12 +37740,21 @@ const loadCrmInformadores = async () => {
     return;
   }
   const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
-  const q = String(crmInformadoresSearch?.value || "").trim().toLowerCase();
+  const qRaw = String(crmInformadoresSearch?.value || "").trim();
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) => [row?.nombre, row?.telefono, row?.movil, row?.email, row?.id_personal].map((v) => String(v || "")).join(" "),
+    fields: {
+      nombre: (row) => row?.nombre,
+      tel: (row) => row?.telefono || row?.movil,
+      movil: (row) => row?.movil,
+      email: (row) => row?.email,
+      id: (row) => row?.id_personal || row?.id,
+    },
+  });
   const items = rowMaps.filter((row) => {
     const perfil = normalizeSimple(row.perfil || "");
     if (!perfil.includes("informador")) return false;
-    const hay = [row.nombre, row.telefono, row.movil, row.email, row.id_personal].map((v) => String(v || "").toLowerCase()).join(" ");
-    if (q && !hay.includes(q)) return false;
+    if (!matchQuery(row)) return false;
     return true;
   });
   const table = document.createElement("table");
@@ -37529,16 +37814,27 @@ const loadCrmEdificios = async () => {
   }
   const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
   const tipoFilter = String(crmEdificiosTipoFilter?.value || "").trim().toLowerCase();
-  const q = String(crmEdificiosSearch?.value || "").trim().toLowerCase();
+  const qRaw = String(crmEdificiosSearch?.value || "").trim();
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) =>
+      [row?.titulo, row?.direccion, row?.localidad, row?.poblacion, row?.provincia, row?.responsable, row?.categoria]
+        .map((v) => String(v || ""))
+        .join(" "),
+    fields: {
+      titulo: (row) => row?.titulo,
+      direccion: (row) => row?.direccion,
+      poblacion: (row) => row?.poblacion || row?.localidad,
+      provincia: (row) => row?.provincia,
+      responsable: (row) => row?.responsable,
+      categoria: (row) => row?.categoria,
+    },
+  });
   const items = rowMaps.filter((row) => {
     const tipo = normalizeSimple(row.tipo_inmueble || "");
     const categoria = normalizeSimple(row.categoria || "");
     if (tipoFilter === "edificios" && !tipo.includes("edific")) return false;
     if (tipoFilter === "complejos" && !(tipo.includes("complej") || categoria)) return false;
-    const hay = [row.titulo, row.direccion, row.localidad, row.poblacion, row.responsable, row.categoria]
-      .map((v) => String(v || "").toLowerCase())
-      .join(" ");
-    if (q && !hay.includes(q)) return false;
+    if (!matchQuery(row)) return false;
     return tipo.includes("edific") || tipo.includes("complej") || categoria;
   });
   const table = document.createElement("table");
@@ -50345,20 +50641,25 @@ if (crmMapaInmueblesRefresh) {
   crmMapaInmueblesRefresh.addEventListener("click", () => loadCrmMapaInmuebles({ force: true }));
 }
 
-if (crmMapaInmueblesPrint) {
-  crmMapaInmueblesPrint.addEventListener("click", () => {
-    const tipo = normalizeCrmMapaTipo(crmMapaInmueblesTipo?.value || "inmuebles");
-    const q = String(crmMapaInmueblesSearch?.value || "").trim().toLowerCase();
-    const base = filterCrmMapaByTipo(cachedCrmMapaInmuebles, tipo).filter((row) => {
-      if (!q) return true;
-      const hay = [row.referencia, row.direccion, row.poblacion, row.provincia, row.propietarios]
-        .map((v) => String(v || "").toLowerCase())
-        .join(" ");
-      return hay.includes(q);
-    });
-    const html = `
-      <table>
-        <thead><tr><th>Referencia</th><th>Dirección</th><th>Etapa</th><th>Propietarios</th></tr></thead>
+	if (crmMapaInmueblesPrint) {
+	  crmMapaInmueblesPrint.addEventListener("click", () => {
+	    const tipo = normalizeCrmMapaTipo(crmMapaInmueblesTipo?.value || "inmuebles");
+	    const qRaw = String(crmMapaInmueblesSearch?.value || "").trim();
+	    const matchQuery = createAdvancedSearchMatcher(qRaw, {
+	      text: (row) =>
+	        [row?.referencia, row?.direccion, row?.poblacion, row?.provincia, row?.propietarios]
+	          .map((v) => String(v || ""))
+	          .join(" "),
+	      fields: {
+	        referencia: (row) => row?.referencia,
+	        poblacion: (row) => row?.poblacion,
+	        provincia: (row) => row?.provincia,
+	      },
+	    });
+	    const base = filterCrmMapaByTipo(cachedCrmMapaInmuebles, tipo).filter((row) => matchQuery(row));
+	    const html = `
+	      <table>
+	        <thead><tr><th>Referencia</th><th>Dirección</th><th>Etapa</th><th>Propietarios</th></tr></thead>
         <tbody>
           ${base
             .slice(0, 500)
