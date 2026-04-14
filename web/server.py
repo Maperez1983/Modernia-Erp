@@ -18260,7 +18260,9 @@ def ensure_tables(db_path):
         except Exception:
             pass
     else:
-        conn = open_sqlite_conn(db_path, with_row_factory=False)
+        # Algunas rutinas de bootstrap iteran resultados por nombre de columna.
+        # `sqlite3.Row` permite también acceso por índice, así que es seguro activarlo aquí.
+        conn = open_sqlite_conn(db_path, with_row_factory=True)
 
     def _backend_name(_conn):
         backend = getattr(_conn, "__crm_backend__", "") or ""
