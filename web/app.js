@@ -2862,14 +2862,25 @@ const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
 const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
- const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
- const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
- const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
- const inmuebleGuidedBtn = document.getElementById("inmuebleGuidedBtn");
- const inmuebleGoActividadBtn = document.getElementById("inmuebleGoActividadBtn");
-const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
-const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
-const inmuebleDocsStatus = document.getElementById("inmuebleDocsStatus");
+	 const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
+	 const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
+	 const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
+	 const inmuebleGuidedBtn = document.getElementById("inmuebleGuidedBtn");
+	 const inmuebleGuidedModal = document.getElementById("inmuebleGuidedModal");
+	 const inmuebleGuidedClose = document.getElementById("inmuebleGuidedClose");
+	 const inmuebleGuidedHeader = document.getElementById("inmuebleGuidedHeader");
+	 const inmuebleGuidedRequirements = document.getElementById("inmuebleGuidedRequirements");
+	 const inmuebleGuidedChecklistPreview = document.getElementById("inmuebleGuidedChecklistPreview");
+	 const inmuebleGuidedActionsPreview = document.getElementById("inmuebleGuidedActionsPreview");
+	 const inmuebleGuidedStatus = document.getElementById("inmuebleGuidedStatus");
+	 const inmuebleGuidedGenerateChecklist = document.getElementById("inmuebleGuidedGenerateChecklist");
+	 const inmuebleGuidedOpenChecklist = document.getElementById("inmuebleGuidedOpenChecklist");
+	 const inmuebleGuidedCreateAction = document.getElementById("inmuebleGuidedCreateAction");
+	 const inmuebleGuidedGoActividad = document.getElementById("inmuebleGuidedGoActividad");
+	 const inmuebleGoActividadBtn = document.getElementById("inmuebleGoActividadBtn");
+	const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
+	const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
+	const inmuebleDocsStatus = document.getElementById("inmuebleDocsStatus");
 const inmuebleChecklistTable = document.getElementById("inmuebleChecklistTable");
 const inmuebleChecklistInfo = document.getElementById("inmuebleChecklistInfo");
 const inmuebleChecklistBtn = document.getElementById("inmuebleChecklistBtn");
@@ -22733,7 +22744,7 @@ const updateCaptacionMap = (lat, lon) => {
 };
 
 const CATASTRO_ICON_HTML = `
-  <img class="catastro-logo-img" src="/icons/catastro.png" alt="" loading="lazy" />
+	  <img class="catastro-logo-img" src="/icons/catastro.png?v=28" alt="" loading="lazy" />
 `.trim();
 
 const buildCatastroButtonInner = (label) =>
@@ -47974,17 +47985,17 @@ if (crmCaptacionCatastroOpen) {
       const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
       const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
       const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
-      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
-      const url = buildCatastroUrl("", address);
-      const win = window.open(url, "_blank", "noopener,noreferrer");
-      if (!win) window.location.href = url;
-    } catch {
-      const fallback = "https://www.sedecatastro.gob.es/";
-      const win = window.open(fallback, "_blank", "noopener,noreferrer");
-      if (!win) window.location.href = fallback;
-    }
-  });
-}
+	      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
+	      const url = buildCatastroUrl("", address);
+	      const win = window.open(url, "_blank", "noopener,noreferrer");
+	      if (!win) window.location.assign(url);
+	    } catch {
+	      const fallback = "https://www.sedecatastro.gob.es/";
+	      const win = window.open(fallback, "_blank", "noopener,noreferrer");
+	      if (!win) window.location.assign(fallback);
+	    }
+	  });
+	}
 
 if (crmCaptacionCreateForm) {
   crmCaptacionCreateForm.addEventListener("submit", async (event) => {
@@ -52419,10 +52430,10 @@ if (inmuebleAlquilerDiaPdfBtn) {
   });
 }
 
-if (inmuebleGoEstadoBtn) {
-  inmuebleGoEstadoBtn.addEventListener("click", () => {
-    const etapaMain = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || "");
-    const tipo = etapaMain === "Encargo"
+	if (inmuebleGoEstadoBtn) {
+	  inmuebleGoEstadoBtn.addEventListener("click", () => {
+	    const etapaMain = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || "");
+	    const tipo = etapaMain === "Encargo"
       ? "Cita de venta/alquiler"
       : etapaMain === "Propuesta"
         ? "Cita de propuesta de compra/alquiler"
@@ -52432,59 +52443,257 @@ if (inmuebleGoEstadoBtn) {
       asunto: tipo,
       statusText: "Registra la cita y ciérrala para que el inmueble avance de fase.",
     });
-    applyPendingInmuebleCitaPrefill();
-  });
-}
+	    applyPendingInmuebleCitaPrefill();
+	  });
+	}
 
-if (inmuebleGuidedBtn) {
-  inmuebleGuidedBtn.addEventListener("click", () => {
-    const ctx = state.currentInmuebleContext || {};
-    const inmueble = ctx.inmueble || {};
-    const captacion = ctx.captacion || {};
-    const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || captacion.situacion_comercial || "");
-    const warnings = [];
-    if (etapaMain === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
-      warnings.push("La noticia no está verificada (INDICIO). Verifica si el propietario confirma la venta.");
-    }
-    if (!String(captacion.proxima_accion || "").trim()) {
-      warnings.push("No hay próxima acción programada. El método exige dejar siempre el siguiente paso.");
-    }
-    const message =
-      warnings.length
-        ? `Proceso guiado (${etapaMain || "Inmueble"}):\n\n- ${warnings.join("\n- ")}\n\n¿Quieres crear ahora la próxima acción?`
-        : `Proceso guiado (${etapaMain || "Inmueble"}):\n\n¿Quieres crear ahora la próxima acción?`;
-    const ok = window.confirm(message);
-    if (!ok) return;
-    const tipo =
-      etapaMain === "Encargo"
-        ? "Cita de gestión encargo (seguimiento)"
-        : etapaMain === "Propuesta"
-          ? "Cita de propuesta"
-          : etapaMain === "Noticia"
-            ? "Llamada propietario (verificar noticia)"
-            : "Llamada";
-    const id = String(state.currentInmuebleId || "").trim();
-    const captacionId = String(captacion.id || "").trim();
-    openActionCreator("", "", "inmobiliaria", {
-      lock_service: true,
-      servicio: "inmobiliaria",
-      inmueble_id: id,
-      ...(captacionId ? { related_tipo: "captacion", related_id: captacionId } : {}),
-    });
-    if (actionModalTipo) actionModalTipo.value = tipo;
-    if (actionModalNotas && warnings.length) {
-      actionModalNotas.value = `Checklist guiado:\n- ${warnings.join("\n- ")}`;
-    }
-    if (warnings.some((w) => w.includes("no está verificada"))) {
-      const wantsVerify = window.confirm("¿Marcar la noticia como verificada ahora?");
-      if (wantsVerify) {
-        try {
-          saveCaptacionField("noticia_verificada", "1");
-        } catch {}
-      }
-    }
-  });
-}
+	if (inmuebleGuidedBtn) {
+	  const getEtapaMain = () => {
+	    const ctx = state.currentInmuebleContext || {};
+	    const inmueble = ctx.inmueble || {};
+	    const captacion = ctx.captacion || {};
+	    return (
+	      normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || captacion.situacion_comercial || "")
+	      || "Inmueble"
+	    );
+	  };
+
+	  const setOpen = (open) => {
+	    if (!inmuebleGuidedModal) return;
+	    inmuebleGuidedModal.classList.toggle("hidden", !open);
+	    if (open) void refresh();
+	  };
+
+	  const renderChecklistPreview = (rows = []) => {
+	    if (!inmuebleGuidedChecklistPreview) return;
+	    const items = Array.isArray(rows) ? rows : [];
+	    if (!items.length) {
+	      inmuebleGuidedChecklistPreview.innerHTML = "<p class='muted'>Sin checklist para esta etapa. Pulsa «Generar».</p>";
+	      return;
+	    }
+	    const list = document.createElement("div");
+	    list.className = "inline-list";
+	    items.slice(0, 10).forEach((row) => {
+	      const estado = String(row?.estado || "Pendiente").trim() || "Pendiente";
+	      const key = normalizeSimple(estado);
+	      const tone = key.includes("complet") ? "accent" : "soft";
+	      const item = document.createElement("div");
+	      item.className = "inline-row";
+	      item.innerHTML = `
+	        <div>
+	          <strong>${escapeHtml(String(row?.tarea || "").trim() || "Tarea")}</strong>
+	          <div class="muted">${escapeHtml(String(row?.responsable || "").trim() || "Sin asignar")}</div>
+	        </div>
+	        <div class="inmueble-summary-badges">
+	          <span class="inmueble-badge tone-${tone}">${escapeHtml(estado)}</span>
+	        </div>
+	      `;
+	      list.appendChild(item);
+	    });
+	    inmuebleGuidedChecklistPreview.innerHTML = "";
+	    inmuebleGuidedChecklistPreview.appendChild(list);
+	  };
+
+	  const renderActionsPreview = (rows = []) => {
+	    if (!inmuebleGuidedActionsPreview) return;
+	    const items = Array.isArray(rows) ? rows : [];
+	    if (!items.length) {
+	      inmuebleGuidedActionsPreview.innerHTML = "<p class='muted'>Sin acciones pendientes.</p>";
+	      return;
+	    }
+	    const list = document.createElement("div");
+	    list.className = "inline-list";
+	    items.slice(0, 8).forEach((row) => {
+	      const item = document.createElement("div");
+	      item.className = "inline-row";
+	      const fecha = row?.fecha ? formatCell("fecha", row.fecha) : "-";
+	      const hora = String(row?.hora || "").trim();
+	      const tipo = String(row?.tipo || "").trim() || "Acción";
+	      const asunto = String(row?.asunto || "").trim();
+	      const resp = String(row?.responsable || "").trim();
+	      item.innerHTML = `
+	        <div>
+	          <strong>${escapeHtml(tipo)}${asunto ? ` · ${escapeHtml(asunto)}` : ""}</strong>
+	          <div class="muted">${escapeHtml([fecha, hora].filter(Boolean).join(" · "))}${resp ? ` · ${escapeHtml(resp)}` : ""}</div>
+	        </div>
+	        <div class="inmueble-summary-badges">
+	          <span class="inmueble-badge tone-soft">${escapeHtml(String(row?.estado || "Pendiente"))}</span>
+	        </div>
+	      `;
+	      list.appendChild(item);
+	    });
+	    inmuebleGuidedActionsPreview.innerHTML = "";
+	    inmuebleGuidedActionsPreview.appendChild(list);
+	  };
+
+	  const refresh = async () => {
+	    if (!inmuebleGuidedModal || inmuebleGuidedModal.classList.contains("hidden")) return;
+	    const ctx = state.currentInmuebleContext || {};
+	    const inmueble = ctx.inmueble || {};
+	    const captacion = ctx.captacion || {};
+	    const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+	    const inmuebleId = String(inmueble.id || state.currentInmuebleId || "").trim();
+	    const empresaId = String(inmueble.empresa_id || "").trim();
+	    const etapaMain = getEtapaMain();
+	    if (!inmuebleId) return;
+
+	    if (inmuebleGuidedStatus) inmuebleGuidedStatus.textContent = "Cargando...";
+	    try {
+	      try {
+	        await apiPost("/api/inmueble_guided_prepare", { inmueble_id: inmuebleId });
+	      } catch {}
+
+	      const checklistParams = new URLSearchParams({ inmueble_id: inmuebleId, etapa: etapaMain });
+	      const [checklistData, accionesData] = await Promise.all([
+	        api(`/api/inmueble_checklist?${checklistParams.toString()}`).catch(() => ({ rows: [] })),
+	        empresaId
+	          ? api(`/api/acciones?servicio=inmobiliaria&empresa_id=${encodeURIComponent(empresaId)}&inmueble_id=${encodeURIComponent(inmuebleId)}`).catch(() => ({ rows: [] }))
+	          : Promise.resolve({ rows: [] }),
+	      ]);
+
+	      const checklist = Array.isArray(checklistData?.rows) ? checklistData.rows : [];
+	      const acciones = Array.isArray(accionesData?.rows)
+	        ? accionesData.rows
+	        : Array.isArray(ctx.actividad)
+	          ? ctx.actividad
+	          : [];
+	      const pendingAcciones = acciones.filter((row) => normalizeSimple(row?.estado || "") === "pendiente");
+	      const requirements = getInmuebleStageRequirements(etapaMain, inmueble, captacion, propietarios);
+	      const pendientes = requirements.filter((item) => !item.ok);
+	      const completedChecklist = checklist.filter((row) => normalizeSimple(row?.estado || "").includes("complet")).length;
+
+	      renderCrmMiniCards(inmuebleGuidedHeader, [
+	        { title: "Etapa", value: etapaMain, meta: "Pipeline", summary: "Situación actual del inmueble." },
+	        {
+	          title: "Validaciones pendientes",
+	          value: pendientes.length,
+	          meta: "Bloqueos",
+	          summary: pendientes.length ? pendientes.slice(0, 2).map((it) => it.label).join(" · ") : "Sin bloqueos.",
+	        },
+	        {
+	          title: "Checklist completada",
+	          value: checklist.length ? `${completedChecklist}/${checklist.length}` : "0/0",
+	          meta: "Tareas",
+	          summary: checklist.length ? "Tareas sugeridas para esta etapa." : "Aún no hay tareas para esta etapa.",
+	        },
+	        {
+	          title: "Acciones pendientes",
+	          value: pendingAcciones.length,
+	          meta: "Agenda",
+	          summary: pendingAcciones.length ? "Revisa próximas citas/acciones." : "No hay acciones pendientes.",
+	        },
+	      ]);
+
+	      renderCrmMiniCards(
+	        inmuebleGuidedRequirements,
+	        requirements.map((item) => ({
+	          title: item.label,
+	          value: item.ok ? "OK" : "Pendiente",
+	          meta: "Validación",
+	          summary: item.ok ? "Cumplido." : "Completa este dato para avanzar.",
+	        }))
+	      );
+
+	      renderChecklistPreview(checklist);
+	      renderActionsPreview(pendingAcciones);
+
+	      if (inmuebleGuidedStatus) {
+	        const hints = [];
+	        if (etapaMain === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
+	          hints.push("Noticia sin verificar.");
+	        }
+	        if (!String(captacion.proxima_accion || "").trim() && !pendingAcciones.length) {
+	          hints.push("Sin próxima acción.");
+	        }
+	        inmuebleGuidedStatus.textContent = hints.length ? hints.join(" ") : "Listo.";
+	      }
+	    } catch (error) {
+	      if (inmuebleGuidedStatus) inmuebleGuidedStatus.textContent = error?.message || "No se pudo cargar el proceso guiado.";
+	    }
+	  };
+
+	  inmuebleGuidedBtn.addEventListener("click", () => setOpen(true));
+
+	  if (inmuebleGuidedClose) {
+	    inmuebleGuidedClose.addEventListener("click", () => setOpen(false));
+	  }
+
+	  if (inmuebleGuidedModal) {
+	    document.addEventListener("click", (event) => {
+	      if (inmuebleGuidedModal.classList.contains("hidden")) return;
+	      const target = event.target;
+	      if (target && target.closest && target.closest("#inmuebleGuidedModal .modal-content")) return;
+	      setOpen(false);
+	    });
+	    document.addEventListener("keydown", (event) => {
+	      if (event.key !== "Escape") return;
+	      if (inmuebleGuidedModal.classList.contains("hidden")) return;
+	      setOpen(false);
+	    });
+	  }
+
+	  if (inmuebleGuidedOpenChecklist) {
+	    inmuebleGuidedOpenChecklist.addEventListener("click", () => {
+	      setOpen(false);
+	      setInmuebleTab("estado");
+	      window.setTimeout(() => {
+	        try {
+	          document.getElementById("inmuebleChecklistTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
+	        } catch {}
+	      }, 0);
+	    });
+	  }
+
+	  if (inmuebleGuidedGenerateChecklist) {
+	    inmuebleGuidedGenerateChecklist.addEventListener("click", () => {
+	      const etapa = getEtapaMain();
+	      const ok = window.confirm(`¿Generar (o regenerar) checklist para la etapa \"${etapa}\"?`);
+	      if (!ok) return;
+	      generateInmuebleChecklist(etapa);
+	      window.setTimeout(() => void refresh(), 300);
+	    });
+	  }
+
+	  if (inmuebleGuidedGoActividad) {
+	    inmuebleGuidedGoActividad.addEventListener("click", () => {
+	      setOpen(false);
+	      setInmuebleTab("actividad");
+	      window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 0);
+	    });
+	  }
+
+	  if (inmuebleGuidedCreateAction) {
+	    inmuebleGuidedCreateAction.addEventListener("click", () => {
+	      const ctx = state.currentInmuebleContext || {};
+	      const captacion = ctx.captacion || {};
+	      const etapa = getEtapaMain();
+	      const warnings = [];
+	      if (etapa === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
+	        warnings.push("La noticia no está verificada (INDICIO).");
+	      }
+	      if (!String(captacion.proxima_accion || "").trim()) {
+	        warnings.push("No hay próxima acción programada.");
+	      }
+	      const tipo =
+	        etapa === "Encargo"
+	          ? "Cita de gestión encargo (seguimiento)"
+	          : etapa === "Propuesta"
+	            ? "Cita de propuesta"
+	            : etapa === "Noticia"
+	              ? "Llamada propietario (verificar noticia)"
+	              : etapa === "Inmueble"
+	                ? "Cita de adquisición"
+	                : "Llamada";
+	      queueInmuebleCitaPrefill({
+	        tipo,
+	        asunto: tipo,
+	        statusText: warnings.length ? `Checklist guiado:\n- ${warnings.join("\n- ")}` : "",
+	      });
+	      setOpen(false);
+	      applyPendingInmuebleCitaPrefill();
+	    });
+	  }
+	}
 
 if (inmuebleGoActividadBtn) {
   inmuebleGoActividadBtn.addEventListener("click", () => {

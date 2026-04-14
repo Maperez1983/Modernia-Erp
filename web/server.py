@@ -42733,6 +42733,58 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": inmueble_id})
             return
+        elif parsed.path == "/api/inmueble_guided_prepare":
+            inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id, estado, asesor, responsable FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            etapa_value = str(inmueble["estado"] or "").strip() or "Inmueble"
+            empresa_id_value = str(inmueble["empresa_id"] or "").strip()
+            responsable_value = str(
+                (inmueble["asesor"] if "asesor" in inmueble.keys() else "")
+                or (inmueble["responsable"] if "responsable" in inmueble.keys() else "")
+                or ""
+            ).strip()
+            checklist_created = False
+            actions_created = False
+            try:
+                checklist_created = bool(
+                    ensure_inmueble_checklist_defaults_if_empty(
+                        conn, inmueble_id, etapa_value, now, responsable=responsable_value
+                    )
+                )
+            except Exception:
+                checklist_created = False
+            try:
+                actions_created = bool(
+                    ensure_pending_inmueble_stage_actions(
+                        conn, empresa_id_value, inmueble_id, etapa_value, now, responsable=responsable_value
+                    )
+                )
+            except Exception:
+                actions_created = False
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "inmueble_id": inmueble_id,
+                    "etapa": etapa_value,
+                    "checklist_created": checklist_created,
+                    "actions_created": actions_created,
+                },
+            )
+            return
         elif parsed.path == "/api/inmueble_checklist_generate":
             inmueble_id = payload.get("inmueble_id")
             etapa = payload.get("etapa")
