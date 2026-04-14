@@ -9249,6 +9249,7 @@ const renderWorkspaceRrhhHub = () => {
 	          </div>
 	          <div class="section-head-actions">
 	            <button type="button" class="secondary ghost button-inline" data-rrhh-employee-new>Crear empleado</button>
+	            <button type="button" class="secondary ghost button-inline" data-rrhh-cleanup>Limpiar plantilla</button>
 	            <button type="button" class="secondary danger button-inline" data-rrhh-reset>Reset RRHH</button>
 	          </div>
 	        </div>
@@ -9887,33 +9888,44 @@ const renderWorkspaceRrhhHub = () => {
                     </div>
                   </div>
                 `}
-	              ${user?.id ? `
+		              ${user?.id ? `
+		                <div class="workspace-rrhh-row">
+		                  <div>
+		                    <strong>Invitación (enlace de acceso)</strong>
+	                    <div class="muted">Envía un link para activar el acceso y definir contraseña.</div>
+	                    <div class="muted" id="rrhhMemberInviteLink"></div>
+	                  </div>
+	                  <div class="workspace-rrhh-row-actions">
+	                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-invite="${escapeHtml(String(user.id))}">Enviar invitación</button>
+	                  </div>
+	                </div>
 	                <div class="workspace-rrhh-row">
 	                  <div>
-	                    <strong>Invitación (enlace de acceso)</strong>
-                    <div class="muted">Envía un link para activar el acceso y definir contraseña.</div>
-                    <div class="muted" id="rrhhMemberInviteLink"></div>
-                  </div>
-                  <div class="workspace-rrhh-row-actions">
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-invite="${escapeHtml(String(user.id))}">Enviar invitación</button>
-                  </div>
-                </div>
-                <div class="workspace-rrhh-row">
-                  <div>
-                    <strong>Contraseña temporal</strong>
-                    <div class="muted">Genera una contraseña y compártela (se invalida al cambiarla).</div>
-                    <input id="rrhhMemberTempPassword" class="rrhh-inline-input" type="text" readonly value="" placeholder="Genera una contraseña..." />
-                  </div>
-                  <div class="workspace-rrhh-row-actions">
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass="${escapeHtml(String(user.id))}">Generar</button>
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-copy>Copiar</button>
-                  </div>
-	                </div>
-	              ` : ""}
-		            ${employee?.id ? `
-		              <div class="workspace-rrhh-row">
-		                <div>
-		                  <strong>Kiosko de fichaje (QR)</strong>
+	                    <strong>Contraseña temporal</strong>
+	                    <div class="muted">Genera una contraseña y compártela (se invalida al cambiarla).</div>
+	                    <input id="rrhhMemberTempPassword" class="rrhh-inline-input" type="text" readonly value="" placeholder="Genera una contraseña..." />
+	                  </div>
+	                  <div class="workspace-rrhh-row-actions">
+	                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass="${escapeHtml(String(user.id))}">Generar</button>
+	                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-copy>Copiar</button>
+	                  </div>
+		                </div>
+		                <div class="workspace-rrhh-row">
+		                  <div>
+		                    <strong>Contraseña manual</strong>
+		                    <div class="muted">Establece una contraseña y guárdala directamente.</div>
+		                    <input id="rrhhMemberManualPassword" class="rrhh-inline-input" type="password" minlength="8" autocomplete="new-password" value="" placeholder="Mínimo 8 caracteres" />
+		                  </div>
+		                  <div class="workspace-rrhh-row-actions">
+		                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-set="${escapeHtml(String(user.id))}">Guardar</button>
+		                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-set-copy>Copiar</button>
+		                  </div>
+		                </div>
+		              ` : ""}
+			            ${employee?.id ? `
+			              <div class="workspace-rrhh-row">
+			                <div>
+			                  <strong>Kiosko de fichaje (QR)</strong>
 		                  <div class="muted">Genera un enlace (QR) para fichar entrada/salida. Recomendado para móvil/tablet; requiere PIN de kiosko.</div>
 		                  <input id="rrhhMemberKioskUrl" class="rrhh-inline-input" type="text" readonly value="${escapeHtml(buildKioskUrl(employee?.kiosk_token || ""))}" placeholder="Genera un enlace..." />
                       <div style="margin-top:10px;">
@@ -11121,11 +11133,11 @@ const renderWorkspaceRrhhHub = () => {
       if (status) status.textContent = "Guardando...";
       const submit = personalForm.querySelector('button[type="submit"]');
       if (submit) submit.disabled = true;
-      const lockActions = Array.from(
-        workspaceRrhhHub.querySelectorAll(
-          '[data-rrhh-user-services-save], [data-rrhh-member-invite], [data-rrhh-member-pass], [data-rrhh-member-toggle-registro]'
-        )
-      );
+	      const lockActions = Array.from(
+	        workspaceRrhhHub.querySelectorAll(
+	          '[data-rrhh-user-services-save], [data-rrhh-member-invite], [data-rrhh-member-pass], [data-rrhh-member-pass-set], [data-rrhh-member-toggle-registro]'
+	        )
+	      );
       lockActions.forEach((btn) => {
         try { btn.disabled = true; } catch {}
       });
@@ -11306,12 +11318,13 @@ const renderWorkspaceRrhhHub = () => {
     });
   }
 
-  const accessStatus = document.getElementById("rrhhMemberAccessStatus");
-  const inviteLinkEl = document.getElementById("rrhhMemberInviteLink");
-  const tempPassInput = document.getElementById("rrhhMemberTempPassword");
-  const inviteBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-invite]");
-  if (inviteBtn) {
-    inviteBtn.addEventListener("click", async () => {
+	  const accessStatus = document.getElementById("rrhhMemberAccessStatus");
+	  const inviteLinkEl = document.getElementById("rrhhMemberInviteLink");
+	  const tempPassInput = document.getElementById("rrhhMemberTempPassword");
+	  const manualPassInput = document.getElementById("rrhhMemberManualPassword");
+	  const inviteBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-invite]");
+	  if (inviteBtn) {
+	    inviteBtn.addEventListener("click", async () => {
       if (!isWorkspaceRrhhManager()) return;
       const userId = String(inviteBtn.dataset.rrhhMemberInvite || "").trim();
       if (!userId) return;
@@ -11355,9 +11368,9 @@ const renderWorkspaceRrhhHub = () => {
       }
     });
   }
-  const passCopyBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-copy]");
-  if (passCopyBtn) {
-    passCopyBtn.addEventListener("click", async () => {
+	  const passCopyBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-copy]");
+	  if (passCopyBtn) {
+	    passCopyBtn.addEventListener("click", async () => {
       const value = String(tempPassInput?.value || "").trim();
       if (!value) return;
       try {
@@ -11368,11 +11381,52 @@ const renderWorkspaceRrhhHub = () => {
           window.prompt("Copia la contraseña:", value);
         } catch {}
       }
-    });
-  }
+	    });
+	  }
 
-  const kioskUrlInput = document.getElementById("rrhhMemberKioskUrl");
-  const kioskQrImg = document.getElementById("rrhhMemberKioskQr");
+	  const manualPassBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-set]");
+	  if (manualPassBtn) {
+	    manualPassBtn.addEventListener("click", async () => {
+	      if (!isWorkspaceRrhhManager()) return;
+	      const userId = String(manualPassBtn.dataset.rrhhMemberPassSet || "").trim();
+	      if (!userId) return;
+	      const password = String(manualPassInput?.value || "");
+	      if (!password || password.length < 8) {
+	        if (accessStatus) accessStatus.textContent = "La contraseña debe tener al menos 8 caracteres.";
+	        return;
+	      }
+	      manualPassBtn.disabled = true;
+	      if (accessStatus) accessStatus.textContent = "Guardando contraseña...";
+	      try {
+	        const resp = await apiPost("/api/usuarios_update", { id: userId, password, workspace_id: state.currentWorkspaceId });
+	        if (resp?.error) throw new Error(resp.error);
+	        if (accessStatus) accessStatus.textContent = "Contraseña guardada.";
+	        if (manualPassInput) manualPassInput.value = "";
+	      } catch (error) {
+	        if (accessStatus) accessStatus.textContent = error.message || "No se pudo guardar la contraseña.";
+	      } finally {
+	        manualPassBtn.disabled = false;
+	      }
+	    });
+	  }
+	  const manualPassCopyBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-set-copy]");
+	  if (manualPassCopyBtn) {
+	    manualPassCopyBtn.addEventListener("click", async () => {
+	      const value = String(manualPassInput?.value || "").trim();
+	      if (!value) return;
+	      try {
+	        await navigator.clipboard.writeText(value);
+	        if (accessStatus) accessStatus.textContent = "Contraseña copiada.";
+	      } catch {
+	        try {
+	          window.prompt("Copia la contraseña:", value);
+	        } catch {}
+	      }
+	    });
+	  }
+	
+	  const kioskUrlInput = document.getElementById("rrhhMemberKioskUrl");
+	  const kioskQrImg = document.getElementById("rrhhMemberKioskQr");
   const kioskGenerateBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-kiosk-generate]");
   if (kioskGenerateBtn && kioskUrlInput) {
     kioskGenerateBtn.addEventListener("click", async () => {
@@ -11753,6 +11807,140 @@ const renderWorkspaceRrhhHub = () => {
         resetBtn.disabled = false;
       }
     });
+  }
+
+  let _rrhhCleanupModal = null;
+  const closeRrhhCleanupModal = () => {
+    if (_rrhhCleanupModal) {
+      try {
+        _rrhhCleanupModal.remove();
+      } catch {}
+      _rrhhCleanupModal = null;
+    }
+  };
+  const openRrhhCleanupModal = () => {
+    if (!isWorkspaceRrhhManager()) return;
+    if (!state.currentWorkspaceId) return;
+    if (_rrhhCleanupModal) return;
+    const rows = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+    const employees = rows.filter((row) => String(row?.source || "").trim() !== "auto");
+    const list = employees
+      .map((row) => ({
+        id: String(row?.id || "").trim(),
+        nombre: String(row?.nombre || "").trim() || "-",
+        empresa: String(row?.empresa_nombre || "").trim(),
+      }))
+      .filter((row) => Boolean(row.id))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "rrhhCleanupModal";
+    modal.innerHTML = `
+      <div class="modal-card" style="max-width: 920px;">
+        <div class="section-head">
+          <div>
+            <h3>Limpiar plantilla RRHH</h3>
+            <p class="muted">Borra del workspace actual todas las fichas excepto las que marques.</p>
+            <p class="muted"><strong>Importante:</strong> esto NO afecta a otros workspaces.</p>
+          </div>
+          <div class="section-head-actions">
+            <button type="button" class="secondary ghost button-inline" data-rrhh-cleanup-close>Cerrar</button>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label class="span-2">
+            Buscar
+            <input id="rrhhCleanupSearch" placeholder="Claudio, Sergio..." />
+          </label>
+          <label>
+            Confirmación
+            <input id="rrhhCleanupConfirm" placeholder="Escribe BORRAR" />
+          </label>
+          <div class="span-2 muted">Selecciona a quién <strong>mantener</strong> (${numberFormatter.format(list.length)} fichas encontradas).</div>
+          <div id="rrhhCleanupList" class="span-2" style="max-height: 320px; overflow:auto; border:1px solid rgba(0,0,0,0.06); border-radius:12px; padding:12px; background:#fff;"></div>
+          <div class="span-2 form-actions">
+            <button type="button" class="secondary danger" data-rrhh-cleanup-run>Eliminar resto</button>
+            <span id="rrhhCleanupStatus" class="muted"></span>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    _rrhhCleanupModal = modal;
+    const listEl = modal.querySelector("#rrhhCleanupList");
+    const searchEl = modal.querySelector("#rrhhCleanupSearch");
+    const confirmEl = modal.querySelector("#rrhhCleanupConfirm");
+    const statusEl = modal.querySelector("#rrhhCleanupStatus");
+    const runBtn = modal.querySelector("[data-rrhh-cleanup-run]");
+    const closeBtn = modal.querySelector("[data-rrhh-cleanup-close]");
+    const renderList = () => {
+      const q = normalizeSimple(String(searchEl?.value || ""));
+      const filtered = q
+        ? list.filter((row) => normalizeSimple(`${row.nombre} ${row.empresa}`).includes(q))
+        : list;
+      if (!listEl) return;
+      listEl.innerHTML = filtered.length
+        ? filtered
+            .map(
+              (row) => `
+                <label class="inline-check" style="display:flex; gap:10px; align-items:center; padding:6px 4px;">
+                  <input type="checkbox" data-rrhh-cleanup-keep="${escapeHtml(row.id)}" />
+                  <span><strong>${escapeHtml(row.nombre)}</strong>${row.empresa ? ` <span class="muted">· ${escapeHtml(row.empresa)}</span>` : ""}</span>
+                </label>
+              `
+            )
+            .join("")
+        : `<p class="muted">Sin resultados.</p>`;
+    };
+    renderList();
+    searchEl?.addEventListener("input", renderList);
+    closeBtn?.addEventListener("click", closeRrhhCleanupModal);
+    modal.addEventListener("click", (ev) => {
+      if (ev.target === modal) closeRrhhCleanupModal();
+    });
+    runBtn?.addEventListener("click", async () => {
+      const confirm = String(confirmEl?.value || "").trim().toUpperCase();
+      if (confirm !== "BORRAR") {
+        if (statusEl) statusEl.textContent = "Escribe BORRAR para confirmar.";
+        return;
+      }
+      const keepIds = Array.from(modal.querySelectorAll('input[type="checkbox"][data-rrhh-cleanup-keep]'))
+        .filter((input) => input.checked)
+        .map((input) => String(input.dataset.rrhhCleanupKeep || "").trim())
+        .filter(Boolean);
+      if (!keepIds.length) {
+        if (statusEl) statusEl.textContent = "Selecciona al menos 1 persona a mantener.";
+        return;
+      }
+      if (!window.confirm(`Vas a borrar ${list.length - keepIds.length} fichas del workspace actual. ¿Continuar?`)) {
+        return;
+      }
+      runBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Borrando...";
+      try {
+        const resp = await apiPost("/api/workspace_rrhh_cleanup", {
+          workspace_id: state.currentWorkspaceId,
+          keep_persona_ids: keepIds,
+          confirm: "BORRAR",
+        });
+        if (resp?.error) throw new Error(resp.error);
+        if (statusEl) statusEl.textContent = `Listo. Eliminadas: ${Number(resp?.removed_personas || 0) || 0}.`;
+        await refreshWorkspaceTimeSetup();
+        await refreshWorkspaceRrhh();
+        renderCompanyCards();
+        window.setTimeout(closeRrhhCleanupModal, 900);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err?.message || "No se pudo limpiar.";
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  };
+
+  const cleanupBtn = workspaceRrhhHub.querySelector("[data-rrhh-cleanup]");
+  if (cleanupBtn) {
+    cleanupBtn.addEventListener("click", () => openRrhhCleanupModal());
   }
 
   workspaceRrhhHub.querySelectorAll("[data-rrhh-employee-edit]").forEach((button) => {
@@ -26500,8 +26688,633 @@ const ensureHipotecaFichaPanel = () => {
         </div>
         <button type="button" id="hipotecaFichaClose" class="secondary">Cerrar</button>
       </div>
+      <div id="hipotecaFichaTabs" class="tabs" style="margin-bottom: 12px;">
+        <button class="tab active" type="button" data-hipoteca-ficha-tab="cliente">Datos cliente e inmueble</button>
+        <button class="tab" type="button" data-hipoteca-ficha-tab="hipoteca">Datos de hipoteca</button>
+        <button class="tab" type="button" data-hipoteca-ficha-tab="liquidacion">Ficha de liquidación</button>
+      </div>
       <form id="hipotecaFichaForm">
-        <div id="hipotecaFichaGrid" class="form-grid"></div>
+        <div id="hipotecaFichaTabCliente" class="stack">
+          <div class="form-card">
+            <h4>Cliente (principal) e inmueble</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Cliente</span>
+                <input name="cliente" placeholder="Nombre y apellidos" />
+              </label>
+              <label>
+                <span>Cliente ID (CRM)</span>
+                <input name="cliente_id" placeholder="-" disabled />
+              </label>
+              <label>
+                <span>Dirección inmueble</span>
+                <input data-json="cliente_inmueble_json" data-path="inmueble.direccion" placeholder="C/ ..." />
+              </label>
+              <label>
+                <span>Localidad</span>
+                <input data-json="cliente_inmueble_json" data-path="inmueble.localidad" />
+              </label>
+              <label>
+                <span>Provincia</span>
+                <input data-json="cliente_inmueble_json" data-path="inmueble.provincia" />
+              </label>
+            </div>
+          </div>
+          <div class="form-card">
+            <h4>Datos del comprador (C1 / C2)</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>C1 · Nombre</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c1.nombre" />
+              </label>
+              <label>
+                <span>C1 · NIF/NIE</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c1.nif" />
+              </label>
+              <label>
+                <span>C1 · Email</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c1.email" />
+              </label>
+              <label>
+                <span>C1 · Teléfono</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c1.telefono" />
+              </label>
+              <label class="span-2">
+                <span>C1 · Domicilio</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c1.domicilio" />
+              </label>
+
+              <label class="span-2">
+                <span>C2 · Nombre</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c2.nombre" />
+              </label>
+              <label>
+                <span>C2 · NIF/NIE</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c2.nif" />
+              </label>
+              <label>
+                <span>C2 · Email</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c2.email" />
+              </label>
+              <label>
+                <span>C2 · Teléfono</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c2.telefono" />
+              </label>
+              <label class="span-2">
+                <span>C2 · Domicilio</span>
+                <input data-json="cliente_inmueble_json" data-path="comprador.c2.domicilio" />
+              </label>
+            </div>
+          </div>
+          <div class="form-card">
+            <h4>Parte prestataria</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Prestatario 1 · Nombre</span>
+                <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nombre" />
+              </label>
+              <label>
+                <span>Prestatario 1 · NIF/NIE</span>
+                <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nif" />
+              </label>
+              <label class="span-2">
+                <span>Prestatario 2 · Nombre</span>
+                <input data-json="cliente_inmueble_json" data-path="prestataria.p2.nombre" />
+              </label>
+              <label>
+                <span>Prestatario 2 · NIF/NIE</span>
+                <input data-json="cliente_inmueble_json" data-path="prestataria.p2.nif" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="hipotecaFichaTabHipoteca" class="stack hidden">
+          <div class="form-card">
+            <h4>Datos principales</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Banco / entidad</span>
+                <input name="banco" list="bankList" />
+              </label>
+              <label>
+                <span>Oficina</span>
+                <input name="oficina" list="officeList" />
+              </label>
+              <label>
+                <span>Inmobiliaria compra</span>
+                <input name="inmobiliaria_compra" />
+              </label>
+              <label>
+                <span>Asesor</span>
+                <input name="asesor" />
+              </label>
+              <label>
+                <span>Estado</span>
+                <select name="estado">
+                  <option value=""></option>
+                  <option>Pendiente</option>
+                  <option>Estudio</option>
+                  <option>Encargo</option>
+                  <option>Firmada</option>
+                  <option>Rechazada</option>
+                  <option>Cancelada</option>
+                  <option>Indemnización</option>
+                </select>
+              </label>
+              <label>
+                <span>Encargo</span>
+                <select name="encargo">
+                  <option value=""></option>
+                  <option>Sí</option>
+                  <option>No</option>
+                  <option>Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Tipo hipoteca</span>
+                <select name="tipo_hipoteca">
+                  <option value=""></option>
+                  <option>Compra</option>
+                  <option>Subrogación</option>
+                  <option>Novación</option>
+                  <option>Cambio</option>
+                  <option>Otro</option>
+                </select>
+              </label>
+              <label>
+                <span>Fecha encargo</span>
+                <input name="fecha_encargo" type="date" />
+              </label>
+              <label>
+                <span>Fecha firma</span>
+                <input name="fecha_firma" type="date" />
+              </label>
+            </div>
+          </div>
+          <div class="form-card">
+            <h4>Importes</h4>
+            <div class="form-grid">
+              <label>
+                <span>Precio</span>
+                <input name="precio" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Importe hipoteca</span>
+                <input name="importe_hipoteca" inputmode="decimal" />
+              </label>
+              <label>
+                <span>% financiación</span>
+                <input name="porcentaje" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Entrada</span>
+                <input name="entrada" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Comisión cliente</span>
+                <input name="comision" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Cesión banco</span>
+                <input name="cesion" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Comisión Juan</span>
+                <input name="comision_juan" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Comisión Modernia</span>
+                <input name="comision_modernia" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Año</span>
+                <input name="anio" type="number" min="1990" max="2100" />
+              </label>
+            </div>
+          </div>
+          <div class="form-card">
+            <h4>Preferencias (LCCI)</h4>
+            <p class="muted">Campos base extraídos de los documentos “Contrato de intermediación” e “Información precontractual”.</p>
+            <div class="form-grid">
+              <label>
+                <span>Plazo amortización (años)</span>
+                <input data-json="hipoteca_detalle_json" data-path="preferencias.plazo_anos" type="number" min="0" max="60" />
+              </label>
+              <label>
+                <span>Tipo interés</span>
+                <select data-json="hipoteca_detalle_json" data-path="preferencias.tipo_interes">
+                  <option value=""></option>
+                  <option>Fijo</option>
+                  <option>Variable</option>
+                  <option>Mixto</option>
+                </select>
+              </label>
+              <label>
+                <span>Garantía · Vivienda habitual</span>
+                <select data-json="hipoteca_detalle_json" data-path="preferencias.garantia_vivienda_habitual">
+                  <option value=""></option>
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </label>
+              <label>
+                <span>Comisión máx. apertura</span>
+                <input data-json="hipoteca_detalle_json" data-path="preferencias.comision_apertura_max" inputmode="decimal" />
+              </label>
+              <label class="span-2">
+                <span>Otras preferencias</span>
+                <input data-json="hipoteca_detalle_json" data-path="preferencias.otras" />
+              </label>
+              <label class="span-2">
+                <span>Registro intermediario (BDE)</span>
+                <input data-json="hipoteca_detalle_json" data-path="precontractual.registro" placeholder="Identificador / URL" />
+              </label>
+              <label class="span-2">
+                <span>Seguro RC profesional</span>
+                <input data-json="hipoteca_detalle_json" data-path="precontractual.seguro_rc" placeholder="Aseguradora / póliza" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="hipotecaFichaTabLiquidacion" class="stack hidden">
+          <div class="form-card">
+            <h4>Liquidación comprador</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Cliente</span>
+                <input data-json="liquidacion_json" data-path="comprador.cliente" />
+              </label>
+              <label class="span-2">
+                <span>Vivienda</span>
+                <input data-json="liquidacion_json" data-path="comprador.vivienda" />
+              </label>
+              <label>
+                <span>Localidad</span>
+                <input data-json="liquidacion_json" data-path="comprador.localidad" />
+              </label>
+              <label>
+                <span>Provincia</span>
+                <input data-json="liquidacion_json" data-path="comprador.provincia" />
+              </label>
+              <label>
+                <span>Precio compra vivienda</span>
+                <input data-json="liquidacion_json" data-path="comprador.precio_compra" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Escriturado</span>
+                <input data-json="liquidacion_json" data-path="comprador.escriturado" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Gastos compraventa</h4>
+            <div class="form-grid">
+              <label>
+                <span>Notaría</span>
+                <input data-json="liquidacion_json" data-path="comprador.gastos_compraventa.notaria" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Registro propiedad</span>
+                <input data-json="liquidacion_json" data-path="comprador.gastos_compraventa.registro" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Impuesto transmisiones</span>
+                <input data-json="liquidacion_json" data-path="comprador.gastos_compraventa.itp" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gestoría</span>
+                <input data-json="liquidacion_json" data-path="comprador.gastos_compraventa.gestoria" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Total gastos (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.gastos_compraventa.total" inputmode="decimal" readonly />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Gastos constitución hipoteca</h4>
+            <div class="form-grid">
+              <label>
+                <span>Hipoteca (capital)</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.capital" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Notaría, impuestos y gestoría</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.notaria_impuestos_gestoria" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Comisión apertura</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.comision_apertura" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Cuota socio caja</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.cuota_socio" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Comisión cheques/OMF</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.comision_cheques" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Total gastos (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_gastos" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Seguros hogar/vida</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguros_nota" placeholder="Nota" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Gestiones y totales</h4>
+            <div class="form-grid">
+              <label>
+                <span>Gestión inmobiliaria</span>
+                <input data-json="liquidacion_json" data-path="comprador.gestion_inmobiliaria" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gestión financiación</span>
+                <input data-json="liquidacion_json" data-path="comprador.gestion_financiacion" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Suma total necesaria (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.suma_total_necesaria" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Total entregado (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.suma_total_entregada" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Sobran en cuenta (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.sobran_en_cuenta" inputmode="decimal" readonly />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Cantidades entregadas</h4>
+            <div class="form-grid">
+              <label>
+                <span>Señal</span>
+                <input data-json="liquidacion_json" data-path="comprador.entregas.senal" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Transf. a Modernia (pte)</span>
+                <input data-json="liquidacion_json" data-path="comprador.entregas.transf_modernia" inputmode="decimal" />
+              </label>
+              <label>
+                <span>A ingresar en banco</span>
+                <input data-json="liquidacion_json" data-path="comprador.entregas.ingresar_banco" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Préstamo concedido</span>
+                <input data-json="liquidacion_json" data-path="comprador.entregas.prestamo_concedido" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Liquidación vendedor</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Cliente</span>
+                <input data-json="liquidacion_json" data-path="vendedor.cliente" />
+              </label>
+              <label class="span-2">
+                <span>Dirección</span>
+                <input data-json="liquidacion_json" data-path="vendedor.direccion" />
+              </label>
+              <label>
+                <span>Localidad</span>
+                <input data-json="liquidacion_json" data-path="vendedor.localidad" />
+              </label>
+              <label>
+                <span>Precio vivienda</span>
+                <input data-json="liquidacion_json" data-path="vendedor.precio_vivienda" inputmode="decimal" />
+              </label>
+              <label class="span-2">
+                <span>Deducciones (texto)</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones_nota" placeholder="(opcional)" />
+              </label>
+              <label>
+                <span>Señal</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.senal" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Cancelación económica préstamo</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.cancelacion_economica" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Cancelación registral préstamo</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.cancelacion_registral" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Deuda IBI</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.deuda_ibi" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Plusvalía municipal</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.plusvalia" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Retención 3% no residente</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.retencion_no_residente" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gestión no residente</span>
+                <input data-json="liquidacion_json" data-path="vendedor.deducciones.gestion_no_residente" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Subtotal pte. percibir</span>
+                <input data-json="liquidacion_json" data-path="vendedor.subtotal_pte_percibir" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Total a percibir</span>
+                <input data-json="liquidacion_json" data-path="vendedor.total_a_percibir" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Vendedores y datos registrales</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Vendedor 1 · Nombre</span>
+                <input data-json="liquidacion_json" data-path="vendedor.vendedores.v1.nombre" />
+              </label>
+              <label>
+                <span>Vendedor 1 · NIF/NIE</span>
+                <input data-json="liquidacion_json" data-path="vendedor.vendedores.v1.nif" />
+              </label>
+              <label class="span-2">
+                <span>Vendedor 2 · Nombre</span>
+                <input data-json="liquidacion_json" data-path="vendedor.vendedores.v2.nombre" />
+              </label>
+              <label>
+                <span>Vendedor 2 · NIF/NIE</span>
+                <input data-json="liquidacion_json" data-path="vendedor.vendedores.v2.nif" />
+              </label>
+              <label class="span-2">
+                <span>Registro (piso)</span>
+                <input data-json="liquidacion_json" data-path="vendedor.registro" placeholder="Registro de ..." />
+              </label>
+              <label>
+                <span>Finca</span>
+                <input data-json="liquidacion_json" data-path="vendedor.finca" placeholder="Nº finca" />
+              </label>
+              <label class="span-2">
+                <span>Notas</span>
+                <input data-json="liquidacion_json" data-path="vendedor.notas" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Cuadre de cheques</h4>
+            <div class="form-grid">
+              <label>
+                <span>Préstamo concedido</span>
+                <input data-json="liquidacion_json" data-path="cuadre.prestamo_concedido" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Ingreso en cuenta</span>
+                <input data-json="liquidacion_json" data-path="cuadre.ingreso_en_cuenta" inputmode="decimal" />
+              </label>
+              <label class="span-2">
+                <span>Cheque 1 (beneficiario)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cheque1.beneficiario" placeholder="OMF ..." />
+              </label>
+              <label>
+                <span>Cheque 1 (importe)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cheque1.importe" inputmode="decimal" />
+              </label>
+              <label class="span-2">
+                <span>Cheque 2 (beneficiario)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cheque2.beneficiario" placeholder="OMF ..." />
+              </label>
+              <label>
+                <span>Cheque 2 (importe)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cheque2.importe" inputmode="decimal" />
+              </label>
+              <label class="span-2">
+                <span>Cancelación económica préstamo</span>
+                <input data-json="liquidacion_json" data-path="cuadre.cancelacion_economica" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Retención cancelación registral</span>
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_cancelacion_registral" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Retención deuda IBI</span>
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_ibi" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Retención 3% no residente</span>
+                <input data-json="liquidacion_json" data-path="cuadre.retencion_no_residente" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gestión no residente</span>
+                <input data-json="liquidacion_json" data-path="cuadre.gestion_no_residente" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gastos escritura · Compraventa</span>
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.compraventa" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gastos escritura · Hipoteca</span>
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.hipoteca" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Gastos escritura · Com. apertura</span>
+                <input data-json="liquidacion_json" data-path="cuadre.gastos_escrituras.com_apertura" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Sobran en cuenta</span>
+                <input data-json="liquidacion_json" data-path="cuadre.sobran_en_cuenta" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Notaría (parte)</h4>
+            <div class="form-grid">
+              <label class="span-2">
+                <span>Notaría</span>
+                <input data-json="liquidacion_json" data-path="notaria.nombre" />
+              </label>
+              <label class="span-2">
+                <span>Persona de contacto</span>
+                <input data-json="liquidacion_json" data-path="notaria.contacto" placeholder="Nombre / teléfono" />
+              </label>
+              <label>
+                <span>A la atención de</span>
+                <input data-json="liquidacion_json" data-path="notaria.atencion" />
+              </label>
+              <label class="span-2">
+                <span>Entidad hipoteca</span>
+                <input data-json="liquidacion_json" data-path="notaria.entidad" />
+              </label>
+              <label class="span-2">
+                <span>Op. referencia</span>
+                <input data-json="liquidacion_json" data-path="notaria.op_referencia" />
+              </label>
+              <label class="span-2">
+                <span>Fecha y hora firma</span>
+                <input data-json="liquidacion_json" data-path="notaria.fecha_hora_firma" />
+              </label>
+              <label class="span-2">
+                <span>Forma de pago</span>
+                <input data-json="liquidacion_json" data-path="notaria.forma_pago" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-card">
+            <h4>Condiciones del préstamo</h4>
+            <div class="form-grid">
+              <label>
+                <span>Tipo salida</span>
+                <input data-json="liquidacion_json" data-path="prestamo.tipo_salida" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Revisión</span>
+                <input data-json="liquidacion_json" data-path="prestamo.revision" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Interés</span>
+                <input data-json="liquidacion_json" data-path="prestamo.interes" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Plazo (años)</span>
+                <input data-json="liquidacion_json" data-path="prestamo.plazo_anos" type="number" min="0" max="60" />
+              </label>
+              <label>
+                <span>Nº cuotas</span>
+                <input data-json="liquidacion_json" data-path="prestamo.numero_cuotas" type="number" min="0" max="1000" />
+              </label>
+              <label>
+                <span>Cuota inicial</span>
+                <input data-json="liquidacion_json" data-path="prestamo.cuota_inicial" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Apertura</span>
+                <input data-json="liquidacion_json" data-path="prestamo.apertura" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Ca. parcial</span>
+                <input data-json="liquidacion_json" data-path="prestamo.cancelacion_parcial" inputmode="decimal" />
+              </label>
+              <label>
+                <span>Cancelación</span>
+                <input data-json="liquidacion_json" data-path="prestamo.cancelacion" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+        </div>
         <div class="form-actions">
           <button type="button" id="hipotecaFichaPdf" class="secondary">Generar PDF</button>
           <button type="submit">Guardar cambios</button>
@@ -26525,6 +27338,9 @@ const ensureHipotecaFichaPanel = () => {
       openHipotecaFichaPrint(recordId);
     }
   });
+  panel.querySelectorAll('#hipotecaFichaTabs [data-hipoteca-ficha-tab]')?.forEach((btn) => {
+    btn.addEventListener("click", () => setHipotecaFichaTab(btn.dataset.hipotecaFichaTab));
+  });
   panel.querySelector("#hipotecaFichaForm")?.addEventListener("submit", saveHipotecaFicha);
   panel.addEventListener("click", (event) => {
     if (event.target === panel) {
@@ -26535,46 +27351,176 @@ const ensureHipotecaFichaPanel = () => {
   return panel;
 };
 
-const buildHipotecaFichaFormFields = (panel, columns = []) => {
-  if (!panel) return [];
-  const grid = panel.querySelector("#hipotecaFichaGrid");
-  if (!grid) return [];
-  const fields = getHipotecaFichaFields(columns);
-  panel.dataset.fields = JSON.stringify(fields);
-  grid.innerHTML = "";
-  fields.forEach((field) => {
-    const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
-    const label = document.createElement("label");
-    label.dataset.field = field;
-    label.innerHTML = `<span>${formatHeader(field)}</span>`;
-    if (cfg.type === "select") {
-      const select = document.createElement("select");
-      select.name = field;
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "-";
-      select.appendChild(empty);
-      (cfg.options || []).forEach((optionValue) => {
-        const option = document.createElement("option");
-        option.value = optionValue;
-        option.textContent = optionValue;
-        select.appendChild(option);
-      });
-      label.appendChild(select);
-    } else {
-      const input = document.createElement("input");
-      input.name = field;
-      if (cfg.type === "date") input.type = "date";
-      else if (cfg.type === "number") input.type = "number";
-      else {
-        input.type = "text";
-        if (cfg.type === "money" || cfg.type === "percent") input.inputMode = "decimal";
-      }
-      label.appendChild(input);
-    }
-    grid.appendChild(label);
+const HIPOTECA_FICHA_COLUMN_FIELDS = [
+  "cliente",
+  "cliente_id",
+  "banco",
+  "oficina",
+  "inmobiliaria_compra",
+  "asesor",
+  "estado",
+  "encargo",
+  "tipo_hipoteca",
+  "fecha_encargo",
+  "fecha_firma",
+  "precio",
+  "importe_hipoteca",
+  "porcentaje",
+  "entrada",
+  "comision",
+  "cesion",
+  "comision_juan",
+  "comision_modernia",
+  "anio",
+];
+
+const setHipotecaFichaTab = (tabKey) => {
+  const panel = ensureHipotecaFichaPanel();
+  if (!panel) return;
+  const key = tabKey === "hipoteca" || tabKey === "liquidacion" ? tabKey : "cliente";
+  panel.dataset.activeTab = key;
+  panel.querySelectorAll("#hipotecaFichaTabs .tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.hipotecaFichaTab === key);
   });
-  return fields;
+  panel.querySelector("#hipotecaFichaTabCliente")?.classList.toggle("hidden", key !== "cliente");
+  panel.querySelector("#hipotecaFichaTabHipoteca")?.classList.toggle("hidden", key !== "hipoteca");
+  panel.querySelector("#hipotecaFichaTabLiquidacion")?.classList.toggle("hidden", key !== "liquidacion");
+};
+
+const safeParseJsonObject = (raw) => {
+  try {
+    const text = String(raw || "").trim();
+    if (!text) return {};
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const setNestedValue = (obj, path, value) => {
+  const parts = String(path || "").split(".").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return;
+  let cursor = obj;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const key = parts[i];
+    const next = cursor[key];
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      cursor[key] = {};
+    }
+    cursor = cursor[key];
+  }
+  cursor[parts[parts.length - 1]] = value;
+};
+
+const getNestedValue = (obj, path) => {
+  const parts = String(path || "").split(".").map((p) => p.trim()).filter(Boolean);
+  let cursor = obj;
+  for (const key of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[key];
+  }
+  return cursor;
+};
+
+const normalizeMoneyLike = (value) => {
+  const parsed = toNumber(value);
+  return parsed === null ? "" : parsed;
+};
+
+const computeHipotecaLiquidacionComputed = (data) => {
+  const liq = data && typeof data === "object" ? data : {};
+  const comprador = liq.comprador && typeof liq.comprador === "object" ? liq.comprador : {};
+  const gastosCv = comprador.gastos_compraventa && typeof comprador.gastos_compraventa === "object" ? comprador.gastos_compraventa : {};
+  const hip = comprador.hipoteca && typeof comprador.hipoteca === "object" ? comprador.hipoteca : {};
+  const entregas = comprador.entregas && typeof comprador.entregas === "object" ? comprador.entregas : {};
+
+  const totalCv =
+    Number(gastosCv.notaria || 0) +
+    Number(gastosCv.registro || 0) +
+    Number(gastosCv.itp || 0) +
+    Number(gastosCv.gestoria || 0);
+  gastosCv.total = Math.round(totalCv * 100) / 100;
+
+  const totalHip =
+    Number(hip.notaria_impuestos_gestoria || 0) +
+    Number(hip.comision_apertura || 0) +
+    Number(hip.cuota_socio || 0) +
+    Number(hip.comision_cheques || 0);
+  hip.total_gastos = Math.round(totalHip * 100) / 100;
+
+  const sumaNecesaria =
+    Number(comprador.precio_compra || 0) +
+    Number(gastosCv.total || 0) +
+    Number(hip.total_gastos || 0) +
+    Number(comprador.gestion_inmobiliaria || 0) +
+    Number(comprador.gestion_financiacion || 0);
+  comprador.suma_total_necesaria = Math.round(sumaNecesaria * 100) / 100;
+
+  const sumaEntregada =
+    Number(entregas.senal || 0) +
+    Number(entregas.transf_modernia || 0) +
+    Number(entregas.ingresar_banco || 0);
+  comprador.suma_total_entregada = Math.round(sumaEntregada * 100) / 100;
+
+  const sobra =
+    Number(entregas.prestamo_concedido || 0) +
+    Number(comprador.suma_total_entregada || 0) -
+    Number(comprador.suma_total_necesaria || 0);
+  comprador.sobran_en_cuenta = Math.round(sobra * 100) / 100;
+
+  liq.comprador = comprador;
+  comprador.gastos_compraventa = gastosCv;
+  comprador.hipoteca = hip;
+  comprador.entregas = entregas;
+  return liq;
+};
+
+const refreshHipotecaLiquidacionComputedControls = (panel) => {
+  if (!panel) return;
+  const liq = collectHipotecaFichaJson(panel, "liquidacion_json");
+  const computed = computeHipotecaLiquidacionComputed(liq);
+  const targets = [
+    "comprador.gastos_compraventa.total",
+    "comprador.hipoteca.total_gastos",
+    "comprador.suma_total_necesaria",
+    "comprador.suma_total_entregada",
+    "comprador.sobran_en_cuenta",
+  ];
+  targets.forEach((path) => {
+    const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);
+    if (!el) return;
+    const val = getNestedValue(computed, path);
+    el.value = val === null || val === undefined || val === "" ? "" : String(val);
+  });
+};
+
+const collectHipotecaFichaJson = (panel, jsonKey) => {
+  const out = {};
+  panel.querySelectorAll(`[data-json="${jsonKey}"][data-path]`).forEach((el) => {
+    const path = el.dataset.path;
+    if (!path) return;
+    const raw = el.value ?? "";
+    const shouldBeNumber =
+      el.inputMode === "decimal" || el.type === "number" || el.hasAttribute("readonly");
+    const value = shouldBeNumber ? normalizeMoneyLike(raw) : String(raw);
+    setNestedValue(out, path, value);
+  });
+  return out;
+};
+
+const fillHipotecaFichaJson = (panel, jsonKey, obj) => {
+  const source = obj && typeof obj === "object" ? obj : {};
+  panel.querySelectorAll(`[data-json="${jsonKey}"][data-path]`).forEach((el) => {
+    const path = el.dataset.path;
+    if (!path) return;
+    const value = getNestedValue(source, path);
+    if (el.inputMode === "decimal" || el.type === "number") {
+      el.value = value === null || value === undefined || value === "" ? "" : String(value);
+      return;
+    }
+    el.value = value === null || value === undefined ? "" : String(value);
+  });
 };
 
 const fetchHipotecaRowById = async (recordId) => {
@@ -26651,21 +27597,21 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   }
   if (!found) return;
   const rowData = hipotecaRowToObject(found.row, found.columns);
-  const fields = buildHipotecaFichaFormFields(panel, found.columns);
   if (meta) {
     const cliente = String(rowData.cliente || "").trim() || `Hipoteca ${target.slice(0, 8)}`;
     meta.textContent = `${cliente} · ID ${target.slice(0, 8)}`;
   }
   syncHipotecaFichaPdfState(panel, rowData);
-  fields.forEach((field) => {
-    const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
+  setHipotecaFichaTab("cliente");
+  HIPOTECA_FICHA_COLUMN_FIELDS.forEach((field) => {
     const control = panel.querySelector(`[name="${field}"]`);
     if (!control) return;
     const raw = rowData[field];
-    if (cfg.type === "select") {
+    if (control.tagName === "SELECT") {
       setSelectValueCaseInsensitive(control, raw);
       return;
     }
+    const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
     if (cfg.type === "money") {
       control.value = formatMoneyInputValue(raw ?? "");
     } else if (cfg.type === "percent") {
@@ -26681,6 +27627,54 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
       control.value = raw ?? "";
     }
   });
+
+  const clienteInmueble = safeParseJsonObject(rowData.cliente_inmueble_json);
+  const hipotecaDetalle = safeParseJsonObject(rowData.hipoteca_detalle_json);
+  const liquidacion = safeParseJsonObject(rowData.liquidacion_json);
+
+  // Defaults (si el JSON está vacío o viene de instalaciones anteriores).
+  const fallbackCliente = String(rowData.cliente || "").trim();
+  if (!String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim() && fallbackCliente) {
+    setNestedValue(clienteInmueble, "comprador.c1.nombre", fallbackCliente);
+  }
+  if (!String(getNestedValue(liquidacion, "comprador.cliente") || "").trim() && fallbackCliente) {
+    setNestedValue(liquidacion, "comprador.cliente", fallbackCliente);
+  }
+  const precio = toNumber(rowData.precio);
+  const importeHipoteca = toNumber(rowData.importe_hipoteca);
+  if ((getNestedValue(liquidacion, "comprador.precio_compra") ?? "") === "" && precio !== null) {
+    setNestedValue(liquidacion, "comprador.precio_compra", precio);
+    setNestedValue(liquidacion, "comprador.escriturado", precio);
+  }
+  if ((getNestedValue(liquidacion, "comprador.hipoteca.capital") ?? "") === "" && importeHipoteca !== null) {
+    setNestedValue(liquidacion, "comprador.hipoteca.capital", importeHipoteca);
+  }
+  if ((getNestedValue(liquidacion, "comprador.entregas.prestamo_concedido") ?? "") === "" && importeHipoteca !== null) {
+    setNestedValue(liquidacion, "comprador.entregas.prestamo_concedido", importeHipoteca);
+  }
+  if (!String(getNestedValue(liquidacion, "notaria.entidad") || "").trim()) {
+    const bank = String(rowData.banco || "").trim();
+    if (bank) setNestedValue(liquidacion, "notaria.entidad", bank);
+  }
+  if (!String(getNestedValue(hipotecaDetalle, "precontractual.seguro_rc") || "").trim()) {
+    setNestedValue(
+      hipotecaDetalle,
+      "precontractual.seguro_rc",
+      "LLOYD’S (EXSEL U.A., S.L.) · Póliza BASWZ1733315598407A",
+    );
+  }
+
+  fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
+  fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
+  fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  refreshHipotecaLiquidacionComputedControls(panel);
+
+  if (panel.dataset.liquidacionListeners !== "1") {
+    panel.dataset.liquidacionListeners = "1";
+    panel.querySelectorAll('[data-json="liquidacion_json"][data-path]:not([readonly])').forEach((el) => {
+      el.addEventListener("change", () => refreshHipotecaLiquidacionComputedControls(panel));
+    });
+  }
   const status = panel.querySelector("#hipotecaFichaStatus");
   if (status) status.textContent = "";
   panel.classList.remove("hidden");
@@ -26701,20 +27695,10 @@ const saveHipotecaFicha = (event) => {
     empresa_id: empresa?.id || "",
     empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
   };
-  let fields = [];
-  try {
-    fields = JSON.parse(panel.dataset.fields || "[]");
-  } catch {
-    fields = [];
-  }
-  if (!Array.isArray(fields) || fields.length === 0) {
-    const found = findHipotecaBdtRowById(recordId);
-    fields = getHipotecaFichaFields(found?.columns || []);
-  }
-  fields.forEach((field) => {
-    const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
+  HIPOTECA_FICHA_COLUMN_FIELDS.forEach((field) => {
     const control = panel.querySelector(`[name="${field}"]`);
-    if (!control) return;
+    if (!control || control.disabled) return;
+    const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
     const value = control.value ?? "";
     if (cfg.type === "money" || cfg.type === "percent" || cfg.type === "number") {
       const parsed = toNumber(value);
@@ -26723,6 +27707,13 @@ const saveHipotecaFicha = (event) => {
     }
     payload[field] = value;
   });
+
+  const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+  const hipotecaDetalle = collectHipotecaFichaJson(panel, "hipoteca_detalle_json");
+  const liquidacion = computeHipotecaLiquidacionComputed(collectHipotecaFichaJson(panel, "liquidacion_json"));
+  payload.cliente_inmueble_json = JSON.stringify(clienteInmueble || {}, null, 0);
+  payload.hipoteca_detalle_json = JSON.stringify(hipotecaDetalle || {}, null, 0);
+  payload.liquidacion_json = JSON.stringify(liquidacion || {}, null, 0);
   fetch("/api/hipotecas_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -35450,6 +35450,93 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_members": int(deleted_members or 0)})
             return
+        elif parsed.path == "/api/workspace_rrhh_cleanup":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if confirm != "BORRAR":
+                json_response(self, {"error": "confirm inválido (usa BORRAR)"}, status=400)
+                return
+            keep_ids_raw = payload.get("keep_persona_ids")
+            keep_ids = []
+            if isinstance(keep_ids_raw, list):
+                keep_ids = [str(x or "").strip() for x in keep_ids_raw]
+            elif isinstance(keep_ids_raw, str):
+                keep_ids = [x.strip() for x in keep_ids_raw.split(",")]
+            keep_ids = [x for x in keep_ids if x]
+            if not keep_ids:
+                json_response(self, {"error": "keep_persona_ids requerido (>=1)"}, status=400)
+                return
+            # Seguridad: evita borrar si los ids no pertenecen al workspace.
+            try:
+                existing = conn.execute(
+                    f"SELECT id FROM workspace_registro_personal WHERE workspace_id = ? AND id IN ({','.join('?' for _ in keep_ids)})",
+                    (workspace_id, *keep_ids),
+                ).fetchall()
+            except Exception:
+                existing = []
+            keep_ids_existing = {
+                str(row_value(r, "id") or row_value(r, 0) or "").strip()
+                for r in (existing or [])
+                if str(row_value(r, "id") or row_value(r, 0) or "").strip()
+            }
+            if not keep_ids_existing:
+                json_response(self, {"error": "Ninguna persona a mantener existe en este workspace."}, status=400)
+                return
+            keep_ids = sorted(keep_ids_existing)
+            placeholders = ",".join("?" for _ in keep_ids)
+            removed_personas = 0
+            try:
+                removed_row = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})",
+                    (workspace_id, *keep_ids),
+                ).fetchone()
+                removed_personas = int(row_value(removed_row, "total", 0) or row_value(removed_row, 0) or 0)
+            except Exception:
+                removed_personas = 0
+            try:
+                # Borra RRHH/registro asociado a personas NO incluidas.
+                statements = [
+                    (f"DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_turnos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                ]
+                for sql, params in statements:
+                    try:
+                        conn.execute(sql, params)
+                    except Exception:
+                        pass
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo limpiar RRHH"}, status=500)
+                return
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "workspace_id": workspace_id,
+                    "kept": keep_ids,
+                    "removed_personas": int(removed_personas or 0),
+                },
+            )
+            return
         elif parsed.path == "/api/workspace_registro_usuario_toggle":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -38686,28 +38773,28 @@ class Handler(BaseHTTPRequestHandler):
                 "entidad": "banco",
                 "inmobiliaria": "inmobiliaria_compra",
             }
-            allowed = (
-                "cliente",
-                "cliente_id",
-                "banco",
-                "precio",
-                "importe_hipoteca",
-                "porcentaje",
-                "entrada",
-                "comision",
-                "oficina",
-                "fecha_encargo",
-                "encargo",
-                "tipo_hipoteca",
-                "fecha_firma",
-                "cesion",
-                "comision_juan",
-                "comision_modernia",
-                "inmobiliaria_compra",
-                "asesor",
-                "estado",
-                "anio",
-            )
+	            allowed = (
+	                "cliente",
+	                "cliente_id",
+	                "banco",
+	                "precio",
+	                "importe_hipoteca",
+	                "porcentaje",
+	                "entrada",
+	                "comision",
+	                "oficina",
+	                "fecha_encargo",
+	                "encargo",
+	                "tipo_hipoteca",
+	                "fecha_firma",
+	                "cesion",
+	                "comision_juan",
+	                "comision_modernia",
+	                "inmobiliaria_compra",
+	                "asesor",
+	                "estado",
+	                "anio",
+	            )
             updates = {}
             for key in allowed:
                 if key in payload:
@@ -38730,10 +38817,10 @@ class Handler(BaseHTTPRequestHandler):
                     updates["cliente_id"] = incoming_cliente_id
                 else:
                     updates["cliente_id"] = None
-            effective_comision = (
-                updates.get("comision")
-                if updates.get("comision") not in (None, "")
-                else current_row["comision"]
+	            effective_comision = (
+	                updates.get("comision")
+	                if updates.get("comision") not in (None, "")
+	                else current_row["comision"]
             )
             effective_agencia = (
                 updates.get("oficina")
