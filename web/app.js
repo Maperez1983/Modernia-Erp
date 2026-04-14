@@ -27683,6 +27683,10 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Forma de pago</span>
                 <input data-json="liquidacion_json" data-path="notaria.forma_pago" />
               </label>
+              <label class="span-2">
+                <span>Observaciones</span>
+                <input data-json="liquidacion_json" data-path="notaria.observaciones" placeholder="Particularidades / notas" />
+              </label>
             </div>
           </div>
 
@@ -27961,6 +27965,19 @@ const computeHipotecaLiquidacionComputed = (data) => {
     Number(comprador.gestion_inmobiliaria || 0) +
     Number(comprador.gestion_financiacion || 0);
   comprador.suma_total_necesaria = round2(sumaNecesaria);
+
+  // Autocalcular "A ingresar en banco" (solo si está vacío), replicando el flujo del Excel:
+  // suma_total_necesaria - prestamo_concedido - señal - transf_modernia.
+  if ((entregas.ingresar_banco ?? "") === "") {
+    const autoIngresar =
+      Number(comprador.suma_total_necesaria || 0) -
+      Number(entregas.prestamo_concedido || 0) -
+      Number(entregas.senal || 0) -
+      Number(entregas.transf_modernia || 0);
+    if (Number.isFinite(autoIngresar)) {
+      entregas.ingresar_banco = round2(Math.max(autoIngresar, 0));
+    }
+  }
 
   const sumaEntregada =
     Number(entregas.senal || 0) +
