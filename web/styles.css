@@ -10391,3 +10391,60 @@ body:not(.theme-operativa) .rrhh-member-card {
 body:not(.theme-operativa) .rrhh-member-card:hover {
   border-color: rgba(var(--gold-rgb), 0.28);
 }
+
+/* Verifika² branding: CRM Inmobiliaria (solo colores, sin tocar comportamiento) */
+body.crm-context-inmo #crmSection .crm-lightning-sidebar {
+  border-color: rgba(var(--gold-rgb), 0.22);
+  background:
+    radial-gradient(circle at 30% -20%, rgba(var(--gold-rgb), 0.18), transparent 58%),
+    linear-gradient(180deg, rgba(var(--ink-rgb), 0.98), rgba(15, 39, 66, 0.96));
+  color: rgba(255, 255, 255, 0.98);
+}
+
+body.crm-context-inmo #crmSection .crm-side-ico {
+  background: rgba(var(--gold-rgb), 0.14);
+  border-color: rgba(var(--gold-rgb), 0.30);
+  color: rgba(255, 255, 255, 0.98);
+}
+
+body.crm-context-inmo #crmSection .crm-side-item:hover {
+  background: rgba(var(--gold-rgb), 0.12);
+  border-color: rgba(var(--gold-rgb), 0.24);
+}
+
+body.crm-context-inmo #crmSection .crm-side-item.active {
+  background: rgba(var(--gold-rgb), 0.18);
+  border-color: rgba(var(--gold-rgb), 0.32);
+}
+
+body.crm-context-inmo #crmSection .crm-side-item:focus-visible {
+  outline: 3px solid rgba(var(--gold-rgb), 0.55);
+}
+
+body.crm-context-inmo #crmSection .crm-side-new .crm-side-ico {
+  background: linear-gradient(135deg, rgba(var(--gold-rgb), 0.95), rgba(var(--gold-rgb), 0.78));
+  border-color: rgba(255, 255, 255, 0.40);
+  color: rgba(var(--ink-rgb), 0.98);
+}
+
+body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
+  border-color: rgba(var(--gold-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.96), rgba(15, 39, 66, 0.92));
+  color: rgba(255, 255, 255, 0.98);
+}
+
+body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module:hover {
+  border-color: rgba(var(--gold-rgb), 0.38);
+}
+
+body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module.active {
+  outline: 3px solid rgba(var(--gold-rgb), 0.28);
+}
+
+body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn {
+  border-color: rgba(var(--gold-rgb), 0.28);
+}
+
+body.crm-context-inmo #crmSection .crm-lightning-topbar {
+  border-color: rgba(var(--gold-rgb), 0.18);
+}
