@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-		    <link rel="stylesheet" href="styles.css?v=180" />
+		    <link rel="stylesheet" href="styles.css?v=181" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2469,24 +2469,26 @@
 			                    </span>
 			                    <span class="tc-mod-label">Inmuebles</span>
 			                  </button>
-			                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8M8 14h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Noticias</span>
-			                  </button>
+				                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
+				                    <span class="tc-mod-ico" aria-hidden="true">
+				                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8M8 14h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+				                    </span>
+				                    <span class="tc-notify-badge hidden" id="crmBadgeNoticias" aria-label="Nuevas oportunidades (Noticias)"></span>
+				                    <span class="tc-mod-label">Noticias</span>
+				                  </button>
 			                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Encargo" title="Encargos">
 			                    <span class="tc-mod-ico" aria-hidden="true">
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v4H7z" stroke="currentColor" stroke-width="2"/><path d="M5 11h14v10H5z" stroke="currentColor" stroke-width="2"/><path d="M8 15h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 			                    </span>
 			                    <span class="tc-mod-label">Encargos</span>
 			                  </button>
-			                  <button type="button" class="tab tc-module" data-crm-view="demandas" data-crm-quick="demandas:activa" title="Pedidos">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M6 7h12l-1 14H7L6 7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Pedidos</span>
-			                  </button>
+				                  <button type="button" class="tab tc-module" data-crm-view="demandas" data-crm-quick="demandas:activa" title="Pedidos">
+				                    <span class="tc-mod-ico" aria-hidden="true">
+				                      <svg viewBox="0 0 24 24" fill="none"><path d="M6 7h12l-1 14H7L6 7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+				                    </span>
+				                    <span class="tc-notify-badge hidden" id="crmBadgePedidos" aria-label="Nuevas oportunidades (Pedidos)"></span>
+				                    <span class="tc-mod-label">Pedidos</span>
+				                  </button>
 			                  <button type="button" class="tab tc-module" data-crm-view="agenda" data-crm-agenda-open="day" title="Act./Citas">
 			                    <span class="tc-mod-ico" aria-hidden="true">
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -2593,11 +2595,22 @@
 					                      </div>
 					                    </div>
 					                  </div>
-					                  <div class="crm-home-right">
-					                    <div class="tc-listview tc-home-panel">
-					                      <div class="tc-listhead">
-					                        <div class="tc-listleft">
-					                          <strong class="tc-title">Agenda</strong>
+						                  <div class="crm-home-right">
+						                    <div class="tc-listview tc-home-panel">
+						                      <div class="tc-listhead">
+						                        <div class="tc-listleft">
+						                          <strong class="tc-title">Oportunidades</strong>
+						                        </div>
+						                        <div class="tc-listright">
+						                          <button type="button" class="secondary ghost kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:activa">Abrir</button>
+						                        </div>
+						                      </div>
+						                      <div id="crmHomeOportunidades" class="crm-focus-list"></div>
+						                    </div>
+						                    <div class="tc-listview tc-home-panel">
+						                      <div class="tc-listhead">
+						                        <div class="tc-listleft">
+						                          <strong class="tc-title">Agenda</strong>
 					                        </div>
 					                        <div class="tc-listright">
 					                          <button type="button" class="secondary ghost kpi-clickable" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Ver agenda</button>
@@ -2862,17 +2875,22 @@
 					                        <span class="tc-subtitle" id="crmDemandasSubtitle">Análisis datos pedidos</span>
 					                      </div>
 					                    </div>
-					                    <div class="tc-listright">
-					                      <button type="button" class="secondary ghost" id="crmDemandasDiscardBtn">Descarta &gt;&gt; No interesante</button>
-				                      <button type="button" class="secondary ghost" id="crmDemandasAcceptBtn">Acepta &gt;&gt; En gestión</button>
-				                      <button type="button" class="secondary ghost" id="crmDemandasPrintBtn">Impresiones</button>
-				                      <input id="crmDemandaSearch" placeholder="Buscar en la lista..." />
-				                      <select id="crmDemandaEstadoFilter" title="Estado">
-				                        <option value="">Todos</option>
-				                        <option value="activa">Activa</option>
-			                        <option value="pausada">Pausada</option>
-			                        <option value="cerrada">Cerrada</option>
-			                      </select>
+				                    <div class="tc-listright">
+				                      <button type="button" class="secondary ghost" id="crmDemandasDiscardBtn">Descarta &gt;&gt; No interesante</button>
+					                      <button type="button" class="secondary ghost" id="crmDemandasAcceptBtn">Acepta &gt;&gt; En gestión</button>
+					                      <select id="crmDemandaOrigenFilter" title="Origen">
+					                        <option value="">Todos</option>
+					                        <option value="web">Web</option>
+					                        <option value="agencias">Agencias</option>
+					                      </select>
+					                      <button type="button" class="secondary ghost" id="crmDemandasPrintBtn">Impresiones</button>
+					                      <input id="crmDemandaSearch" placeholder="Buscar en la lista..." />
+					                      <select id="crmDemandaEstadoFilter" title="Estado">
+					                        <option value="">Todos</option>
+					                        <option value="activa">Activa</option>
+				                        <option value="pausada">Pausada</option>
+				                        <option value="cerrada">Cerrada</option>
+				                      </select>
 			                    </div>
 			                  </div>
 			                  <div class="tc-azbar" id="crmDemandasAz" aria-label="Filtrar por letra"></div>
@@ -8788,7 +8806,7 @@
 	    <script src="app-auth.js?v=10"></script>
 	    <script src="app-routing.js?v=7"></script>
 	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=481"></script>
+		    <script src="app.js?v=482"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;

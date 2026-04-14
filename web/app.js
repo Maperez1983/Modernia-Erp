@@ -2654,11 +2654,12 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 		const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 					const crmViewDemandas = document.getElementById("crmViewDemandas");
-					const crmDemandasAz = document.getElementById("crmDemandasAz");
-					const crmDemandasAcceptBtn = document.getElementById("crmDemandasAcceptBtn");
-					const crmDemandasDiscardBtn = document.getElementById("crmDemandasDiscardBtn");
-					const crmDemandasPrintBtn = document.getElementById("crmDemandasPrintBtn");
-					const crmViewRelaciones = document.getElementById("crmViewRelaciones");
+						const crmDemandasAz = document.getElementById("crmDemandasAz");
+						const crmDemandasAcceptBtn = document.getElementById("crmDemandasAcceptBtn");
+						const crmDemandasDiscardBtn = document.getElementById("crmDemandasDiscardBtn");
+						const crmDemandasPrintBtn = document.getElementById("crmDemandasPrintBtn");
+						const crmDemandaOrigenFilter = document.getElementById("crmDemandaOrigenFilter");
+						const crmViewRelaciones = document.getElementById("crmViewRelaciones");
 					const crmRelacionesPreset = document.getElementById("crmRelacionesPreset");
 					const crmRelacionesAz = document.getElementById("crmRelacionesAz");
 					const crmRelacionesPrintBtn = document.getElementById("crmRelacionesPrintBtn");
@@ -2683,10 +2684,13 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmResumenPulse = document.getElementById("crmResumenPulse");
 		const crmResumenHoy = document.getElementById("crmResumenHoy");
 		const crmResumenAlertas = document.getElementById("crmResumenAlertas");
-		const crmHomePanelNoticias = document.getElementById("crmHomePanelNoticias");
-		const crmHomePanelEncargos = document.getElementById("crmHomePanelEncargos");
-		const crmHomePanelPedidos = document.getElementById("crmHomePanelPedidos");
-		const crmHomePanelObjetivos = document.getElementById("crmHomePanelObjetivos");
+			const crmHomePanelNoticias = document.getElementById("crmHomePanelNoticias");
+			const crmHomePanelEncargos = document.getElementById("crmHomePanelEncargos");
+			const crmHomePanelPedidos = document.getElementById("crmHomePanelPedidos");
+			const crmHomePanelObjetivos = document.getElementById("crmHomePanelObjetivos");
+			const crmHomeOportunidades = document.getElementById("crmHomeOportunidades");
+			const crmBadgeNoticias = document.getElementById("crmBadgeNoticias");
+			const crmBadgePedidos = document.getElementById("crmBadgePedidos");
 		const crmInicioNoticias = document.getElementById("crmInicioNoticias");
 		const crmInicioEncargos = document.getElementById("crmInicioEncargos");
 		const crmInicioPedidos = document.getElementById("crmInicioPedidos");
@@ -17879,12 +17883,25 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
       loadCrmCaptaciones();
       return;
     }
-    if (scope === "demandas") {
-      if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = value || "";
-      setCrmWorkspaceView("demandas");
-      loadCrmDemandas();
-      return;
-    }
+	    if (scope === "demandas") {
+	      const v = String(value || "").trim().toLowerCase();
+	      const isOrigenQuick = v === "web" || v === "agencias";
+	      if (crmDemandaOrigenFilter) {
+	        crmDemandaOrigenFilter.value = isOrigenQuick ? v : "";
+	      }
+	      if (crmDemandaEstadoFilter) {
+	        crmDemandaEstadoFilter.value = isOrigenQuick ? "activa" : (value || "");
+	      }
+	      setCrmWorkspaceView("demandas");
+	      loadCrmDemandas();
+	      return;
+	    }
+	    if (scope === "clientes") {
+	      if (crmClientesFilter) crmClientesFilter.value = value || "recientes";
+	      setCrmWorkspaceView("clientes");
+	      loadCrmClientes();
+	      return;
+	    }
     if (scope === "visitas") {
       if (crmVisitaEstadoFilter) crmVisitaEstadoFilter.value = value || "";
       setCrmWorkspaceView("visitas");
@@ -31583,10 +31600,15 @@ const loadCrmClientes = async ({ force = false } = {}) => {
   } else {
     crmClientesTable.appendChild(node);
   }
-  if (crmClientesInfo) {
-    crmClientesInfo.textContent = `Mostrando ${filtered.length} clientes.`;
-  }
-};
+	  if (crmClientesInfo) {
+	    crmClientesInfo.textContent = `Mostrando ${filtered.length} clientes.`;
+	  }
+	  try {
+	    if (crmViewResumen && !crmViewResumen.classList.contains("hidden")) {
+	      renderCrmResumenDashboard();
+	    }
+	  } catch {}
+	};
 
 const resolveCaptacionCodePrefix = (etapa) => {
   const stage = normalizeCrmMainEtapa(etapa || "") || "Inmueble";
@@ -33083,22 +33105,57 @@ const renderCrmResumenDashboard = () => {
   const stageCount = (name) => pipelineItems.filter((row) => row.stage === name).length;
   const activePipelineItems = pipelineItems.filter((row) => !isClosedStage(row.stage));
 
-  const kpiNoticias = document.getElementById("crmHomeKpiNoticias");
-  if (kpiNoticias) {
-    kpiNoticias.textContent = String(stageCount("Noticia"));
-  }
-  const kpiClientesWeb = document.getElementById("crmHomeKpiClientesWeb");
-  if (kpiClientesWeb) {
-    const rows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
-    const count = rows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
-    kpiClientesWeb.textContent = String(count);
-  }
-  const kpiPedidosNuevos = document.getElementById("crmHomeKpiPedidosNuevos");
-  if (kpiPedidosNuevos) {
-    const rows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
-    const count = rows.filter((row) => isDateWithinLastDays(row?.created_at || row?.updated_at || "", 5)).length;
-    kpiPedidosNuevos.textContent = String(count);
-  }
+	  // Oportunidades (Tecnocloud-like): web/agencias y notificaciones en el menú superior.
+	  const clientesRows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+	  const demandasRows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
+	  const captacionesRows = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
+
+	  const clientesWebCount = clientesRows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
+	  const pedidosNuevosCount = demandasRows.filter((row) => isDateWithinLastDays(row?.created_at || row?.updated_at || "", 5)).length;
+	  const pedidosWebCount = demandasRows.filter((row) => {
+	    const pedidoWeb = String(row?.pedido_web || "").trim() === "1";
+	    const origen = normalizeSimple(row?.origen || "");
+	    return pedidoWeb || origen.includes("web");
+	  }).length;
+	  const pedidosAgenciasCount = demandasRows.filter((row) => String(row?.agencia_insercion || "").trim()).length;
+	  const noticiasWebCount = captacionesRows.filter((row) => {
+	    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
+	    if (etapa !== "Noticia") return false;
+	    const canal = normalizeSimple(row?.canal || "");
+	    const procedencia = normalizeSimple(row?.tipo_procedencia || "");
+	    return canal.includes("web") || procedencia.includes("web");
+	  }).length;
+	  const noticiasSinVerificarCount = activePipelineItems.filter((row) => row.stage === "Noticia" && !row.noticia_verificada).length;
+
+	  const setBadge = (el, count) => {
+	    if (!el) return;
+	    const n = Number(count || 0) || 0;
+	    el.textContent = n > 99 ? "99+" : String(n);
+	    el.classList.toggle("hidden", n <= 0);
+	  };
+	  setBadge(crmBadgePedidos, pedidosNuevosCount || pedidosWebCount || pedidosAgenciasCount);
+	  setBadge(crmBadgeNoticias, noticiasSinVerificarCount || noticiasWebCount);
+
+	  if (crmHomeOportunidades) {
+	    const items = [
+	      pedidosNuevosCount
+	        ? { title: "Pedidos nuevos (5 días)", summary: `${pedidosNuevosCount} por revisar.`, crmQuick: "demandas:activa" }
+	        : null,
+	      pedidosWebCount
+	        ? { title: "Pedidos web", summary: `${pedidosWebCount} recibidos.`, crmQuick: "demandas:web" }
+	        : null,
+	      pedidosAgenciasCount
+	        ? { title: "Pedidos de agencias", summary: `${pedidosAgenciasCount} compartidos.`, crmQuick: "demandas:agencias" }
+	        : null,
+	      clientesWebCount
+	        ? { title: "Clientes web genérico", summary: `${clientesWebCount} sin cualificar.`, crmQuick: "clientes:web" }
+	        : null,
+	      noticiasWebCount
+	        ? { title: "Noticias web", summary: `${noticiasWebCount} en captación.`, crmView: "captaciones", etapa: "Noticia" }
+	        : null,
+	    ].filter(Boolean);
+	    renderCrmActionList(crmHomeOportunidades, items, "Sin oportunidades nuevas.");
+	  }
 
   renderCrmHomeAgendaPreview();
 
@@ -35679,14 +35736,28 @@ const loadCrmDemandas = () => {
     const key = normalizeSimple(state.crmDemandasStep || "a_analizar");
     return DEMANDAS_STEPS.some((s) => s.key === key) ? key : "a_analizar";
   };
-  const persistDemandasStep = (key) => {
-    try {
-      localStorage.setItem("crm.demandas.step", String(key || "a_analizar"));
-    } catch {}
-  };
-	  const renderDemandasSteps = (rows = []) => {
-	    if (!crmDemandasSteps) return;
-	    const active = resolveDemandasStep();
+	  const persistDemandasStep = (key) => {
+	    try {
+	      localStorage.setItem("crm.demandas.step", String(key || "a_analizar"));
+	    } catch {}
+	  };
+	  const origenFilter = normalizeSimple(crmDemandaOrigenFilter?.value || "");
+	  const matchesOrigen = (row) => {
+	    if (!origenFilter) return true;
+	    if (origenFilter === "web") {
+	      const pedidoWeb = String(row.pedido_web || "").trim() === "1";
+	      const origen = normalizeSimple(row.origen || "");
+	      return pedidoWeb || origen.includes("web");
+	    }
+	    if (origenFilter === "agencias") {
+	      const agencia = String(row.agencia_insercion || "").trim();
+	      return Boolean(agencia);
+	    }
+	    return true;
+	  };
+		  const renderDemandasSteps = (rows = []) => {
+		    if (!crmDemandasSteps) return;
+		    const active = resolveDemandasStep();
 	    if (crmDemandasSubtitle) {
 	      crmDemandasSubtitle.textContent =
 	        active === "a_analizar"
@@ -35699,11 +35770,12 @@ const loadCrmDemandas = () => {
 	                ? "Pedidos en negociación avanzada"
 	                : "Otras búsquedas";
 	    }
-	    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
-	    const base = rows.filter((row) => {
-	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-	      return true;
-	    });
+		    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
+		    const base = rows.filter((row) => {
+		      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+		      if (!matchesOrigen(row)) return false;
+		      return true;
+		    });
     const counts = {};
     DEMANDAS_STEPS.forEach((s) => (counts[s.key] = 0));
     base.forEach((row) => {
@@ -35829,11 +35901,11 @@ const loadCrmDemandas = () => {
   api(`/api/demandas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     cachedCrmDemandas = rows;
-	    renderDemandasSteps(rows);
-	    const q = String(crmDemandaSearch?.value || "").trim().toLowerCase();
-	    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
-	    const az = String(state.crmAz?.demandas || "").trim().toUpperCase();
-	    const activeStep = resolveDemandasStep();
+		    renderDemandasSteps(rows);
+		    const q = String(crmDemandaSearch?.value || "").trim().toLowerCase();
+		    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
+		    const az = String(state.crmAz?.demandas || "").trim().toUpperCase();
+		    const activeStep = resolveDemandasStep();
 	    persistDemandasStep(activeStep);
 	    const filteredRows = rows.filter((row) => {
 	      if (!matchTcAz(az, row.cliente || row.pedido || row.tipo || "")) return false;
@@ -35849,11 +35921,12 @@ const loadCrmDemandas = () => {
       ]
         .map((value) => String(value || "").toLowerCase())
         .join(" ");
-      if (q && !haystack.includes(q)) return false;
-      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-      if (activeStep !== "otras" && normalizeDemandaFaseKey(row.fase) !== activeStep) return false;
-      return true;
-    });
+	      if (q && !haystack.includes(q)) return false;
+	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+	      if (origenFilter && !matchesOrigen(row)) return false;
+	      if (activeStep !== "otras" && normalizeDemandaFaseKey(row.fase) !== activeStep) return false;
+	      return true;
+	    });
     renderVisitaSelects();
     renderCrmMiniCards(crmDemandasMini, [
       {
@@ -35893,10 +35966,13 @@ const loadCrmDemandas = () => {
       renderCrmActionList(crmDemandasPriority, priorityItems, "Sin demandas priorizadas.");
     }
 	    renderDemandasDenseTable(filteredRows);
-	    if (crmDemandasInfo) {
-	      const start = filteredRows.length ? 1 : 0;
-	      crmDemandasInfo.textContent = `desde ${start} a ${filteredRows.length} de ${filteredRows.length}${estadoFilter ? ` · estado ${estadoFilter}` : ""}`;
-	    }
+		    if (crmDemandasInfo) {
+		      const start = filteredRows.length ? 1 : 0;
+		      const extras = [];
+		      if (estadoFilter) extras.push(`estado ${estadoFilter}`);
+		      if (origenFilter) extras.push(`origen ${origenFilter}`);
+		      crmDemandasInfo.textContent = `desde ${start} a ${filteredRows.length} de ${filteredRows.length}${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
+		    }
 	    renderCrmResumenDashboard();
 	  });
 	};
@@ -50424,11 +50500,17 @@ if (crmDemandaSearch) {
   });
 }
 
-if (crmDemandaEstadoFilter) {
-  crmDemandaEstadoFilter.addEventListener("change", () => {
-    loadCrmDemandas();
-  });
-}
+	if (crmDemandaEstadoFilter) {
+	  crmDemandaEstadoFilter.addEventListener("change", () => {
+	    loadCrmDemandas();
+	  });
+	}
+
+	if (crmDemandaOrigenFilter) {
+	  crmDemandaOrigenFilter.addEventListener("change", () => {
+	    loadCrmDemandas();
+	  });
+	}
 
 if (crmDemandasAcceptBtn) {
   crmDemandasAcceptBtn.addEventListener("click", () => {
