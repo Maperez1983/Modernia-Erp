@@ -17891,6 +17891,55 @@ const openCrmRecentItem = (row = {}) => {
 const setCrmGlobalSearchResultsOpen = (open = false) => {
   if (!crmGlobalSearchResults) return;
   crmGlobalSearchResults.classList.toggle("hidden", !open);
+  if (crmGlobalSearch) {
+    try {
+      crmGlobalSearch.setAttribute("aria-expanded", open ? "true" : "false");
+    } catch {}
+  }
+  if (!open) {
+    state.crmGlobalSearchActiveIdx = -1;
+  }
+};
+
+const getCrmGlobalSearchItems = () => {
+  if (!crmGlobalSearchResults) return [];
+  return Array.from(crmGlobalSearchResults.querySelectorAll(".crm-global-item"));
+};
+
+const setCrmGlobalSearchActiveIndex = (index) => {
+  const items = getCrmGlobalSearchItems();
+  const max = items.length - 1;
+  const next = Number.isFinite(index) ? index : -1;
+  const bounded = next < 0 ? -1 : next > max ? max : next;
+  state.crmGlobalSearchActiveIdx = bounded;
+  items.forEach((item, idx) => {
+    const isActive = idx === bounded;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+    if (isActive) {
+      try { item.scrollIntoView({ block: "nearest" }); } catch {}
+    }
+  });
+  if (crmGlobalSearch) {
+    const activeItem = bounded >= 0 ? items[bounded] : null;
+    try {
+      if (activeItem?.id) {
+        crmGlobalSearch.setAttribute("aria-activedescendant", activeItem.id);
+      } else {
+        crmGlobalSearch.removeAttribute("aria-activedescendant");
+      }
+    } catch {}
+  }
+};
+
+const moveCrmGlobalSearchActive = (delta) => {
+  const items = getCrmGlobalSearchItems();
+  if (!items.length) return;
+  const current = Number(state.crmGlobalSearchActiveIdx ?? -1);
+  const next = current < 0
+    ? (delta > 0 ? 0 : items.length - 1)
+    : (current + delta + items.length) % items.length;
+  setCrmGlobalSearchActiveIndex(next);
 };
 
 const setInmuebleTecnoPrintMenuOpen = (open = false) => {
@@ -17902,6 +17951,8 @@ const renderCrmGlobalSearchResults = () => {
   if (!crmGlobalSearchResults) return;
   const raw = String(state.crmGlobalSearch || "").trim();
   const needle = normalizeSimple(raw);
+  const activeIdx = Number(state.crmGlobalSearchActiveIdx ?? -1);
+  let optionIdx = 0;
 
   const renderRecents = () => {
     const items = loadCrmRecentItems().slice(0, 5);
@@ -17913,6 +17964,7 @@ const renderCrmGlobalSearchResults = () => {
       empty.textContent = "Sin recientes.";
       crmGlobalSearchResults.appendChild(empty);
       setCrmGlobalSearchResultsOpen(true);
+      setCrmGlobalSearchActiveIndex(-1);
       return;
     }
     const wrap = document.createElement("div");
@@ -17925,6 +17977,9 @@ const renderCrmGlobalSearchResults = () => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "crm-global-item";
+      btn.id = `crmGlobalOpt-${optionIdx++}`;
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", "false");
       btn.dataset.crmGlobalKind = String(item?.kind || "").trim();
       if (item?.view) btn.dataset.crmGlobalView = String(item.view);
       if (item?.id) btn.dataset.crmGlobalId = String(item.id);
@@ -17948,6 +18003,7 @@ const renderCrmGlobalSearchResults = () => {
     });
     crmGlobalSearchResults.appendChild(wrap);
     setCrmGlobalSearchResultsOpen(true);
+    setCrmGlobalSearchActiveIndex(activeIdx);
   };
 
   // Tecnocloud: al hacer click sin texto, muestra 5 recientes.
@@ -18060,6 +18116,7 @@ const renderCrmGlobalSearchResults = () => {
     empty.textContent = "Sin resultados en datos cargados. Pulsa Enter para filtrar la vista actual.";
     crmGlobalSearchResults.appendChild(empty);
     setCrmGlobalSearchResultsOpen(true);
+    setCrmGlobalSearchActiveIndex(-1);
     return;
   }
 
@@ -18074,6 +18131,9 @@ const renderCrmGlobalSearchResults = () => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "crm-global-item";
+      btn.id = `crmGlobalOpt-${optionIdx++}`;
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", "false");
       btn.dataset.crmGlobalKind = item.kind;
       if (item.view) btn.dataset.crmGlobalView = item.view;
       if (item.id) btn.dataset.crmGlobalId = item.id;
@@ -18098,6 +18158,7 @@ const renderCrmGlobalSearchResults = () => {
     crmGlobalSearchResults.appendChild(wrap);
   });
   setCrmGlobalSearchResultsOpen(true);
+  setCrmGlobalSearchActiveIndex(activeIdx);
 };
 
 const applyCrmTecnocloudQuickSearch = (token = "") => {
@@ -51294,8 +51355,16 @@ if (crmCaptacionModal) {
 }
 
 if (crmGlobalSearch) {
+  try {
+    crmGlobalSearch.setAttribute("role", "combobox");
+    crmGlobalSearch.setAttribute("aria-autocomplete", "list");
+    crmGlobalSearch.setAttribute("aria-controls", "crmGlobalSearchResults");
+    crmGlobalSearch.setAttribute("aria-expanded", "false");
+  } catch {}
+
   crmGlobalSearch.addEventListener("input", () => {
     state.crmGlobalSearch = crmGlobalSearch.value || "";
+    state.crmGlobalSearchActiveIdx = -1;
     renderCrmGlobalSearchResults();
     scheduleSave("crm-global-search", () => applyCrmGlobalSearchToCurrentView(), 220);
   });
@@ -51307,13 +51376,32 @@ if (crmGlobalSearch) {
   });
 
   crmGlobalSearch.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setCrmQuickNewOpen(false);
+      setCrmRecentOpen(false);
+      renderCrmGlobalSearchResults();
+      setCrmGlobalSearchResultsOpen(true);
+      moveCrmGlobalSearchActive(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
     if (event.key === "Enter") {
+      const items = getCrmGlobalSearchItems();
+      const idx = Number(state.crmGlobalSearchActiveIdx ?? -1);
+      if (idx >= 0 && items[idx] && crmGlobalSearchResults && !crmGlobalSearchResults.classList.contains("hidden")) {
+        event.preventDefault();
+        items[idx].click();
+        return;
+      }
       setCrmGlobalSearchResultsOpen(false);
       return;
     }
     if (event.key === "Escape") {
       setCrmGlobalSearchResultsOpen(false);
       return;
+    }
+    if (event.key === "Tab") {
+      setCrmGlobalSearchResultsOpen(false);
     }
   });
 }

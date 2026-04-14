@@ -4417,6 +4417,13 @@ body.crm-fin #companySummary {
   background: rgba(var(--gold-rgb), 0.10);
 }
 
+#crmSection .crm-global-results .crm-global-item.active,
+#crmSection .crm-global-results .crm-global-item:focus-visible {
+  border-color: rgba(var(--gold-rgb), 0.55);
+  background: rgba(var(--gold-rgb), 0.14);
+  outline: none;
+}
+
 #crmSection .crm-global-results .crm-global-item strong {
   display: block;
   font-size: 13px;
