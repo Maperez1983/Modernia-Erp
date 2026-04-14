@@ -749,9 +749,6 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/build_info",
     "/api/me",
     "/api/auth_invite_status",
-    "/api/portal_inmuebles",
-    "/api/portal_inmueble",
-    "/api/portal_leads_recent",
     "/api/workspace_portal_public",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_kiosk_status",
@@ -761,8 +758,6 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
     "/api/auth_set_password",
-    "/api/portal_leads_ingest",
-    "/api/portal_publish_update",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
@@ -1287,6 +1282,15 @@ def parse_services_param(raw):
         "gestoria": "gestoría",
         "administracion fincas": "administración fincas",
         "administracion de fincas": "administración de fincas",
+        "administracion_fincas": "administración de fincas",
+        "administracion_de_fincas": "administración de fincas",
+        "administración fincas": "administración de fincas",
+        "administración_de_fincas": "administración de fincas",
+        "admin fincas": "fincas",
+        "admin de fincas": "fincas",
+        "admin_de_fincas": "fincas",
+        "fincas": "administración de fincas",
+        "administración de fincas": "fincas",
         "inversion": "inversión",
         "direccion": "dirección",
     }
@@ -2655,10 +2659,6 @@ def normalize_service_key(value):
         "GESTORIA": "gestoria",
         "SEGUROS": "seguros",
         "INMOBILIARIA": "inmobiliaria",
-        "INMO": "inmobiliaria",
-        "CRM INMOBILIARIO": "inmobiliaria",
-        "CRM INMOBILIARIA": "inmobiliaria",
-        "CRM INMO": "inmobiliaria",
         "FINANCIACIONES": "financiaciones",
         "HIPOTECAS": "financiaciones",
         "ADMINISTRACION FINCAS": "fincas",
@@ -4645,30 +4645,6 @@ def hash_password(password):
 
 def verify_password(password, password_hash):
     return runtime_verify_password(password, password_hash)
-
-
-def normalize_password_input(value):
-    """
-    Normaliza entrada de password para evitar fallos por copiado/pegado:
-    - recorta espacios/saltos al principio/fin
-    - elimina caracteres zero-width comunes (WhatsApp/Slack)
-    - normaliza unicode (NFKC)
-
-    Nota: en verificación de credenciales probamos primero el valor raw para
-    no romper contraseñas existentes que incluyan espacios intencionalmente.
-    """
-    try:
-        text = str(value or "")
-    except Exception:
-        return ""
-    try:
-        text = unicodedata.normalize("NFKC", text)
-    except Exception:
-        pass
-    # Zero-width chars: ZWSP, ZWNJ, ZWJ, BOM
-    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff"):
-        text = text.replace(ch, "")
-    return text.strip()
 
 
 def _cleanup_expired_sessions():
@@ -16225,26 +16201,6 @@ def infer_inmueble_type_from_catastro_use(use_label, current_value=""):
     return mapping.get(key) or normalize_person_name(use_label or "")
 
 
-def infer_inmobiliaria_categoria(tipo_inmueble):
-    key = normalize_lookup_text(tipo_inmueble or "")
-    if not key:
-        return ""
-    residencial = {"piso", "atico", "ático", "bajo", "duplex", "dúplex", "casa", "chalet", "adosado", "pareado", "villa", "finca"}
-    if key in residencial:
-        return "Residencial"
-    if key in {"local", "oficina"}:
-        return "Comercial"
-    if key in {"nave"}:
-        return "Industrial"
-    if key in {"garaje", "trastero"}:
-        return "Anexos"
-    if key in {"terreno", "solar"}:
-        return "Suelo"
-    if key in {"edificio", "hotel"}:
-        return "Edificio"
-    return normalize_person_name(tipo_inmueble or "")
-
-
 def extract_catastro_public_summary_from_html(html_text, reference=""):
     if not html_text:
         return {}
@@ -16622,9 +16578,8 @@ def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     return normalized
 
 
-def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia_catastral="", owner_nifs=None, scope="captacion"):
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
     direccion_norm = normalize_inmobiliaria_address(direccion)
-    ref_norm = re.sub(r"[^A-Z0-9]", "", str(referencia_catastral or "").upper())
     owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
     owner_nif_set = set(owner_nifs)
     duplicates = []
@@ -16655,9 +16610,6 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia
         reasons = []
         if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
             reasons.append("misma dirección")
-        row_ref = re.sub(r"[^A-Z0-9]", "", str(row["referencia_catastral"] or "").upper())
-        if ref_norm and row_ref and row_ref == ref_norm:
-            reasons.append("misma referencia catastral")
         row_nifs = {
             normalize_nif(part)
             for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
@@ -18291,238 +18243,6 @@ def open_sqlite_conn(db_path, with_row_factory=False):
     return conn
 
 
-def _sqlite_table_columns(conn, table_name: str) -> set:
-    if not conn or not table_name:
-        return set()
-    try:
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    except Exception:
-        return set()
-    cols = set()
-    for row in rows or []:
-        try:
-            # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-            cols.add(str(row[1] or "").strip())
-        except Exception:
-            continue
-    return {c for c in cols if c}
-
-
-def _sqlite_select_all_with_columns(conn, table_name: str, columns: list[str]) -> list:
-    if not conn or not table_name:
-        return []
-    try:
-        if not _table_exists_sqlite(conn, table_name):
-            return []
-    except Exception:
-        return []
-    cols_existing = _sqlite_table_columns(conn, table_name)
-    if not cols_existing:
-        return []
-    select_exprs = []
-    for col in columns or []:
-        col = str(col or "").strip()
-        if not col:
-            continue
-        if col in cols_existing:
-            select_exprs.append(col)
-        else:
-            select_exprs.append(f"NULL AS {col}")
-    if not select_exprs:
-        return []
-    sql = f"SELECT {', '.join(select_exprs)} FROM {table_name}"
-    try:
-        return conn.execute(sql).fetchall() or []
-    except Exception:
-        return []
-
-
-def _sync_auth_from_sqlite_to_postgres(pg_conn, sqlite_db_path: str) -> dict:
-    """
-    Best-effort: when Postgres is enabled but legacy SQLite still contains auth/workspace data,
-    copy users/memberships to Postgres to avoid "usuarios desaparecidos".
-
-    Runs one-way (SQLite -> Postgres). Designed to be safe to call multiple times.
-    """
-    if not pg_conn:
-        return {"ok": False, "reason": "missing_pg_conn"}
-    try:
-        backend = getattr(pg_conn, "__crm_backend__", "") or ""
-    except Exception:
-        backend = ""
-    if backend != "postgres":
-        return {"ok": True, "skipped": True, "reason": "not_postgres_backend"}
-
-    sqlite_path = str(sqlite_db_path or "").strip()
-    if not sqlite_path:
-        return {"ok": True, "skipped": True, "reason": "missing_sqlite_path"}
-    try:
-        p = Path(sqlite_path)
-    except Exception:
-        p = None
-    if not p or (not p.exists()):
-        return {"ok": True, "skipped": True, "reason": "sqlite_not_found"}
-
-    sqlite_conn = None
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        sqlite_conn = open_sqlite_conn(str(p), with_row_factory=True)
-
-        # --- usuarios ---
-        user_cols = [
-            "id",
-            "nombre",
-            "apellido",
-            "usuario",
-            "email",
-            "servicio",
-            "rol",
-            "registro_horario_activo",
-            "password_hash",
-            "activo",
-            "invite_token",
-            "invite_expires_at",
-            "invite_sent_at",
-            "created_at",
-            "updated_at",
-        ]
-        sqlite_users = _sqlite_select_all_with_columns(sqlite_conn, "usuarios", user_cols)
-        try:
-            sqlite_users_total = int((sqlite_conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone() or {}).get("n") or 0)
-        except Exception:
-            try:
-                sqlite_users_total = int((sqlite_conn.execute("SELECT COUNT(*) FROM usuarios").fetchone() or [0])[0] or 0)
-            except Exception:
-                sqlite_users_total = len(sqlite_users or [])
-        try:
-            pg_users_total = int(row_value(pg_conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone(), "n", 0) or 0)
-        except Exception:
-            pg_users_total = 0
-
-        users_upserted = 0
-        users_skipped = 0
-        if sqlite_users_total > pg_users_total and sqlite_users_total > 0:
-            for row in sqlite_users or []:
-                user_id = str(row_value(row, "id", "") or "").strip()
-                if not user_id:
-                    users_skipped += 1
-                    continue
-                payload = {
-                    "id": user_id,
-                    "nombre": str(row_value(row, "nombre", "") or "").strip() or "Usuario",
-                    "apellido": str(row_value(row, "apellido", "") or "").strip() or None,
-                    "usuario": str(row_value(row, "usuario", "") or "").strip() or None,
-                    "email": str(row_value(row, "email", "") or "").strip() or None,
-                    "servicio": str(row_value(row, "servicio", "") or "").strip() or None,
-                    "rol": str(row_value(row, "rol", "") or "").strip() or None,
-                    "registro_horario_activo": int(row_value(row, "registro_horario_activo", 0) or 0),
-                    "password_hash": str(row_value(row, "password_hash", "") or "").strip() or None,
-                    "activo": int(row_value(row, "activo", 1) or 1),
-                    "invite_token": str(row_value(row, "invite_token", "") or "").strip() or None,
-                    "invite_expires_at": str(row_value(row, "invite_expires_at", "") or "").strip() or None,
-                    "invite_sent_at": str(row_value(row, "invite_sent_at", "") or "").strip() or None,
-                    "created_at": str(row_value(row, "created_at", "") or "").strip() or now,
-                    "updated_at": str(row_value(row, "updated_at", "") or "").strip() or now,
-                }
-                try:
-                    pg_conn.execute(
-                        """
-                        INSERT INTO usuarios (
-                          id, nombre, apellido, usuario, email, servicio, rol,
-                          registro_horario_activo, password_hash, activo,
-                          invite_token, invite_expires_at, invite_sent_at,
-                          created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?,
-                          ?, ?, ?,
-                          ?, ?
-                        )
-                        ON CONFLICT (id) DO UPDATE
-                        SET nombre = EXCLUDED.nombre,
-                            apellido = COALESCE(NULLIF(usuarios.apellido, ''), EXCLUDED.apellido),
-                            usuario = COALESCE(NULLIF(usuarios.usuario, ''), EXCLUDED.usuario),
-                            email = COALESCE(NULLIF(usuarios.email, ''), EXCLUDED.email),
-                            servicio = COALESCE(NULLIF(usuarios.servicio, ''), EXCLUDED.servicio),
-                            rol = COALESCE(NULLIF(usuarios.rol, ''), EXCLUDED.rol),
-                            registro_horario_activo = GREATEST(COALESCE(usuarios.registro_horario_activo, 0), COALESCE(EXCLUDED.registro_horario_activo, 0)),
-                            password_hash = COALESCE(NULLIF(usuarios.password_hash, ''), EXCLUDED.password_hash),
-                            activo = GREATEST(COALESCE(usuarios.activo, 1), COALESCE(EXCLUDED.activo, 1)),
-                            invite_token = COALESCE(NULLIF(usuarios.invite_token, ''), EXCLUDED.invite_token),
-                            invite_expires_at = COALESCE(NULLIF(usuarios.invite_expires_at, ''), EXCLUDED.invite_expires_at),
-                            invite_sent_at = COALESCE(NULLIF(usuarios.invite_sent_at, ''), EXCLUDED.invite_sent_at),
-                            created_at = COALESCE(NULLIF(usuarios.created_at, ''), EXCLUDED.created_at),
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (
-                            payload["id"],
-                            payload["nombre"],
-                            payload["apellido"],
-                            payload["usuario"],
-                            payload["email"],
-                            payload["servicio"],
-                            payload["rol"],
-                            payload["registro_horario_activo"],
-                            payload["password_hash"],
-                            payload["activo"],
-                            payload["invite_token"],
-                            payload["invite_expires_at"],
-                            payload["invite_sent_at"],
-                            payload["created_at"],
-                            payload["updated_at"],
-                        ),
-                    )
-                    users_upserted += 1
-                except Exception:
-                    users_skipped += 1
-
-        # --- workspace_miembros (best-effort) ---
-        memb_cols = ["id", "workspace_id", "usuario_id", "rol", "created_at", "updated_at"]
-        sqlite_membs = _sqlite_select_all_with_columns(sqlite_conn, "workspace_miembros", memb_cols)
-        memb_upserted = 0
-        memb_skipped = 0
-        for row in sqlite_membs or []:
-            ws_id = str(row_value(row, "workspace_id", "") or "").strip()
-            uid = str(row_value(row, "usuario_id", "") or "").strip()
-            if not ws_id or not uid:
-                memb_skipped += 1
-                continue
-            mid = str(row_value(row, "id", "") or "").strip() or os.urandom(16).hex()
-            rol = str(row_value(row, "rol", "") or "").strip() or "Miembro"
-            created_at = str(row_value(row, "created_at", "") or "").strip() or now
-            updated_at = str(row_value(row, "updated_at", "") or "").strip() or now
-            try:
-                pg_conn.execute(
-                    """
-                    INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (workspace_id, usuario_id) DO UPDATE
-                    SET rol = EXCLUDED.rol,
-                        updated_at = EXCLUDED.updated_at
-                    """,
-                    (mid, ws_id, uid, rol, created_at, updated_at),
-                )
-                memb_upserted += 1
-            except Exception:
-                memb_skipped += 1
-
-        return {
-            "ok": True,
-            "sqlite_users_total": sqlite_users_total,
-            "pg_users_total": pg_users_total,
-            "users_upserted": users_upserted,
-            "users_skipped": users_skipped,
-            "memberships_upserted": memb_upserted,
-            "memberships_skipped": memb_skipped,
-        }
-    finally:
-        try:
-            if sqlite_conn:
-                sqlite_conn.close()
-        except Exception:
-            pass
-
-
 def ensure_tables(db_path):
     if db_is_postgres_enabled():
         conn = open_postgres_conn(with_row_factory=False)
@@ -18536,7 +18256,7 @@ def ensure_tables(db_path):
         except Exception:
             pass
     else:
-        conn = open_sqlite_conn(db_path, with_row_factory=True)
+        conn = open_sqlite_conn(db_path, with_row_factory=False)
 
     def _backend_name(_conn):
         backend = getattr(_conn, "__crm_backend__", "") or ""
@@ -18990,7 +18710,6 @@ def ensure_tables(db_path):
         "provincia": "provincia TEXT",
         "situacion_comercial": "situacion_comercial TEXT",
         "fecha_conversion": "fecha_conversion TEXT",
-        "tipo_operacion": "tipo_operacion TEXT",
         # TecnoCloud-style fields (zona/priorización).
         "situacion_ocupacion": "situacion_ocupacion TEXT",
         "ocupado_por": "ocupado_por TEXT",
@@ -19007,7 +18726,6 @@ def ensure_tables(db_path):
         "provincia": "provincia TEXT",
         "asesor": "asesor TEXT",
         "ocupado_por": "ocupado_por TEXT",
-        "tipo_operacion": "tipo_operacion TEXT",
     }.items():
         try:
             ensure_column(conn, "inmuebles", col_name, col_sql)
@@ -19663,18 +19381,6 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS inmueble_servicios (
-          id TEXT PRIMARY KEY,
-          inmueble_id TEXT NOT NULL,
-          servicio TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          UNIQUE (inmueble_id, servicio)
-        )
-        """
-    )
-    conn.execute(
-        """
         CREATE TABLE IF NOT EXISTS seguros_ofertas (
           id TEXT PRIMARY KEY,
           cliente_id TEXT,
@@ -19904,20 +19610,6 @@ def ensure_tables(db_path):
         "CREATE INDEX IF NOT EXISTS idx_postal_cp ON postal_catalogo(codigo_postal)"
     )
     ensure_usuarios_schema(conn)
-    ensure_portal_leads_schema(conn)
-    # Sync auth tables from legacy SQLite when Postgres is enabled (prevents "usuarios desaparecidos").
-    try:
-        if db_is_postgres_enabled() and (not _migration_done(conn, "auth_sync_sqlite_to_pg_v1")):
-            sync_res = _sync_auth_from_sqlite_to_postgres(conn, db_path)
-            try:
-                if int(sync_res.get("users_upserted") or 0) > 0:
-                    # Asegura acceso en instalaciones multi-workspace tras recuperar usuarios.
-                    ensure_workspace_membership_backfill(conn)
-            except Exception:
-                pass
-            _migration_mark(conn, "auth_sync_sqlite_to_pg_v1")
-    except Exception:
-        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS cnae_catalogo (
@@ -19934,9 +19626,6 @@ def ensure_tables(db_path):
         )
         """
     )
-    # Compat: bases antiguas podían carecer de campos base en `clientes`.
-    ensure_column(conn, "clientes", "fecha_nacimiento", "fecha_nacimiento TEXT")
-    ensure_column(conn, "clientes", "direccion", "direccion TEXT")
     ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
@@ -20063,8 +19752,6 @@ def ensure_tables(db_path):
         "titulo": "titulo TEXT",
         "tipo_operacion": "tipo_operacion TEXT",
         "direccion_numero": "direccion_numero TEXT",
-        "planta": "planta TEXT",
-        "puerta": "puerta TEXT",
         "interior": "interior TEXT",
         "escalera": "escalera TEXT",
         "edificio": "edificio TEXT",
@@ -20105,8 +19792,6 @@ def ensure_tables(db_path):
         "focalizacion": "focalizacion TEXT",
         "subtipologia": "subtipologia TEXT",
         "direccion_numero": "direccion_numero TEXT",
-        "planta": "planta TEXT",
-        "puerta": "puerta TEXT",
         "interior": "interior TEXT",
         "escalera": "escalera TEXT",
         "edificio": "edificio TEXT",
@@ -20358,43 +20043,6 @@ def ensure_usuarios_schema(conn):
         pass
     try:
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_ci ON usuarios(LOWER(TRIM(email)))")
-    except Exception:
-        pass
-
-
-def ensure_portal_leads_schema(conn):
-    if not conn:
-        return
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS portal_leads (
-          id TEXT PRIMARY KEY,
-          hub_lead_id TEXT,
-          created_at TEXT NOT NULL,
-          empresa_id TEXT,
-          inmueble_id TEXT,
-          listing_title TEXT,
-          listing_city TEXT,
-          persona TEXT,
-          intent TEXT,
-          contact TEXT,
-          name TEXT,
-          note TEXT,
-          source_path TEXT,
-          source_href TEXT,
-          payload_json TEXT
-        )
-        """
-    )
-    try:
-        ensure_column(conn, "portal_leads", "hub_lead_id", "hub_lead_id TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_created ON portal_leads(created_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_inmueble ON portal_leads(inmueble_id, created_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_empresa ON portal_leads(empresa_id, created_at)")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_leads_hub_lead_id ON portal_leads(hub_lead_id)")
     except Exception:
         pass
 
@@ -21220,18 +20868,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-              id TEXT PRIMARY KEY,
-              workspace_id TEXT NOT NULL,
-              empresa_id TEXT,
-              nombre TEXT NOT NULL,
-              referencia_catastral TEXT,
-              cif TEXT,
-              direccion TEXT,
-              foto_edificio_key TEXT,
-              presidente TEXT,
-              secretario TEXT,
-              estado TEXT NOT NULL DEFAULT 'Activa',
+	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+	          id TEXT PRIMARY KEY,
+	          workspace_id TEXT NOT NULL,
+	          empresa_id TEXT,
+	          nombre TEXT NOT NULL,
+	          referencia_catastral TEXT,
+	          cif TEXT,
+	          direccion TEXT,
+	          foto_edificio_key TEXT,
+	          presidente TEXT,
+	          secretario TEXT,
+	          estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -24159,6 +23807,10 @@ def workspace_session_is_privileged(session):
     # `normalize_lookup_text` devuelve tokens en MAYÚSCULAS (sin acentos).
     if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL", "ADMINISTRACION"}:
         return True
+    # Compat: algunos flujos legacy guardaban "Dirección/Administración" en `servicio` en vez de `rol`.
+    servicios = _normalize_service_tokens(session.get("servicio") or "")
+    if servicios.intersection({"DIRECCION", "CONTROL", "ADMINISTRACION", "ADMIN"}):
+        return True
     return False
 
 def workspace_actor_is_privileged(conn, session):
@@ -26188,13 +25840,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-              c.cif,
-              c.direccion,
-              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-              c.presidente,
-              c.secretario,
-              c.estado,
+	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+	          c.cif,
+	          c.direccion,
+	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+	          c.presidente,
+	          c.secretario,
+	          c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -27503,80 +27155,6 @@ def format_eur(value):
     amount = float(value or 0.0)
     raw = f"{amount:,.2f}"
     return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " €"
-
-
-def _portal_format_price_label(tipo_operacion, amount):
-    try:
-        val = float(amount or 0.0)
-    except Exception:
-        val = 0.0
-    if val <= 0:
-        return ""
-    is_rent = str(tipo_operacion or "").strip().lower() in {"alquiler", "rent", "renta"}
-    label = f"{val:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{label} €/mes" if is_rent else f"{label} €"
-
-
-def _portal_property_type(tipo_inmueble):
-    raw = str(tipo_inmueble or "").strip().lower()
-    if "atico" in raw or "ático" in raw:
-        return "ático"
-    if "casa" in raw or "chalet" in raw:
-        return "casa"
-    if "local" in raw:
-        return "local"
-    return "piso"
-
-
-def _portal_operation(tipo_operacion):
-    raw = str(tipo_operacion or "").strip().lower()
-    return "alquiler" if "alquil" in raw or raw == "rent" else "venta"
-
-
-def _portal_details_short(habs, banos, m2):
-    parts = []
-    try:
-        h = int(habs or 0)
-        if h > 0:
-            parts.append(f"{h} hab")
-    except Exception:
-        pass
-    try:
-        b = int(banos or 0)
-        if b > 0:
-            parts.append(f"{b} baños")
-    except Exception:
-        pass
-    try:
-        mm = float(m2 or 0)
-        if mm > 0:
-            parts.append(f"{int(mm)} m²")
-    except Exception:
-        pass
-    return " · ".join(parts)
-
-
-def _portal_details(habs, banos, m2):
-    items = []
-    try:
-        h = int(habs or 0)
-        if h > 0:
-            items.append(f"{h} habitaciones")
-    except Exception:
-        pass
-    try:
-        b = int(banos or 0)
-        if b > 0:
-            items.append(f"{b} baños")
-    except Exception:
-        pass
-    try:
-        mm = float(m2 or 0)
-        if mm > 0:
-            items.append(f"{int(mm)} m²")
-    except Exception:
-        pass
-    return items
 
 
 def build_workspace_invoice_pdf(invoice, workspace, company, client, collections):
@@ -30292,6 +29870,8 @@ class Handler(BaseHTTPRequestHandler):
         expanded = set(services)
         if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
             return None
+        if expanded.intersection({"direccion", "administracion", "control"}):
+            return None
         if "financiaciones" in expanded:
             expanded.add("hipotecas")
         if "hipotecas" in expanded:
@@ -30892,13 +30472,6 @@ class Handler(BaseHTTPRequestHandler):
                     if mapped and mapped.exists():
                         send_file(self, mapped)
                         return
-
-                # Iconos propios (ej. /icons/catastro.png)
-                rel = "/".join(parts[1:]) if len(parts) > 1 else ""
-                mapped = safe_resolve_under(ROOT / "icons", rel)
-                if mapped and mapped.exists() and mapped.is_file():
-                    send_file(self, mapped)
-                    return
             except Exception:
                 pass
 
@@ -31072,23 +30645,19 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_update",
             "/api/inmueble_delete",
             "/api/inmueble_compradores",
-                "/api/inmueble_propietarios_update",
-                "/api/inmueble_docs",
-	            "/api/inmueble_servicios_update",
-	            "/api/inmueble_checklist_generate",
-	            "/api/inmueble_checklist_update",
-	            "/api/demandas",
-	            "/api/demandas_update",
-	            "/api/visitas",
-	            "/api/usuarios",
-	            "/api/usuarios_update",
-	            "/api/usuarios_delete",
+            "/api/inmueble_propietarios_update",
+            "/api/inmueble_docs",
+            "/api/inmueble_checklist_generate",
+            "/api/inmueble_checklist_update",
+            "/api/demandas",
+            "/api/visitas",
+            "/api/usuarios",
+            "/api/usuarios_update",
+            "/api/usuarios_delete",
             "/api/usuarios_invitar",
             "/api/login",
             "/api/logout",
             "/api/auth_set_password",
-            "/api/portal_leads_ingest",
-            "/api/portal_publish_update",
             "/api/workspace_customer_create",
             "/api/empresa_create",
             "/api/workspace_empresa_link",
@@ -31193,9 +30762,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/login":
             usuario_raw = str(payload.get("usuario") or payload.get("email") or "").strip()
-            password_raw = str(payload.get("password") or "")
-            password_norm = normalize_password_input(password_raw)
-            if not usuario_raw or not password_norm:
+            password = str(payload.get("password") or "")
+            if not usuario_raw or not password:
                 json_response(self, {"error": "usuario y contraseña requeridos"}, status=400)
                 return
             ip = _get_client_ip(self)
@@ -31225,19 +30793,14 @@ class Handler(BaseHTTPRequestHandler):
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
-                password_used = None
-                if verify_password(password_raw, stored_hash):
-                    password_used = password_raw
-                elif password_norm != password_raw and verify_password(password_norm, stored_hash):
-                    password_used = password_norm
-                if not password_used:
+                if not verify_password(password, stored_hash):
                     register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                     return
                 if needs_password_rehash(stored_hash):
                     conn.execute(
                         "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
-                        (hash_password(password_used), row["id"]),
+                        (hash_password(password), row["id"]),
                     )
                     conn.commit()
                     row = conn.execute(
@@ -31252,12 +30815,12 @@ class Handler(BaseHTTPRequestHandler):
                     register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
                     return
-                if len(password_norm) < 8:
+                if len(password) < 8:
                     json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
                     return
                 conn.execute(
                     "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
-                    (hash_password(password_norm), row["id"]),
+                    (hash_password(password), row["id"]),
                 )
                 conn.commit()
                 first_password_set = True
@@ -31283,7 +30846,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/auth_set_password":
             token = str(payload.get("token") or "").strip()
-            password = normalize_password_input(payload.get("password"))
+            password = str(payload.get("password") or "")
             if not token or not password:
                 json_response(self, {"error": "token y password requeridos"}, status=400)
                 return
@@ -31394,212 +30957,6 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
 
-        if parsed.path == "/api/portal_publish_update":
-            # Control de publicación (CRM -> Portal). Requiere rol admin o token Bearer.
-            token_header = str(self.headers.get("Authorization") or "").strip()
-            bearer = ""
-            if token_header.lower().startswith("bearer "):
-                bearer = token_header.split(" ", 1)[1].strip()
-            expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
-            portal_admin = False
-            if expected and bearer:
-                try:
-                    portal_admin = secrets.compare_digest(bearer, expected)
-                except Exception:
-                    portal_admin = False
-            if not portal_admin:
-                session = self._current_session()
-                if not session:
-                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
-                    return
-                rol = normalize_service_key(session.get("rol") or "")
-                if rol not in {"administrador", "admin", "direccion", "administracion", "control"}:
-                    json_response(self, {"ok": False, "error": "forbidden"}, status=403)
-                    return
-                portal_admin = True
-
-            listing_id = str(payload.get("listing_id") or payload.get("id") or "").strip() if isinstance(payload, dict) else ""
-            published_raw = payload.get("published") if isinstance(payload, dict) else 0
-            if not listing_id:
-                json_response(self, {"ok": False, "error": "missing_listing_id"}, status=400)
-                return
-            published = 1 if str(published_raw).strip().lower() in {"1", "true", "yes", "on", "si", "sí"} else 0
-
-            conn = get_db(self.db_path)
-            self._track_conn(conn)
-            try:
-                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                updated = conn.execute(
-                    "UPDATE inmuebles SET portal_publicado = ?, updated_at = datetime('now') WHERE id = ?",
-                    (published, listing_id),
-                )
-            except Exception:
-                updated = conn.execute(
-                    "UPDATE inmuebles SET portal_publicado = ? WHERE id = ?",
-                    (published, listing_id),
-                )
-            try:
-                changed = getattr(updated, "rowcount", None)
-            except Exception:
-                changed = None
-            conn.commit()
-            if changed == 0:
-                json_response(self, {"ok": False, "error": "not_found"}, status=404)
-                return
-            json_response(self, {"ok": True})
-            return
-
-        if parsed.path == "/api/portal_leads_ingest":
-            # Ingest de leads desde el portal (Lead Hub -> CRM). Autenticado por token.
-            token_header = str(self.headers.get("Authorization") or "").strip()
-            bearer = ""
-            if token_header.lower().startswith("bearer "):
-                bearer = token_header.split(" ", 1)[1].strip()
-            expected = str(os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
-            if not expected:
-                json_response(self, {"ok": False, "error": "portal_ingest_not_configured"}, status=500)
-                return
-            try:
-                if not bearer or not secrets.compare_digest(bearer, expected):
-                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
-                    return
-            except Exception:
-                json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
-                return
-
-            listing = payload.get("listing") if isinstance(payload, dict) else None
-            listing_id = str((listing or {}).get("id") or payload.get("listing_id") or "").strip() if isinstance(payload, dict) else ""
-            if not listing_id:
-                json_response(self, {"ok": False, "error": "missing_listing_id"}, status=400)
-                return
-            intent = str(payload.get("intent") or "").strip().lower() if isinstance(payload, dict) else ""
-            if intent not in {"info", "visita", "contacto"}:
-                intent = "info"
-            persona = str(payload.get("persona") or "").strip().lower() if isinstance(payload, dict) else ""
-            if persona not in {"comprador", "propietario"}:
-                persona = "comprador"
-            contact = str(payload.get("contact") or "").strip() if isinstance(payload, dict) else ""
-            name = str(payload.get("name") or "").strip() if isinstance(payload, dict) else ""
-            note = str(payload.get("note") or "").strip() if isinstance(payload, dict) else ""
-            source = payload.get("source") if isinstance(payload, dict) else None
-            source_path = str((source or {}).get("path") or "").strip() if isinstance(source, dict) else ""
-            source_href = str((source or {}).get("href") or "").strip() if isinstance(source, dict) else ""
-            hub_lead_id = str(payload.get("hub_lead_id") or "").strip() if isinstance(payload, dict) else ""
-
-            conn = get_db(self.db_path)
-            self._track_conn(conn)
-            ensure_portal_leads_schema(conn)
-            conn.commit()
-
-            inmueble = conn.execute(
-                "SELECT id, empresa_id, COALESCE(NULLIF(TRIM(titulo), ''), 'Inmueble') AS titulo, COALESCE(NULLIF(TRIM(poblacion), ''), NULLIF(TRIM(localidad), ''), '') AS poblacion FROM inmuebles WHERE id = ? LIMIT 1",
-                (listing_id,),
-            ).fetchone()
-            if not inmueble:
-                json_response(self, {"ok": False, "error": "listing_not_found"}, status=404)
-                return
-            empresa_id = str(inmueble["empresa_id"] or "").strip() or None
-            listing_title = str(((listing or {}).get("title") if isinstance(listing, dict) else "") or inmueble["titulo"] or "").strip()
-            listing_city = str(((listing or {}).get("city") if isinstance(listing, dict) else "") or inmueble["poblacion"] or "").strip()
-
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            lead_id = hub_lead_id or os.urandom(16).hex()
-            payload_json = json.dumps(payload, ensure_ascii=False, default=str)
-
-            # Guardamos el lead (idempotente si viene hub_lead_id).
-            try:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO portal_leads (
-                      id, hub_lead_id, created_at,
-                      empresa_id, inmueble_id,
-                      listing_title, listing_city,
-                      persona, intent, contact, name, note,
-                      source_path, source_href,
-                      payload_json
-                    ) VALUES (
-                      ?, ?, datetime(?),
-                      ?, ?,
-                      ?, ?,
-                      ?, ?, ?, ?, ?,
-                      ?, ?,
-                      ?
-                    )
-                    """,
-                    (
-                        lead_id,
-                        hub_lead_id or None,
-                        now,
-                        empresa_id,
-                        listing_id,
-                        listing_title or None,
-                        listing_city or None,
-                        persona,
-                        intent,
-                        contact or None,
-                        name or None,
-                        note or None,
-                        source_path or None,
-                        source_href or None,
-                        payload_json,
-                    ),
-                )
-            except Exception:
-                pass
-
-            # Creamos una acción visible en CRM (inmobiliaria) para que no se pierda.
-            try:
-                asunto = f"Lead portal: {intent}"
-                notas = "\n".join(
-                    [line for line in [
-                        f"Contacto: {contact}" if contact else "",
-                        f"Nombre: {name}" if name else "",
-                        note,
-                        f"Origen: {source_href}" if source_href else "",
-                    ] if str(line or "").strip()]
-                )
-                conn.execute(
-                    """
-                    INSERT INTO acciones (
-                      id, empresa_id, servicio, inmueble_id,
-                      fecha, hora, asunto, tipo, modalidad_contacto, estado,
-                      notas, related_id, related_tipo,
-                      created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?,
-                      datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        empresa_id,
-                        "inmobiliaria",
-                        listing_id,
-                        now[:10],
-                        None,
-                        asunto,
-                        "Lead portal",
-                        "Portal",
-                        "Pendiente",
-                        notas or None,
-                        lead_id,
-                        "portal_lead",
-                        now,
-                        now,
-                    ),
-                )
-            except Exception:
-                pass
-
-            conn.commit()
-            json_response(self, {"ok": True, "id": lead_id})
-            return
-
         empresa_nombre = payload.get("empresa_nombre")
         path_value = str(parsed.path or "")
         empresa_scope_exempt = (
@@ -31644,11 +31001,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios_delete",
             "/api/usuarios_invitar",
             "/api/auth_set_password",
-                "/api/cliente_gestoria_update",
-                "/api/inmueble_docs",
-                "/api/inmueble_servicios_update",
-                "/api/inmueble_checklist_generate",
-                "/api/inmueble_checklist_update",
+            "/api/cliente_gestoria_update",
+            "/api/inmueble_docs",
+            "/api/inmueble_checklist_generate",
+            "/api/inmueble_checklist_update",
             "/api/gestoria_modelos",
             "/api/gestoria_trabajos",
             "/api/gestoria_docs",
@@ -41434,7 +40790,6 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=direccion,
-                    referencia_catastral=payload.get("referencia_catastral") or payload.get("ref_catastral") or payload.get("rc"),
                     owner_nifs=[
                         payload.get("propietario1_nif"),
                         payload.get("propietario2_nif"),
@@ -42015,7 +41370,6 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=payload.get("direccion"),
-                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
@@ -42033,62 +41387,10 @@ class Handler(BaseHTTPRequestHandler):
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
                 etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
-
-                # Defaults / normalización (evita fichas “vacías” en Resumen y rellena dirección detallada).
-                try:
-                    direccion_raw = str(payload.get("direccion") or "").strip()
-                    tipo_inmueble_raw = str(payload.get("tipo_inmueble") or "").strip()
-                    poblacion_raw = str(payload.get("poblacion") or "").strip()
-
-                    if not str(payload.get("titulo") or "").strip():
-                        if direccion_raw:
-                            payload["titulo"] = direccion_raw
-                        elif tipo_inmueble_raw and poblacion_raw:
-                            payload["titulo"] = f"{tipo_inmueble_raw} en {poblacion_raw}"
-                        else:
-                            payload["titulo"] = tipo_inmueble_raw or "Inmueble"
-
-                    if not str(payload.get("categoria") or "").strip():
-                        payload["categoria"] = infer_inmobiliaria_categoria(tipo_inmueble_raw)
-
-                    tipo_oper = str(payload.get("tipo_operacion") or "").strip()
-                    if not tipo_oper:
-                        tipo_oper = str(payload.get("necesidad_venta_alquiler") or "").strip()
-                    tipo_oper_key = normalize_lookup_text(tipo_oper)
-                    if "alquil" in tipo_oper_key or "arrend" in tipo_oper_key or "renta" in tipo_oper_key:
-                        payload["tipo_operacion"] = "alquiler"
-                    elif tipo_oper_key:
-                        payload["tipo_operacion"] = "venta"
-                    else:
-                        payload["tipo_operacion"] = "venta"
-
-                    # Parseamos número/planta/puerta desde dirección si no vienen explícitos.
-                    if direccion_raw:
-                        parts = parse_inmobiliaria_address_for_catastro(direccion_raw)
-                        if not str(payload.get("direccion_numero") or "").strip() and parts.get("numero"):
-                            payload["direccion_numero"] = parts.get("numero")
-                        if not str(payload.get("escalera") or "").strip() and parts.get("escalera"):
-                            payload["escalera"] = parts.get("escalera")
-                        if not str(payload.get("planta") or "").strip() and parts.get("planta"):
-                            payload["planta"] = parts.get("planta")
-                        if not str(payload.get("puerta") or "").strip() and parts.get("puerta"):
-                            payload["puerta"] = parts.get("puerta")
-                        # Compat: si no hay planta/puerta explícitos, guardamos una versión “humana” en `interior`.
-                        if not str(payload.get("interior") or "").strip():
-                            interior = " ".join(
-                                [
-                                    str(payload.get("planta") or "").strip(),
-                                    str(payload.get("puerta") or "").strip(),
-                                ]
-                            ).strip()
-                            if interior:
-                                payload["interior"] = interior
-                except Exception:
-                    pass
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, titulo, referencia_catastral, tipo_operacion, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
+                      id, empresa_id, referencia, titulo, referencia_catastral, direccion, direccion_numero, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, focalizacion, tipo_inmueble, subtipologia,
                       m2, anio_construccion, anio_reforma, habitaciones, banos, precio_objetivo, precio_encargo, precio_valoracion,
                       precio_pedido_cliente, fecha_valoracion, desviacion_pct,
@@ -42103,7 +41405,7 @@ class Handler(BaseHTTPRequestHandler):
                       planificacion_encargo, fecha_ultima_renov_rebaja,
                       estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42112,11 +41414,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("referencia"),
                         payload.get("titulo"),
                         payload.get("referencia_catastral"),
-                        payload.get("tipo_operacion"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
-                        payload.get("planta"),
-                        payload.get("puerta"),
                         payload.get("interior"),
                         payload.get("escalera"),
                         payload.get("edificio"),
@@ -42174,10 +41473,10 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO captaciones (
-                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
+                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
                       precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
-                      urgencia, motivo, motivacion, necesidad_venta_alquiler, tipo_operacion, canal, tipo_procedencia,
+                      urgencia, motivo, motivacion, necesidad_venta_alquiler, canal, tipo_procedencia,
                       situacion_comercial, fecha_conversion,
                       etapa, noticia_verificada, situacion_ocupacion, ocupado_por,
                       probabilidad, proxima_accion, fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
@@ -42186,7 +41485,7 @@ class Handler(BaseHTTPRequestHandler):
                       propietario_telefono, propietario_email,
                       asesor, responsable, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42199,8 +41498,6 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("subtipologia"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
-                        payload.get("planta"),
-                        payload.get("puerta"),
                         payload.get("interior"),
                         payload.get("escalera"),
                         payload.get("edificio"),
@@ -42223,7 +41520,6 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("motivo"),
                         payload.get("motivacion"),
                         payload.get("necesidad_venta_alquiler"),
-                        payload.get("tipo_operacion"),
                         payload.get("canal"),
                         payload.get("tipo_procedencia"),
                         payload.get("situacion_comercial") or etapa_value,
@@ -42435,8 +41731,6 @@ class Handler(BaseHTTPRequestHandler):
                 "subtipologia",
                 "direccion",
                 "direccion_numero",
-                "planta",
-                "puerta",
                 "interior",
                 "escalera",
                 "edificio",
@@ -42526,8 +41820,6 @@ class Handler(BaseHTTPRequestHandler):
                 "subtipologia",
                 "direccion",
                 "direccion_numero",
-                "planta",
-                "puerta",
                 "interior",
                 "escalera",
                 "edificio",
@@ -43522,51 +42814,6 @@ class Handler(BaseHTTPRequestHandler):
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
-            conn.commit()
-            json_response(self, {"ok": True})
-            return
-        elif parsed.path == "/api/inmueble_servicios_update":
-            inmueble_id = str(payload.get("inmueble_id") or "").strip()
-            servicios = payload.get("servicios", [])
-            if not inmueble_id:
-                json_response(self, {"error": "inmueble_id requerido"}, status=400)
-                return
-            if not isinstance(servicios, list):
-                json_response(self, {"error": "servicios invalido"}, status=400)
-                return
-            exists = conn.execute(
-                "SELECT id FROM inmuebles WHERE id = ? LIMIT 1",
-                (inmueble_id,),
-            ).fetchone()
-            if not exists:
-                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
-                return
-            cleaned = []
-            for value in servicios:
-                label = str(value or "").strip()
-                if not label:
-                    continue
-                if label not in cleaned:
-                    cleaned.append(label[:80])
-            conn.execute("DELETE FROM inmueble_servicios WHERE inmueble_id = ?", (inmueble_id,))
-            for label in cleaned:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO inmueble_servicios (
-                      id, inmueble_id, servicio, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (os.urandom(16).hex(), inmueble_id, label, now, now),
-                )
-            try:
-                audit("inmueble_servicios", inmueble_id, "Actualizar servicios", usuario=payload.get("usuario"))
-            except Exception:
-                pass
-            conn.commit()
-            json_response(self, {"ok": True, "servicios": cleaned})
-            return
         elif parsed.path == "/api/inmueble_propietario_create":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
@@ -43601,10 +42848,7 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
                 (cliente_id,),
             ).fetchone()
-            json_response(
-                self,
-                {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}},
-            )
+            json_response(self, {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}})
             return
         elif parsed.path == "/api/inmueble_compradores":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
@@ -43757,12 +43001,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             audit("inmueble_docs", doc_id, "Subir documento", usuario=payload.get("usuario"))
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
-            conn.commit()
-            json_response(self, {"ok": True, "id": doc_id, "url": url})
-            return
-
         elif parsed.path == "/api/demandas":
-            demanda_id = os.urandom(16).hex()
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
@@ -43793,7 +43032,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    demanda_id,
+                    os.urandom(16).hex(),
                     empresa["id"],
                     cliente_id,
                     payload.get("focalizacion"),
@@ -43827,82 +43066,7 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            conn.commit()
-            json_response(self, {"ok": True, "id": demanda_id})
-            return
-
-        elif parsed.path == "/api/demandas_update":
-            record_ids = payload.get("ids")
-            if record_ids is None:
-                record_ids = payload.get("id")
-            if isinstance(record_ids, str):
-                record_ids = [record_ids]
-            if not isinstance(record_ids, list):
-                record_ids = []
-            record_ids = [str(rid or "").strip() for rid in record_ids]
-            record_ids = [rid for rid in record_ids if rid]
-            if not record_ids:
-                json_response(self, {"error": "ids requerido"}, status=400)
-                return
-            empresa_id = str(payload.get("empresa_id") or "").strip() or str((empresa["id"] if empresa else "") or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            updates = {}
-            for key in (
-                "fase",
-                "estado",
-                "responsable",
-                "pedido",
-                "tipologia",
-                "subtipologia",
-                "motivo",
-                "agencia_insercion",
-                "origen",
-                "pedido_web",
-                "anuncio_mi_cartera",
-                "presentacion_servicio",
-                "fecha_insercion",
-                "motivo_ultimo_contacto",
-                "fecha_ultimo_contacto_interno",
-                "fecha_prox_act_cita",
-                "fecha_ultima_cita_venta_red",
-                "estado_contacto",
-                "notas",
-            ):
-                if key in payload:
-                    updates[key] = payload.get(key)
-            if not updates:
-                json_response(self, {"error": "Sin cambios"}, status=400)
-                return
-            for bool_key in ("pedido_web", "anuncio_mi_cartera", "presentacion_servicio"):
-                if bool_key in updates:
-                    updates[bool_key] = parse_boolish(updates.get(bool_key))
-            set_clause = ", ".join([f"{key} = ?" for key in updates])
-            values = list(updates.values())
-            placeholders = ",".join(["?"] * len(record_ids))
-            values.extend([now, empresa_id])
-            values.extend(record_ids)
-            conn.execute(
-                f"UPDATE demandas SET {set_clause}, updated_at = datetime(?) WHERE empresa_id = ? AND id IN ({placeholders})",
-                values,
-            )
-            audit_event(
-                conn,
-                empresa_id,
-                "demanda",
-                record_ids[0] if record_ids else None,
-                "Actualizar pedido",
-                usuario=payload.get("usuario"),
-                detalles={"ids": record_ids[:50], "updates": {k: updates.get(k) for k in list(updates)[:30]}},
-                now=now,
-            )
-            conn.commit()
-            json_response(self, {"ok": True, "updated": len(record_ids)})
-            return
-
         elif parsed.path == "/api/visitas":
-            visita_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO visitas (
@@ -43913,7 +43077,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    visita_id,
+                    os.urandom(16).hex(),
                     empresa["id"],
                     payload.get("inmueble_id"),
                     payload.get("demanda_id"),
@@ -43926,9 +43090,6 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            conn.commit()
-            json_response(self, {"ok": True, "id": visita_id})
-            return
         elif parsed.path == "/api/clientes":
             nombre = payload.get("nombre")
             if not nombre:
@@ -43936,76 +43097,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             nombre_norm = re.sub(r"\s+", " ", str(nombre)).strip()
             nif = (payload.get("nif") or "").strip()
-            telefono = re.sub(r"\s+", "", str(payload.get("telefono") or "").strip())
-            movil = re.sub(r"\s+", "", str(payload.get("movil") or "").strip())
-            email = str(payload.get("email") or "").strip().lower()
-
-            nif_norm = re.sub(r"\s+", "", nif).upper() if nif else ""
-            tel_norm = re.sub(r"[^\d+]", "", telefono) if telefono else ""
-            mov_norm = re.sub(r"[^\d+]", "", movil) if movil else ""
-            email_norm = email
-
-            # Dedupe ampliado (Tecnocloud “reconciliación”): nif / email / móvil / teléfono / nombre exacto.
-            where = []
-            params = []
-            if nif_norm:
-                where.append("REPLACE(UPPER(nif), ' ', '') = ?")
-                params.append(nif_norm)
-            if email_norm:
-                where.append("LOWER(TRIM(email)) = ?")
-                params.append(email_norm)
-            if mov_norm:
-                where.append("REPLACE(REPLACE(REPLACE(movil, ' ', ''), '-', ''), '.', '') = ?")
-                params.append(mov_norm)
-            if tel_norm:
-                where.append("REPLACE(REPLACE(REPLACE(telefono, ' ', ''), '-', ''), '.', '') = ?")
-                params.append(tel_norm)
-            # Nombre exacto como último recurso (evita duplicar “Juan Pérez” en altas manuales).
-            where.append("TRIM(UPPER(nombre)) = ?")
-            params.append(nombre_norm.upper())
-
-            dup_rows = []
-            try:
-                query = f"SELECT id, nombre, nif, telefono, movil, email FROM clientes WHERE ({' OR '.join(where)}) LIMIT 8"
-                dup_rows = conn.execute(query, tuple(params)).fetchall()
-            except Exception:
-                dup_rows = []
-            if dup_rows:
-                matches = []
-                for row in dup_rows:
-                    reasons = []
-                    if nif_norm and re.sub(r"\s+", "", str(row["nif"] or "")).upper() == nif_norm:
-                        reasons.append("mismo documento")
-                    if email_norm and str(row["email"] or "").strip().lower() == email_norm:
-                        reasons.append("mismo email")
-                    if mov_norm and re.sub(r"[^\d+]", "", str(row["movil"] or "")) == mov_norm:
-                        reasons.append("mismo móvil")
-                    if tel_norm and re.sub(r"[^\d+]", "", str(row["telefono"] or "")) == tel_norm:
-                        reasons.append("mismo teléfono")
-                    if str(row["nombre"] or "").strip().upper() == nombre_norm.upper():
-                        reasons.append("mismo nombre")
-                    matches.append(
-                        {
-                            "id": row["id"],
-                            "nombre": row["nombre"] or "",
-                            "nif": row["nif"] or "",
-                            "telefono": row["telefono"] or "",
-                            "movil": row["movil"] or "",
-                            "email": row["email"] or "",
-                            "reasons": reasons,
-                        }
-                    )
-                json_response(
-                    self,
-                    {
-                        "error": "Posible cliente duplicado",
-                        "code": "duplicate_cliente",
-                        "matches": matches,
-                        # Compat con callers antiguos
-                        "id": matches[0]["id"] if matches else None,
-                    },
-                    status=409,
-                )
+            dup = None
+            if nif:
+                nif_norm = re.sub(r"\s+", "", nif).upper()
+                dup = conn.execute(
+                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                    (nif_norm,),
+                ).fetchone()
+            if not dup:
+                dup = conn.execute(
+                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
+                    (nombre_norm.upper(),),
+                ).fetchone()
+            if dup:
+                json_response(self, {"error": "Cliente duplicado", "id": dup["id"]}, status=409)
                 return
             cliente_id = payload.get("id") or os.urandom(16).hex()
             conn.execute(
@@ -44763,10 +43868,6 @@ class Handler(BaseHTTPRequestHandler):
             if not current:
                 json_response(self, {"error": "Acción no encontrada"}, status=404)
                 return
-            empresa_id = str(current["empresa_id"] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "Acción sin empresa_id"}, status=400)
-                return
             updates = {}
             for key in (
                 "fecha",
@@ -44824,10 +43925,10 @@ class Handler(BaseHTTPRequestHandler):
                 (record_id,),
             ).fetchone()
             if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
-                apply_fin_action_workflow(conn, empresa_id, action_row, now)
+                apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             audit_event(
                 conn,
-                empresa_id,
+                empresa["id"],
                 "accion",
                 record_id,
                 "Actualizar acción",
@@ -45430,339 +44531,6 @@ class Handler(BaseHTTPRequestHandler):
                 if token in AUTH_SESSIONS:
                     AUTH_SESSIONS[token].update(refreshed_session)
             json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
-            return
-
-        if path == "/api/catalogo_poblaciones":
-            try:
-                load_postal_catalog(conn)
-            except Exception:
-                pass
-            q = (params.get("q", [""])[0] or "").strip().lower()
-            provincia = (params.get("provincia", [""])[0] or "").strip()
-            limit = (params.get("limit", ["20000"])[0] or "20000").strip()
-            try:
-                limit_n = max(1, min(50000, int(limit or "20000")))
-            except Exception:
-                limit_n = 20000
-            sql = "SELECT DISTINCT poblacion, provincia FROM postal_catalogo WHERE TRIM(COALESCE(poblacion,'')) <> ''"
-            args = []
-            if provincia:
-                sql += " AND LOWER(TRIM(COALESCE(provincia,''))) = LOWER(?)"
-                args.append(provincia)
-            if q:
-                sql += " AND LOWER(TRIM(poblacion)) LIKE ?"
-                args.append(f"%{q}%")
-            sql += " ORDER BY LOWER(TRIM(poblacion)) ASC LIMIT ?"
-            args.append(limit_n)
-            rows = conn.execute(sql, args).fetchall()
-            items = [
-                {
-                    "poblacion": str(row_value(r, "poblacion") or "").strip(),
-                    "provincia": str(row_value(r, "provincia") or "").strip(),
-                }
-                for r in rows
-                if str(row_value(r, "poblacion") or "").strip()
-            ]
-            json_response(self, {"ok": True, "items": items})
-            return
-
-        if path == "/api/portal_inmuebles":
-            limit = (params.get("limit", ["60"])[0] or "60").strip()
-            q = (params.get("q", [""])[0] or "").strip().lower()
-            ciudad = (params.get("ciudad", [""])[0] or "").strip().lower()
-            operacion = (params.get("operacion", [""])[0] or "").strip().lower()
-            certificado_only = (params.get("certificado", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
-            show_all = (params.get("all", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
-            try:
-                limit_n = max(1, min(200, int(limit or "60")))
-            except Exception:
-                limit_n = 60
-            try:
-                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-
-            portal_admin = False
-            try:
-                token_header = str(self.headers.get("Authorization") or "").strip()
-                bearer = token_header.split(" ", 1)[1].strip() if token_header.lower().startswith("bearer ") else ""
-                expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
-                if expected and bearer and secrets.compare_digest(bearer, expected):
-                    portal_admin = True
-            except Exception:
-                portal_admin = False
-            if not portal_admin:
-                try:
-                    session = self._current_session()
-                    rol = normalize_service_key((session or {}).get("rol") or "")
-                    if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
-                        portal_admin = True
-                except Exception:
-                    portal_admin = False
-
-            where = [
-                "EXISTS (SELECT 1 FROM captaciones c WHERE c.inmueble_id = i.id AND COALESCE(c.noticia_verificada, 0) = 1)"
-            ]
-            values = []
-            if not (show_all and portal_admin):
-                where.append("COALESCE(i.portal_publicado, 0) = 1")
-            if operacion in {"venta", "alquiler"}:
-                where.append("LOWER(COALESCE(i.tipo_operacion, '')) LIKE ?")
-                values.append(f"%{operacion}%")
-            if ciudad:
-                where.append("LOWER(COALESCE(i.poblacion, '')) LIKE ?")
-                values.append(f"%{ciudad}%")
-            if q:
-                where.append("(LOWER(COALESCE(i.titulo, '')) LIKE ? OR LOWER(COALESCE(i.descripcion, '')) LIKE ?)")
-                values.extend([f"%{q}%", f"%{q}%"])
-            if certificado_only:
-                where.append("COALESCE(i.certificado, 0) = 1")
-
-            where_clause = " AND ".join(where) if where else "1=1"
-            rows = conn.execute(
-                f"""
-                SELECT
-                  i.id,
-                  COALESCE(NULLIF(TRIM(i.titulo), ''), 'Inmueble') AS titulo,
-                  COALESCE(NULLIF(TRIM(i.poblacion), ''), NULLIF(TRIM(i.localidad), ''), '') AS poblacion,
-                  COALESCE(NULLIF(TRIM(i.tipo_operacion), ''), 'Venta') AS tipo_operacion,
-                  COALESCE(NULLIF(TRIM(i.tipo_inmueble), ''), 'Piso') AS tipo_inmueble,
-                  COALESCE(i.precio_encargo, i.precio_objetivo, i.precio_pedido_cliente, 0) AS precio,
-                  COALESCE(i.habitaciones, 0) AS habitaciones,
-                  COALESCE(i.banos, 0) AS banos,
-                  COALESCE(i.m2, 0) AS m2,
-                  COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
-                  COALESCE(i.updated_at, i.created_at, '') AS updated_at,
-                  COALESCE(i.created_at, '') AS created_at,
-                  COALESCE(i.certificado, 0) AS certificado,
-                  COALESCE(i.portal_publicado, 0) AS portal_publicado
-                FROM inmuebles i
-                WHERE {where_clause}
-                ORDER BY COALESCE(NULLIF(i.updated_at, ''), i.created_at) DESC
-                LIMIT {int(limit_n)}
-                """,
-                values,
-            ).fetchall()
-
-            listings = []
-            for r in rows or []:
-                op = _portal_operation(row_value(r, "tipo_operacion") or "")
-                ptype = _portal_property_type(row_value(r, "tipo_inmueble") or "")
-                price_label = _portal_format_price_label(op, row_value(r, "precio") or 0)
-                details_short = _portal_details_short(row_value(r, "habitaciones"), row_value(r, "banos"), row_value(r, "m2"))
-                details = _portal_details(row_value(r, "habitaciones"), row_value(r, "banos"), row_value(r, "m2"))
-                verified_at = str(row_value(r, "updated_at") or row_value(r, "created_at") or "")[:10]
-                listings.append(
-                    {
-                        "id": row_value(r, "id"),
-                        "title": row_value(r, "titulo"),
-                        "city": row_value(r, "poblacion") or "",
-                        "operation": op,
-                        "propertyType": ptype,
-                        "priceLabel": price_label or "",
-                        "priceValue": float(row_value(r, "precio") or 0) if row_value(r, "precio") is not None else 0,
-                        "detailsShort": details_short or "",
-                        "details": details,
-                        "description": row_value(r, "descripcion") or "",
-                        "verifiedAt": verified_at or "",
-                        "certified": bool(int(row_value(r, "certificado") or 0)),
-                        "published": bool(int(row_value(r, "portal_publicado") or 0)),
-                    }
-                )
-
-            json_response(self, {"ok": True, "listings": listings})
-            return
-
-        if path == "/api/portal_inmueble":
-            inmueble_id = (params.get("id", [""])[0] or "").strip()
-            if not inmueble_id:
-                json_response(self, {"ok": False, "error": "missing_id"}, status=400)
-                return
-            show_all = (params.get("all", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
-            try:
-                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-
-            portal_admin = False
-            try:
-                token_header = str(self.headers.get("Authorization") or "").strip()
-                bearer = token_header.split(" ", 1)[1].strip() if token_header.lower().startswith("bearer ") else ""
-                expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
-                if expected and bearer and secrets.compare_digest(bearer, expected):
-                    portal_admin = True
-            except Exception:
-                portal_admin = False
-            if not portal_admin:
-                try:
-                    session = self._current_session()
-                    rol = normalize_service_key((session or {}).get("rol") or "")
-                    if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
-                        portal_admin = True
-                except Exception:
-                    portal_admin = False
-            row = conn.execute(
-                """
-                SELECT
-                  i.id,
-                  COALESCE(NULLIF(TRIM(i.titulo), ''), 'Inmueble') AS titulo,
-                  COALESCE(NULLIF(TRIM(i.poblacion), ''), NULLIF(TRIM(i.localidad), ''), '') AS poblacion,
-                  COALESCE(NULLIF(TRIM(i.tipo_operacion), ''), 'Venta') AS tipo_operacion,
-                  COALESCE(NULLIF(TRIM(i.tipo_inmueble), ''), 'Piso') AS tipo_inmueble,
-                  COALESCE(i.precio_encargo, i.precio_objetivo, i.precio_pedido_cliente, 0) AS precio,
-                  COALESCE(i.habitaciones, 0) AS habitaciones,
-                  COALESCE(i.banos, 0) AS banos,
-                  COALESCE(i.m2, 0) AS m2,
-                  COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
-                  COALESCE(i.updated_at, i.created_at, '') AS updated_at,
-                  COALESCE(i.created_at, '') AS created_at,
-                  COALESCE(i.certificado, 0) AS certificado,
-                  COALESCE(i.portal_publicado, 0) AS portal_publicado
-                FROM inmuebles i
-                WHERE i.id = ?
-                LIMIT 1
-                """,
-                (inmueble_id,),
-            ).fetchone()
-            if not row:
-                json_response(self, {"ok": False, "error": "not_found"}, status=404)
-                return
-            if not (show_all and portal_admin):
-                try:
-                    if int(row_value(row, "portal_publicado") or 0) != 1:
-                        json_response(self, {"ok": False, "error": "not_found"}, status=404)
-                        return
-                except Exception:
-                    json_response(self, {"ok": False, "error": "not_found"}, status=404)
-                    return
-            op = _portal_operation(row_value(row, "tipo_operacion") or "")
-            ptype = _portal_property_type(row_value(row, "tipo_inmueble") or "")
-            price_label = _portal_format_price_label(op, row_value(row, "precio") or 0)
-            details_short = _portal_details_short(row_value(row, "habitaciones"), row_value(row, "banos"), row_value(row, "m2"))
-            details = _portal_details(row_value(row, "habitaciones"), row_value(row, "banos"), row_value(row, "m2"))
-            verified_at = str(row_value(row, "updated_at") or row_value(row, "created_at") or "")[:10]
-            listing = {
-                "id": row_value(row, "id"),
-                "title": row_value(row, "titulo"),
-                "city": row_value(row, "poblacion") or "",
-                "operation": op,
-                "propertyType": ptype,
-                "priceLabel": price_label or "",
-                "priceValue": float(row_value(row, "precio") or 0) if row_value(row, "precio") is not None else 0,
-                "detailsShort": details_short or "",
-                "details": details,
-                "description": row_value(row, "descripcion") or "",
-                "verifiedAt": verified_at or "",
-                "certified": bool(int(row_value(row, "certificado") or 0)),
-                "published": bool(int(row_value(row, "portal_publicado") or 0)),
-            }
-            json_response(self, {"ok": True, "listing": listing})
-            return
-
-        if path == "/api/portal_leads_recent":
-            # Listado de leads ingeridos (CRM). Requiere rol admin o token Bearer.
-            token_header = str(self.headers.get("Authorization") or "").strip()
-            bearer = ""
-            if token_header.lower().startswith("bearer "):
-                bearer = token_header.split(" ", 1)[1].strip()
-            expected = str(os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
-
-            allowed = False
-            if expected and bearer:
-                try:
-                    allowed = secrets.compare_digest(bearer, expected)
-                except Exception:
-                    allowed = False
-
-            if not allowed:
-                session = self._current_session()
-                if not session:
-                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
-                    return
-                rol = normalize_service_key(session.get("rol") or "")
-                if rol not in {"administrador", "admin", "direccion", "administracion", "control"}:
-                    json_response(self, {"ok": False, "error": "forbidden"}, status=403)
-                    return
-                allowed = True
-
-            limit = (params.get("limit", ["50"])[0] or "50").strip()
-            inmueble_id = (params.get("inmueble_id", [""])[0] or "").strip()
-            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
-            intent = (params.get("intent", [""])[0] or "").strip().lower()
-            try:
-                limit_n = max(1, min(200, int(limit or "50")))
-            except Exception:
-                limit_n = 50
-
-            ensure_portal_leads_schema(conn)
-
-            where = ["1=1"]
-            values = []
-            if inmueble_id:
-                where.append("inmueble_id = ?")
-                values.append(inmueble_id)
-            if empresa_id:
-                where.append("empresa_id = ?")
-                values.append(empresa_id)
-            if intent in {"info", "visita", "contacto"}:
-                where.append("LOWER(COALESCE(intent,'')) = ?")
-                values.append(intent)
-
-            where_clause = " AND ".join(where) if where else "1=1"
-            rows = conn.execute(
-                f"""
-                SELECT
-                  id,
-                  hub_lead_id,
-                  created_at,
-                  empresa_id,
-                  inmueble_id,
-                  listing_title,
-                  listing_city,
-                  persona,
-                  intent,
-                  contact,
-                  name,
-                  note,
-                  source_path,
-                  source_href
-                FROM portal_leads
-                WHERE {where_clause}
-                ORDER BY created_at DESC
-                LIMIT {int(limit_n)}
-                """,
-                values,
-            ).fetchall()
-
-            leads = []
-            for r in rows or []:
-                leads.append(
-                    {
-                        "id": row_value(r, "id"),
-                        "hub_lead_id": row_value(r, "hub_lead_id"),
-                        "created_at": row_value(r, "created_at"),
-                        "empresa_id": row_value(r, "empresa_id"),
-                        "inmueble_id": row_value(r, "inmueble_id"),
-                        "listing_title": row_value(r, "listing_title"),
-                        "listing_city": row_value(r, "listing_city"),
-                        "persona": row_value(r, "persona"),
-                        "intent": row_value(r, "intent"),
-                        "contact": row_value(r, "contact"),
-                        "name": row_value(r, "name"),
-                        "note": row_value(r, "note"),
-                        "source_path": row_value(r, "source_path"),
-                        "source_href": row_value(r, "source_href"),
-                    }
-                )
-            json_response(self, {"ok": True, "leads": leads})
             return
 
         if path == "/api/debug_auth":
@@ -48031,14 +46799,12 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                  COALESCE(i.direccion, '') AS inmueble,
                   a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
                   a.documento_tipo, a.importe_propuesta,
                   a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
                   a.related_id, a.related_tipo
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
-                LEFT JOIN inmuebles i ON i.id = a.inmueble_id
                 WHERE LOWER(a.servicio) = LOWER(?)
                   AND (? = '' OR a.empresa_id = ?)
                   AND (? = '' OR a.cliente_id = ?)
@@ -49846,23 +48612,17 @@ class Handler(BaseHTTPRequestHandler):
                 where_clause = f"WHERE {' AND '.join(where)}"
                 rows = conn.execute(
                     f"""
-                        SELECT
-                          {select_id}
-                          c.nombre,
-                          c.tipo_persona,
-                          c.nif,
-                          c.telefono,
-                          c.movil,
-                          c.otro_telefono,
-                          c.email,
-                          c.id_personal,
-                          c.cliente_generico_web,
-                          c.tiene_pedido,
-                          c.perfil,
-                          c.fecha_nacimiento,
-                          c.direccion,
-                          c.codigo_postal,
-                          c.poblacion,
+                    SELECT
+                      {select_id}
+                      c.nombre,
+                      c.tipo_persona,
+                      c.nif,
+                      c.telefono,
+                      c.email,
+                      c.fecha_nacimiento,
+                      c.direccion,
+                      c.codigo_postal,
+                      c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(COALESCE(NULLIF(ce.servicio, ''), 'seguros'), ' | ') AS servicios
@@ -49899,23 +48659,17 @@ class Handler(BaseHTTPRequestHandler):
                 join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
                 rows = conn.execute(
                     f"""
-                        SELECT
-                          {select_id}
-                          c.nombre,
-                          c.tipo_persona,
-                          c.nif,
-                          c.telefono,
-                          c.movil,
-                          c.otro_telefono,
-                          c.email,
-                          c.id_personal,
-                          c.cliente_generico_web,
-                          c.tiene_pedido,
-                          c.perfil,
-                          c.fecha_nacimiento,
-                          c.direccion,
-                          c.codigo_postal,
-                          c.poblacion,
+                    SELECT
+                      {select_id}
+                      c.nombre,
+                      c.tipo_persona,
+                      c.nif,
+                      c.telefono,
+                      c.email,
+                      c.fecha_nacimiento,
+                      c.direccion,
+                      c.codigo_postal,
+                      c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(ce.servicio, ' | ') AS servicios
@@ -49934,13 +48688,7 @@ class Handler(BaseHTTPRequestHandler):
                 "tipo_persona",
                 "nif",
                 "telefono",
-                "movil",
-                "otro_telefono",
                 "email",
-                "id_personal",
-                "cliente_generico_web",
-                "tiene_pedido",
-                "perfil",
                 "fecha_nacimiento",
                 "direccion",
                 "codigo_postal",
@@ -49960,24 +48708,13 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            try:
-                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
             where = ["i.empresa_id = ?"]
             values = [empresa_id]
             if q:
                 where.append(
-                    "("
-                    "i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR "
-                    "c.nombre LIKE ? OR cap.propietario LIKE ? OR cap.motivacion LIKE ? OR cap.necesidad_venta_alquiler LIKE ?"
-                    ")"
+                    "(i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR c.nombre LIKE ?)"
                 )
-                values.extend([f"%{q}%"] * 9)
+                values.extend([f"%{q}%"] * 6)
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
@@ -49985,49 +48722,19 @@ class Handler(BaseHTTPRequestHandler):
                   i.id,
                   i.referencia,
                   i.direccion,
-                  i.direccion_numero,
                   i.referencia_catastral,
                   i.codigo_postal,
-                  i.localidad,
                   i.poblacion,
                   i.provincia,
                   i.zona,
-                  COALESCE(NULLIF(i.focalizacion, ''), cap.focalizacion) AS focalizacion,
-                  COALESCE(NULLIF(i.tipo_inmueble, ''), cap.tipo_inmueble) AS tipo_inmueble,
-                  COALESCE(NULLIF(i.subtipologia, ''), cap.subtipologia) AS subtipologia,
+                  i.tipo_inmueble,
                   i.m2,
                   i.habitaciones,
                   i.banos,
-                  i.propietario_telefono,
-                  i.propietario_email,
-                  i.informador_nombre,
-                  i.asesor,
-                  i.responsable,
-                  i.ultima_fecha_contacto,
-                  i.estado_contacto,
                   i.precio_objetivo,
-                  i.precio_pedido_cliente,
-                  COALESCE(NULLIF(i.precio_encargo, 0), cap.precio_encargo) AS precio_encargo,
-                  cap.motivacion,
-                  cap.necesidad_venta_alquiler,
-                  cap.proxima_accion,
-                  cap.propietario AS propietario_principal,
-                  i.propietario_localizado,
-                  i.lat,
-                  i.lon,
                   i.estado,
-                  COALESCE(i.portal_publicado, 0) AS portal_publicado,
-                  COALESCE(i.certificado, 0) AS certificado,
-                  COALESCE(cap.noticia_verificada, 0) AS noticia_verificada,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
-                LEFT JOIN captaciones cap ON cap.id = (
-                  SELECT id
-                  FROM captaciones
-                  WHERE inmueble_id = i.id
-                  ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC, created_at DESC
-                  LIMIT 1
-                )
                 LEFT JOIN inmueble_propietarios ip ON ip.inmueble_id = i.id
                 LEFT JOIN clientes c ON c.id = ip.cliente_id
                 WHERE {where_clause}
@@ -50265,15 +48972,6 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchall()
-            servicios = []
-            try:
-                servicio_rows = conn.execute(
-                    "SELECT servicio FROM inmueble_servicios WHERE inmueble_id = ? ORDER BY servicio",
-                    (inmueble_id,),
-                ).fetchall()
-                servicios = [str(r["servicio"] or "").strip() for r in servicio_rows if str(r["servicio"] or "").strip()]
-            except Exception:
-                servicios = []
             captacion = conn.execute(
                 """
                 SELECT *
@@ -50284,44 +48982,15 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchone()
-            auditoria_rows = []
-            try:
-                auditoria_rows = conn.execute(
-                    """
-                    SELECT entidad, accion, usuario, detalles, created_at
-                    FROM auditoria
-                    WHERE entidad_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT 80
-                    """,
-                    (inmueble_id,),
-                ).fetchall()
-            except Exception:
-                auditoria_rows = []
             json_response(
                 self,
                 {
                     "inmueble": dict(inmueble),
                     "propietarios": [dict(r) for r in propietarios],
                     "docs": [dict(r) for r in docs],
-                    "servicios": servicios,
                     "captacion": dict(captacion) if captacion else {},
-                    "auditoria": [dict(r) for r in auditoria_rows],
                 },
             )
-            return
-
-        if path == "/api/inmueble_servicios":
-            inmueble_id = (params.get("inmueble_id", [""])[0] or params.get("id", [""])[0] or "").strip()
-            if not inmueble_id:
-                json_response(self, {"error": "inmueble_id requerido"}, status=400)
-                return
-            rows = conn.execute(
-                "SELECT servicio FROM inmueble_servicios WHERE inmueble_id = ? ORDER BY servicio",
-                (inmueble_id,),
-            ).fetchall()
-            servicios = [str(r["servicio"] or "").strip() for r in rows if str(r["servicio"] or "").strip()]
-            json_response(self, {"servicios": servicios})
             return
 
         if path == "/api/inmueble_ensure":
@@ -50941,32 +49610,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = conn.execute(
                 """
-               SELECT
-                       d.id,
-                       COALESCE(NULLIF(TRIM(d.fase), ''), 'Pedidos a analizar') AS fase,
-                       COALESCE(NULLIF(TRIM(d.estado), ''), 'Activa') AS estado,
-                       d.pedido,
-                       d.tipologia,
-                       d.subtipologia,
-                       d.motivo,
-                       d.tipo,
-                       d.precio_max,
-                       d.m2_min,
-                       d.habitaciones_min,
-                       d.banos_min,
-                       COALESCE(d.pedido_web, 0) AS pedido_web,
-                       COALESCE(d.anuncio_mi_cartera, 0) AS anuncio_mi_cartera,
-                       COALESCE(d.presentacion_servicio, 0) AS presentacion_servicio,
-                       d.responsable,
-                       d.created_at,
-                       d.updated_at,
+               SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
+                       d.habitaciones_min, d.banos_min, d.estado, d.prioridad,
                        d.cliente_id,
-                       c.nombre AS cliente,
-                       CASE
-                         WHEN LOWER(COALESCE(c.tipo, '')) LIKE '%propiet%'
-                           OR LOWER(COALESCE(c.perfil, '')) LIKE '%propiet%'
-                         THEN 1 ELSE 0
-                       END AS cliente_propietario
+                       c.nombre AS cliente
                 FROM demandas d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
                 WHERE d.empresa_id = ?
@@ -51023,6 +49670,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             where = ["empresa_id = ?"]
             values = [empresa_id]
+            if demanda["zona"]:
+                where.append("LOWER(zona) LIKE ?")
+                values.append(f"%{demanda['zona'].lower()}%")
             if demanda["precio_max"]:
                 where.append("precio_objetivo <= ?")
                 values.append(demanda["precio_max"])
@@ -51063,6 +49713,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             where = ["d.empresa_id = ?"]
             values = [inmueble["empresa_id"]]
+            if inmueble["zona"]:
+                where.append("LOWER(d.zona) LIKE ?")
+                values.append(f"%{inmueble['zona'].lower()}%")
             if inmueble["precio_objetivo"]:
                 where.append("(d.precio_max IS NULL OR d.precio_max >= ?)")
                 values.append(inmueble["precio_objetivo"])
@@ -53929,7 +52582,6 @@ def main():
         legal_thread.start()
     # Creamos el servidor ANTES de bootstraps pesados para evitar 502 en plataformas (Render) con timeouts de arranque.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    bound_host, bound_port = server.server_address[:2]
     # Bootstrap DB en background (no bloquea bind del puerto).
     try:
         Handler._trigger_db_bootstrap_async(args.db)
@@ -53943,7 +52595,7 @@ def main():
             print(f"[WARN] OCR DB no disponible al arrancar: {type(exc).__name__}: {exc}")
     threading.Thread(target=_ocr_bootstrap, name="ocr-bootstrap", daemon=True).start()
     print(
-        f"Servidor activo en http://{bound_host}:{bound_port} · db={Path(args.db).resolve()} · "
+        f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
         f"ocr_db={Path(args.ocr_db).resolve()} · ocr_workers={ocr_workers}"
     )
     server.serve_forever()

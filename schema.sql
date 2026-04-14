@@ -909,8 +909,6 @@ CREATE TABLE IF NOT EXISTS captaciones (
   subtipologia TEXT,
   direccion TEXT,
   direccion_numero TEXT,
-  planta TEXT,
-  puerta TEXT,
   interior TEXT,
   escalera TEXT,
   edificio TEXT,
@@ -970,8 +968,6 @@ CREATE TABLE IF NOT EXISTS inmuebles (
   tipo_operacion TEXT,
   direccion TEXT,
   direccion_numero TEXT,
-  planta TEXT,
-  puerta TEXT,
   interior TEXT,
   escalera TEXT,
   edificio TEXT,
@@ -1137,16 +1133,6 @@ CREATE TABLE IF NOT EXISTS inmueble_checklist (
   fecha_limite TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
-);
-
-CREATE TABLE IF NOT EXISTS inmueble_servicios (
-  id TEXT PRIMARY KEY,
-  inmueble_id TEXT NOT NULL,
-  servicio TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE (inmueble_id, servicio),
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
 );
 

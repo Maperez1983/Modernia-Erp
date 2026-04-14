@@ -36,7 +36,10 @@ class PrivilegeRefreshTests(unittest.TestCase):
         session = {"token": "t", "user_id": "u1", "rol": "", "servicio": ""}
         self.assertFalse(workspace_actor_is_privileged(self.conn, session))
 
+    def test_treats_privileged_services_as_privileged(self):
+        session = {"token": "t", "user_id": "u1", "rol": "Lectura", "servicio": "Dirección"}
+        self.assertTrue(workspace_actor_is_privileged(self.conn, session))
+
 
 if __name__ == "__main__":
     unittest.main()
-
