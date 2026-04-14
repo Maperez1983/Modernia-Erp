@@ -2592,9 +2592,13 @@ const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
 const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
-	const crmGlobalSearch = document.getElementById("crmGlobalSearch");
-	const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
-	const crmBrandTitle = document.getElementById("crmBrandTitle");
+		const crmGlobalSearch = document.getElementById("crmGlobalSearch");
+		const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
+		const crmSupportBtn = document.getElementById("crmSupportBtn");
+		const crmAlertsBtn = document.getElementById("crmAlertsBtn");
+		const crmAlertsBadge = document.getElementById("crmAlertsBadge");
+		const crmProfileBtn = document.getElementById("crmProfileBtn");
+		const crmBrandTitle = document.getElementById("crmBrandTitle");
 		const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
 		const crmLightningSidebar = document.getElementById("crmLightningSidebar");
 		const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
@@ -17898,7 +17902,60 @@ const renderCrmGlobalSearchResults = () => {
   if (!crmGlobalSearchResults) return;
   const raw = String(state.crmGlobalSearch || "").trim();
   const needle = normalizeSimple(raw);
-  if (!needle || needle.length < 2) {
+
+  const renderRecents = () => {
+    const items = loadCrmRecentItems().slice(0, 5);
+    crmGlobalSearchResults.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.padding = "8px 6px";
+      empty.textContent = "Sin recientes.";
+      crmGlobalSearchResults.appendChild(empty);
+      setCrmGlobalSearchResultsOpen(true);
+      return;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "crm-global-group";
+    const title = document.createElement("div");
+    title.className = "crm-global-group-title";
+    title.textContent = "Recientes";
+    wrap.appendChild(title);
+    items.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "crm-global-item";
+      btn.dataset.crmGlobalKind = String(item?.kind || "").trim();
+      if (item?.view) btn.dataset.crmGlobalView = String(item.view);
+      if (item?.id) btn.dataset.crmGlobalId = String(item.id);
+      if (item?.inmuebleId) btn.dataset.crmGlobalInmuebleId = String(item.inmuebleId);
+      const left = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = item?.title || item?.id || item?.inmuebleId || "Elemento";
+      left.appendChild(strong);
+      if (item?.meta) {
+        const meta = document.createElement("div");
+        meta.className = "muted";
+        meta.textContent = String(item.meta);
+        left.appendChild(meta);
+      }
+      btn.appendChild(left);
+      const pill = document.createElement("span");
+      pill.className = "crm-global-pill";
+      pill.textContent = String(item?.kind || "").trim() || "Reciente";
+      btn.appendChild(pill);
+      wrap.appendChild(btn);
+    });
+    crmGlobalSearchResults.appendChild(wrap);
+    setCrmGlobalSearchResultsOpen(true);
+  };
+
+  // Tecnocloud: al hacer click sin texto, muestra 5 recientes.
+  if (!needle) {
+    renderRecents();
+    return;
+  }
+  if (needle.length < 1) {
     crmGlobalSearchResults.innerHTML = "";
     setCrmGlobalSearchResultsOpen(false);
     return;
@@ -18054,21 +18111,67 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
       setCrmWorkspaceView("captaciones");
       loadCrmCaptaciones();
       return;
-    }
-	    if (scope === "demandas") {
-	      const v = String(value || "").trim().toLowerCase();
-	      const isOrigenQuick = v === "web" || v === "agencias";
-	      if (crmDemandaOrigenFilter) {
-	        crmDemandaOrigenFilter.value = isOrigenQuick ? v : "";
-	      }
-	      if (crmDemandaEstadoFilter) {
-	        crmDemandaEstadoFilter.value = isOrigenQuick ? "activa" : (value || "");
-	      }
-	      setCrmWorkspaceView("demandas");
-	      loadCrmDemandas();
-	      return;
 	    }
-	    if (scope === "clientes") {
+		    if (scope === "demandas") {
+		      const vRaw = String(value || "").trim();
+		      const v = normalizeSimple(vRaw);
+		      const isOrigenQuick = v === "web" || v === "agencias";
+		      const isDemandasStep =
+		        v === "a_analizar"
+		        || v === "en_gestion"
+		        || v === "en_visita"
+		        || v === "negociacion"
+		        || v === "otras";
+
+		      // Steps (Tecnocloud).
+		      if (isDemandasStep) {
+		        state.crmDemandasStep = v;
+		        try { localStorage.setItem("crm.demandas.step", v); } catch {}
+		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
+		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = "";
+		        if (crmDemandaSearch) crmDemandaSearch.value = "";
+		        setCrmWorkspaceView("demandas");
+		        loadCrmDemandas();
+		        return;
+		      }
+
+		      // Atajos por origen.
+		      if (isOrigenQuick) {
+		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = v;
+		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
+		        state.crmDemandasStep = "otras";
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		        if (crmDemandaSearch) crmDemandaSearch.value = "";
+		        setCrmWorkspaceView("demandas");
+		        loadCrmDemandas();
+		        return;
+		      }
+
+		      // Prioridad alta.
+		      if (v === "prioridad_alta" || (v === "prioridad" && normalizeSimple(rest[1] || "") === "alta")) {
+		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = "";
+		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
+		        state.crmDemandasStep = "otras";
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		        if (crmDemandaSearch) crmDemandaSearch.value = "prioridad:alta";
+		        setCrmWorkspaceView("demandas");
+		        loadCrmDemandas();
+		        return;
+		      }
+
+		      // Estado (incl. "activa"): para ver todas las fases, abrimos el paso "otras".
+		      if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = "";
+		      if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = vRaw || "";
+		      if (v === "activa") {
+		        state.crmDemandasStep = "otras";
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		      }
+		      if (crmDemandaSearch) crmDemandaSearch.value = "";
+		      setCrmWorkspaceView("demandas");
+		      loadCrmDemandas();
+		      return;
+		    }
+		    if (scope === "clientes") {
 	      if (crmClientesFilter) crmClientesFilter.value = value || "recientes";
 	      setCrmWorkspaceView("clientes");
 	      loadCrmClientes();
@@ -18096,6 +18199,291 @@ const openInmuebleFromAgenda = (inmuebleId) => {
     setCrmWorkspaceView("inmuebles");
     openInmuebleDetail(inmuebleId);
   }, 300);
+};
+
+const setCrmTopBadge = (el, count) => {
+  if (!el) return;
+  const n = Number(count || 0) || 0;
+  el.textContent = n > 99 ? "99+" : String(n);
+  el.classList.toggle("hidden", n <= 0);
+};
+
+const collectCrmAlertsSnapshot = () => {
+  const clientesRows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+  const demandasRows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
+  const captacionesRows = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
+  const agendaRows = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll : [];
+
+  const clientesWebCount = clientesRows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
+  const pedidosActivosCount = demandasRows.filter((row) => normalizeSimple(row?.estado || "") === "activa").length;
+  const pedidosWebCount = demandasRows.filter((row) => {
+    const pedidoWeb = String(row?.pedido_web || "").trim() === "1";
+    const origen = normalizeSimple(row?.origen || "");
+    return pedidoWeb || origen.includes("web");
+  }).length;
+  const pedidosAgenciasCount = demandasRows.filter((row) => String(row?.agencia_insercion || "").trim()).length;
+  const pedidosAnalizarCount = demandasRows.filter((row) => normalizeSimple(row?.fase || "").includes("anal")).length;
+  const pedidosVisitaCount = demandasRows.filter((row) => normalizeSimple(row?.fase || "").includes("visita")).length;
+  const prioridadAltaCount = demandasRows.filter((row) => normalizeSimple(row?.prioridad || "") === "alta").length;
+
+  const noticiasSinVerificarCount = captacionesRows.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
+    if (etapa !== "Noticia") return false;
+    return String(row?.noticia_verificada ?? "").trim() !== "1";
+  }).length;
+
+  const sinProximaAccionCount = captacionesRows.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
+    if (etapa !== "Noticia" && etapa !== "Encargo") return false;
+    return !String(row?.proxima_accion || "").trim();
+  }).length;
+
+  const parseRowTs = (row) => {
+    const fechaKey = String(row?.fecha || "").trim();
+    if (!fechaKey) return 0;
+    const base = parseAgendaDate(fechaKey);
+    if (!base) return 0;
+    const timeRaw = String(row?.hora_fin || row?.hora || "").trim();
+    const parts = timeRaw.split(":");
+    const h = Number(parts[0]);
+    const m = Number(parts[1] || 0);
+    if (Number.isFinite(h) && Number.isFinite(m)) {
+      base.setHours(h);
+      base.setMinutes(m);
+    }
+    return base.getTime();
+  };
+  const isCaducada = (row) => {
+    const estado = normalizeSimple(row?.estado || "");
+    if (estado.includes("complet") || estado.includes("realiz") || estado.includes("cancel")) return false;
+    const ts = parseRowTs(row);
+    return ts > 0 && ts < Date.now();
+  };
+  const normalizeTipoKey = (row) => {
+    const tipo = normalizeSimple(row?.tipo || row?.asunto || "");
+    if (tipo.includes("cita")) return "cita";
+    if (tipo.includes("actividad")) return "actividad";
+    return "actividad";
+  };
+  const citasCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) === "cita" && isCaducada(row)).length;
+  const actividadesCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) !== "cita" && isCaducada(row)).length;
+
+  const total =
+    noticiasSinVerificarCount
+    + sinProximaAccionCount
+    + pedidosAnalizarCount
+    + pedidosVisitaCount
+    + prioridadAltaCount
+    + citasCaducadasCount
+    + actividadesCaducadasCount;
+
+  return {
+    total,
+    clientesWebCount,
+    pedidosActivosCount,
+    pedidosWebCount,
+    pedidosAgenciasCount,
+    pedidosAnalizarCount,
+    pedidosVisitaCount,
+    prioridadAltaCount,
+    noticiasSinVerificarCount,
+    sinProximaAccionCount,
+    citasCaducadasCount,
+    actividadesCaducadasCount,
+  };
+};
+
+const ensureCrmModal = (id, title, subtitle = "") => {
+  let modal = document.getElementById(id);
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = id;
+  modal.className = "crm-modal hidden";
+  modal.innerHTML = `
+    <div class="crm-modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <div class="crm-modal-head">
+        <div>
+          <h3 style="margin:0;">${escapeHtml(title)}</h3>
+          ${subtitle ? `<p class="muted" style="margin:4px 0 0;">${escapeHtml(subtitle)}</p>` : ""}
+        </div>
+        <button type="button" class="secondary ghost" data-crm-modal-close>Cerrar</button>
+      </div>
+      <div class="crm-modal-body" data-crm-modal-body></div>
+    </div>
+  `;
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      modal.classList.add("hidden");
+    }
+  });
+  modal.querySelector("[data-crm-modal-close]")?.addEventListener("click", () => modal.classList.add("hidden"));
+  document.body.appendChild(modal);
+  return modal;
+};
+
+const openCrmSupportModal = () => {
+  const modal = ensureCrmModal(
+    "crmSupportModal",
+    "Soporte",
+    "Guías rápidas, manuales y contacto."
+  );
+  const body = modal.querySelector("[data-crm-modal-body]");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="crm-modal-links">
+      <a class="crm-modal-link" href="/manual_inmobiliaria.html" target="_blank" rel="noopener noreferrer">
+        <div class="crm-modal-link-left">
+          <strong>Manual Inmobiliaria</strong>
+          <span class="muted">Procesos, tips y operativa del CRM inmobiliario.</span>
+        </div>
+        <span aria-hidden="true">↗</span>
+      </a>
+      <a class="crm-modal-link" href="mailto:soporte@verifika2.com?subject=Soporte%20Verifika2%20CRM">
+        <div class="crm-modal-link-left">
+          <strong>Contactar soporte</strong>
+          <span class="muted">soporte@verifika2.com</span>
+        </div>
+        <span aria-hidden="true">↗</span>
+      </a>
+      <a class="crm-modal-link" href="/healthz" target="_blank" rel="noopener noreferrer">
+        <div class="crm-modal-link-left">
+          <strong>Estado del servicio</strong>
+          <span class="muted">Comprobación rápida del servidor.</span>
+        </div>
+        <span aria-hidden="true">↗</span>
+      </a>
+    </div>
+  `;
+  modal.classList.remove("hidden");
+};
+
+const openCrmAlertsModal = () => {
+  const modal = ensureCrmModal(
+    "crmAlertsModal",
+    "Alertas",
+    "Pendientes operativos y oportunidades."
+  );
+  const body = modal.querySelector("[data-crm-modal-body]");
+  if (!body) return;
+  const snapshot = collectCrmAlertsSnapshot();
+  const tiles = [
+    snapshot.noticiasSinVerificarCount ? { title: "Noticias sin verificar", meta: `${snapshot.noticiasSinVerificarCount}`, sub: "Valorar/verificar para avanzar pipeline.", quick: "captaciones:quick_noticia_sin_verificar" } : null,
+    snapshot.sinProximaAccionCount ? { title: "Sin próxima acción", meta: `${snapshot.sinProximaAccionCount}`, sub: "Planifica siguientes pasos.", quick: "captaciones:quick_sin_proxima_accion" } : null,
+    snapshot.pedidosAnalizarCount ? { title: "Pedidos a analizar", meta: `${snapshot.pedidosAnalizarCount}`, sub: "Primera llamada y cualificación.", quick: "demandas:a_analizar" } : null,
+    snapshot.pedidosVisitaCount ? { title: "Pedidos en visita", meta: `${snapshot.pedidosVisitaCount}`, sub: "Seguimiento y cierres.", quick: "demandas:en_visita" } : null,
+    snapshot.prioridadAltaCount ? { title: "Pedidos prioridad alta", meta: `${snapshot.prioridadAltaCount}`, sub: "Atención comercial prioritaria.", quick: "demandas:prioridad_alta" } : null,
+    snapshot.citasCaducadasCount ? { title: "Citas caducadas", meta: `${snapshot.citasCaducadasCount}`, sub: "Reprograma o cierra.", view: "agenda", preset: "citas_caducadas" } : null,
+    snapshot.actividadesCaducadasCount ? { title: "Actividades caducadas", meta: `${snapshot.actividadesCaducadasCount}`, sub: "Revisar pendientes.", view: "agenda", preset: "actividades_caducadas" } : null,
+    snapshot.clientesWebCount ? { title: "Clientes web genérico", meta: `${snapshot.clientesWebCount}`, sub: "Cualificar y convertir.", quick: "clientes:web" } : null,
+    snapshot.pedidosAgenciasCount ? { title: "Pedidos de agencias", meta: `${snapshot.pedidosAgenciasCount}`, sub: "Revisar colaboración.", quick: "demandas:agencias" } : null,
+    snapshot.pedidosWebCount ? { title: "Pedidos web", meta: `${snapshot.pedidosWebCount}`, sub: "Leads entrantes.", quick: "demandas:web" } : null,
+  ].filter(Boolean);
+
+  const renderEmpty = () => `<p class="muted" style="margin:0;">Sin alertas calculadas. Abre Captaciones/Demandas/Agenda para cargar datos.</p>`;
+  body.innerHTML = `
+    ${tiles.length ? `<div class="crm-modal-grid">
+      ${tiles.map((t) => `
+        <div class="crm-modal-tile">
+          <div>
+            <strong>${escapeHtml(t.title)}</strong>
+            <p class="muted">${escapeHtml(t.sub || "")}</p>
+          </div>
+          <button type="button" class="secondary" data-crm-alert-open="1"
+            ${t.quick ? `data-crm-quick="${escapeHtml(t.quick)}"` : ""}
+            ${t.view ? `data-crm-view="${escapeHtml(t.view)}"` : ""}
+            ${t.preset ? `data-crm-agenda-preset="${escapeHtml(t.preset)}"` : ""}
+          >${escapeHtml(t.meta || "Abrir")}</button>
+        </div>
+      `).join("")}
+    </div>` : renderEmpty()}
+    <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="button" class="secondary" data-crm-alert-refresh="1">Actualizar datos</button>
+      <button type="button" class="secondary ghost" data-crm-modal-close-inline="1">Cerrar</button>
+    </div>
+  `;
+  body.querySelector('[data-crm-modal-close-inline="1"]')?.addEventListener("click", () => modal.classList.add("hidden"));
+  body.querySelector('[data-crm-alert-refresh="1"]')?.addEventListener("click", () => {
+    try {
+      loadCrmCaptaciones();
+      loadCrmDemandas();
+      loadCrmAgenda();
+      setTimeout(() => openCrmAlertsModal(), 260);
+    } catch {}
+  });
+  body.querySelectorAll('[data-crm-alert-open="1"]').forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      const quick = String(btn.dataset.crmQuick || "").trim();
+      const view = String(btn.dataset.crmView || "").trim();
+      const preset = String(btn.dataset.crmAgendaPreset || "").trim();
+      modal.classList.add("hidden");
+      if (view === "agenda" && preset && crmAgendaPreset) {
+        crmAgendaPreset.value = preset;
+        setCrmWorkspaceView("agenda");
+        loadCrmAgenda();
+        return;
+      }
+      if (quick) {
+        applyCrmTecnocloudQuickSearch(quick);
+        return;
+      }
+      if (view) setCrmWorkspaceView(view);
+    });
+  });
+  modal.classList.remove("hidden");
+};
+
+const openCrmProfileModal = () => {
+  const user = getAuthScopeUser() || {};
+  const modal = ensureCrmModal(
+    "crmProfileModal",
+    "Perfil",
+    "Cuenta y sesión actual."
+  );
+  const body = modal.querySelector("[data-crm-modal-body]");
+  if (!body) return;
+  const nombre = [user?.nombre, user?.apellido].filter(Boolean).join(" ").trim() || user?.usuario || "Usuario";
+  const rol = String(user?.rol || "").trim() || "-";
+  const servicios = String(user?.servicio || "").trim() || "-";
+  const workspace = String(state.currentWorkspaceName || "").trim() || "-";
+  body.innerHTML = `
+    <div class="crm-modal-grid">
+      <div class="crm-modal-tile">
+        <div>
+          <strong>${escapeHtml(nombre)}</strong>
+          <p class="muted">Rol: ${escapeHtml(rol)}</p>
+          <p class="muted">Servicios: ${escapeHtml(servicios)}</p>
+        </div>
+        <span class="pill">Activo</span>
+      </div>
+      <div class="crm-modal-tile">
+        <div>
+          <strong>Workspace</strong>
+          <p class="muted">${escapeHtml(workspace)}</p>
+        </div>
+        <button type="button" class="secondary ghost" data-crm-profile-open-workspaces="1">Workspaces</button>
+      </div>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="button" class="secondary" data-crm-profile-logout="1">Salir</button>
+      <button type="button" class="secondary ghost" data-crm-modal-close-inline="1">Cerrar</button>
+    </div>
+  `;
+  body.querySelector('[data-crm-modal-close-inline="1"]')?.addEventListener("click", () => modal.classList.add("hidden"));
+  body.querySelector('[data-crm-profile-logout="1"]')?.addEventListener("click", () => {
+    modal.classList.add("hidden");
+    try {
+      logoutAuthSession();
+    } catch {}
+  });
+  body.querySelector('[data-crm-profile-open-workspaces="1"]')?.addEventListener("click", () => {
+    modal.classList.add("hidden");
+    try {
+      setUrlParams(new URLSearchParams({ holding: "1", mode: "tenant", view: "operations" }));
+      openHolding({ mode: "tenant", view: "operations" });
+    } catch {}
+  });
+  modal.classList.remove("hidden");
 };
 
 const openGestoriaCrm = () => {
@@ -34074,11 +34462,11 @@ const renderCrmResumenDashboard = () => {
 	  setBadge(crmBadgePedidos, pedidosNuevosCount || pedidosWebCount || pedidosAgenciasCount);
 	  setBadge(crmBadgeNoticias, noticiasSinVerificarCount || noticiasWebCount);
 
-	  if (crmHomeOportunidades) {
-	    const items = [
-	      pedidosNuevosCount
-	        ? { title: "Pedidos nuevos (5 días)", summary: `${pedidosNuevosCount} por revisar.`, crmQuick: "demandas:activa" }
-	        : null,
+  if (crmHomeOportunidades) {
+    const items = [
+      pedidosNuevosCount
+        ? { title: "Pedidos nuevos (5 días)", summary: `${pedidosNuevosCount} por revisar.`, crmQuick: "demandas:activa" }
+        : null,
 	      pedidosWebCount
 	        ? { title: "Pedidos web", summary: `${pedidosWebCount} recibidos.`, crmQuick: "demandas:web" }
 	        : null,
@@ -34091,9 +34479,15 @@ const renderCrmResumenDashboard = () => {
 	      noticiasWebCount
 	        ? { title: "Noticias web", summary: `${noticiasWebCount} en captación.`, crmView: "captaciones", etapa: "Noticia" }
 	        : null,
-	    ].filter(Boolean);
-	    renderCrmActionList(crmHomeOportunidades, items, "Sin oportunidades nuevas.");
-	  }
+    ].filter(Boolean);
+    renderCrmActionList(crmHomeOportunidades, items, "Sin oportunidades nuevas.");
+  }
+
+  // Alertas (Tecnocloud-like).
+  try {
+    const snapshot = collectCrmAlertsSnapshot();
+    setCrmTopBadge(crmAlertsBadge, snapshot.total);
+  } catch {}
 
   renderCrmHomeAgendaPreview();
 
@@ -50537,6 +50931,16 @@ if (crmWorkspaceTabs) {
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     const view = String(btn.dataset.crmView || "").trim();
+    if (view === "agenda") {
+      const preset = String(btn.dataset.crmAgendaPreset || "").trim();
+      if (preset && crmAgendaPreset) {
+        crmAgendaPreset.value = preset;
+        setCrmAgendaView("list");
+        setCrmWorkspaceView("agenda");
+        loadCrmAgenda();
+        return;
+      }
+    }
     if (view === "agenda" && btn.dataset.crmAgendaOpen) {
       const desired = normalizeCrmAgendaView(btn.dataset.crmAgendaOpen || "day");
       setCrmAgendaAnchorDay(formatAgendaDate(new Date()));
@@ -50913,6 +51317,30 @@ if (crmGlobalSearch) {
       setCrmGlobalSearchResultsOpen(false);
       return;
     }
+  });
+}
+
+if (crmSupportBtn) {
+  crmSupportBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCrmSupportModal();
+  });
+}
+
+if (crmAlertsBtn) {
+  crmAlertsBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCrmAlertsModal();
+  });
+}
+
+if (crmProfileBtn) {
+  crmProfileBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCrmProfileModal();
   });
 }
 

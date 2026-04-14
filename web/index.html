@@ -2503,13 +2503,25 @@
 			                  </button>
 			                </div>
 
-		                <div class="crm-lightning-topbar-right">
-		                  <button type="button" class="secondary ghost" id="crmExitBtn" title="Volver al panel">Volver</button>
-		                  <div class="crm-global-searchbox">
-		                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" title="Búsqueda avanzada: escribe términos o filtros (ej: provincia:Málaga tel:! estado:activa &quot;Calle Larios&quot; -cancelada). Pulsa Enter para filtrar la vista actual." />
-	                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
-                  </div>
-                </div>
+			                <div class="crm-lightning-topbar-right">
+			                  <div class="crm-top-actions" aria-label="Accesos directos">
+			                    <button type="button" class="secondary ghost crm-iconbtn" id="crmSupportBtn" title="Soporte" aria-haspopup="dialog" aria-controls="crmSupportModal">
+			                      <span aria-hidden="true">🛟</span>
+			                    </button>
+			                    <button type="button" class="secondary ghost crm-iconbtn" id="crmAlertsBtn" title="Alertas" aria-haspopup="dialog" aria-controls="crmAlertsModal">
+			                      <span class="tc-notify-badge hidden" id="crmAlertsBadge" aria-label="Alertas pendientes"></span>
+			                      <span aria-hidden="true">🔔</span>
+			                    </button>
+			                    <button type="button" class="secondary ghost crm-iconbtn" id="crmProfileBtn" title="Perfil" aria-haspopup="dialog" aria-controls="crmProfileModal">
+			                      <span aria-hidden="true">👤</span>
+			                    </button>
+			                  </div>
+			                  <button type="button" class="secondary ghost" id="crmExitBtn" title="Volver al panel">Volver</button>
+			                  <div class="crm-global-searchbox">
+			                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" title="Búsqueda avanzada: escribe términos o filtros (ej: provincia:Málaga tel:! estado:activa &quot;Calle Larios&quot; -cancelada). Pulsa Enter para filtrar la vista actual." />
+		                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
+	                  </div>
+	                </div>
               </div>
 
 	              <div class="crm-lightning-content">
@@ -2537,17 +2549,26 @@
 					                          <strong class="tc-title">Búsquedas principales</strong>
 					                        </div>
 					                      </div>
-					                      <div class="tc-quickgrid">
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_pisos_vacios">Pisos vacíos</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_alquilados">Alquilados</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Noticia">Todas las noticias</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
-					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos activos</button>
-					                      </div>
-					                    </div>
+						                      <div class="tc-quickgrid">
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_pisos_vacios">Pisos vacíos</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_alquilados">Alquilados</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Noticia">Todas las noticias</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos activos</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:a_analizar">Pedidos a analizar</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:en_gestion">En gestión</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:en_visita">En visita</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:negociacion">Negociación</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:prioridad_alta">Prioridad alta</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:web">Pedidos web</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:agencias">Pedidos agencias</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="agenda" data-crm-agenda-preset="citas_caducadas">Citas caducadas</button>
+						                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="agenda" data-crm-agenda-preset="actividades_caducadas">Actividades caducadas</button>
+						                      </div>
+						                    </div>
 					                    <div class="crm-home-cards" aria-label="Gestión">
 					                      <div class="tc-listview tc-home-panel">
 					                        <div class="tc-listhead">
