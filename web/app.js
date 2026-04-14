@@ -22223,6 +22223,164 @@ const buildInmuebleDisplayAddress = (source = {}) => {
   return [direccion, locality, provincia].filter(Boolean).join(", ");
 };
 
+const resolveProvinciaFromFreeText = (text = "") => {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const normalized = normalizeSimple(raw);
+  const match = (SPAIN_PROVINCES || []).find((prov) => normalizeSimple(prov) === normalized);
+  return match || "";
+};
+
+const parseInmuebleDireccionLibre = (rawText = "") => {
+  const raw = String(rawText || "").replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const result = {
+    direccion: "",
+    direccion_numero: "",
+    planta: "",
+    puerta: "",
+    codigo_postal: "",
+    poblacion: "",
+    provincia: "",
+  };
+
+  const cpMatch = raw.match(/\b(\d{5})\b/);
+  if (cpMatch) result.codigo_postal = cpMatch[1];
+
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  // Calle y extras en el primer tramo (antes de CP/municipio/provincia).
+  const first = parts[0] || raw;
+  let street = first;
+
+  // Patrones comunes: "... 2 14D" / "... 2 14 D" / "... 2 14D"
+  let m = street.match(/^(.*?)(?:\s+|,)\b(\d{1,5}[A-Za-z]?)\b(?:\s+|,)\b(\d{1,3})\s*([A-Za-z]{1,3})\b\s*$/);
+  if (m) {
+    result.direccion = String(m[1] || "").trim();
+    result.direccion_numero = String(m[2] || "").trim();
+    result.planta = String(m[3] || "").trim();
+    result.puerta = String(m[4] || "").trim().toUpperCase();
+  } else {
+    m = street.match(/^(.*?)(?:\s+|,)\b(\d{1,5}[A-Za-z]?)\b(?:\s+|,)\b(\d{1,3})([A-Za-z]{1,3})\b\s*$/);
+    if (m) {
+      result.direccion = String(m[1] || "").trim();
+      result.direccion_numero = String(m[2] || "").trim();
+      result.planta = String(m[3] || "").trim();
+      result.puerta = String(m[4] || "").trim().toUpperCase();
+    } else {
+      m = street.match(/^(.*?)(?:\s+|,)\b(?:n[oº°\\.]?\s*)?(\d{1,5}[A-Za-z]?)\b\s*$/i);
+      if (m) {
+        result.direccion = String(m[1] || "").trim();
+        result.direccion_numero = String(m[2] || "").trim();
+      } else {
+        result.direccion = street.trim();
+      }
+    }
+  }
+
+  if (result.codigo_postal) {
+    const idx = parts.findIndex((p) => p.includes(result.codigo_postal));
+    if (idx >= 0) {
+      const seg = parts[idx];
+      const after = seg.replace(result.codigo_postal, "").trim();
+      if (after) {
+        result.poblacion = after;
+      } else if (parts[idx + 1]) {
+        result.poblacion = parts[idx + 1];
+      }
+      const provinciaCandidate = parts[parts.length - 1] || "";
+      result.provincia = resolveProvinciaFromFreeText(provinciaCandidate) || "";
+    }
+  } else if (parts.length >= 2) {
+    const provinciaCandidate = parts[parts.length - 1] || "";
+    const poblacionCandidate = parts[parts.length - 2] || "";
+    result.provincia = resolveProvinciaFromFreeText(provinciaCandidate) || "";
+    if (poblacionCandidate && normalizeSimple(poblacionCandidate) !== normalizeSimple(result.provincia)) {
+      result.poblacion = poblacionCandidate;
+    }
+  }
+
+  if (result.poblacion) result.poblacion = result.poblacion.replace(/\s+/g, " ").trim();
+  if (result.direccion) result.direccion = result.direccion.replace(/\s+/g, " ").trim();
+
+  return result;
+};
+
+const getInmuebleDireccionInputMapFromDom = () => ({
+  direccion: document.querySelector('.inline-input[data-target="inmueble"][data-field="direccion"]'),
+  direccion_numero: document.querySelector('.inline-input[data-target="inmueble"][data-field="direccion_numero"]'),
+  planta: document.querySelector('.inline-input[data-target="inmueble"][data-field="planta"]'),
+  puerta: document.querySelector('.inline-input[data-target="inmueble"][data-field="puerta"]'),
+  codigo_postal: document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]'),
+  poblacion: document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]'),
+  provincia: document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]'),
+});
+
+const autocompleteInmuebleDireccionFromUi = async () => {
+  if (!state.currentInmuebleId) return;
+  const inputs = getInmuebleDireccionInputMapFromDom();
+  if (!inputs.direccion) return;
+  const raw = String(inputs.direccion.value || "").trim();
+  const parsed = parseInmuebleDireccionLibre(raw);
+  if (!parsed) {
+    setInmuebleSaveStatus("Sin datos para autocompletar.");
+    return;
+  }
+
+  const updates = {};
+  const maybeSet = (key, nextValue) => {
+    const el = inputs[key];
+    const next = String(nextValue || "").trim();
+    if (!el || !next) return;
+    const current = String(el.value || "").trim();
+    if (current) return; // solo autocompleta si está vacío
+    el.value = next;
+    updates[key] = next;
+  };
+
+  // Si el usuario pegó la dirección completa, rellenamos piezas.
+  maybeSet("codigo_postal", parsed.codigo_postal);
+  maybeSet("poblacion", parsed.poblacion);
+  if (parsed.provincia) {
+    const provinciaEl = inputs.provincia;
+    const current = provinciaEl ? String(provinciaEl.value || "").trim() : "";
+    if (provinciaEl && !current) {
+      const resolved = resolveProvinciaFromFreeText(parsed.provincia) || "";
+      if (resolved) {
+        provinciaEl.value = resolved;
+        updates.provincia = resolved;
+      }
+    }
+  }
+
+  // Número/planta/puerta a partir del texto en Dirección.
+  maybeSet("direccion_numero", parsed.direccion_numero);
+  maybeSet("planta", parsed.planta);
+  maybeSet("puerta", parsed.puerta);
+
+  // Limpia la calle si hemos tenido que inferir el número (evita duplicar "2 14D" en Dirección).
+  if (Object.prototype.hasOwnProperty.call(updates, "direccion_numero") && parsed.direccion) {
+    const currentStreet = String(inputs.direccion.value || "").trim();
+    if (currentStreet && currentStreet !== parsed.direccion) {
+      inputs.direccion.value = parsed.direccion;
+      updates.direccion = parsed.direccion;
+    }
+  }
+
+  if (!Object.keys(updates).length) {
+    setInmuebleSaveStatus("Sin datos para autocompletar.");
+    return;
+  }
+
+  try {
+    await saveInmuebleFields(updates);
+  } catch {}
+};
+
 const refreshCurrentInmuebleHeader = () => {
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
   const captacion = state.currentInmuebleContext?.captacion || {};
@@ -23149,18 +23307,34 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (target === "cliente" && field.key === "apellidos" && isJuridica) {
       return;
     }
-    if (field.section && field.section !== currentSection) {
-      currentSection = field.section;
-      if (useTecnoLayout) {
-        const details = document.createElement("details");
-        details.className = "tc-accordion";
-        details.open = true;
-        const summary = document.createElement("summary");
-        summary.textContent = field.section;
-        details.appendChild(summary);
-        const body = document.createElement("div");
-        body.className = "tc-accordion-body";
-        if (sectionCopy[field.section]) {
+	  if (field.section && field.section !== currentSection) {
+	    currentSection = field.section;
+	    if (useTecnoLayout) {
+	      const details = document.createElement("details");
+	      details.className = "tc-accordion";
+	      details.open = true;
+	      const summary = document.createElement("summary");
+	      if (isInmueble && field.section === "Dirección") {
+	        const label = document.createElement("span");
+	        label.textContent = field.section;
+	        summary.appendChild(label);
+	        const action = document.createElement("button");
+	        action.type = "button";
+	        action.className = "secondary tc-accordion-action";
+	        action.textContent = "Autocompletar";
+	        action.addEventListener("click", (event) => {
+	          event.preventDefault();
+	          event.stopPropagation();
+	          void autocompleteInmuebleDireccionFromUi();
+	        });
+	        summary.appendChild(action);
+	      } else {
+	        summary.textContent = field.section;
+	      }
+	      details.appendChild(summary);
+	      const body = document.createElement("div");
+	      body.className = "tc-accordion-body";
+	      if (sectionCopy[field.section]) {
           const copy = document.createElement("div");
           copy.className = "tc-accordion-copy muted";
           copy.textContent = sectionCopy[field.section];

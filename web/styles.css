@@ -5865,6 +5865,18 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   gap: 10px;
 }
 
+#inmuebleDetail .tc-accordion summary .tc-accordion-action {
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  box-shadow: none;
+}
+
+#inmuebleDetail .tc-accordion summary .tc-accordion-action:hover {
+  transform: none;
+}
+
 #inmuebleDetail .tc-accordion summary::-webkit-details-marker {
   display: none;
 }
