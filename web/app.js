@@ -34646,73 +34646,158 @@ const renderInmuebleServiciosTab = ({ servicios = [] } = {}) => {
   `;
 };
 
-const renderInmuebleHistorialTab = ({ inmueble = {}, captacion = {}, actividad = [] } = {}) => {
+const renderInmuebleHistorialTab = ({ inmueble = {}, captacion = {} } = {}) => {
   if (!inmuebleHistorialTabList) return;
-  const updated = String(inmueble?.updated_at || captacion?.updated_at || "").trim();
-  const created = String(inmueble?.created_at || captacion?.created_at || "").trim();
-  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || "") || String(inmueble?.estado || captacion?.etapa || "").trim();
-  const last = (Array.isArray(actividad) ? actividad : [])
-    .slice()
-    .sort((a, b) => String(b?.fecha || "").localeCompare(String(a?.fecha || "")) || String(b?.hora || "").localeCompare(String(a?.hora || "")))[0];
-  const lastLabel = last ? [last.fecha || "", last.hora || "", last.asunto || last.tipo || ""].filter(Boolean).join(" · ") : "";
-  const proxima = String(captacion?.proxima_accion || "").trim();
+  const timeline = Array.isArray(state.currentInmuebleContext?.timeline) ? state.currentInmuebleContext.timeline : [];
+  const cambios = timeline.filter((item) => normalizeSimple(item?.kind || "") === "campo");
 
-  const items = [
-    created ? `Alta ficha · ${created}` : "",
-    stage ? `Estado actual · ${stage}` : "",
-    updated ? `Última actualización · ${updated}` : "",
-    proxima ? `Próxima acción · ${proxima}` : "",
-    lastLabel ? `Última actividad · ${lastLabel}` : "",
-  ].filter(Boolean);
-
-  inmuebleHistorialTabList.innerHTML = items.length
-    ? items.map((text) => `<div class="crm-focus-link">${escapeHtml(text)}</div>`).join("")
-    : "<div class='muted'>Sin historial disponible.</div>";
-};
-
-const renderInmuebleEvolucionTab = ({ inmueble = {}, captacion = {}, actividad = [] } = {}) => {
-  if (!inmuebleEvolucionTabTable) return;
-  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || "") || String(inmueble?.estado || captacion?.etapa || "").trim() || "-";
-  const created = String(inmueble?.created_at || captacion?.created_at || "").trim();
-  const updated = String(inmueble?.updated_at || captacion?.updated_at || "").trim();
-  const last = (Array.isArray(actividad) ? actividad : [])
-    .slice()
-    .sort((a, b) => String(b?.fecha || "").localeCompare(String(a?.fecha || "")) || String(b?.hora || "").localeCompare(String(a?.hora || "")))[0];
-
-  const milestones = [
-    created ? { fecha: created.slice(0, 10), estado: "Alta", detalle: "Creación de ficha" } : null,
-    last ? { fecha: String(last.fecha || "").slice(0, 10) || "-", estado: "Actividad", detalle: String(last.asunto || last.tipo || "").trim() } : null,
-    updated ? { fecha: updated.slice(0, 10), estado: stage, detalle: "Última actualización" } : null,
-  ].filter(Boolean);
-
-  if (!milestones.length) {
-    inmuebleEvolucionTabTable.innerHTML = "<p class='muted'>Sin datos de evolución.</p>";
+  if (!cambios.length) {
+    inmuebleHistorialTabList.innerHTML = "<div class='muted'>Sin histórico de campos todavía. Se llenará a medida que se editen datos (audit trail).</div>";
     return;
   }
+
+  const labelForField = (field) => {
+    const raw = String(field || "").trim();
+    if (!raw) return "Campo";
+    try {
+      return formatHeader(raw);
+    } catch {
+      return raw.replaceAll("_", " ");
+    }
+  };
+  const displayValue = (value) => {
+    if (value === null || value === undefined) return "-";
+    const text = String(value);
+    return text.trim() ? text : "-";
+  };
+
+  const rows = cambios
+    .slice()
+    .sort((a, b) => String(b?.date || "").localeCompare(String(a?.date || "")))
+    .slice(0, 120);
 
   const table = document.createElement("table");
   table.className = "crm-dense-table";
   table.innerHTML = `
     <thead>
       <tr>
-        <th style="width:140px;">Fecha</th>
-        <th style="width:200px;">Evento/Estado</th>
+        <th style="width:160px;">Fecha</th>
+        <th style="width:180px;">Usuario</th>
+        <th style="width:220px;">Campo</th>
+        <th>Antes</th>
+        <th>Después</th>
+      </tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+  rows.forEach((item) => {
+    const tr = document.createElement("tr");
+    const rawDate = String(item?.date || "").trim();
+    const fecha = rawDate ? `${formatCell("fecha", rawDate.slice(0, 10))}${rawDate.length > 10 ? ` ${rawDate.slice(11, 16)}` : ""}` : "-";
+    const usuario = String(item?.meta?.usuario || "-");
+    const campo = item?.meta?.field || item?.title || "";
+    const antes = displayValue(item?.meta?.from);
+    const despues = displayValue(item?.meta?.to);
+
+    const tdFecha = document.createElement("td");
+    tdFecha.textContent = fecha;
+    tr.appendChild(tdFecha);
+    const tdUsuario = document.createElement("td");
+    tdUsuario.textContent = usuario || "-";
+    tr.appendChild(tdUsuario);
+    const tdCampo = document.createElement("td");
+    tdCampo.innerHTML = `<strong>${escapeHtml(labelForField(campo))}</strong>`;
+    tr.appendChild(tdCampo);
+    const tdAntes = document.createElement("td");
+    tdAntes.textContent = antes;
+    tr.appendChild(tdAntes);
+    const tdDesp = document.createElement("td");
+    tdDesp.textContent = despues;
+    tr.appendChild(tdDesp);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  inmuebleHistorialTabList.innerHTML = "";
+  inmuebleHistorialTabList.appendChild(table);
+};
+
+const renderInmuebleEvolucionTab = ({ inmueble = {}, captacion = {} } = {}) => {
+  if (!inmuebleEvolucionTabTable) return;
+  const timeline = Array.isArray(state.currentInmuebleContext?.timeline) ? state.currentInmuebleContext.timeline : [];
+  const transiciones = timeline.filter((item) => normalizeSimple(item?.kind || "") === "transicion");
+  const operaciones = timeline.filter((item) => normalizeSimple(item?.kind || "") === "operacion");
+
+  const created = String(inmueble?.created_at || captacion?.created_at || "").trim();
+  const stageNow = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || "") || String(inmueble?.estado || captacion?.etapa || "").trim() || "-";
+
+  const evol = [];
+  if (created) {
+    evol.push({
+      fecha: created,
+      from: "",
+      to: "Alta",
+      usuario: String(inmueble?.created_by || captacion?.created_by || "").trim(),
+      detalle: "Creación de ficha",
+    });
+  }
+  transiciones.forEach((it) => {
+    evol.push({
+      fecha: it?.date || "",
+      from: it?.meta?.from || "",
+      to: it?.meta?.to || it?.status || "",
+      usuario: it?.meta?.usuario || "",
+      detalle: it?.meta?.responsable ? `Responsable: ${it.meta.responsable}` : "",
+    });
+  });
+  operaciones.forEach((it) => {
+    evol.push({
+      fecha: it?.date || "",
+      from: "",
+      to: "Operación",
+      usuario: "",
+      detalle: `${it?.title || "Operación"} · ${it?.status || ""}`.trim(),
+    });
+  });
+
+  if (!evol.length) {
+    inmuebleEvolucionTabTable.innerHTML = "<p class='muted'>Sin evolución registrada todavía.</p>";
+    return;
+  }
+
+  evol.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+
+  const table = document.createElement("table");
+  table.className = "crm-dense-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width:160px;">Fecha</th>
+        <th style="width:200px;">De</th>
+        <th style="width:220px;">A</th>
+        <th style="width:180px;">Usuario</th>
         <th>Detalle</th>
       </tr>
     </thead>
   `;
   const tbody = document.createElement("tbody");
-  milestones.forEach((row) => {
+  evol.slice(0, 160).forEach((row) => {
     const tr = document.createElement("tr");
+    const raw = String(row.fecha || "").trim();
+    const day = raw ? `${formatCell("fecha", raw.slice(0, 10))}${raw.length > 10 ? ` ${raw.slice(11, 16)}` : ""}` : "-";
     const tdFecha = document.createElement("td");
-    tdFecha.textContent = row.fecha || "-";
+    tdFecha.textContent = day;
     tr.appendChild(tdFecha);
-    const tdEstado = document.createElement("td");
-    tdEstado.textContent = row.estado || "-";
-    tr.appendChild(tdEstado);
+    const tdFrom = document.createElement("td");
+    tdFrom.textContent = row.from || "-";
+    tr.appendChild(tdFrom);
+    const tdTo = document.createElement("td");
+    tdTo.innerHTML = `<strong>${escapeHtml(row.to || "-")}</strong>`;
+    tr.appendChild(tdTo);
+    const tdUser = document.createElement("td");
+    tdUser.textContent = row.usuario || "-";
+    tr.appendChild(tdUser);
     const tdDet = document.createElement("td");
-    tdDet.className = "crm-dense-main";
-    tdDet.innerHTML = `<strong>${escapeHtml(row.detalle || "-")}</strong>`;
+    tdDet.textContent = row.detalle || (row.to === stageNow ? "Estado actual" : "");
     tr.appendChild(tdDet);
     tbody.appendChild(tr);
   });
@@ -39311,12 +39396,13 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   Promise.all([accionesReq, visitasReq, timelineReq]).then(([accionesData, visitasData, timelineData]) => {
     const acciones = accionesData.rows || [];
     const visitas = visitasData.rows || [];
+    const unifiedTimeline = Array.isArray(timelineData?.rows) ? timelineData.rows : [];
     if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
       state.currentInmuebleContext.actividad = Array.isArray(acciones) ? acciones : [];
       state.currentInmuebleContext.visitas = Array.isArray(visitas) ? visitas : [];
+      state.currentInmuebleContext.timeline = unifiedTimeline;
       refreshCurrentInmuebleProfile();
     }
-    const unifiedTimeline = Array.isArray(timelineData?.rows) ? timelineData.rows : [];
     const timeline = unifiedTimeline.length
       ? unifiedTimeline
       : [
@@ -39350,6 +39436,18 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
           if (kind === "documento") {
             if (item?.meta?.tipo) metaParts.push(item.meta.tipo);
             if (item?.meta?.version) metaParts.push(`v${item.meta.version}`);
+          } else if (kind === "campo") {
+            const field = item?.meta?.field || item?.title || "";
+            const fromValue = item?.meta?.from;
+            const toValue = item?.meta?.to;
+            if (field) metaParts.push(String(field));
+            if (fromValue !== undefined || toValue !== undefined) {
+              metaParts.push(`${String(fromValue ?? "").slice(0, 60)} → ${String(toValue ?? "").slice(0, 60)}`.trim());
+            }
+            if (item?.meta?.usuario) metaParts.push(item.meta.usuario);
+          } else if (kind === "transicion") {
+            if (item?.meta?.from || item?.meta?.to) metaParts.push(`${item.meta.from || "-"} → ${item.meta.to || "-"}`);
+            if (item?.meta?.usuario) metaParts.push(item.meta.usuario);
           } else if (kind === "auditoria") {
             if (item?.meta?.usuario) metaParts.push(item.meta.usuario);
             if (item?.status) metaParts.push(item.status);

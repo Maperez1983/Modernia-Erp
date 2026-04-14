@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import math
 import os
 import sqlite3
 import urllib.parse
@@ -41990,6 +41991,36 @@ class Handler(BaseHTTPRequestHandler):
             if "etapa" in updates and "situacion_comercial" not in updates:
                 updates["situacion_comercial"] = updates["etapa"]
             next_stage = str(updates.get("situacion_comercial") or updates.get("etapa") or "").strip()
+
+            def _audit_norm(value):
+                if value is None:
+                    return ""
+                if isinstance(value, float):
+                    try:
+                        if not math.isfinite(value):
+                            return ""
+                    except Exception:
+                        pass
+                    txt = f"{value:.6f}".rstrip("0").rstrip(".")
+                    return txt
+                if isinstance(value, (int, bool)):
+                    return str(int(value))
+                return str(value).strip()
+
+            prev_map = dict(prev) if prev else {}
+            diffs = []
+            for key, new_value in updates.items():
+                old_value = prev_map.get(key)
+                if _audit_norm(old_value) == _audit_norm(new_value):
+                    continue
+                diffs.append(
+                    {
+                        "campo": key,
+                        "from": old_value,
+                        "to": new_value,
+                        "origen": "captacion",
+                    }
+                )
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -42046,6 +42077,24 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE inmuebles SET {inm_set}, updated_at = datetime(?) WHERE id = ?",
                     inm_values,
                 )
+
+            # Auditoría de cambios de captación (se muestran dentro del inmueble).
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                usuario = str(payload.get("usuario") or "").strip() or _session_user_label(session) or "Sistema"
+                for diff in diffs[:80]:
+                    audit_event(
+                        conn,
+                        empresa["id"],
+                        "inmueble",
+                        inmueble_id,
+                        "Cambio campo",
+                        usuario=usuario,
+                        detalles=diff,
+                        now=now,
+                    )
+            except Exception:
+                pass
             try:
                 from_stage = str((prev["situacion_comercial"] or prev["etapa"] or "") if prev else "").strip()
                 captacion_id = str(prev["id"] or "").strip() if prev else ""
@@ -42063,6 +42112,19 @@ class Handler(BaseHTTPRequestHandler):
                         session=session,
                         responsable=responsable,
                     )
+                    try:
+                        audit_event(
+                            conn,
+                            empresa["id"],
+                            "inmueble",
+                            inmueble_id,
+                            "Transición etapa",
+                            usuario=usuario,
+                            detalles={"from": from_stage, "to": next_stage, "captacion_id": captacion_id},
+                            now=now,
+                        )
+                    except Exception:
+                        pass
             except Exception:
                 pass
         elif parsed.path == "/api/captacion_delete":
@@ -42645,6 +42707,20 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            try:
+                prev_inmueble = conn.execute(
+                    "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+            except Exception:
+                prev_inmueble = None
+            try:
+                prev_captacion = conn.execute(
+                    "SELECT id, etapa, situacion_comercial, asesor, responsable FROM captaciones WHERE inmueble_id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+            except Exception:
+                prev_captacion = None
             allowed = (
                 "tipo_operacion",
                 "referencia",
@@ -42729,6 +42805,36 @@ class Handler(BaseHTTPRequestHandler):
                 if tipo_operacion not in {"venta", "alquiler"}:
                     tipo_operacion = "venta"
                 updates["tipo_operacion"] = tipo_operacion
+
+            def _audit_norm(value):
+                if value is None:
+                    return ""
+                if isinstance(value, float):
+                    try:
+                        if not math.isfinite(value):
+                            return ""
+                    except Exception:
+                        pass
+                    txt = f"{value:.6f}".rstrip("0").rstrip(".")
+                    return txt
+                if isinstance(value, (int, bool)):
+                    return str(int(value))
+                return str(value).strip()
+
+            diffs = []
+            prev_map = dict(prev_inmueble) if prev_inmueble else {}
+            for key, new_value in updates.items():
+                old_value = prev_map.get(key)
+                if _audit_norm(old_value) == _audit_norm(new_value):
+                    continue
+                diffs.append(
+                    {
+                        "campo": key,
+                        "from": old_value,
+                        "to": new_value,
+                        "origen": "inmueble",
+                    }
+                )
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -42796,6 +42902,57 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE captaciones SET {cap_set}, updated_at = datetime(?) WHERE inmueble_id = ?",
                     cap_values,
                 )
+
+            # Auditoría (Tecnocloud-like): cambios de campos + transición de etapa.
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                usuario = str(payload.get("usuario") or "").strip() or _session_user_label(session) or "Sistema"
+                for diff in diffs[:80]:
+                    audit_event(
+                        conn,
+                        empresa["id"],
+                        "inmueble",
+                        inmueble_id,
+                        "Cambio campo",
+                        usuario=usuario,
+                        detalles=diff,
+                        now=now,
+                    )
+            except Exception:
+                pass
+
+            if "estado" in updates:
+                try:
+                    from_etapa = str(prev_map.get("estado") or "").strip()
+                    to_etapa = str(updates.get("estado") or "").strip()
+                    captacion_id = str((prev_captacion["id"] if prev_captacion else "") or "").strip()
+                    responsable = str(
+                        (updates.get("responsable") or updates.get("asesor") or (prev_captacion["responsable"] if prev_captacion else "") or (prev_captacion["asesor"] if prev_captacion else "") or "")
+                    ).strip()
+                    if to_etapa and to_etapa != from_etapa:
+                        log_crm_stage_event(
+                            conn,
+                            empresa["id"],
+                            inmueble_id,
+                            captacion_id,
+                            to_etapa,
+                            now=now,
+                            from_etapa=from_etapa,
+                            session=session,
+                            responsable=responsable,
+                        )
+                        audit_event(
+                            conn,
+                            empresa["id"],
+                            "inmueble",
+                            inmueble_id,
+                            "Transición etapa",
+                            usuario=usuario,
+                            detalles={"from": from_etapa, "to": to_etapa, "captacion_id": captacion_id},
+                            now=now,
+                        )
+                except Exception:
+                    pass
             if "estado" in updates:
                 etapa_value = str(updates.get("estado") or "").strip()
                 if etapa_value:
@@ -49759,6 +49916,28 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            try:
+                cap_row = conn.execute(
+                    "SELECT id FROM captaciones WHERE inmueble_id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+                captacion_id = str(row_value(cap_row, "id", "") or "").strip()
+            except Exception:
+                captacion_id = ""
+            try:
+                ensure_crm_stage_events_schema(conn)
+                stage_rows = conn.execute(
+                    """
+                    SELECT id, from_etapa, to_etapa, usuario, responsable, created_at
+                    FROM crm_stage_events
+                    WHERE inmueble_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 120
+                    """,
+                    (inmueble_id,),
+                ).fetchall()
+            except Exception:
+                stage_rows = []
             oper_rows = conn.execute(
                 """
                 SELECT
@@ -49805,14 +49984,46 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT id, entidad, entidad_id, accion, usuario, detalles, created_at
                 FROM auditoria
                 WHERE (entidad = 'inmueble' AND entidad_id = ?)
+                   OR (entidad = 'captacion' AND entidad_id = ?)
                    OR (entidad = 'accion' AND entidad_id IN (SELECT id FROM acciones WHERE inmueble_id = ?))
                    OR (entidad = 'inmueble_docs' AND entidad_id IN (SELECT id FROM inmueble_docs WHERE inmueble_id = ?))
                 ORDER BY created_at DESC
                 LIMIT 200
                 """,
-                (inmueble_id, inmueble_id, inmueble_id),
+                (inmueble_id, captacion_id, inmueble_id, inmueble_id),
             ).fetchall()
             items = []
+            for row in stage_rows:
+                try:
+                    from_etapa = row.get("from_etapa") if isinstance(row, dict) else row["from_etapa"]
+                except Exception:
+                    from_etapa = ""
+                try:
+                    to_etapa = row.get("to_etapa") if isinstance(row, dict) else row["to_etapa"]
+                except Exception:
+                    to_etapa = ""
+                try:
+                    created_at = row.get("created_at") if isinstance(row, dict) else row["created_at"]
+                except Exception:
+                    created_at = ""
+                try:
+                    usuario = row.get("usuario") if isinstance(row, dict) else row["usuario"]
+                except Exception:
+                    usuario = ""
+                try:
+                    responsable = row.get("responsable") if isinstance(row, dict) else row["responsable"]
+                except Exception:
+                    responsable = ""
+                items.append(
+                    {
+                        "kind": "transicion",
+                        "id": row["id"] if not isinstance(row, dict) else row.get("id"),
+                        "title": "Transición etapa",
+                        "status": to_etapa or "",
+                        "meta": {"from": from_etapa, "to": to_etapa, "usuario": usuario, "responsable": responsable},
+                        "date": created_at,
+                    }
+                )
             for row in oper_rows:
                 try:
                     tipo_op = str(row.get("tipo_operacion") or row["tipo_operacion"] or "").strip().lower()
@@ -49869,14 +50080,56 @@ class Handler(BaseHTTPRequestHandler):
                     "date": row["updated_at"] or row["created_at"],
                 })
             for row in audit_rows:
-                items.append({
-                    "kind": "auditoria",
-                    "id": row["id"],
-                    "title": row["accion"] or "Evento",
-                    "status": row["entidad"] or "",
-                    "meta": {"usuario": row["usuario"], "detalles": row["detalles"], "entidad_id": row["entidad_id"]},
-                    "date": row["created_at"],
-                })
+                accion = str(row["accion"] or "").strip()
+                detalles_raw = row["detalles"]
+                if accion == "Cambio campo":
+                    parsed = None
+                    if isinstance(detalles_raw, str) and detalles_raw and detalles_raw.strip().startswith(("{", "[")):
+                        try:
+                            parsed = json.loads(detalles_raw)
+                        except Exception:
+                            parsed = None
+                    if isinstance(parsed, dict):
+                        field_name = str(parsed.get("campo") or "").strip()
+                        items.append(
+                            {
+                                "kind": "campo",
+                                "id": row["id"],
+                                "title": field_name or "Cambio campo",
+                                "status": str(parsed.get("origen") or "inmueble"),
+                                "meta": {
+                                    "field": field_name,
+                                    "from": parsed.get("from"),
+                                    "to": parsed.get("to"),
+                                    "usuario": row["usuario"],
+                                },
+                                "date": row["created_at"],
+                            }
+                        )
+                    else:
+                        items.append(
+                            {
+                                "kind": "campo",
+                                "id": row["id"],
+                                "title": "Cambio campo",
+                                "status": row["entidad"] or "",
+                                "meta": {"usuario": row["usuario"], "detalles": detalles_raw, "entidad_id": row["entidad_id"]},
+                                "date": row["created_at"],
+                            }
+                        )
+                    continue
+                if accion == "Transición etapa":
+                    continue
+                items.append(
+                    {
+                        "kind": "auditoria",
+                        "id": row["id"],
+                        "title": accion or "Evento",
+                        "status": row["entidad"] or "",
+                        "meta": {"usuario": row["usuario"], "detalles": detalles_raw, "entidad_id": row["entidad_id"]},
+                        "date": row["created_at"],
+                    }
+                )
             items.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
             json_response(self, {"rows": items[:250]})
             return
