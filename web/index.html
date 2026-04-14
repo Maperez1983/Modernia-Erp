@@ -2079,7 +2079,7 @@
           </div>
           <div class="form-card">
             <h3>Listado de usuarios</h3>
-            <input id="adminUsersSearch" placeholder="Buscar por nombre, usuario, email, rol..." />
+            <input id="adminUsersSearch" placeholder="Buscar en la lista..." />
             <div id="adminUsersTable"></div>
             <div class="footer" id="adminUsersInfo"></div>
           </div>
@@ -2811,10 +2811,16 @@
 		                <div class="tc-listview">
 	                  <div class="tc-listhead">
 	                    <div class="tc-listleft">
-	                      <strong class="tc-title">Alquileres</strong>
+	                      <select id="crmAlquilerPreset" title="Alquileres">
+	                        <option value="activos">Alquileres activos</option>
+	                        <option value="sin_inquilino">Sin inquilino</option>
+	                        <option value="sin_renta">Sin renta</option>
+	                        <option value="todos">Alquileres</option>
+	                      </select>
 	                    </div>
 	                    <div class="tc-listright">
-	                      <input id="crmAlquilerSearch" placeholder="Buscar por dirección, propietario o inquilino..." />
+	                      <button type="button" class="secondary ghost" id="crmAlquilerPrintBtn">Impresiones</button>
+	                      <input id="crmAlquilerSearch" placeholder="Buscar en la lista..." />
 	                    </div>
 	                  </div>
 	                  <div id="crmAlquileresTable"></div>
@@ -2828,10 +2834,16 @@
 		                <div class="tc-listview">
 	                  <div class="tc-listhead">
 	                    <div class="tc-listleft">
-	                      <strong class="tc-title">Compraventas</strong>
+	                      <select id="crmCompraventasPreset" title="Compraventas">
+	                        <option value="todas">Compraventas</option>
+	                        <option value="manuales">Manuales</option>
+	                        <option value="historicas">Históricas</option>
+	                        <option value="escrituradas">Escrituradas</option>
+	                      </select>
 	                    </div>
 	                    <div class="tc-listright">
-	                      <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
+	                      <button type="button" class="secondary ghost" id="crmCompraventasPrintBtn">Impresiones</button>
+	                      <input id="crmCompraventaSearch" placeholder="Buscar en la lista..." />
 	                    </div>
 	                  </div>
 	                  <div id="crmCompraventasTable"></div>
@@ -3074,7 +3086,7 @@
 	                    </div>
 	                    <div class="tc-listright">
 	                      <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
-	                      <input id="crmInformadoresSearch" placeholder="Buscar por nombre, teléfono, email..." />
+	                      <input id="crmInformadoresSearch" placeholder="Buscar en la lista..." />
 	                    </div>
 	                  </div>
 	                  <div id="crmInformadoresTable"></div>
@@ -3095,7 +3107,7 @@
 	                      </select>
 	                    </div>
 	                    <div class="tc-listright">
-	                      <input id="crmEdificiosSearch" placeholder="Buscar por inmueble o responsable..." />
+	                      <input id="crmEdificiosSearch" placeholder="Buscar en la lista..." />
 	                    </div>
 	                  </div>
 	                  <div id="crmEdificiosTable"></div>
@@ -5583,7 +5595,7 @@
               <option>Activo</option>
               <option>Inactivo</option>
             </select>
-            <input id="searchInput" placeholder="Buscar por texto o número..." />
+            <input id="searchInput" placeholder="Buscar en la lista..." />
             <button id="applyBtn">Aplicar</button>
             <button id="resetBtn" class="secondary">Reset</button>
             <button id="clientesColumnsBtn" class="ghost columns-toggle">Ajustes</button>
@@ -8776,7 +8788,7 @@
 	    <script src="app-auth.js?v=10"></script>
 	    <script src="app-routing.js?v=7"></script>
 	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-	    <script src="app.js?v=478"></script>
+	    <script src="app.js?v=479"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8804,7 +8816,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=98").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=99").catch(function () {});
         });
       })();
     </script>

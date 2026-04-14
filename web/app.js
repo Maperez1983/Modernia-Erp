@@ -2777,10 +2777,14 @@ const crmInmueblesRecentMirror = document.getElementById("crmInmueblesRecentMirr
 const crmAlquileresMini = document.getElementById("crmAlquileresMini");
 const crmAlquileresTable = document.getElementById("crmAlquileresTable");
 const crmAlquileresInfo = document.getElementById("crmAlquileresInfo");
+const crmAlquilerPreset = document.getElementById("crmAlquilerPreset");
+const crmAlquilerPrintBtn = document.getElementById("crmAlquilerPrintBtn");
 const crmAlquilerSearch = document.getElementById("crmAlquilerSearch");
 const crmCompraventasMini = document.getElementById("crmCompraventasMini");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
+const crmCompraventasPreset = document.getElementById("crmCompraventasPreset");
+const crmCompraventasPrintBtn = document.getElementById("crmCompraventasPrintBtn");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
 	const crmDemandasMini = document.getElementById("crmDemandasMini");
 	const crmDemandasTable = document.getElementById("crmDemandasTable");
@@ -30954,6 +30958,8 @@ const loadCrmAlquileres = () => {
       if (!row.estado && row.tipo) row.estado = row.tipo;
     });
     cachedCrmAlquileres = rowMaps;
+    const preset = normalizeCrmAlquilerPreset(crmAlquilerPreset?.value || "");
+    const filteredRows = filterCrmAlquileresRows(rowMaps, { preset });
     const activos = rowMaps.filter((row) => {
       const status = normalizeSimple(row.estado || row.situacion || row.estado_operacion || "");
       return status && !status.includes("cerr") && !status.includes("baja") && !status.includes("cancel");
@@ -31053,8 +31059,84 @@ const loadCrmAlquileres = () => {
         crmAlquileresInfo.textContent = `Mostrando ${items.length} alquileres.`;
       }
     };
-    buildAlquileresTable(rowMaps);
+    buildAlquileresTable(filteredRows);
+    if (crmAlquileresInfo) {
+      const presetLabel =
+        {
+          activos: "Activos",
+          sin_inquilino: "Sin inquilino",
+          sin_renta: "Sin renta",
+          todos: "",
+        }[preset] || "";
+      crmAlquileresInfo.textContent = `Mostrando ${filteredRows.length} de ${rowMaps.length}${presetLabel ? ` · ${presetLabel}` : ""}.`;
+    }
     renderCrmResumenDashboard();
+  });
+};
+
+const normalizeCrmAlquilerPreset = (value) => {
+  const normalized = normalizeSimple(value || "");
+  if (normalized === "activos") return "activos";
+  if (normalized === "sin_inquilino") return "sin_inquilino";
+  if (normalized === "sin_renta") return "sin_renta";
+  if (normalized === "todos") return "todos";
+  return "activos";
+};
+
+const filterCrmAlquileresRows = (rows = [], opts = {}) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const preset = normalizeCrmAlquilerPreset(opts?.preset || crmAlquilerPreset?.value || "");
+  return items.filter((row) => {
+    if (!row) return false;
+    const status = normalizeSimple(row.estado || row.situacion || row.estado_operacion || "");
+    const hasInquilino = Boolean(String(row.inquilino || row.arrendatario || "").trim());
+    const rent = Number(row.renta || row.renta_mensual || row.precio || 0);
+    if (preset === "activos") {
+      return !status.includes("cerr") && !status.includes("baja") && !status.includes("cancel") && !status.includes("final");
+    }
+    if (preset === "sin_inquilino") {
+      return !hasInquilino;
+    }
+    if (preset === "sin_renta") {
+      return !(Number.isFinite(rent) && rent > 0);
+    }
+    return true;
+  });
+};
+
+const normalizeCrmCompraventasPreset = (value) => {
+  const normalized = normalizeSimple(value || "");
+  if (normalized === "todas") return "todas";
+  if (normalized === "manuales") return "manuales";
+  if (normalized === "historicas") return "historicas";
+  if (normalized === "escrituradas") return "escrituradas";
+  return "todas";
+};
+
+const filterCrmCompraventasRows = (rows = [], opts = {}) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const preset = normalizeCrmCompraventasPreset(opts?.preset || crmCompraventasPreset?.value || "");
+  return items.filter((row) => {
+    if (!row) return false;
+    if (preset === "manuales") {
+      const estado = String(row.estado || "").trim().toLowerCase();
+      const origen = String(row.origen || "").trim().toLowerCase();
+      return estado === "manual" || origen === "formulario";
+    }
+    if (preset === "historicas") {
+      const estado = normalizeSimple(row.estado || "");
+      return (
+        estado === "importado historico"
+        || estado === "cerrada positiva"
+        || estado === "cerrado positivo"
+        || estado === "cerrada"
+        || estado === "cerrado"
+      );
+    }
+    if (preset === "escrituradas") {
+      return Boolean(String(row.fecha_escritura || "").trim());
+    }
+    return true;
   });
 };
 
@@ -34195,6 +34277,8 @@ const loadCrmCompraventas = () => {
     .then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     cachedCrmCompraventas = rows;
+    const preset = normalizeCrmCompraventasPreset(crmCompraventasPreset?.value || "");
+    const filteredRows = filterCrmCompraventasRows(rows, { preset });
     const manualCount = rows.filter((row) => {
       const estado = String(row.estado || "").trim().toLowerCase();
       const origen = String(row.origen || "").trim().toLowerCase();
@@ -34296,7 +34380,7 @@ const loadCrmCompraventas = () => {
 	      a.addEventListener("click", (event) => event.stopPropagation());
 	      container.appendChild(a);
 	    };
-	    rows.forEach((row) => {
+	    filteredRows.forEach((row) => {
 	      const tr = document.createElement("tr");
 	      tr.addEventListener("click", () => {
 	        const recordId = String(row.id || "").trim();
@@ -34421,7 +34505,14 @@ const loadCrmCompraventas = () => {
     crmCompraventasTable.innerHTML = "";
     crmCompraventasTable.appendChild(table);
     if (crmCompraventasInfo) {
-      crmCompraventasInfo.textContent = `Mostrando ${rows.length} compraventas. Manuales: ${manualCount}. Históricas: ${historicoCount}. Busca también por responsable, agente u oficina.`;
+      const presetLabel =
+        {
+          todas: "",
+          manuales: "Manuales",
+          historicas: "Históricas",
+          escrituradas: "Escrituradas",
+        }[preset] || "";
+      crmCompraventasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length}${presetLabel ? ` · ${presetLabel}` : ""}. Manuales: ${manualCount}. Históricas: ${historicoCount}.`;
     }
     if (crmKpiCompraventas) {
       crmKpiCompraventas.textContent = String(data?.kpis?.total || rows.length || 0);
@@ -49067,11 +49158,86 @@ if (crmCompraventaSearch) {
   });
 }
 
+if (crmCompraventasPreset) {
+  crmCompraventasPreset.addEventListener("change", () => {
+    loadCrmCompraventas();
+  });
+}
+
+if (crmCompraventasPrintBtn) {
+  crmCompraventasPrintBtn.addEventListener("click", () => {
+    const rows = filterCrmCompraventasRows(Array.isArray(cachedCrmCompraventas) ? cachedCrmCompraventas : []);
+    const html = `
+      <table>
+        <thead><tr><th>Dirección</th><th>Responsable</th><th>Agente</th><th>Estado</th><th>Vendedores</th><th>Compradores</th><th>F. encargo</th><th>F. propuesta</th><th>F. escritura</th><th>Precio</th><th>Honorarios</th></tr></thead>
+        <tbody>
+          ${rows
+            .slice(0, 500)
+            .map((row) => {
+              return `<tr>
+                <td>${escapeHtml(String(row.direccion || ""))}</td>
+                <td>${escapeHtml(String(row.responsable_gestion || ""))}</td>
+                <td>${escapeHtml(String(row.agente || ""))}</td>
+                <td>${escapeHtml(String(row.estado || ""))}</td>
+                <td>${escapeHtml(String(row.vendedores || ""))}</td>
+                <td>${escapeHtml(String(row.compradores || ""))}</td>
+                <td>${escapeHtml(String(row.fecha_encargo || ""))}</td>
+                <td>${escapeHtml(String(row.fecha_propuesta || row.fecha_contrato || ""))}</td>
+                <td>${escapeHtml(String(row.fecha_escritura || ""))}</td>
+                <td>${escapeHtml(String(formatCell("precio_venta", row.precio_venta) || formatCell("precio_escritura", row.precio_escritura) || formatCell("precio_encargo", row.precio_encargo) || ""))}</td>
+                <td>${escapeHtml(String(formatCell("honorarios", row.honorarios) || ""))}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: "Listado de compraventas", html });
+  });
+}
+
 if (crmAlquilerSearch) {
   crmAlquilerSearch.addEventListener("input", () => {
     scheduleSave("crm-alquileres-search", () => {
       loadCrmAlquileres();
     }, 300);
+  });
+}
+
+if (crmAlquilerPreset) {
+  crmAlquilerPreset.addEventListener("change", () => {
+    loadCrmAlquileres();
+  });
+}
+
+if (crmAlquilerPrintBtn) {
+  crmAlquilerPrintBtn.addEventListener("click", () => {
+    const rows = filterCrmAlquileresRows(Array.isArray(cachedCrmAlquileres) ? cachedCrmAlquileres : []);
+    const html = `
+      <table>
+        <thead><tr><th>Fecha</th><th>Dirección</th><th>Propietario</th><th>Tel.</th><th>Precio</th><th>Inquilino</th><th>Tel.</th><th>Agente</th><th>Oficina</th><th>Tipo</th></tr></thead>
+        <tbody>
+          ${rows
+            .slice(0, 500)
+            .map((row) => {
+              return `<tr>
+                <td>${escapeHtml(String(formatCell("fecha", row.fecha) || ""))}</td>
+                <td>${escapeHtml(String(row.direccion || ""))}</td>
+                <td>${escapeHtml(String(row.propietario || ""))}</td>
+                <td>${escapeHtml(String(row.telefono || ""))}</td>
+                <td>${escapeHtml(String(formatCell("precio", row.precio) || ""))}</td>
+                <td>${escapeHtml(String(row.inquilino || ""))}</td>
+                <td>${escapeHtml(String(row.telefono2 || ""))}</td>
+                <td>${escapeHtml(String(row.agente || ""))}</td>
+                <td>${escapeHtml(String(row.oficina || ""))}</td>
+                <td>${escapeHtml(String(row.tipo || ""))}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: "Listado de alquileres", html });
   });
 }
 
