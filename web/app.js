@@ -26770,12 +26770,31 @@ const ensureHipotecaFichaPanel = () => {
             <h4>Parte prestataria</h4>
             <div class="form-grid">
               <label class="span-2">
+                <span>Prestatario 1 · Fuente</span>
+                <select data-json="cliente_inmueble_json" data-path="prestataria.p1.source">
+                  <option value=""></option>
+                  <option value="c1">C1 (Cliente)</option>
+                  <option value="c2">C2 (Cliente)</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
+              <label class="span-2">
                 <span>Prestatario 1 · Nombre</span>
                 <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nombre" />
               </label>
               <label>
                 <span>Prestatario 1 · NIF/NIE</span>
                 <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nif" />
+              </label>
+              <label class="span-2">
+                <span>Prestatario 2 · Fuente</span>
+                <select data-json="cliente_inmueble_json" data-path="prestataria.p2.source">
+                  <option value=""></option>
+                  <option value="c1">C1 (Cliente)</option>
+                  <option value="c2">C2 (Cliente)</option>
+                  <option value="manual">Manual</option>
+                  <option value="none">No aplica</option>
+                </select>
               </label>
               <label class="span-2">
                 <span>Prestatario 2 · Nombre</span>
@@ -27423,6 +27442,54 @@ const getNestedValue = (obj, path) => {
   return cursor;
 };
 
+const normalizePrestatariaSource = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "c1" || raw === "cliente1" || raw === "1") return "c1";
+  if (raw === "c2" || raw === "cliente2" || raw === "2") return "c2";
+  if (raw === "none" || raw === "ninguno" || raw === "no aplica") return "none";
+  if (raw === "manual") return "manual";
+  return raw;
+};
+
+const syncHipotecaPrestatariaFromClientes = (panel, clienteInmueble) => {
+  if (!panel) return;
+  const obj = clienteInmueble && typeof clienteInmueble === "object" ? clienteInmueble : {};
+  const c1 = getNestedValue(obj, "comprador.c1") || {};
+  const c2 = getNestedValue(obj, "comprador.c2") || {};
+
+  const applyParty = (partyKey, source) => {
+    const src = normalizePrestatariaSource(source);
+    const nombreEl = panel.querySelector(`[data-json="cliente_inmueble_json"][data-path="prestataria.${partyKey}.nombre"]`);
+    const nifEl = panel.querySelector(`[data-json="cliente_inmueble_json"][data-path="prestataria.${partyKey}.nif"]`);
+    if (!nombreEl || !nifEl) return;
+
+    if (src === "none") {
+      nombreEl.value = "";
+      nifEl.value = "";
+      nombreEl.disabled = true;
+      nifEl.disabled = true;
+      return;
+    }
+    if (src === "c1" || src === "c2") {
+      const ref = src === "c1" ? c1 : c2;
+      nombreEl.value = String(ref?.nombre || "").trim();
+      nifEl.value = String(ref?.nif || "").trim();
+      nombreEl.disabled = true;
+      nifEl.disabled = true;
+      return;
+    }
+    // manual o vacío => editable
+    nombreEl.disabled = false;
+    nifEl.disabled = false;
+  };
+
+  const p1Source = getNestedValue(obj, "prestataria.p1.source");
+  const p2Source = getNestedValue(obj, "prestataria.p2.source");
+  applyParty("p1", p1Source);
+  applyParty("p2", p2Source);
+};
+
 const normalizeMoneyLike = (value) => {
   const parsed = toNumber(value);
   return parsed === null ? "" : parsed;
@@ -27637,6 +27704,14 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   if (!String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim() && fallbackCliente) {
     setNestedValue(clienteInmueble, "comprador.c1.nombre", fallbackCliente);
   }
+  // Parte prestataria: por defecto, 1º prestatario = C1 y 2º prestatario = C2 (si existe).
+  const c2Nombre = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
+  if (!String(getNestedValue(clienteInmueble, "prestataria.p1.source") || "").trim()) {
+    setNestedValue(clienteInmueble, "prestataria.p1.source", "c1");
+  }
+  if (!String(getNestedValue(clienteInmueble, "prestataria.p2.source") || "").trim()) {
+    setNestedValue(clienteInmueble, "prestataria.p2.source", c2Nombre ? "c2" : "none");
+  }
   if (!String(getNestedValue(liquidacion, "comprador.cliente") || "").trim() && fallbackCliente) {
     setNestedValue(liquidacion, "comprador.cliente", fallbackCliente);
   }
@@ -27667,12 +27742,22 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
   fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
   fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
   refreshHipotecaLiquidacionComputedControls(panel);
 
   if (panel.dataset.liquidacionListeners !== "1") {
     panel.dataset.liquidacionListeners = "1";
     panel.querySelectorAll('[data-json="liquidacion_json"][data-path]:not([readonly])').forEach((el) => {
       el.addEventListener("change", () => refreshHipotecaLiquidacionComputedControls(panel));
+    });
+  }
+  if (panel.dataset.prestatariaListeners !== "1") {
+    panel.dataset.prestatariaListeners = "1";
+    panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="prestataria."][data-path$=".source"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const fresh = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+        syncHipotecaPrestatariaFromClientes(panel, fresh);
+      });
     });
   }
   const status = panel.querySelector("#hipotecaFichaStatus");
