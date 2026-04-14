@@ -3322,6 +3322,7 @@
               </div>
               <div class="form-actions">
                 <span id="inmuebleSaveStatus" class="muted"></span>
+                <button class="secondary" type="button" id="inmuebleManualSaveBtn" disabled>Guardar</button>
                 <button class="secondary hidden" type="button" id="inmuebleVisitaPdfBtn">Hoja de visita PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaFichaPdfBtn">Ficha venta PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaPrecioPdfBtn">Nota precio PDF</button>
@@ -8759,7 +8760,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=496"></script>
+		    <script src="app.js?v=497"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8787,7 +8788,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=117").catch(function () {});
+		          navigator.serviceWorker.register("/sw.js?v=118").catch(function () {});
         });
       })();
     </script>

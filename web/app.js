@@ -2841,6 +2841,7 @@ const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPd
 const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
+const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
 const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
@@ -22065,6 +22066,10 @@ const attachChartTooltip = (canvas, meta) => {
 };
 
 const saveTimers = new Map();
+const pendingInlineEdits = {
+  inmueble: new Map(),
+  captacion: new Map(),
+};
 
 const setInmuebleSaveStatus = (text) => {
   if (!inmuebleSaveStatus) {
@@ -22077,6 +22082,26 @@ const setInmuebleSaveStatus = (text) => {
       inmuebleSaveStatus.textContent = "";
     }, 2000);
   }
+};
+
+const syncInmuebleManualSaveButton = () => {
+  if (!inmuebleManualSaveBtn) return;
+  const pending = pendingInlineEdits.inmueble.size + pendingInlineEdits.captacion.size;
+  inmuebleManualSaveBtn.disabled = pending === 0 || !state.currentInmuebleId;
+  inmuebleManualSaveBtn.textContent = pending ? `Guardar (${pending})` : "Guardar";
+};
+
+const markPendingInlineEdit = (target, field, value) => {
+  if (target !== "inmueble" && target !== "captacion") return;
+  pendingInlineEdits[target].set(field, value);
+  syncInmuebleManualSaveButton();
+};
+
+const clearPendingInlineEdits = (target, fields = []) => {
+  if (target !== "inmueble" && target !== "captacion") return;
+  const keys = Array.isArray(fields) ? fields : Object.keys(fields || {});
+  keys.forEach((key) => pendingInlineEdits[target].delete(key));
+  syncInmuebleManualSaveButton();
 };
 
 const scheduleSave = (key, fn, delay = 500) => {
@@ -22702,14 +22727,15 @@ const saveInmuebleFields = async (updates = {}) => {
     loadCrmInmuebles();
     refreshCurrentInmuebleProfile();
     refreshInmuebleVisitSheetButton();
-    if (Object.prototype.hasOwnProperty.call(updates || {}, "tipo_operacion")) {
-      rerenderCurrentInmuebleGrids();
-    }
-    return data;
-  } catch (error) {
-    setInmuebleSaveStatus(error?.message || "Error al guardar.");
-    return { error: error?.message || "Error al guardar." };
-  }
+	    if (Object.prototype.hasOwnProperty.call(updates || {}, "tipo_operacion")) {
+	      rerenderCurrentInmuebleGrids();
+	    }
+	    clearPendingInlineEdits("inmueble", Object.keys(updates || {}));
+	    return data;
+	  } catch (error) {
+	    setInmuebleSaveStatus(error?.message || "Error al guardar.");
+	    return { error: error?.message || "Error al guardar." };
+	  }
 };
 
 const saveInmuebleField = (field, value) => {
@@ -22749,20 +22775,21 @@ const saveCaptacionField = (field, value) => {
     { inmueble_id: state.currentInmuebleId, [field]: value },
     { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
   )
-    .then((data) => {
-      if (data?.error) {
-        setInmuebleSaveStatus(data.error);
-        return;
-      }
-      if (state.currentInmuebleContext?.captacion) {
-        state.currentInmuebleContext.captacion[field] = value;
-      }
-      setInmuebleSaveStatus("Guardado · cambios aplicados");
-      refreshCurrentInmuebleProfile();
-    })
-    .catch((error) => {
-      setInmuebleSaveStatus(error?.message || "Error al guardar.");
-    });
+	    .then((data) => {
+	      if (data?.error) {
+	        setInmuebleSaveStatus(data.error);
+	        return;
+	      }
+	      if (state.currentInmuebleContext?.captacion) {
+	        state.currentInmuebleContext.captacion[field] = value;
+	      }
+	      clearPendingInlineEdits("captacion", [field]);
+	      setInmuebleSaveStatus("Guardado · cambios aplicados");
+	      refreshCurrentInmuebleProfile();
+	    })
+	    .catch((error) => {
+	      setInmuebleSaveStatus(error?.message || "Error al guardar.");
+	    });
 };
 
 const saveClienteField = (field, value) => {
@@ -23153,48 +23180,52 @@ const renderEditableGrid = (grid, fields, data, target) => {
         : "";
     }
 
-    const saveHandler = () => {
-      if (target === "cliente" && (field.key === "nombre" || field.key === "apellidos")) {
-        saveClienteNombreApellidos();
-        return;
-      }
-      const value =
-        target === "cliente" && field.key === "nif"
-          ? normalizeDocumento(input.value)
-          : input.value;
-      if (target === "inmueble") {
-        saveInmuebleField(field.key, value);
-      } else if (target === "captacion") {
-        saveCaptacionField(field.key, value);
-      } else if (target === "cliente") {
-        saveClienteField(field.key, value);
-      }
-    };
+	    const saveHandler = () => {
+	      if (target === "cliente" && (field.key === "nombre" || field.key === "apellidos")) {
+	        saveClienteNombreApellidos();
+	        return;
+	      }
+	      const value =
+	        target === "cliente" && field.key === "nif"
+	          ? normalizeDocumento(input.value)
+	          : input.value;
+	      if (target === "inmueble") {
+	        saveInmuebleField(field.key, value);
+	      } else if (target === "captacion") {
+	        saveCaptacionField(field.key, value);
+	      } else if (target === "cliente") {
+	        saveClienteField(field.key, value);
+	      }
+	    };
 
-    if (field.type === "select") {
-      input.addEventListener("change", saveHandler);
-    } else {
-      input.addEventListener("input", () => {
-        if (status) {
-          const val = input.value;
-          status.textContent = val
-            ? isValidDocumento(val)
-              ? "Documento válido"
-              : "Documento no válido"
-            : "";
-        }
-        scheduleSave(`${target}:${field.key}`, saveHandler);
-      });
-      if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
-        input.addEventListener("blur", () => {
-          const parsed = toNumber(input.value);
-          if (parsed !== null) {
-            input.value = formatMoneyInputValue(parsed);
-          }
-        });
-      }
-      input.addEventListener("blur", saveHandler);
-    }
+	    if (field.type === "select") {
+	      input.addEventListener("change", () => {
+	        markPendingInlineEdit(target, field.key, input.value);
+	        saveHandler();
+	      });
+	    } else {
+	      input.addEventListener("input", () => {
+	        if (status) {
+	          const val = input.value;
+	          status.textContent = val
+	            ? isValidDocumento(val)
+	              ? "Documento válido"
+	              : "Documento no válido"
+	            : "";
+	        }
+	        markPendingInlineEdit(target, field.key, input.value);
+	        scheduleSave(`${target}:${field.key}`, saveHandler);
+	      });
+	      if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
+	        input.addEventListener("blur", () => {
+	          const parsed = toNumber(input.value);
+	          if (parsed !== null) {
+	            input.value = formatMoneyInputValue(parsed);
+	          }
+	        });
+	      }
+	      input.addEventListener("blur", saveHandler);
+	    }
     valueWrap.appendChild(input);
     if (status) {
       valueWrap.appendChild(status);
@@ -39894,6 +39925,9 @@ const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;
   const hasPendingPrefill = Boolean(state.pendingInmuebleCitaPrefill);
   state.currentInmuebleId = id;
+  pendingInlineEdits.inmueble.clear();
+  pendingInlineEdits.captacion.clear();
+  syncInmuebleManualSaveButton();
   state.currentInmuebleOriginView = originView || state.crmWorkspaceView || "inmuebles";
   state.currentInmueble = null;
   state.currentInmuebleContext = null;
@@ -40053,6 +40087,66 @@ const openInmuebleDetail = (id, originView = "") => {
       if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = error?.message || "Error al cargar.";
   });
 };
+
+if (inmuebleManualSaveBtn) {
+  inmuebleManualSaveBtn.addEventListener("click", async () => {
+    if (!state.currentInmuebleId) return;
+    const inmuebleUpdates = Object.fromEntries(pendingInlineEdits.inmueble.entries());
+    const captacionUpdates = Object.fromEntries(pendingInlineEdits.captacion.entries());
+    if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
+      setInmuebleSaveStatus("No hay cambios pendientes.");
+      syncInmuebleManualSaveButton();
+      return;
+    }
+    setInmuebleSaveStatus("Guardando...");
+    inmuebleManualSaveBtn.disabled = true;
+    try {
+      if (Object.keys(inmuebleUpdates).length) {
+        if (Object.prototype.hasOwnProperty.call(inmuebleUpdates, "estado")) {
+          const inmueble = { ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}), estado: inmuebleUpdates.estado };
+          const captacion = state.currentInmuebleContext?.captacion || {};
+          const propietarios = state.currentInmuebleContext?.propietarios || [];
+          const validation = validateInmuebleStageTransition(inmuebleUpdates.estado, inmueble, captacion, propietarios);
+          if (!validation.ok) {
+            setInmuebleSaveStatus(`Faltan datos para pasar a ${inmuebleUpdates.estado}: ${validation.missing.map((item) => item.label).join(", ")}.`);
+            return;
+          }
+        }
+        const res = await saveInmuebleFields(inmuebleUpdates);
+        if (res?.error) throw new Error(res.error);
+      }
+      if (Object.keys(captacionUpdates).length) {
+        if (Object.prototype.hasOwnProperty.call(captacionUpdates, "etapa")) {
+          const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+          const captacion = { ...(state.currentInmuebleContext?.captacion || {}), etapa: captacionUpdates.etapa };
+          const propietarios = state.currentInmuebleContext?.propietarios || [];
+          const validation = validateInmuebleStageTransition(captacionUpdates.etapa, inmueble, captacion, propietarios);
+          if (!validation.ok) {
+            setInmuebleSaveStatus(`Faltan datos para pasar a ${captacionUpdates.etapa}: ${validation.missing.map((item) => item.label).join(", ")}.`);
+            return;
+          }
+        }
+        const data = await postJsonWithDbRetry(
+          "/api/captacion_update",
+          { inmueble_id: state.currentInmuebleId, ...(captacionUpdates || {}) },
+          { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
+        );
+        if (data?.error) throw new Error(data.error);
+        Object.entries(captacionUpdates || {}).forEach(([field, value]) => {
+          if (state.currentInmuebleContext?.captacion) {
+            state.currentInmuebleContext.captacion[field] = value;
+          }
+        });
+        clearPendingInlineEdits("captacion", Object.keys(captacionUpdates || {}));
+      }
+      setInmuebleSaveStatus("Guardado · cambios aplicados");
+    } catch (err) {
+      setInmuebleSaveStatus(err?.message || "Error al guardar.");
+    } finally {
+      syncInmuebleManualSaveButton();
+    }
+  });
+}
 
 const upsertInmuebleComprador = async (inmuebleId, demandaId, updates = {}) => {
   if (!inmuebleId || !demandaId) return { error: "inmueble_id y demanda_id requeridos" };
