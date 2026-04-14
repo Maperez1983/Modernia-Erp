@@ -27066,6 +27066,10 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.comision_cheques" inputmode="decimal" />
               </label>
               <label>
+                <span>Seguro protección de pago</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_proteccion_pago" inputmode="decimal" />
+              </label>
+              <label>
                 <span>Total gastos (auto)</span>
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_gastos" inputmode="decimal" readonly />
               </label>
