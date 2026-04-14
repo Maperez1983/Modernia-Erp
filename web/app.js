@@ -23613,18 +23613,25 @@ const renderEditableGrid = (grid, fields, data, target) => {
 	      actions.appendChild(btn);
 	      valueWrap.appendChild(actions);
 	    }
-	    if (isInmueble && field.key === "referencia_catastral") {
-	      const hint = document.createElement("p");
-	      hint.className = "muted editable-card-help";
-	      hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
-	      valueWrap.appendChild(hint);
-      const actions = document.createElement("div");
-      actions.className = "catastro-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "secondary catastro-button";
-      openBtn.innerHTML = buildCatastroButtonInner("Abrir Catastro");
+		    if (isInmueble && field.key === "referencia_catastral") {
+		      const hint = document.createElement("p");
+		      hint.className = "muted editable-card-help";
+		      hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
+		      valueWrap.appendChild(hint);
+	      const inlineStatus = document.createElement("div");
+	      inlineStatus.className = "muted";
+	      inlineStatus.style.marginTop = "8px";
+	      const setInlineStatus = (text) => {
+	        inlineStatus.textContent = String(text || "").trim();
+	      };
+	      const actions = document.createElement("div");
+	      actions.className = "catastro-actions";
+	      const openBtn = document.createElement("button");
+	      openBtn.type = "button";
+	      openBtn.className = "secondary catastro-button";
+	      openBtn.innerHTML = buildCatastroButtonInner("Abrir Catastro");
 		      openBtn.addEventListener("click", () => {
+		        setInlineStatus("Abriendo Catastro…");
 		        const ref = String(inputMap?.referencia_catastral?.value || input.value || "").trim();
 		        const address = buildInmuebleDisplayAddress({
 		          direccion: String(inputMap?.direccion?.value || "").trim(),
@@ -23635,25 +23642,40 @@ const renderEditableGrid = (grid, fields, data, target) => {
 		        const url = buildCatastroUrl(ref, address);
 		        openExternalUrl(url);
 		      });
-      actions.appendChild(openBtn);
-      const lookupBtn = document.createElement("button");
-      lookupBtn.type = "button";
-      lookupBtn.className = "secondary catastro-button";
-      lookupBtn.innerHTML = buildCatastroButtonInner("Buscar referencia");
-      lookupBtn.addEventListener("click", async () => {
-        await lookupInmuebleCatastro(inputMap, { silent: false });
-      });
-      actions.appendChild(lookupBtn);
-      const syncBtn = document.createElement("button");
-      syncBtn.type = "button";
-      syncBtn.className = "secondary catastro-button";
-      syncBtn.innerHTML = buildCatastroButtonInner("Ficha PDF");
-      syncBtn.addEventListener("click", async () => {
-        await syncInmuebleCatastroFicha(inputMap);
-      });
-      actions.appendChild(syncBtn);
-      valueWrap.appendChild(actions);
-    }
+	      actions.appendChild(openBtn);
+	      const lookupBtn = document.createElement("button");
+	      lookupBtn.type = "button";
+	      lookupBtn.className = "secondary catastro-button";
+	      lookupBtn.innerHTML = buildCatastroButtonInner("Buscar referencia");
+	      lookupBtn.addEventListener("click", async () => {
+	        setInlineStatus("Consultando Catastro…");
+	        const rc = await lookupInmuebleCatastro(inputMap, { silent: false });
+	        if (rc) {
+	          setInlineStatus(`Referencia detectada: ${rc}`);
+	        } else {
+	          setInlineStatus("No se pudo detectar una referencia única. Revisa la dirección (incluye nº portal).");
+	        }
+	      });
+	      actions.appendChild(lookupBtn);
+	      const syncBtn = document.createElement("button");
+	      syncBtn.type = "button";
+	      syncBtn.className = "secondary catastro-button";
+	      syncBtn.innerHTML = buildCatastroButtonInner("Ficha PDF");
+	      syncBtn.addEventListener("click", async () => {
+	        setInlineStatus("Generando ficha PDF…");
+	        const res = await syncInmuebleCatastroFicha(inputMap);
+	        if (res?.error) {
+	          setInlineStatus(String(res.error || "No se pudo generar la ficha.").trim());
+	        } else if (res?.document?.url) {
+	          setInlineStatus("Ficha generada y guardada en Adjuntos.");
+	        } else {
+	          setInlineStatus("Datos sincronizados.");
+	        }
+	      });
+	      actions.appendChild(syncBtn);
+	      valueWrap.appendChild(actions);
+	      valueWrap.appendChild(inlineStatus);
+		    }
     currentSectionBody.appendChild(card);
   });
 
@@ -56785,26 +56807,6 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    if (!inmuebleGuidedModal) return;
 	    inmuebleGuidedModal.classList.toggle("hidden", !open);
 	    if (open) void refresh();
-	  };
-
-	  const safeOpenExternal = (url) => {
-	    const href = String(url || "").trim();
-	    if (!href) return;
-	    let win = null;
-	    try {
-	      win = window.open(href, "_blank", "noopener,noreferrer");
-	    } catch {
-	      win = null;
-	    }
-	    window.setTimeout(() => {
-	      try {
-	        if (!win || win.closed) {
-	          window.location.assign(href);
-	        }
-	      } catch {
-	        window.location.assign(href);
-	      }
-	    }, 150);
 	  };
 
 	  const focusInmuebleField = ({ tab = "", target = "", field = "" } = {}) => {
