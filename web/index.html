@@ -8548,6 +8548,30 @@
 	          <div class="form-card">
 	            <div class="section-head">
 	              <div>
+	                <h3>Wizard</h3>
+	                <p class="muted">Pasos recomendados con acceso directo a campos, documentos y citas.</p>
+	              </div>
+	              <div class="form-actions">
+	                <select id="inmuebleGuidedStageSelect" title="Etapa">
+	                  <option>Inmueble</option>
+	                  <option>Noticia</option>
+	                  <option>Encargo</option>
+	                  <option>Propuesta</option>
+	                  <option>Reservado</option>
+	                  <option>Contrato de arras</option>
+	                  <option>Vendido</option>
+	                  <option>Alquiler</option>
+	                  <option>Cerrado negativamente</option>
+	                </select>
+	                <button type="button" class="secondary ghost" id="inmuebleGuidedRefreshBtn">Actualizar</button>
+	              </div>
+	            </div>
+	            <div id="inmuebleGuidedSteps"></div>
+	          </div>
+
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
 	                <h3>Validaciones</h3>
 	                <p class="muted">Requisitos mínimos para la etapa actual.</p>
 	              </div>
@@ -8774,7 +8798,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=97").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=98").catch(function () {});
         });
       })();
     </script>

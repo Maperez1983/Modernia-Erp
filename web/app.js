@@ -2789,6 +2789,8 @@ const visitaDemanda = document.getElementById("visitaDemanda");
 const crmVisitasMini = document.getElementById("crmVisitasMini");
 const crmVisitasTable = document.getElementById("crmVisitasTable");
 const crmVisitasInfo = document.getElementById("crmVisitasInfo");
+const crmVisitasPreset = document.getElementById("crmVisitasPreset");
+const crmVisitasPrintBtn = document.getElementById("crmVisitasPrintBtn");
 const crmVisitaSearch = document.getElementById("crmVisitaSearch");
 const crmVisitaEstadoFilter = document.getElementById("crmVisitaEstadoFilter");
 const crmKanban = document.getElementById("crmKanban");
@@ -2868,10 +2870,13 @@ const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEnc
 	 const inmuebleGuidedBtn = document.getElementById("inmuebleGuidedBtn");
 	 const inmuebleGuidedModal = document.getElementById("inmuebleGuidedModal");
 	 const inmuebleGuidedClose = document.getElementById("inmuebleGuidedClose");
-	 const inmuebleGuidedHeader = document.getElementById("inmuebleGuidedHeader");
-	 const inmuebleGuidedRequirements = document.getElementById("inmuebleGuidedRequirements");
-	 const inmuebleGuidedChecklistPreview = document.getElementById("inmuebleGuidedChecklistPreview");
-	 const inmuebleGuidedActionsPreview = document.getElementById("inmuebleGuidedActionsPreview");
+		 const inmuebleGuidedHeader = document.getElementById("inmuebleGuidedHeader");
+		 const inmuebleGuidedStageSelect = document.getElementById("inmuebleGuidedStageSelect");
+		 const inmuebleGuidedRefreshBtn = document.getElementById("inmuebleGuidedRefreshBtn");
+		 const inmuebleGuidedSteps = document.getElementById("inmuebleGuidedSteps");
+		 const inmuebleGuidedRequirements = document.getElementById("inmuebleGuidedRequirements");
+		 const inmuebleGuidedChecklistPreview = document.getElementById("inmuebleGuidedChecklistPreview");
+		 const inmuebleGuidedActionsPreview = document.getElementById("inmuebleGuidedActionsPreview");
 	 const inmuebleGuidedStatus = document.getElementById("inmuebleGuidedStatus");
 	 const inmuebleGuidedGenerateChecklist = document.getElementById("inmuebleGuidedGenerateChecklist");
 	 const inmuebleGuidedOpenChecklist = document.getElementById("inmuebleGuidedOpenChecklist");
@@ -9117,19 +9122,7 @@ const renderWorkspaceRrhhHub = () => {
     const companies = state.currentWorkspaceDetail?.companies || [];
     const employeesAll = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
     const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
-    const usersAll = (() => {
-      const combined = [];
-      if (Array.isArray(state.usersList)) combined.push(...state.usersList);
-      if (Array.isArray(state.workspaceTimeUsers)) combined.push(...state.workspaceTimeUsers);
-      const seen = new Set();
-      return combined.filter((row) => {
-        const id = String(row?.id || "").trim();
-        if (!id) return false;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-    })();
+    const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
     const usersById = new Map(usersAll.map((row) => [String(row.id || "").trim(), row]));
 
 	    const normalizeMemberTab = (value = "") => {
@@ -9666,26 +9659,6 @@ const renderWorkspaceRrhhHub = () => {
 			    const renderMemberDetail = (m) => {
 			      const employee = m?.employee || null;
 			      const user = m?.user || null;
-            const isLinkedToUser = Boolean(Number(employee?.usuario_manual || 0) === 1 && String(employee?.usuario_id || "").trim());
-            const resolveSuggestedUser = () => {
-              if (user) return null;
-              const email = normalizeSimple(employee?.email || "");
-              if (!email) return null;
-              const users = Array.isArray(usersAll) ? usersAll : [];
-              const matches = users.filter((u) => Number(u.activo ?? 1) === 1 && normalizeSimple(u?.email || "") === email);
-              if (matches.length !== 1) return null;
-              const candidate = matches[0];
-              const candidateId = String(candidate?.id || "").trim();
-              if (!candidateId) return null;
-              // Evita sugerir usuarios ya vinculados manualmente a otra ficha.
-              const alreadyLinked = (employees || []).some(
-                (row) => Number(row?.usuario_manual || 0) === 1 && String(row?.usuario_id || "").trim() === candidateId
-              );
-              if (alreadyLinked) return null;
-              return candidate;
-            };
-            const suggestedUser = resolveSuggestedUser();
-            const effectiveUser = user || suggestedUser;
 			      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
 	      const safeKey = String(m?.key || "member").replace(/[^a-z0-9_-]/gi, "_");
 	      const autoSection = `section-rrhh-${safeKey}`;
@@ -9697,7 +9670,7 @@ const renderWorkspaceRrhhHub = () => {
               .normalize("NFD")
               .replace(/[\u0300-\u036f]/g, "")
               .replace(/\s+/g, " ");
-          const userFullName = `${effectiveUser?.nombre || ""} ${effectiveUser?.apellido || ""}`.trim();
+          const userFullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim();
           const fichaName = String(employee?.nombre || "").trim();
           const displayName = fichaName || userFullName || String(m?.nombre || "").trim() || "Miembro";
           const mismatch =
@@ -9768,7 +9741,7 @@ const renderWorkspaceRrhhHub = () => {
 		            </label>
 		            <label>
 		              Email
-		              <input name="email" autocomplete="${escapeHtml(autoSection)} email" value="${escapeHtml(String(employee?.email || effectiveUser?.email || ""))}" />
+		              <input name="email" autocomplete="${escapeHtml(autoSection)} email" value="${escapeHtml(String(employee?.email || user?.email || ""))}" />
 		            </label>
 		            <label>
 		              Teléfono
@@ -9831,8 +9804,8 @@ const renderWorkspaceRrhhHub = () => {
 	            <div class="workspace-rrhh-row">
 	              <div>
 	                <strong>Usuario del sistema</strong>
-	                <div class="muted">${escapeHtml(effectiveUser?.usuario || effectiveUser?.email || "—")}${suggestedUser ? ` · Sugerido` : ""}</div>
-	                <div class="muted" data-rrhh-user-service-label="${escapeHtml(String(user?.id || ""))}">${escapeHtml(effectiveUser?.rol || "—")}${effectiveUser?.servicio ? ` · ${escapeHtml(effectiveUser.servicio)}` : ""}</div>
+	                <div class="muted">${escapeHtml(user?.usuario || user?.email || "—")}</div>
+	                <div class="muted" data-rrhh-user-service-label="${escapeHtml(String(user?.id || ""))}">${escapeHtml(user?.rol || "—")}${user?.servicio ? ` · ${escapeHtml(user.servicio)}` : ""}</div>
 	              </div>
 	              <div class="workspace-rrhh-row-actions">
 	                ${user?.id ? `<button type="button" class="secondary ghost button-inline" data-rrhh-member-toggle-registro="${escapeHtml(String(user.id))}" data-rrhh-member-toggle-next="${Number(user.registro_horario_activo || 0) === 1 ? "0" : "1"}">${Number(user.registro_horario_activo || 0) === 1 ? "Desactivar registro" : "Activar registro"}</button>` : ""}
@@ -9845,8 +9818,8 @@ const renderWorkspaceRrhhHub = () => {
                       <div class="muted">Marca qué módulos verá este usuario.</div>
                       <div class="rrhh-service-grid" data-rrhh-service-scope="${escapeHtml(String(user.id || ""))}">
                         ${getWorkspaceAccessServiceOptions().map((label) => {
-                          const key = normalizeWorkspaceServiceKey(label);
-                          const selected = expandServiceAliases(parseServiceList(user?.servicio || "").map(normalizeWorkspaceServiceKey)).includes(key);
+                          const key = normalizeSimple(label);
+                          const selected = parseServiceList(user?.servicio || "").includes(key);
                           return `
                             <label class="inline-check">
                               <input type="checkbox" data-rrhh-service-check="${escapeHtml(label)}" ${selected ? "checked" : ""} />
@@ -9874,11 +9847,7 @@ const renderWorkspaceRrhhHub = () => {
                           </label>
                           <label>
                             Email
-                          <input id="rrhhAccessCreateEmail" autocomplete="off" placeholder="email@empresa.com" value="${escapeHtml(String(employee?.email || ""))}" />
-                          </label>
-                          <label>
-                            Contraseña
-                            <input id="rrhhAccessCreatePassword" type="password" autocomplete="new-password" placeholder="Opcional (mín. 8 caracteres)" />
+                            <input id="rrhhAccessCreateEmail" autocomplete="off" placeholder="email@empresa.com" />
                           </label>
                           <label>
                             Rol
@@ -9905,23 +9874,13 @@ const renderWorkspaceRrhhHub = () => {
                 `}
 	              ${user?.id ? `
 	                <div class="workspace-rrhh-row">
-                  <div>
-                    <strong>Invitación (enlace de acceso)</strong>
+	                  <div>
+	                    <strong>Invitación (enlace de acceso)</strong>
                     <div class="muted">Envía un link para activar el acceso y definir contraseña.</div>
                     <div class="muted" id="rrhhMemberInviteLink"></div>
                   </div>
                   <div class="workspace-rrhh-row-actions">
                     <button type="button" class="secondary ghost button-inline" data-rrhh-member-invite="${escapeHtml(String(user.id))}">Enviar invitación</button>
-                  </div>
-                </div>
-                <div class="workspace-rrhh-row">
-                  <div>
-                    <strong>Establecer contraseña</strong>
-                    <div class="muted">Guarda una contraseña manual para este usuario (mínimo 8 caracteres).</div>
-                    <input id="rrhhMemberManualPassword" class="rrhh-inline-input" type="password" value="" placeholder="Nueva contraseña..." autocomplete="new-password" />
-                  </div>
-                  <div class="workspace-rrhh-row-actions">
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-set="${escapeHtml(String(user.id))}">Guardar</button>
                   </div>
                 </div>
                 <div class="workspace-rrhh-row">
@@ -9963,10 +9922,10 @@ const renderWorkspaceRrhhHub = () => {
 		              <div class="workspace-rrhh-row">
 		                <div>
 		                  <strong>Vínculo</strong>
-	                  <div class="muted">${isLinkedToUser ? "Vinculado" : (suggestedUser ? "Sin vincular · Usuario sugerido por email" : "Sin vincular")}</div>
+	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
 	                </div>
 	                <div class="workspace-rrhh-row-actions">
-                  ${isLinkedToUser ? `
+                  ${employee?.usuario_manual ? `
                     <button type="button" class="secondary danger button-inline" data-rrhh-member-unlink>Desvincular</button>
                   ` : `
                     <label class="muted">
@@ -9976,11 +9935,7 @@ const renderWorkspaceRrhhHub = () => {
                         ${usersAll
                           .filter((u) => Number(u.activo ?? 1) === 1)
                           .sort((a, b) => `${a.nombre || ""} ${a.apellido || ""}`.localeCompare(`${b.nombre || ""} ${b.apellido || ""}`, "es", { sensitivity: "base" }))
-                          .map((u) => {
-                            const uid = String(u.id || "").trim();
-                            const selected = suggestedUser && uid && uid === String(suggestedUser?.id || "").trim() ? "selected" : "";
-                            return `<option value="${escapeHtml(uid)}" ${selected}>${escapeHtml(`${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario")}</option>`;
-                          })
+                          .map((u) => `<option value="${escapeHtml(String(u.id || ""))}">${escapeHtml(`${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario")}</option>`)
                           .join("")}
                       </select>
                     </label>
@@ -11277,21 +11232,16 @@ const renderWorkspaceRrhhHub = () => {
       }
       const usuario = String(document.getElementById("rrhhAccessCreateUsuario")?.value || "").trim();
       const email = String(document.getElementById("rrhhAccessCreateEmail")?.value || "").trim();
-      const password = String(document.getElementById("rrhhAccessCreatePassword")?.value || "");
       const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "Lectura").trim();
       const scope = workspaceRrhhHub.querySelector('[data-rrhh-service-scope="new"]');
       const keys = scope
         ? Array.from(scope.querySelectorAll('input[type="checkbox"][data-rrhh-service-check]'))
             .filter((input) => input.checked)
-            .map((input) => normalizeWorkspaceServiceKey(String(input.dataset.rrhhServiceCheck || "")))
+            .map((input) => normalizeSimple(String(input.dataset.rrhhServiceCheck || "")))
             .filter(Boolean)
         : [];
       if (!usuario || !email) {
         if (status) status.textContent = "Usuario y email requeridos.";
-        return;
-      }
-      if (password && password.trim() && password.trim().length < 8) {
-        if (status) status.textContent = "La contraseña debe tener al menos 8 caracteres.";
         return;
       }
       if (!keys.length) {
@@ -11310,7 +11260,6 @@ const renderWorkspaceRrhhHub = () => {
           apellido,
           usuario,
           email,
-          password: password && password.trim() ? password : "",
           servicio: keys.join(", "),
           rol,
           registro_horario_activo: 1,
@@ -11388,36 +11337,6 @@ const renderWorkspaceRrhhHub = () => {
         if (accessStatus) accessStatus.textContent = error.message || "No se pudo generar la contraseña.";
       } finally {
         passBtn.disabled = false;
-      }
-    });
-  }
-  const passSetBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-set]");
-  if (passSetBtn) {
-    passSetBtn.addEventListener("click", async () => {
-      if (!isWorkspaceRrhhManager()) return;
-      const userId = String(passSetBtn.dataset.rrhhMemberPassSet || "").trim();
-      if (!userId) return;
-      const input = document.getElementById("rrhhMemberManualPassword");
-      const password = String(input?.value || "");
-      if (!password.trim()) {
-        if (accessStatus) accessStatus.textContent = "Introduce una contraseña.";
-        return;
-      }
-      if (password.trim().length < 8) {
-        if (accessStatus) accessStatus.textContent = "La contraseña debe tener al menos 8 caracteres.";
-        return;
-      }
-      passSetBtn.disabled = true;
-      if (accessStatus) accessStatus.textContent = "Guardando contraseña...";
-      try {
-        const resp = await apiPost("/api/usuarios_update", { id: userId, password, workspace_id: state.currentWorkspaceId });
-        if (resp?.error) throw new Error(resp.error);
-        if (input) input.value = "";
-        if (accessStatus) accessStatus.textContent = "Contraseña guardada.";
-      } catch (error) {
-        if (accessStatus) accessStatus.textContent = error.message || "No se pudo guardar la contraseña.";
-      } finally {
-        passSetBtn.disabled = false;
       }
     });
   }
@@ -34886,6 +34805,122 @@ const loadCrmDemandas = () => {
 	  });
 	};
 
+const normalizeCrmVisitasPreset = (value) => {
+  const normalized = normalizeSimple(value || "");
+  if (!normalized) return "semana";
+  if (normalized.includes("hoy")) return "hoy";
+  if (normalized.includes("pend")) return "pendientes";
+  if (normalized.includes("toda")) return "todas";
+  return "semana";
+};
+
+const filterCrmVisitasRows = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const q = String(crmVisitaSearch?.value || "").trim().toLowerCase();
+  const estadoFilter = normalizeSimple(crmVisitaEstadoFilter?.value || "");
+  const preset = normalizeCrmVisitasPreset(crmVisitasPreset?.value || "");
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayEnd = todayStart + 86400000 - 1;
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+  const weekStart = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()).getTime();
+  const weekEnd = weekStart + 7 * 86400000 - 1;
+
+  return items.filter((row) => {
+    const haystack = [row.inmueble, row.cliente, row.asesor, row.estado, row.fecha, row.hora]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+    if (q && !haystack.includes(q)) return false;
+    if (estadoFilter && !normalizeSimple(row.estado || "").includes(estadoFilter)) return false;
+
+    if (preset === "pendientes") {
+      if (!normalizeSimple(row.estado || "").includes("pendiente")) return false;
+    } else if (preset === "hoy" || preset === "semana") {
+      const ts = parseCrmDateTime(row.fecha, "00:00");
+      if (!ts) return false;
+      if (preset === "hoy" && (ts < todayStart || ts > todayEnd)) return false;
+      if (preset === "semana" && (ts < weekStart || ts > weekEnd)) return false;
+    }
+    return true;
+  });
+};
+
+const buildCrmVisitasDenseTableNode = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) return null;
+  const table = document.createElement("table");
+  table.className = "crm-dense-table crm-visitas-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th style="width:34px;"></th>
+      <th style="width:92px;">Fecha</th>
+      <th style="width:64px;">Hora</th>
+      <th style="width:110px;">Estado</th>
+      <th>Inmueble</th>
+      <th style="width:220px;">Cliente</th>
+      <th style="width:150px;">Asesor</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items
+    .slice()
+    .sort((a, b) => parseCrmDateTime(b.fecha, b.hora) - parseCrmDateTime(a.fecha, a.hora))
+    .forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.addEventListener("click", () => {
+        const inmuebleId = String(row.inmueble_id || "").trim();
+        const demandaId = String(row.demanda_id || "").trim();
+        if (inmuebleId) {
+          openInmuebleDetail(inmuebleId, "visitas");
+          return;
+        }
+        if (demandaId) {
+          openDemandaDetail(demandaId);
+        }
+      });
+      const selectTd = document.createElement("td");
+      selectTd.className = "crm-dense-select";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.visitaId = String(row.id || "").trim();
+      checkbox.addEventListener("click", (event) => event.stopPropagation());
+      selectTd.appendChild(checkbox);
+      tr.appendChild(selectTd);
+
+      const fechaCell = document.createElement("td");
+      fechaCell.textContent = String(row.fecha || "-").trim() || "-";
+      tr.appendChild(fechaCell);
+
+      const horaCell = document.createElement("td");
+      horaCell.textContent = String(row.hora || "-").trim() || "-";
+      tr.appendChild(horaCell);
+
+      const estadoCell = document.createElement("td");
+      estadoCell.textContent = String(row.estado || "-").trim() || "-";
+      tr.appendChild(estadoCell);
+
+      const inmuebleCell = document.createElement("td");
+      inmuebleCell.textContent = String(row.inmueble || "-").trim() || "-";
+      tr.appendChild(inmuebleCell);
+
+      const clienteCell = document.createElement("td");
+      clienteCell.textContent = String(row.cliente || "-").trim() || "-";
+      tr.appendChild(clienteCell);
+
+      const asesorCell = document.createElement("td");
+      asesorCell.textContent = String(row.asesor || "-").trim() || "-";
+      tr.appendChild(asesorCell);
+
+      tbody.appendChild(tr);
+    });
+  table.appendChild(tbody);
+  return table;
+};
+
 const loadCrmVisitas = () => {
   if (!crmVisitasTable) {
     return;
@@ -34899,21 +34934,7 @@ const loadCrmVisitas = () => {
   api(`/api/visitas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     cachedCrmVisitas = rows;
-    const q = String(crmVisitaSearch?.value || "").trim().toLowerCase();
-    const estadoFilter = normalizeSimple(crmVisitaEstadoFilter?.value || "");
-    const filteredRows = rows.filter((row) => {
-      const haystack = [
-        row.inmueble,
-        row.cliente,
-        row.asesor,
-        row.estado,
-      ]
-        .map((value) => String(value || "").toLowerCase())
-        .join(" ");
-      if (q && !haystack.includes(q)) return false;
-      if (estadoFilter && !normalizeSimple(row.estado || "").includes(estadoFilter)) return false;
-      return true;
-    });
+    const filteredRows = filterCrmVisitasRows(rows);
     renderCrmMiniCards(crmVisitasMini, [
       {
         title: "Visitas totales",
@@ -34934,7 +34955,7 @@ const loadCrmVisitas = () => {
         summary: "Visitas ya completadas con resultado.",
       },
     ]);
-	    if (crmVisitasAgenda) {
+    if (crmVisitasAgenda) {
       const agendaItems = filteredRows
         .slice()
         .sort((a, b) => parseCrmDateTime(a.fecha, a.hora) - parseCrmDateTime(b.fecha, b.hora))
@@ -34946,58 +34967,25 @@ const loadCrmVisitas = () => {
           summary: `${row.fecha || "-"} ${row.hora || ""} · ${row.estado || "Pendiente"}`.trim(),
         }));
       renderCrmActionList(crmVisitasAgenda, agendaItems, "Sin visitas programadas.");
-	    }
-	    const table = document.createElement("table");
-	    table.className = "crm-dense-table crm-visitas-table";
-	    const thead = document.createElement("thead");
-	    const trHead = document.createElement("tr");
-	    ["", "fecha", "hora", "estado", "inmueble", "cliente", "asesor"].forEach((col) => {
-	      const th = document.createElement("th");
-	      th.textContent = col ? formatHeader(col) : "";
-	      trHead.appendChild(th);
-	    });
-	    thead.appendChild(trHead);
-	    table.appendChild(thead);
-	    const tbody = document.createElement("tbody");
-	    filteredRows
-      .slice()
-      .sort((a, b) => parseCrmDateTime(b.fecha, b.hora) - parseCrmDateTime(a.fecha, a.hora))
-	      .forEach((row) => {
-	      const tr = document.createElement("tr");
-	      tr.addEventListener("click", () => {
-	        const inmuebleId = String(row.inmueble_id || "").trim();
-	        if (!inmuebleId) return;
-	        openInmuebleDetail(inmuebleId, "visitas");
-	      });
-	      const selectTd = document.createElement("td");
-	      selectTd.className = "crm-dense-select";
-	      const checkbox = document.createElement("input");
-	      checkbox.type = "checkbox";
-	      checkbox.addEventListener("click", (event) => event.stopPropagation());
-	      selectTd.appendChild(checkbox);
-	      tr.appendChild(selectTd);
-	      const values = [
-	        row.fecha || "-",
-	        row.hora || "-",
-	        row.estado || "-",
-	        row.inmueble || "-",
-	        row.cliente || "-",
-	        row.asesor || "-",
-	      ];
-      values.forEach((value, idx) => {
-        const td = document.createElement("td");
-        const colName = ["fecha", "hora", "estado", "inmueble", "cliente", "asesor"][idx];
-        const formatted = formatCell(colName, value);
-        td.textContent = formatted === null ? "" : formatted;
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-      });
-    table.appendChild(tbody);
+    }
+    const table = buildCrmVisitasDenseTableNode(filteredRows);
     crmVisitasTable.innerHTML = "";
-    crmVisitasTable.appendChild(table);
+    if (!table) {
+      crmVisitasTable.innerHTML = "<p class='muted'>Sin visitas.</p>";
+    } else {
+      crmVisitasTable.appendChild(table);
+    }
     if (crmVisitasInfo) {
-      crmVisitasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length} visitas.`;
+      const preset = normalizeCrmVisitasPreset(crmVisitasPreset?.value || "");
+      const presetLabel =
+        {
+          semana: "Semana",
+          hoy: "Hoy",
+          pendientes: "Pendientes",
+          todas: "",
+        }[preset] || "";
+      const estadoLabel = String(crmVisitaEstadoFilter?.value || "").trim();
+      crmVisitasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length}${presetLabel ? ` · ${presetLabel}` : ""}${estadoLabel ? ` · estado ${estadoLabel}` : ""}.`;
     }
     renderCrmResumenDashboard();
   });
@@ -48067,6 +48055,25 @@ if (crmCaptacionCloseBtn) {
 
 if (crmCaptacionCatastroOpen) {
   crmCaptacionCatastroOpen.addEventListener("click", () => {
+    const safeOpenExternal = (url) => {
+      const href = String(url || "").trim();
+      if (!href) return;
+      let win = null;
+      try {
+        win = window.open(href, "_blank", "noopener,noreferrer");
+      } catch {
+        win = null;
+      }
+      window.setTimeout(() => {
+        try {
+          if (!win || win.closed) {
+            window.location.assign(href);
+          }
+        } catch {
+          window.location.assign(href);
+        }
+      }, 150);
+    };
     try {
       const form = crmCaptacionCreateForm;
       const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
@@ -48074,12 +48081,10 @@ if (crmCaptacionCatastroOpen) {
       const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
 	      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
 	      const url = buildCatastroUrl("", address);
-	      const win = window.open(url, "_blank", "noopener,noreferrer");
-	      if (!win) window.location.assign(url);
+	      safeOpenExternal(url);
 	    } catch {
 	      const fallback = "https://www.sedecatastro.gob.es/";
-	      const win = window.open(fallback, "_blank", "noopener,noreferrer");
-	      if (!win) window.location.assign(fallback);
+	      safeOpenExternal(fallback);
 	    }
 	  });
 	}
@@ -49093,9 +49098,42 @@ if (crmVisitaSearch) {
   });
 }
 
+if (crmVisitasPreset) {
+  crmVisitasPreset.addEventListener("change", () => {
+    loadCrmVisitas();
+  });
+}
+
 if (crmVisitaEstadoFilter) {
   crmVisitaEstadoFilter.addEventListener("change", () => {
     loadCrmVisitas();
+  });
+}
+
+if (crmVisitasPrintBtn) {
+  crmVisitasPrintBtn.addEventListener("click", () => {
+    const rows = filterCrmVisitasRows(Array.isArray(cachedCrmVisitas) ? cachedCrmVisitas : []);
+    const html = `
+      <table>
+        <thead><tr><th>Fecha</th><th>Hora</th><th>Estado</th><th>Inmueble</th><th>Cliente</th><th>Asesor</th></tr></thead>
+        <tbody>
+          ${rows
+            .slice(0, 500)
+            .map((row) => {
+              return `<tr>
+                <td>${escapeHtml(String(row.fecha || ""))}</td>
+                <td>${escapeHtml(String(row.hora || ""))}</td>
+                <td>${escapeHtml(String(row.estado || ""))}</td>
+                <td>${escapeHtml(String(row.inmueble || ""))}</td>
+                <td>${escapeHtml(String(row.cliente || ""))}</td>
+                <td>${escapeHtml(String(row.asesor || ""))}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: "Listado de visitas", html });
   });
 }
 
@@ -52545,10 +52583,119 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    );
 	  };
 
+	  const normalizeStageLabel = (value) => {
+	    const raw = String(value || "").trim();
+	    if (!raw) return "Inmueble";
+	    return normalizeCrmMainEtapa(raw) || raw;
+	  };
+
 	  const setOpen = (open) => {
 	    if (!inmuebleGuidedModal) return;
 	    inmuebleGuidedModal.classList.toggle("hidden", !open);
 	    if (open) void refresh();
+	  };
+
+	  const safeOpenExternal = (url) => {
+	    const href = String(url || "").trim();
+	    if (!href) return;
+	    let win = null;
+	    try {
+	      win = window.open(href, "_blank", "noopener,noreferrer");
+	    } catch {
+	      win = null;
+	    }
+	    window.setTimeout(() => {
+	      try {
+	        if (!win || win.closed) {
+	          window.location.assign(href);
+	        }
+	      } catch {
+	        window.location.assign(href);
+	      }
+	    }, 150);
+	  };
+
+	  const focusInmuebleField = ({ tab = "", target = "", field = "" } = {}) => {
+	    const tabKey = String(tab || "").trim();
+	    const targetKey = String(target || "").trim();
+	    const fieldKey = String(field || "").trim();
+	    if (!fieldKey || !targetKey) return;
+	    if (tabKey) {
+	      try {
+	        setInmuebleTab(tabKey);
+	      } catch {}
+	    }
+	    window.setTimeout(() => {
+	      try {
+	        const scope =
+	          tabKey === "datos"
+	            ? inmuebleTabDatos
+	            : tabKey === "captacion"
+	              ? inmuebleTabCaptacion
+	              : tabKey === "adjuntos"
+	                ? inmuebleTabAdjuntos
+	                : tabKey === "actividad"
+	                  ? inmuebleTabActividad
+	                  : inmuebleDetail;
+	        const selector = `.inline-input[data-target="${CSS.escape(targetKey)}"][data-field="${CSS.escape(fieldKey)}"]`;
+	        const el = scope?.querySelector?.(selector) || document.querySelector(selector);
+	        if (!el) return;
+	        try {
+	          el.scrollIntoView({ behavior: "smooth", block: "center" });
+	        } catch {}
+	        if (el.focus) el.focus();
+	      } catch {}
+	    }, 80);
+	  };
+
+	  const scrollToOwnersEditor = () => {
+	    try {
+	      setInmuebleTab("captacion");
+	    } catch {}
+	    window.setTimeout(() => {
+	      const card = inmuebleTabCaptacion?.querySelector?.(".editable-card--owners");
+	      if (!card) return;
+	      try {
+	        card.scrollIntoView({ behavior: "smooth", block: "start" });
+	      } catch {}
+	      try {
+	        const firstSelect = card.querySelector("select");
+	        if (firstSelect && firstSelect.focus) firstSelect.focus();
+	      } catch {}
+	    }, 120);
+	  };
+
+	  const openInmuebleDocs = (tipo = "") => {
+	    try {
+	      setInmuebleTab("adjuntos");
+	    } catch {}
+	    window.setTimeout(() => {
+	      try {
+	        const select = inmuebleDocsForm?.querySelector?.('select[name="tipo"]');
+	        const next = String(tipo || "").trim();
+	        if (select && next) {
+	          select.value = next;
+	        }
+	      } catch {}
+	      try {
+	        inmuebleDocsForm?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+	      } catch {}
+	      try {
+	        inmuebleDocsFile?.focus?.();
+	      } catch {}
+	    }, 120);
+	  };
+
+	  const openCatastroForCurrent = () => {
+	    try {
+	      const ctx = state.currentInmuebleContext || {};
+	      const inmueble = ctx.inmueble || {};
+	      const address = [inmueble.direccion, inmueble.poblacion, inmueble.provincia, "España"].filter(Boolean).join(", ");
+	      const url = buildCatastroUrl(String(inmueble.referencia_catastral || "").trim(), address);
+	      safeOpenExternal(url || "https://www.sedecatastro.gob.es/");
+	    } catch {
+	      safeOpenExternal("https://www.sedecatastro.gob.es/");
+	    }
 	  };
 
 	  const renderChecklistPreview = (rows = []) => {
@@ -52613,6 +52760,134 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    inmuebleGuidedActionsPreview.appendChild(list);
 	  };
 
+	  const renderWizardSteps = (steps = []) => {
+	    if (!inmuebleGuidedSteps) return;
+	    const items = Array.isArray(steps) ? steps : [];
+	    if (!items.length) {
+	      inmuebleGuidedSteps.innerHTML = "<p class='muted'>No hay pasos sugeridos.</p>";
+	      return;
+	    }
+	    const list = document.createElement("div");
+	    list.className = "inline-list";
+	    items.forEach((step) => {
+	      const title = String(step?.title || "").trim() || "Paso";
+	      const summary = String(step?.summary || "").trim();
+	      const ok = Boolean(step?.ok);
+	      const tone = ok ? "accent" : "soft";
+	      const row = document.createElement("div");
+	      row.className = "inline-row";
+	      const left = document.createElement("div");
+	      left.innerHTML = `<strong>${escapeHtml(title)}</strong>${summary ? `<div class="muted">${escapeHtml(summary)}</div>` : ""}`;
+	      const right = document.createElement("div");
+	      right.className = "inmueble-summary-badges";
+	      const badge = document.createElement("span");
+	      badge.className = `inmueble-badge tone-${tone}`;
+	      badge.textContent = ok ? "OK" : "Pendiente";
+	      right.appendChild(badge);
+	      const actions = Array.isArray(step?.actions) ? step.actions : [];
+	      actions.slice(0, 3).forEach((action) => {
+	        const btn = document.createElement("button");
+	        btn.type = "button";
+	        btn.className = "secondary";
+	        btn.textContent = String(action?.label || "").trim() || "Abrir";
+	        btn.addEventListener("click", () => {
+	          try {
+	            action?.onClick?.();
+	          } catch {}
+	        });
+	        right.appendChild(btn);
+	      });
+	      row.appendChild(left);
+	      row.appendChild(right);
+	      list.appendChild(row);
+	    });
+	    inmuebleGuidedSteps.innerHTML = "";
+	    inmuebleGuidedSteps.appendChild(list);
+	  };
+
+	  const computeWizardSteps = (stage, inmueble = {}, captacion = {}, propietarios = [], pendingAcciones = []) => {
+	    const etapa = normalizeStageLabel(stage);
+	    const stageKey = normalizeSimple(etapa);
+	    const steps = [];
+
+	    const hasAddress = Boolean(String(inmueble.direccion || "").trim()) && Boolean(String(inmueble.poblacion || "").trim()) && Boolean(String(inmueble.provincia || "").trim());
+	    const hasTipo = Boolean(String(inmueble.tipo_inmueble || "").trim());
+	    const hasProp = Boolean(String(captacion.propietario || "").trim()) || (Array.isArray(propietarios) && propietarios.length > 0);
+	    const hasCatastro = Boolean(String(inmueble.referencia_catastral || "").trim());
+	    const hasProximaAccion = Boolean(String(captacion.proxima_accion || "").trim()) || (Array.isArray(pendingAcciones) && pendingAcciones.length > 0);
+	    const noticiaOk = String(captacion.noticia_verificada ?? "").trim() === "1";
+
+	    steps.push({
+	      title: "Completar dirección (CP/Población/Provincia)",
+	      summary: "Esto alimenta duplicados, Catastro y mapas.",
+	      ok: hasAddress,
+	      actions: [
+	        { label: "Ir a dirección", onClick: () => focusInmuebleField({ tab: "datos", target: "inmueble", field: "direccion" }) },
+	      ],
+	    });
+
+	    steps.push({
+	      title: "Definir tipo de inmueble",
+	      summary: "Ayuda a clasificar y publicar en el portal.",
+	      ok: hasTipo,
+	      actions: [
+	        { label: "Ir a tipo", onClick: () => focusInmuebleField({ tab: "datos", target: "inmueble", field: "tipo_inmueble" }) },
+	      ],
+	    });
+
+	    steps.push({
+	      title: "Vincular propietario real",
+	      summary: "La vinculación activa documentos y seguimiento.",
+	      ok: hasProp,
+	      actions: [{ label: "Abrir propietarios", onClick: () => scrollToOwnersEditor() }],
+	    });
+
+	    if (stageKey === "noticia") {
+	      steps.push({
+	        title: "Marcar noticia como verificada",
+	        summary: "INDICIO: confirma la información antes de avanzar.",
+	        ok: noticiaOk,
+	        actions: [
+	          { label: "Ir a verificación", onClick: () => focusInmuebleField({ tab: "captacion", target: "captacion", field: "noticia_verificada" }) },
+	        ],
+	      });
+	    }
+
+	    steps.push({
+	      title: "Consultar Catastro y registrar referencia",
+	      summary:
+	        stageKey === "reservado" || stageKey === "vendido"
+	          ? "La referencia catastral es obligatoria para cierre."
+	          : "Recomendado para evitar duplicados y acelerar verificaciones.",
+	      ok: hasCatastro,
+	      actions: [
+	        { label: "Abrir Catastro", onClick: () => openCatastroForCurrent() },
+	        { label: "Ir a ref.", onClick: () => focusInmuebleField({ tab: "datos", target: "inmueble", field: "referencia_catastral" }) },
+	      ],
+	    });
+
+	    steps.push({
+	      title: "Subir documentación básica",
+	      summary: "Ej: Nota simple, Escritura, Contrato/Arras.",
+	      ok: true,
+	      actions: [
+	        { label: "Abrir adjuntos", onClick: () => openInmuebleDocs("Nota simple") },
+	      ],
+	    });
+
+	    steps.push({
+	      title: "Mantener próxima acción",
+	      summary: "Agenda viva para avanzar la fase con trazabilidad.",
+	      ok: hasProximaAccion,
+	      actions: [
+	        { label: "Crear acción", onClick: () => inmuebleGuidedCreateAction?.click?.() },
+	        { label: "Ir a citas", onClick: () => inmuebleGuidedGoActividad?.click?.() },
+	      ],
+	    });
+
+	    return steps;
+	  };
+
 	  const refresh = async () => {
 	    if (!inmuebleGuidedModal || inmuebleGuidedModal.classList.contains("hidden")) return;
 	    const ctx = state.currentInmuebleContext || {};
@@ -52621,7 +52896,18 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
 	    const inmuebleId = String(inmueble.id || state.currentInmuebleId || "").trim();
 	    const empresaId = String(inmueble.empresa_id || "").trim();
-	    const etapaMain = getEtapaMain();
+	      const etapaMain = getEtapaMain();
+	      const stageSelected = normalizeStageLabel(inmuebleGuidedStageSelect?.value || etapaMain);
+	      if (inmuebleGuidedStageSelect) {
+	        const wanted = stageSelected;
+	        const has = Array.from(inmuebleGuidedStageSelect.options || []).some((opt) => String(opt.value || opt.textContent || "").trim() === wanted);
+	        if (!has) {
+	          const opt = document.createElement("option");
+	          opt.textContent = wanted;
+	          inmuebleGuidedStageSelect.appendChild(opt);
+	        }
+	        inmuebleGuidedStageSelect.value = wanted;
+	      }
 	    if (!inmuebleId) return;
 
 	    if (inmuebleGuidedStatus) inmuebleGuidedStatus.textContent = "Cargando...";
@@ -52645,7 +52931,7 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	          ? ctx.actividad
 	          : [];
 	      const pendingAcciones = acciones.filter((row) => normalizeSimple(row?.estado || "") === "pendiente");
-	      const requirements = getInmuebleStageRequirements(etapaMain, inmueble, captacion, propietarios);
+	      const requirements = getInmuebleStageRequirements(stageSelected, inmueble, captacion, propietarios);
 	      const pendientes = requirements.filter((item) => !item.ok);
 	      const completedChecklist = checklist.filter((row) => normalizeSimple(row?.estado || "").includes("complet")).length;
 
@@ -52683,10 +52969,11 @@ if (inmuebleAlquilerDiaPdfBtn) {
 
 	      renderChecklistPreview(checklist);
 	      renderActionsPreview(pendingAcciones);
+	      renderWizardSteps(computeWizardSteps(stageSelected, inmueble, captacion, propietarios, pendingAcciones));
 
 	      if (inmuebleGuidedStatus) {
 	        const hints = [];
-	        if (etapaMain === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
+	        if (stageSelected === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
 	          hints.push("Noticia sin verificar.");
 	        }
 	        if (!String(captacion.proxima_accion || "").trim() && !pendingAcciones.length) {
@@ -52700,6 +52987,13 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	  };
 
 	  inmuebleGuidedBtn.addEventListener("click", () => setOpen(true));
+
+	  if (inmuebleGuidedStageSelect) {
+	    inmuebleGuidedStageSelect.addEventListener("change", () => void refresh());
+	  }
+	  if (inmuebleGuidedRefreshBtn) {
+	    inmuebleGuidedRefreshBtn.addEventListener("click", () => void refresh());
+	  }
 
 	  if (inmuebleGuidedClose) {
 	    inmuebleGuidedClose.addEventListener("click", () => setOpen(false));

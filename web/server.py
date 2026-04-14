@@ -16579,8 +16579,9 @@ def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     return normalized
 
 
-def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia_catastral="", owner_nifs=None, scope="captacion"):
     direccion_norm = normalize_inmobiliaria_address(direccion)
+    ref_norm = clean_catastro_reference(referencia_catastral)
     owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
     owner_nif_set = set(owner_nifs)
     duplicates = []
@@ -16611,6 +16612,8 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs
         reasons = []
         if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
             reasons.append("misma dirección")
+        if ref_norm and clean_catastro_reference(row["referencia_catastral"]) == ref_norm:
+            reasons.append("misma referencia catastral")
         row_nifs = {
             normalize_nif(part)
             for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
@@ -30476,6 +30479,17 @@ class Handler(BaseHTTPRequestHandler):
                         return
             except Exception:
                 pass
+            # Otros iconos de UI (allowlist).
+            try:
+                rel = parsed.path.replace("/icons/", "", 1)
+                safe_path = safe_resolve_under(ROOT / "icons", rel)
+                if safe_path and safe_path.exists():
+                    allowed = {"catastro.png"}
+                    if safe_path.name in allowed:
+                        send_file(self, safe_path)
+                        return
+            except Exception:
+                pass
 
         rel_path = parsed.path.lstrip("/")
         # No servir ficheros arbitrarios desde `web/` (evita exponer código fuente/secretos).
@@ -40792,6 +40806,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=direccion,
+                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=[
                         payload.get("propietario1_nif"),
                         payload.get("propietario2_nif"),
@@ -41372,6 +41387,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=payload.get("direccion"),
+                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
@@ -49694,6 +49710,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT v.id, v.fecha, v.hora, v.estado, v.asesor, v.notas,
                        v.demanda_id,
+                       v.inmueble_id,
                        i.direccion AS inmueble,
                        d.cliente_id,
                        c.nombre AS cliente

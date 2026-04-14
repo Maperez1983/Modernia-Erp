@@ -19,6 +19,7 @@ const SHELL_URLS = [
   "/app-routing.js?v=7",
   "/app.js?v=476",
   "/manifest.webmanifest?v=17",
+  "/icons/catastro.png?v=28",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
