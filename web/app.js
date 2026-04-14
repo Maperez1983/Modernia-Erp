@@ -24403,7 +24403,12 @@ const loadDemandasList = (empresaId) => {
     state.demandasList = [];
     return Promise.resolve([]);
   }
-  return api(`/api/demandas?empresa_id=${empresaId}`).then((data) => {
+  const params = new URLSearchParams({
+    empresa_id: String(empresaId || "").trim(),
+    limit: "500",
+    offset: "0",
+  });
+  return api(`/api/demandas?${params.toString()}`).then((data) => {
     state.demandasList = data.rows || [];
     return state.demandasList;
   });
@@ -36697,9 +36702,14 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
   }
   const empresaId = String(empresa.id || "").trim();
   crmRelacionesTable.innerHTML = "<p class='muted'>Calculando relaciones...</p>";
+  const demandasParams = new URLSearchParams({
+    empresa_id: String(empresaId || "").trim(),
+    limit: "2000",
+    offset: "0",
+  });
   Promise.all([
     api(`/api/inmuebles?empresa_id=${encodeURIComponent(empresaId)}`),
-    api(`/api/demandas?empresa_id=${encodeURIComponent(empresaId)}`),
+    api(`/api/demandas?${demandasParams.toString()}`),
   ])
     .then(([inmoData, demData]) => {
       const inmuebles = Array.isArray(inmoData?.rows) ? inmoData.rows : [];

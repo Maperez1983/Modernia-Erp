@@ -50445,6 +50445,24 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            limit = params.get("limit", [""])[0]
+            offset = params.get("offset", [""])[0]
+            try:
+                limit_val = int(str(limit or "").strip() or "500")
+            except Exception:
+                limit_val = 500
+            try:
+                offset_val = int(str(offset or "").strip() or "0")
+            except Exception:
+                offset_val = 0
+            if limit_val <= 0:
+                limit_val = 500
+            if limit_val > 2000:
+                limit_val = 2000
+            if offset_val < 0:
+                offset_val = 0
+            if offset_val > 100000:
+                offset_val = 100000
             rows = conn.execute(
                 """
                SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
@@ -50455,10 +50473,18 @@ class Handler(BaseHTTPRequestHandler):
                 LEFT JOIN clientes c ON c.id = d.cliente_id
                 WHERE d.empresa_id = ?
                 ORDER BY d.created_at DESC
+                LIMIT ? OFFSET ?
                 """,
-                (empresa_id,),
+                (empresa_id, limit_val, offset_val),
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            payload = {
+                "rows": [dict(r) for r in rows],
+                "limit": limit_val,
+                "offset": offset_val,
+                "returned": len(rows),
+                "truncated": len(rows) >= limit_val,
+            }
+            json_response(self, payload)
             return
 
         if path == "/api/visitas":
