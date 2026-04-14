@@ -5642,7 +5642,7 @@ body.crm-context-inmo #inmuebleDetail > .section-head .form-actions {
   gap: 10px;
 }
 
-body.crm-context-inmo #inmuebleDetail > .section-head .form-actions > :not(#inmuebleBackBtn):not(#inmuebleSaveStatus) {
+body.crm-context-inmo #inmuebleDetail > .section-head .form-actions > :not(#inmuebleBackBtn):not(#inmuebleSaveStatus):not(#inmuebleManualSaveBtn) {
   display: none;
 }
 
