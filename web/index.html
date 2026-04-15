@@ -869,7 +869,7 @@
           <div class="section-head">
             <div>
               <h3>Gestoría del workspace</h3>
-              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y campaña de renta dentro del workspace.</p>
+              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y renta dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceGestoriaOverview"></div>
@@ -2214,7 +2214,7 @@
 	            </span>
 	            <span class="tc-mod-label">Inbox</span>
 	          </button>
-	          <button class="tab tc-module hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab" title="Campañas">
+		          <button class="tab tc-module hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab" title="Agenda">
 	            <span class="tc-mod-ico" aria-hidden="true">
 	              <svg viewBox="0 0 24 24" fill="none"><path d="M3 11l18-8-8 18-2-7-8-3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
 	            </span>
@@ -4611,13 +4611,13 @@
             <div class="footer" id="gestoriaContabilidadInfo"></div>
           </div>
         </div>
-        <div id="gestoriaAgendaSection" class="hidden">
-          <div class="crm-header">
-            <div>
-              <h3>Gestoría · Campañas</h3>
-              <p class="muted">Seguimiento de campañas, agenda operativa y acciones recurrentes del equipo.</p>
-            </div>
-          </div>
+	        <div id="gestoriaAgendaSection" class="hidden">
+	          <div class="crm-header">
+	            <div>
+	              <h3>Gestoría · Agenda</h3>
+	              <p class="muted">Agenda operativa y acciones recurrentes del equipo.</p>
+	            </div>
+	          </div>
           <div class="form-card">
             <form id="gestoriaAgendaForm" class="form-grid">
               <label>
@@ -8348,8 +8348,8 @@
                   <div id="gestoriaRentaQuickMatches"></div>
                 </div>
                 <div class="form-card">
-                  <h3>Renta · Campañas y expedientes</h3>
-                  <p class="muted">Seguimiento anual y requerimientos.</p>
+	                  <h3>Renta · Expedientes</h3>
+	                  <p class="muted">Declaraciones, extemporáneas, requerimientos y seguimiento.</p>
                   <form id="gestoriaRentaForm" class="form-grid">
                     <label>
                       Tipo
@@ -8398,7 +8398,7 @@
                   </form>
                   <form id="gestoriaRentaDetallesForm" class="form-grid">
                     <label>
-                      Campaña seleccionada
+	                      Ejercicio seleccionado
                       <input name="entry_ejercicio" id="gestoriaRentaEntryEjercicio" readonly />
                     </label>
                     <label>
@@ -8449,7 +8449,7 @@
                       Remesada
                     </label>
                     <label class="span-2">
-                      Detalles de la campaña (venta vivienda, deducciones, incidencias, etc.)
+	                      Detalles del expediente (venta vivienda, deducciones, incidencias, etc.)
                       <textarea name="renta_detalles" rows="3"></textarea>
                     </label>
                     <input type="hidden" name="doc_id" id="gestoriaRentaDocId" />
@@ -8459,8 +8459,8 @@
                     </div>
                   </form>
                   <div class="form-card">
-                    <h4>Documento de campaña</h4>
-                    <p class="muted">Sube borrador o presentación final. Si presentas una campaña en borrador, el sistema sustituye el archivo y actualiza la ficha.</p>
+	                    <h4>Documento del expediente</h4>
+	                    <p class="muted">Sube borrador o presentación final. Si presentas un borrador, el sistema sustituye el archivo y actualiza la ficha.</p>
                     <form id="gestoriaRentaDocumentoForm" class="form-grid">
                       <label>
                         Nombre documento
@@ -8486,11 +8486,11 @@
                     </form>
                   </div>
                   <div class="form-card">
-                    <h4>Cards de renta</h4>
-                    <p class="muted">Resumen por campaña y acceso directo a la ficha fiscal del cliente.</p>
+	                    <h4>Cards de renta</h4>
+	                    <p class="muted">Resumen por expediente y acceso directo a la ficha fiscal del cliente.</p>
                     <div class="toolbar" id="gestoriaRentaCampaignToolbar">
                       <select id="gestoriaRentaCampaignEjercicio" aria-label="Ejercicio renta"></select>
-                      <button type="button" class="secondary" id="gestoriaRentaCampaignCreateBtn">Nueva campaña</button>
+	                      <button type="button" class="secondary" id="gestoriaRentaCampaignCreateBtn">Nuevo ejercicio</button>
                       <span id="gestoriaRentaCampaignCreateStatus" class="muted"></span>
                     </div>
                     <div id="gestoriaRentaCards"></div>
@@ -8996,7 +8996,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=547"></script>
+			    <script src="app.js?v=548"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;

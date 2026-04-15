@@ -19913,8 +19913,8 @@ const updateCompanySummary = (empresaName) => {
       meta: "Área · Inbox documental",
     },
     "gestoria-agenda": {
-      subtitle: "Campañas, seguimientos y agenda operativa del equipo.",
-      meta: "Área · Campañas",
+      subtitle: "Agenda operativa y acciones recurrentes del equipo.",
+      meta: "Área · Agenda",
     },
     "gestoria-conta": {
       subtitle: "Cola contable, revisión y control operativo.",
@@ -49441,7 +49441,7 @@ const createGestoriaRentaCampaign = async () => {
     }
     state.currentRentaEntryId = entryId;
     if (gestoriaRentaCampaignCreateStatus) {
-      gestoriaRentaCampaignCreateStatus.textContent = `Campaña ${ejercicio} creada.`;
+      gestoriaRentaCampaignCreateStatus.textContent = `Ejercicio ${ejercicio} creado.`;
     }
     loadClienteGestoria(state.currentClienteId);
   } catch (err) {
@@ -51794,7 +51794,7 @@ const loadClienteTrabajosPlanificados = async (clienteId, empresas = []) => {
         planRows.push({ servicio: "Gestoría", tarea: "Gestiones laborales", indicador: `${pendingGestoriaJobs} en curso`, estado: pendingGestoriaJobs ? "En curso" : "Sin carga" });
       }
       if (Number(cfg.mod_renta || 0)) {
-        planRows.push({ servicio: "Gestoría", tarea: "Campaña renta / expedientes", indicador: `${pendingGestoriaAcciones} acciones`, estado: pendingGestoriaAcciones ? "Seguimiento" : "Sin pendientes" });
+        planRows.push({ servicio: "Gestoría", tarea: "Renta / expedientes", indicador: `${pendingGestoriaAcciones} acciones`, estado: pendingGestoriaAcciones ? "Seguimiento" : "Sin pendientes" });
       }
       if (Number(cfg.mod_registro || 0) || Number(cfg.mod_trafico || 0) || Number(cfg.mod_puntuales || 0)) {
         planRows.push({ servicio: "Gestoría", tarea: "Gestiones administrativas", indicador: `${pendingGestoriaAcciones} acciones`, estado: pendingGestoriaAcciones ? "Seguimiento" : "Sin pendientes" });
@@ -55479,7 +55479,7 @@ if (gestoriaCrmTabs) {
 
 if (gestoriaCrmUploadRentaBtn) {
   gestoriaCrmUploadRentaBtn.addEventListener("click", () => {
-    // Lleva al usuario a Campañas → Renta, donde está el flujo de subida/ocr por DNI/NIF.
+    // Lleva al usuario a Agenda → Renta, donde está el flujo de subida/ocr por DNI/NIF.
     setTab("gestoria-agenda");
     window.requestAnimationFrame(() => {
       setGestoriaClientModuleTab("renta");
