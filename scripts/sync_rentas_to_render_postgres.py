@@ -258,42 +258,41 @@ try:
             ).fetchone()
             if existing:
                 cliente_id = existing["id"]
+                # IMPORTANTE: no pisar datos existentes con valores vacíos.
+                # Solo rellenar campos cuando el payload trae un valor real.
+                updates = {"empresa_id": empresa_id, "updated_at": now}
+                def _nonempty(v):
+                    s = str(v or "").strip()
+                    return s if s else ""
+                for key in (
+                    "nombre",
+                    "telefono",
+                    "email",
+                    "tipo",
+                    "perfil",
+                    "estado",
+                    "fecha_nacimiento",
+                    "direccion",
+                    "tipo_persona",
+                    "codigo_postal",
+                    "poblacion",
+                    "provincia",
+                ):
+                    value = client.get(key)
+                    if value is None:
+                        continue
+                    if key in {"codigo_postal"}:
+                        # Puede venir como None/"" en SQLite; tratamos "" como vacío.
+                        value = _nonempty(value)
+                    if isinstance(value, str):
+                        value = value.strip()
+                    if value == "" or value is None:
+                        continue
+                    updates[key] = value
+                set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
                 cur.execute(
-                    """
-                    UPDATE clientes SET
-                      empresa_id = %s,
-                      nombre = %s,
-                      telefono = %s,
-                      email = %s,
-                      tipo = %s,
-                      perfil = %s,
-                      estado = %s,
-                      fecha_nacimiento = %s,
-                      direccion = %s,
-                      tipo_persona = %s,
-                      codigo_postal = %s,
-                      poblacion = %s,
-                      provincia = %s,
-                      updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        empresa_id,
-                        client.get("nombre"),
-                        client.get("telefono"),
-                        client.get("email"),
-                        client.get("tipo"),
-                        client.get("perfil"),
-                        client.get("estado"),
-                        client.get("fecha_nacimiento"),
-                        client.get("direccion"),
-                        client.get("tipo_persona"),
-                        client.get("codigo_postal"),
-                        client.get("poblacion"),
-                        client.get("provincia"),
-                        now,
-                        cliente_id,
-                    ),
+                    f"UPDATE clientes SET {set_clause} WHERE id = %s",
+                    (*updates.values(), cliente_id),
                 )
             else:
                 cliente_id = uuid.uuid4().hex
@@ -633,4 +632,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(130)
-
