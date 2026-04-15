@@ -54255,11 +54255,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if q:
                 if field_filter and field_filter in visible_columns:
-                    where.append(f"t.{quote_ident(field_filter)} LIKE ?")
+                    where.append(f"CAST(t.{quote_ident(field_filter)} AS TEXT) LIKE ?")
                     values.append(f"%{q}%")
                 else:
                     if text_columns:
-                        likes = " OR ".join([f"t.{quote_ident(col)} LIKE ?" for col in text_columns])
+                        likes = " OR ".join([f"CAST(t.{quote_ident(col)} AS TEXT) LIKE ?" for col in text_columns])
                         where.append(f"({likes})")
                         values.extend([f"%{q}%"] * len(text_columns))
 
@@ -54270,7 +54270,7 @@ class Handler(BaseHTTPRequestHandler):
                 where.append(f"t.{quote_ident('tipo')} = ?")
                 values.append(tipo_filter)
             if perfil_filter and "perfil" in visible_columns:
-                where.append(f"t.{quote_ident('perfil')} LIKE ?")
+                where.append(f"CAST(t.{quote_ident('perfil')} AS TEXT) LIKE ?")
                 values.append(f"%{perfil_filter}%")
 
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
