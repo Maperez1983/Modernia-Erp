@@ -52472,6 +52472,7 @@ class Handler(BaseHTTPRequestHandler):
             empresa_nombre = (params.get("empresa_nombre", [""])[0] or "").strip()
             limit_raw = (params.get("limit", ["2000"])[0] or "2000").strip()
             only_mismatch = (params.get("only_mismatch", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
+            include_incomplete = (params.get("include_incomplete", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
             if not empresa_id and empresa_nombre:
                 empresa = get_empresa_by_nombre(conn, empresa_nombre)
                 if empresa:
@@ -52496,7 +52497,7 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, limit),
             ).fetchall()
 
-            counts = {"total": len(rows), "ok": 0, "mismatch": 0}
+            counts = {"total": len(rows), "ok": 0, "mismatch": 0, "incomplete": 0}
             items = []
             for row in rows:
                 record_id = str(row["id"] or "").strip()
@@ -52528,22 +52529,31 @@ class Handler(BaseHTTPRequestHandler):
                 issues = []
                 precio_compra = parse_money_value(comprador.get("precio_compra") or 0)
                 escriturado = parse_money_value(comprador.get("escriturado") or 0)
-                if not precio_compra or precio_compra <= 0:
-                    issues.append("Falta precio_compra.")
-                if not escriturado or escriturado <= 0:
-                    issues.append("Falta escriturado.")
                 if abs(delta_sobrante) > 0.01:
                     issues.append(f"Descuadre sobrante: Δ {delta_sobrante:.2f}.")
                 if abs(diff_medios_pago) > 0.01:
                     issues.append(f"Medios de pago no cuadran: Δ {diff_medios_pago:.2f}.")
 
-                ok = not issues
-                if ok:
-                    counts["ok"] += 1
-                else:
-                    counts["mismatch"] += 1
+                incomplete_issues = []
+                if not precio_compra or precio_compra <= 0:
+                    incomplete_issues.append("Falta precio_compra.")
+                if not escriturado or escriturado <= 0:
+                    incomplete_issues.append("Falta escriturado.")
 
-                if only_mismatch and ok:
+                if incomplete_issues:
+                    status = "incomplete"
+                    counts["incomplete"] += 1
+                    issues = incomplete_issues + issues
+                elif issues:
+                    status = "mismatch"
+                    counts["mismatch"] += 1
+                else:
+                    status = "ok"
+                    counts["ok"] += 1
+
+                if only_mismatch and status == "ok":
+                    continue
+                if not include_incomplete and status == "incomplete":
                     continue
 
                 items.append(
@@ -52553,6 +52563,7 @@ class Handler(BaseHTTPRequestHandler):
                         "banco": banco,
                         "estado": estado,
                         "fecha_firma": fecha_firma,
+                        "status": status,
                         "sobran_comprador": sobran_comprador,
                         "sobran_cuadre": sobran_cuadre,
                         "delta_sobrante": delta_sobrante,
