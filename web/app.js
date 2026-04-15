@@ -36742,6 +36742,10 @@ const refreshCurrentInmuebleProfile = () => {
     ];
     const ownerPrimary = ownerNames[0] || "";
     const ownerExtra = ownerNames.length > 1 ? `+${ownerNames.length - 1} más` : "";
+    const pricingHtml = priceLine
+      ? `<div class="inmueble-summary-pricing">${priceLine}</div>`
+      : "";
+
     inmuebleSummaryCard.innerHTML = `
       <div class="inmueble-summary-top">
         <div>
@@ -36751,7 +36755,7 @@ const refreshCurrentInmuebleProfile = () => {
         </div>
         <div class="inmueble-summary-badges">${topBadges}</div>
       </div>
-      <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
+      ${pricingHtml}
       <div class="inmueble-summary-note">${captacion.proxima_accion || inmueble.referencia || "Completa la ficha para convertir esta noticia en expediente vendible."}</div>
       <div class="inmueble-summary-metrics">
         ${metrics
