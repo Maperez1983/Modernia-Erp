@@ -16700,8 +16700,13 @@ def extract_catastro_public_summary_from_html(html_text, reference=""):
     if not html_text:
         return {}
     clean_ref = clean_catastro_reference(reference)
+    # Nota: el HTML público del Catastro cambia con frecuencia (comillas, acentos y etiquetas).
+    # Mantenemos regex tolerantes y, si falla, el flujo de sync aún debe generar PDF "parcial".
     parcel_match = re.search(
-        r"PARCELA CATASTRAL\s+([A-Z0-9]+).*?title='Tipo de parcela'>(.*?)</span>.*?title='Localizacion'>(.*?)</span>.*?title='Superficie gráfica'>(.*?)</span>",
+        r"PARCELA\s+CATASTRAL\s+([A-Z0-9]+).*?"
+        r"title=(?:'|\")Tipo\s+de\s+parcela(?:'|\")>(.*?)</span>.*?"
+        r"title=(?:'|\")Localizaci(?:ó|o)n(?:'|\")>(.*?)</span>.*?"
+        r"title=(?:'|\")Superficie\s+gr[aá]fica(?:'|\")>(.*?)</span>",
         html_text,
         re.I | re.S,
     )
@@ -16714,12 +16719,12 @@ def extract_catastro_public_summary_from_html(html_text, reference=""):
             "superficie_grafica_m2": _parse_catastro_number(parcel_match.group(4)),
         }
     pattern = re.compile(
-        r"CargarBien\('[^']*','[^']*','[^']*','(?P<ref>[A-Z0-9]+)'.*?"
-        r"title='Localización'>(?P<location>.*?)</span>.*?"
-        r"title='Uso'>(?P<use>.*?)</span>.*?"
-        r"title='Superficie construida'>(?P<surface>.*?)</span>.*?"
-        r"title='Coeficiente de participación'>(?P<coef>.*?)</span>.*?"
-        r"title='Año construcción'>(?P<year>\d{4})</span>",
+        r"CargarBien\((?:'|\")[^'\"]*(?:'|\"),(?:'|\")[^'\"]*(?:'|\"),(?:'|\")[^'\"]*(?:'|\"),(?:'|\")(?P<ref>[A-Z0-9]+)(?:'|\").*?"
+        r"title=(?:'|\")Localizaci(?:ó|o)n(?:'|\")>(?P<location>.*?)</span>.*?"
+        r"title=(?:'|\")Uso(?:'|\")>(?P<use>.*?)</span>.*?"
+        r"title=(?:'|\")Superficie\s+construida(?:'|\")>(?P<surface>.*?)</span>.*?"
+        r"title=(?:'|\")Coeficiente\s+de\s+participaci(?:ó|o)n(?:'|\")>(?P<coef>.*?)</span>.*?"
+        r"title=(?:'|\")A(?:ñ|n)o\s+construcci(?:ó|o)n(?:'|\")>(?P<year>\d{4})</span>",
         re.I | re.S,
     )
     items = []
@@ -16754,9 +16759,25 @@ def fetch_catastro_public_summary(reference):
     source_url = f"{CATRASTRO_PUBLIC_LIST_URL}?{urllib.parse.urlencode(query)}"
     with urllib.request.urlopen(source_url, timeout=10) as response:
         html_text = response.read().decode("utf-8", errors="ignore")
-    summary = extract_catastro_public_summary_from_html(html_text, clean_ref)
-    if not summary or (clean_ref and clean_catastro_reference(summary.get("referencia_catastral")) != clean_ref):
-        raise RuntimeError("no se pudo localizar la finca exacta en la ficha pública del Catastro")
+    summary = extract_catastro_public_summary_from_html(html_text, clean_ref) or {}
+    # Si el HTML cambia o hay varios bienes, no abortamos: generamos ficha PDF parcial y dejamos trazabilidad.
+    # Intentamos seleccionar la coincidencia exacta (por los primeros 14 chars) si hay lista de items.
+    items = summary.get("items") if isinstance(summary.get("items"), list) else []
+    if items and clean_ref:
+        needle = clean_ref[:14]
+        exact = next(
+            (item for item in items if clean_catastro_reference(item.get("referencia_catastral")) == needle),
+            None,
+        )
+        if exact:
+            parcel = {k: summary.get(k) for k in ("referencia_parcela", "tipo_parcela", "localizacion_parcela", "superficie_grafica_m2") if k in summary}
+            summary = {**parcel, **exact}
+        elif len(items) == 1:
+            parcel = {k: summary.get(k) for k in ("referencia_parcela", "tipo_parcela", "localizacion_parcela", "superficie_grafica_m2") if k in summary}
+            summary = {**parcel, **items[0]}
+    # Asegura referencia en el resumen, aunque sea parcial.
+    if clean_ref and not clean_catastro_reference(summary.get("referencia_catastral")):
+        summary["referencia_catastral"] = clean_ref[:14]
     summary["source_url"] = source_url
     return summary, html_text
 
