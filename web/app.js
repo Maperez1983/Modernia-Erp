@@ -22029,6 +22029,7 @@ const CLIENTE_FIELDS_BASE = [
   { key: "email", label: "Email", type: "text" },
   { key: "id_personal", label: "Id. personal", type: "text" },
   { key: "fecha_nacimiento", label: "Fecha nacimiento", type: "date" },
+  { key: "hijos_count", label: "Hijos", type: "number" },
   { key: "direccion", label: "Dirección", type: "text" },
   { key: "direccion_numero", label: "Número", type: "text" },
   { key: "codigo_postal", label: "Código postal", type: "text" },
@@ -50025,7 +50026,7 @@ const renderGestoriaRentaCards = (row = {}) => {
       <div class="renta-card-meta">
         <span>Exp. DNI: ${dniMeta.expedicion}</span>
         <span>${dniMeta.label}: ${dniMeta.value}</span>
-        <span>Hijos: ${entry.hijos_count ?? 0}</span>
+        <span>Hijos: ${entry.hijos_count ?? "-"}</span>
       </div>
       <div class="renta-card-meta">
         <span>Casilla 505</span>
@@ -50131,7 +50132,7 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       </div>
       <div class="gestoria-renta-overview-meta">
         <span>${entry.estado_civil || "Sin estado civil"}</span>
-        <span>Hijos: ${entry.hijos_count ?? 0}</span>
+        <span>Hijos: ${entry.hijos_count ?? "-"}</span>
         <span>Exp. DNI: ${dniMeta.expedicion}</span>
         <span>${dniMeta.label}: ${dniMeta.value}</span>
         <span>${entry.responsable || "Sin responsable"}</span>

@@ -1098,7 +1098,9 @@ def parse_modelo_100_text(text: str) -> dict:
                 }
             )
     data["hijos"] = hijos
-    data["hijos_count"] = len(hijos)
+    # Solo fijamos hijos_count cuando detectamos explícitamente al menos 1 hijo.
+    # Si no se detecta el bloque, dejamos NULL para no asumir que son 0.
+    data["hijos_count"] = len(hijos) if hijos else None
 
     casillas = {
         "rendimientos_trabajo_total": "0012",
@@ -1743,6 +1745,7 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
         "telefono": None,
         "email": None,
         "fecha_nacimiento": record.get("cliente_fecha_nacimiento") or None,
+        "hijos_count": record.get("hijos_count") if record.get("hijos_count") is not None else None,
         "direccion": record.get("direccion") or record.get("direccion_inmueble_principal") or None,
         "codigo_postal": record.get("codigo_postal") or None,
         "poblacion": record.get("poblacion") or None,
@@ -1754,10 +1757,10 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
         conn.execute(
             """
             INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento,
+              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, hijos_count,
               direccion, codigo_postal, poblacion, provincia, estado, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activo', datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activo', datetime(?), datetime(?)
             )
             """,
             (
@@ -1768,6 +1771,7 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
                 fields["telefono"],
                 fields["email"],
                 fields["fecha_nacimiento"],
+                fields["hijos_count"],
                 fields["direccion"],
                 fields["codigo_postal"],
                 fields["poblacion"],
@@ -1782,6 +1786,10 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
         if nif:
             updates["nif"] = nif
         for key, value in fields.items():
+            if key == "hijos_count":
+                if value is not None:
+                    updates[key] = value
+                continue
             if value:
                 updates[key] = value
         if updates:
@@ -1789,10 +1797,19 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
             # - En la BD hay muchos campos guardados como "" en vez de NULL.
             # - COALESCE(campo, ?) NO rellena cuando campo == "".
             # Usamos NULLIF(TRIM(campo),'') para tratar "" como NULL.
-            set_clause = ", ".join([f"{key} = COALESCE(NULLIF(TRIM({key}), ''), ?)" for key in updates])
+            clauses = []
+            values = []
+            for key, value in updates.items():
+                if key == "hijos_count":
+                    clauses.append(f"{key} = COALESCE({key}, ?)")
+                    values.append(value)
+                else:
+                    clauses.append(f"{key} = COALESCE(NULLIF(TRIM({key}), ''), ?)")
+                    values.append(value)
+            set_clause = ", ".join(clauses)
             conn.execute(
                 f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                (*updates.values(), now, cliente_id),
+                (*values, now, cliente_id),
             )
     link = conn.execute(
         """
@@ -1898,7 +1915,7 @@ def build_renta_entry(record: dict, ejercicio: str | None = None, estado_present
         "dni_permanente": 1 if str(record.get("dni_permanente") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
         "cliente_fecha_nacimiento": record.get("cliente_fecha_nacimiento") or "",
         "estado_civil": record.get("cliente_estado_civil") or "",
-        "hijos_count": int(record.get("hijos_count") or 0),
+        "hijos_count": int(record["hijos_count"]) if record.get("hijos_count") is not None else None,
         "hijos": record.get("hijos") or [],
         "casilla_505": record.get("casilla_505"),
         "resultado_declaracion": record.get("resultado_declaracion"),
@@ -2328,6 +2345,11 @@ def apply_to_db(
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
+        # Migración ligera: algunas bases antiguas no tienen la columna.
+        try:
+            conn.execute("ALTER TABLE clientes ADD COLUMN hijos_count INTEGER")
+        except sqlite3.OperationalError:
+            pass
         company_id = ensure_company_id(conn, company_name)
         now = datetime.now(timezone.utc).isoformat()
         created_or_updated = 0

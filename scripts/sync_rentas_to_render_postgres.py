@@ -79,8 +79,14 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
         if not empresa:
             raise SystemExit(f"No existe la empresa {GESTORIA_COMPANY!r} en la base local.")
 
+        try:
+            cliente_cols = {row["name"] for row in conn.execute("PRAGMA table_info(clientes)").fetchall()}
+        except Exception:
+            cliente_cols = set()
+        hijos_select = "c.hijos_count AS hijos_count," if "hijos_count" in cliente_cols else "NULL AS hijos_count,"
+
         rows = conn.execute(
-            """
+            f"""
             SELECT
               c.id AS cliente_id,
               c.nombre,
@@ -91,6 +97,7 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
               c.perfil,
               c.estado,
               c.fecha_nacimiento,
+              {hijos_select}
               c.direccion,
               c.tipo_persona,
               c.codigo_postal,
@@ -176,7 +183,7 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
 
         items = []
         for row in rows:
-            client = {key: row[key] for key in ("nombre", "nif", "telefono", "email", "tipo", "perfil", "estado", "fecha_nacimiento", "direccion", "tipo_persona", "codigo_postal", "poblacion", "provincia", "iban")}
+            client = {key: row[key] for key in ("nombre", "nif", "telefono", "email", "tipo", "perfil", "estado", "fecha_nacimiento", "hijos_count", "direccion", "tipo_persona", "codigo_postal", "poblacion", "provincia", "iban")}
             gestoria = {
                 "tipo_cliente": row["tipo_cliente"],
                 "mod_fiscal": row["mod_fiscal"],
@@ -235,16 +242,19 @@ with open(payload_path, "r", encoding="utf-8") as fh:
 conn = psycopg.connect(dsn, row_factory=dict_row)
 conn.autocommit = False
 try:
-    with conn.cursor() as cur:
-        empresa_nombre = payload["empresa_nombre"]
-        empresa = cur.execute("SELECT id FROM empresas WHERE nombre = %s LIMIT 1", (empresa_nombre,)).fetchone()
-        if not empresa:
-            raise SystemExit(f"Empresa no encontrada en Render: {empresa_nombre}")
-        empresa_id = empresa["id"]
+	    with conn.cursor() as cur:
+	        empresa_nombre = payload["empresa_nombre"]
+	        empresa = cur.execute("SELECT id FROM empresas WHERE nombre = %s LIMIT 1", (empresa_nombre,)).fetchone()
+	        if not empresa:
+	            raise SystemExit(f"Empresa no encontrada en Render: {empresa_nombre}")
+	        empresa_id = empresa["id"]
+	
+	        # Migración ligera: asegurar columna para no depender del arranque del server.
+	        cur.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS hijos_count integer")
 
-        processed = 0
-        for item in payload.get("items") or []:
-            client = item.get("client") or {}
+	        processed = 0
+	        for item in payload.get("items") or []:
+	            client = item.get("client") or {}
             gestoria = item.get("gestoria") or {}
             trabajo = item.get("trabajo") or None
             docs = item.get("docs") or []
@@ -253,32 +263,32 @@ try:
             if not nif:
                 continue
 
-            existing = cur.execute(
-                "SELECT id FROM clientes WHERE UPPER(COALESCE(nif,'')) = %s ORDER BY updated_at DESC LIMIT 1",
-                (nif,),
-            ).fetchone()
-            if existing:
-                cliente_id = existing["id"]
+	            existing = cur.execute(
+	                "SELECT id, hijos_count FROM clientes WHERE UPPER(COALESCE(nif,'')) = %s ORDER BY updated_at DESC LIMIT 1",
+	                (nif,),
+	            ).fetchone()
+	            if existing:
+	                cliente_id = existing["id"]
                 # IMPORTANTE: no pisar datos existentes con valores vacíos.
                 # Solo rellenar campos cuando el payload trae un valor real.
                 updates = {"empresa_id": empresa_id, "updated_at": now}
                 def _nonempty(v):
                     s = str(v or "").strip()
                     return s if s else ""
-                for key in (
-                    "nombre",
-                    "telefono",
-                    "email",
-                    "tipo",
-                    "perfil",
-                    "estado",
-                    "fecha_nacimiento",
-                    "direccion",
-                    "tipo_persona",
-                    "codigo_postal",
-                    "poblacion",
-                    "provincia",
-                ):
+	                for key in (
+	                    "nombre",
+	                    "telefono",
+	                    "email",
+	                    "tipo",
+	                    "perfil",
+	                    "estado",
+	                    "fecha_nacimiento",
+	                    "direccion",
+	                    "tipo_persona",
+	                    "codigo_postal",
+	                    "poblacion",
+	                    "provincia",
+	                ):
                     value = client.get(key)
                     if value is None:
                         continue
@@ -287,46 +297,53 @@ try:
                         value = _nonempty(value)
                     if isinstance(value, str):
                         value = value.strip()
-                    if value == "" or value is None:
-                        continue
-                    updates[key] = value
-                set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
-                cur.execute(
-                    f"UPDATE clientes SET {set_clause} WHERE id = %s",
-                    (*updates.values(), cliente_id),
-                )
-            else:
-                cliente_id = uuid.uuid4().hex
-                cur.execute(
-                    """
-                    INSERT INTO clientes (
-                      id, empresa_id, nombre, nif, telefono, email, tipo, perfil, estado,
-                      created_at, updated_at, fecha_nacimiento, direccion, tipo_persona, codigo_postal, poblacion, provincia
-                    ) VALUES (
-                      %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        cliente_id,
-                        empresa_id,
-                        client.get("nombre"),
-                        client.get("nif"),
-                        client.get("telefono"),
-                        client.get("email"),
-                        client.get("tipo"),
-                        client.get("perfil"),
-                        client.get("estado"),
-                        now,
-                        now,
-                        client.get("fecha_nacimiento"),
-                        client.get("direccion"),
-                        client.get("tipo_persona"),
-                        client.get("codigo_postal"),
-                        client.get("poblacion"),
-                        client.get("provincia"),
-                    ),
-                )
+	                    if value == "" or value is None:
+	                        continue
+	                    updates[key] = value
+	                hijos_count = client.get("hijos_count")
+	                if hijos_count is not None and existing.get("hijos_count") is None:
+	                    try:
+	                        updates["hijos_count"] = int(hijos_count)
+	                    except Exception:
+	                        pass
+	                set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
+	                cur.execute(
+	                    f"UPDATE clientes SET {set_clause} WHERE id = %s",
+	                    (*updates.values(), cliente_id),
+	                )
+	            else:
+	                cliente_id = uuid.uuid4().hex
+	                cur.execute(
+	                    """
+	                    INSERT INTO clientes (
+	                      id, empresa_id, nombre, nif, telefono, email, tipo, perfil, estado,
+	                      created_at, updated_at, fecha_nacimiento, hijos_count, direccion, tipo_persona, codigo_postal, poblacion, provincia
+	                    ) VALUES (
+	                      %s, %s, %s, %s, %s, %s, %s, %s, %s,
+	                      %s, %s, %s, %s, %s, %s, %s, %s, %s
+	                    )
+	                    """,
+	                    (
+	                        cliente_id,
+	                        empresa_id,
+	                        client.get("nombre"),
+	                        client.get("nif"),
+	                        client.get("telefono"),
+	                        client.get("email"),
+	                        client.get("tipo"),
+	                        client.get("perfil"),
+	                        client.get("estado"),
+	                        now,
+	                        now,
+	                        client.get("fecha_nacimiento"),
+	                        client.get("hijos_count"),
+	                        client.get("direccion"),
+	                        client.get("tipo_persona"),
+	                        client.get("codigo_postal"),
+	                        client.get("poblacion"),
+	                        client.get("provincia"),
+	                    ),
+	                )
 
             link = cur.execute(
                 """

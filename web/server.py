@@ -20621,6 +20621,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
     ensure_column(conn, "clientes", "provincia", "provincia TEXT")
+    ensure_column(conn, "clientes", "hijos_count", "hijos_count INTEGER")
     # CRM inmobiliaria: campos Tecnocloud (clientes/informadores).
     ensure_column(conn, "clientes", "movil", "movil TEXT")
     ensure_column(conn, "clientes", "otro_telefono", "otro_telefono TEXT")
@@ -45252,6 +45253,7 @@ class Handler(BaseHTTPRequestHandler):
                 "otro_telefono",
                 "email",
                 "fecha_nacimiento",
+                "hijos_count",
                 "direccion",
                 "direccion_numero",
                 "codigo_postal",
@@ -45277,6 +45279,8 @@ class Handler(BaseHTTPRequestHandler):
             for key in ("cliente_generico_web", "tiene_pedido", "estudio_vip"):
                 if key in updates:
                     updates[key] = parse_boolish(updates.get(key))
+            if "hijos_count" in updates:
+                updates["hijos_count"] = parse_optional_int(updates.get("hijos_count"))
             if "valor_maximo_piso" in updates:
                 updates["valor_maximo_piso"] = parse_optional_float(updates.get("valor_maximo_piso"))
             sync = {"linked": 0, "docs": 0}
