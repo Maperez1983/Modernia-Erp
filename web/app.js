@@ -29925,6 +29925,14 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
     const sobranComprador = toNumber(getNestedValue(computed, "comprador.sobran_en_cuenta"));
     const sobranCuadre = toNumber(getNestedValue(computed, "cuadre.sobran_en_cuenta"));
     const diffMediosPago = toNumber(getNestedValue(computed, "cuadre.diferencia_medios_pago"));
+    const precioCompra = toNumber(getNestedValue(computed, "comprador.precio_compra"));
+    const escriturado = toNumber(getNestedValue(computed, "comprador.escriturado"));
+    const prestamo = toNumber(getNestedValue(computed, "comprador.entregas.prestamo_concedido"));
+
+    if (!precioCompra || precioCompra <= 0) issues.push("Falta el precio de compra.");
+    if (!escriturado || escriturado <= 0) issues.push("Falta el valor escriturado.");
+    if (prestamo === null || prestamo < 0) issues.push("Revisa el préstamo concedido.");
+
     if (sobranComprador !== null && sobranCuadre !== null && Math.abs(sobranComprador - sobranCuadre) > 0.01) {
       issues.push(
         `Sobrante comprador (${formatMoneyInputValue(sobranComprador)}) ≠ sobrante cheques (${formatMoneyInputValue(
@@ -29965,6 +29973,18 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       const first = issues[0];
       review.textContent = issues.length === 1 ? `Revisión Excel: ${first}` : `Revisión Excel: ${first} (+${issues.length - 1})`;
     }
+
+    const pdfButtons = [
+      panel.querySelector("#hipotecaFichaPdfComprador"),
+      panel.querySelector("#hipotecaFichaPdfVendedor"),
+      panel.querySelector("#hipotecaFichaPdfCheques"),
+      panel.querySelector("#hipotecaFichaPdfNotaria"),
+    ].filter(Boolean);
+    const ok = !issues.length;
+    pdfButtons.forEach((btn) => {
+      btn.disabled = !ok;
+      btn.title = ok ? "" : "Corrige la Revisión Excel antes de imprimir.";
+    });
   }
 };
 
@@ -30225,12 +30245,11 @@ const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
     panel.querySelector("#hipotecaFichaPdfNotaria"),
   ].filter(Boolean);
   if (!buttons.length) return;
-  const enabled =
-    !!String(rowData.fecha_firma || "").trim() &&
-    ["firmada", "firmado"].includes(normalizeSimple(rowData.estado || ""));
+  // La impresión se controla por la “Revisión Excel” (cuadre y datos mínimos),
+  // no por el estado de la operación (muchas históricas están en ESTUDIO).
   buttons.forEach((btn) => {
-    btn.disabled = !enabled;
-    btn.title = enabled ? "" : "Disponible solo para hipotecas firmadas con fecha de firma.";
+    btn.disabled = false;
+    btn.title = "";
   });
 };
 
