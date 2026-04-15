@@ -21795,8 +21795,6 @@ const CAPTACION_FIELDS = [
   },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
-  { key: "motivo", label: "Motivo (qué necesita)", type: "text", section: "Propiedad y origen" },
-  { key: "motivacion", label: "Motivación (por qué ahora)", type: "text", section: "Propiedad y origen" },
   {
     key: "necesidad_venta_alquiler",
     label: "Necesidad",
@@ -34677,14 +34675,13 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
 	      <th style="width:34px;"></th>
 	      <th style="width:34px;"></th>
 	      <th>Inmueble</th>
-	      <th>Propietario</th>
-	      <th>Tel.</th>
-	      <th>Subtipología</th>
-	      <th>Motivación</th>
-	      <th>Necesidad</th>
-	      <th>Precio</th>
-	      <th>Próxima acción</th>
-	      <th>Etapa</th>
+		      <th>Propietario</th>
+		      <th>Tel.</th>
+		      <th>Subtipología</th>
+		      <th>Necesidad</th>
+		      <th>Precio</th>
+		      <th>Próxima acción</th>
+		      <th>Etapa</th>
 	    </tr>
 	  `;
   table.appendChild(thead);
@@ -34740,17 +34737,13 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
     telTd.textContent = String(row.propietario_telefono || "").trim();
     tr.appendChild(telTd);
 
-    const subTd = document.createElement("td");
-    subTd.textContent = String(row.subtipologia || "").trim();
-    tr.appendChild(subTd);
+	    const subTd = document.createElement("td");
+	    subTd.textContent = String(row.subtipologia || "").trim();
+	    tr.appendChild(subTd);
 
-    const motivTd = document.createElement("td");
-    motivTd.textContent = String(row.motivacion || "").trim();
-    tr.appendChild(motivTd);
-
-    const necTd = document.createElement("td");
-    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
-    tr.appendChild(necTd);
+	    const necTd = document.createElement("td");
+	    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
+	    tr.appendChild(necTd);
 
     const precioTd = document.createElement("td");
     const early = stage === "Inmueble" || stage === "Noticia";
@@ -34826,20 +34819,19 @@ const loadCrmCaptaciones = () => {
 		    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
 		    const localQRaw = String(crmCaptacionesSearch?.value || "").trim();
 		    const matchLocalQuery = createAdvancedSearchMatcher(localQRaw, {
-		      text: (rowMap) =>
-		        [
-		          rowMap?.id,
-		          rowMap?.direccion,
-		          rowMap?.propietario,
-		          rowMap?.propietario_telefono,
-		          rowMap?.poblacion,
-		          rowMap?.provincia,
-		          rowMap?.subtipologia,
-		          rowMap?.motivacion,
-		          rowMap?.necesidad_venta_alquiler,
-		          rowMap?.proxima_accion,
-		          rowMap?.etapa,
-		          rowMap?.situacion_ocupacion,
+			      text: (rowMap) =>
+			        [
+			          rowMap?.id,
+			          rowMap?.direccion,
+			          rowMap?.propietario,
+			          rowMap?.propietario_telefono,
+			          rowMap?.poblacion,
+			          rowMap?.provincia,
+			          rowMap?.subtipologia,
+			          rowMap?.necesidad_venta_alquiler,
+			          rowMap?.proxima_accion,
+			          rowMap?.etapa,
+			          rowMap?.situacion_ocupacion,
 		          rowMap?.ocupado_por,
 		        ]
 		          .map((value) => String(value || ""))
@@ -34849,13 +34841,12 @@ const loadCrmCaptaciones = () => {
 		        direccion: (rowMap) => rowMap?.direccion,
 		        tel: (rowMap) => rowMap?.propietario_telefono,
 		        poblacion: (rowMap) => rowMap?.poblacion,
-		        provincia: (rowMap) => rowMap?.provincia,
-		        etapa: { get: (rowMap) => rowMap?.etapa, match: "equals" },
-		        necesidad: (rowMap) => rowMap?.necesidad_venta_alquiler,
-		        motivacion: (rowMap) => rowMap?.motivacion,
-		        ocupacion: (rowMap) => rowMap?.situacion_ocupacion,
-		      },
-		    });
+			        provincia: (rowMap) => rowMap?.provincia,
+			        etapa: { get: (rowMap) => rowMap?.etapa, match: "equals" },
+			        necesidad: (rowMap) => rowMap?.necesidad_venta_alquiler,
+			        ocupacion: (rowMap) => rowMap?.situacion_ocupacion,
+			      },
+			    });
 	    const parseDateMs = (value) => {
 	      const dateText = String(value || "").trim();
 	      if (!dateText) return 0;
@@ -37782,16 +37773,15 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   table.className = "crm-dense-table crm-inmuebles-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-		  [
-		    "",
-		    "Inmueble",
-		    "Propietario",
-		    "Inmueble: Tel. pr.",
-		    "Subtipología inm.",
-	    "Motivación",
-	    "Necesidad de vta.",
-	    "Precio encargo",
-	  ].forEach((label) => {
+			  [
+			    "",
+			    "Inmueble",
+			    "Propietario",
+			    "Inmueble: Tel. pr.",
+			    "Subtipología inm.",
+		    "Necesidad de vta.",
+		    "Precio encargo",
+		  ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
     trHead.appendChild(th);
@@ -37849,17 +37839,13 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     telTd.textContent = String(row.propietario_telefono || "").trim();
     tr.appendChild(telTd);
 
-    const subtipoTd = document.createElement("td");
-    subtipoTd.textContent = String(row.subtipologia || "").trim();
-    tr.appendChild(subtipoTd);
+	    const subtipoTd = document.createElement("td");
+	    subtipoTd.textContent = String(row.subtipologia || "").trim();
+	    tr.appendChild(subtipoTd);
 
-    const motivTd = document.createElement("td");
-    motivTd.textContent = String(row.motivacion || "").trim();
-    tr.appendChild(motivTd);
-
-    const necTd = document.createElement("td");
-    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
-    tr.appendChild(necTd);
+	    const necTd = document.createElement("td");
+	    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
+	    tr.appendChild(necTd);
 
     const precioTd = document.createElement("td");
     const precio = Number(row.precio_encargo || 0) > 0
@@ -37980,14 +37966,15 @@ const loadCrmInmuebles = () => {
 	      if (presetKey === "encargos") return allRows.filter((row) => stage(row) === "Encargo");
 	      if (presetKey === "edificios") return allRows.filter((row) => tipo(row).includes("edificio"));
 	      if (presetKey === "complejos") return allRows.filter((row) => tipo(row).includes("complejo"));
-      if (presetKey === "potencial_adquisicion") {
-        return allRows.filter((row) => {
-          const mot = normalizeSimple(row?.motivacion || "");
-          return mot.includes("adquis") || stage(row) === "Noticia";
-        });
-      }
-      return allRows;
-    })();
+	      if (presetKey === "potencial_adquisicion") {
+	        return allRows.filter((row) => {
+	          const val = normalizeSimple(row?.potencial_adquisicion || "");
+	          const yes = val === "si" || val === "sí" || val === "1" || val === "true";
+	          return yes || stage(row) === "Noticia";
+	        });
+	      }
+	      return allRows;
+	    })();
     const rows = filterRowsByEstado(presetFiltered, estadoFilter).filter((row) =>
       matchTcAz(az, row?.referencia || row?.direccion || "")
     );
