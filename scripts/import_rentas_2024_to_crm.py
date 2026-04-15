@@ -585,14 +585,89 @@ def sanitize_person_name_candidate(value: object) -> str:
     return text
 
 
+def _mod97(numeric: str) -> int:
+    rem = 0
+    for ch in str(numeric or ""):
+        if not ch.isdigit():
+            continue
+        rem = (rem * 10 + int(ch)) % 97
+    return rem
+
+
+def _iban_is_valid(iban: str) -> bool:
+    iban = re.sub(r"\s+", "", str(iban or "")).upper()
+    if not re.fullmatch(r"[A-Z0-9]{15,34}", iban):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    expanded = []
+    for ch in rearranged:
+        if ch.isdigit():
+            expanded.append(ch)
+        elif "A" <= ch <= "Z":
+            expanded.append(str(ord(ch) - ord("A") + 10))
+        else:
+            return False
+    return _mod97("".join(expanded)) == 1
+
+
+def _normalize_iban_candidate(raw: str) -> str:
+    normalized = re.sub(r"\s+", "", str(raw or "")).upper()
+    if not re.fullmatch(r"ES[0-9A-Z]{22}", normalized):
+        return ""
+    if re.fullmatch(r"ES[0-9]{22}", normalized):
+        return normalized if _iban_is_valid(normalized) else ""
+    rescue_map = str.maketrans(
+        {
+            "O": "0",
+            "I": "1",
+            "L": "1",
+            "S": "5",
+            "B": "8",
+            "Z": "2",
+            "G": "6",
+        }
+    )
+    rescued = ("ES" + normalized[2:]).translate(rescue_map)
+    if not re.fullmatch(r"ES[0-9]{22}", rescued):
+        return ""
+    return rescued if _iban_is_valid(rescued) else ""
+
+
 def extract_iban_accounts(text: str) -> list[str]:
     raw_matches = re.findall(r"\bES(?:\s*[0-9A-Z]){22}\b", str(text or ""), re.IGNORECASE)
-    accounts = []
+    accounts: list[str] = []
     for raw in raw_matches:
-        normalized = re.sub(r"\s+", "", raw).upper()
-        if re.fullmatch(r"ES[0-9A-Z]{22}", normalized) and normalized not in accounts:
-            accounts.append(normalized)
+        iban = _normalize_iban_candidate(raw)
+        if iban and iban not in accounts:
+            accounts.append(iban)
     return accounts
+
+
+def iban_from_ccc(ccc: str) -> str:
+    ccc = re.sub(r"\s+", "", str(ccc or ""))
+    if not re.fullmatch(r"\d{20}", ccc):
+        return ""
+    remainder = _mod97(ccc + "142800")  # ES00 -> 14 28 00
+    check = 98 - remainder
+    iban = f"ES{check:02d}{ccc}"
+    return iban if _iban_is_valid(iban) else ""
+
+
+def best_iban_from_record(record: dict) -> str:
+    cuentas = record.get("cuentas_detectadas") or []
+    if not isinstance(cuentas, list):
+        cuentas = []
+    for item in cuentas:
+        iban = _normalize_iban_candidate(str(item or ""))
+        if iban:
+            return iban
+    for item in cuentas:
+        digits = re.sub(r"\D+", "", str(item or ""))
+        if len(digits) == 20:
+            iban = iban_from_ccc(digits)
+            if iban:
+                return iban
+    return ""
 
 
 def run_pdftotext(pdf_path: Path) -> str:
@@ -1750,6 +1825,54 @@ def ensure_spouse(conn: sqlite3.Connection, empresa_id: str, service: str, recor
     return ensure_cliente(conn, empresa_id, service, spouse_record, now)
 
 
+def ensure_cliente_profesional_iban(conn: sqlite3.Connection, cliente_id: str, record: dict, now: str) -> None:
+    cliente_id = str(cliente_id or "").strip()
+    if not cliente_id:
+        return
+    iban = best_iban_from_record(record)
+    if not iban:
+        return
+    try:
+        row = conn.execute(
+            """
+            SELECT id, iban
+            FROM cliente_profesional
+            WHERE cliente_id = ?
+            ORDER BY principal DESC, created_at ASC
+            LIMIT 1
+            """,
+            (cliente_id,),
+        ).fetchone()
+    except Exception:
+        return
+    if row:
+        current = compact_spaces(row["iban"] if isinstance(row, sqlite3.Row) else row[1])
+        if current:
+            return
+        try:
+            record_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+            conn.execute(
+                "UPDATE cliente_profesional SET iban = ?, principal = COALESCE(principal, 1), updated_at = datetime(?) WHERE id = ?",
+                (iban, now, record_id),
+            )
+        except Exception:
+            return
+        return
+    try:
+        conn.execute(
+            """
+            INSERT INTO cliente_profesional (
+              id, cliente_id, cnae, iae, actividad, iban, principal, created_at, updated_at
+            ) VALUES (
+              ?, ?, '', '', '', ?, 1, datetime(?), datetime(?)
+            )
+            """,
+            (uuid.uuid4().hex, cliente_id, iban, now, now),
+        )
+    except Exception:
+        return
+
+
 def build_renta_entry(record: dict, ejercicio: str | None = None, estado_presentacion: str | None = None) -> dict:
     ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
     estado_presentacion = detect_renta_doc_status(
@@ -2223,6 +2346,7 @@ def apply_to_db(
             if not cliente_id:
                 skipped_for_review += 1
                 continue
+            ensure_cliente_profesional_iban(conn, cliente_id, record, now)
             spouse_id = ensure_spouse(conn, company_id, RENTA_SERVICE, record, now)
             if spouse_id:
                 linked_spouses += 1

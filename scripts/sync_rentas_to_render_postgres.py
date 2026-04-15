@@ -96,6 +96,7 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
               c.codigo_postal,
               c.poblacion,
               c.provincia,
+              (SELECT iban FROM cliente_profesional p WHERE p.cliente_id = c.id ORDER BY COALESCE(p.principal, 0) DESC, p.created_at ASC LIMIT 1) AS iban,
               cg.tipo_cliente,
               cg.mod_fiscal,
               cg.mod_laboral,
@@ -175,7 +176,7 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
 
         items = []
         for row in rows:
-            client = {key: row[key] for key in ("nombre", "nif", "telefono", "email", "tipo", "perfil", "estado", "fecha_nacimiento", "direccion", "tipo_persona", "codigo_postal", "poblacion", "provincia")}
+            client = {key: row[key] for key in ("nombre", "nif", "telefono", "email", "tipo", "perfil", "estado", "fecha_nacimiento", "direccion", "tipo_persona", "codigo_postal", "poblacion", "provincia", "iban")}
             gestoria = {
                 "tipo_cliente": row["tipo_cliente"],
                 "mod_fiscal": row["mod_fiscal"],
@@ -352,6 +353,41 @@ try:
                     """,
                     (uuid.uuid4().hex, cliente_id, empresa_id, now, now),
                 )
+
+            iban = str(client.get("iban") or "").strip()
+            if iban:
+                try:
+                    prof = cur.execute(
+                        """
+                        SELECT id, iban
+                        FROM cliente_profesional
+                        WHERE cliente_id = %s
+                        ORDER BY COALESCE(principal, 0) DESC, created_at ASC
+                        LIMIT 1
+                        """,
+                        (cliente_id,),
+                    ).fetchone()
+                    if prof:
+                        existing_iban = str(prof.get("iban") or "").strip()
+                        if not existing_iban:
+                            cur.execute(
+                                "UPDATE cliente_profesional SET iban=%s, principal=COALESCE(principal,1), updated_at=%s WHERE id=%s",
+                                (iban, now, prof["id"]),
+                            )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO cliente_profesional (
+                              id, cliente_id, cnae, iae, actividad, iban, principal, created_at, updated_at
+                            ) VALUES (
+                              %s, %s, '', '', '', %s, 1, %s, %s
+                            )
+                            """,
+                            (uuid.uuid4().hex, cliente_id, iban, now, now),
+                        )
+                except Exception:
+                    # Best effort: no bloquear el sync por este extra.
+                    conn.rollback()
 
             cg = cur.execute("SELECT id FROM cliente_gestoria WHERE cliente_id = %s LIMIT 1", (cliente_id,)).fetchone()
             if cg:
