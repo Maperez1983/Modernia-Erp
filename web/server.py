@@ -52469,10 +52469,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipotecas_audit_descuadres":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            empresa_nombre = (params.get("empresa_nombre", [""])[0] or "").strip()
             limit_raw = (params.get("limit", ["2000"])[0] or "2000").strip()
             only_mismatch = (params.get("only_mismatch", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
+            if not empresa_id and empresa_nombre:
+                empresa = get_empresa_by_nombre(conn, empresa_nombre)
+                if empresa:
+                    empresa_id = str(empresa["id"] or "").strip()
             if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                json_response(self, {"error": "empresa_id o empresa_nombre requerido"}, status=400)
                 return
             try:
                 limit = int(limit_raw)
