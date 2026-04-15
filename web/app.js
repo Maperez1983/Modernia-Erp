@@ -29536,8 +29536,9 @@ const ensureHipotecaFichaPanel = () => {
   const bindPdf = (id, section) => {
     panel.querySelector(id)?.addEventListener("click", () => {
       if (panel.dataset.pdfReviewBlocked === "1") {
-        alert(String(panel.dataset.pdfReviewBlockedReason || "").trim() || "Corrige la Revisión Excel antes de imprimir.");
-        return;
+        const reason = String(panel.dataset.pdfReviewBlockedReason || "").trim() || "Revisión Excel con incidencias.";
+        const ok = window.confirm(`${reason}\n\n¿Generar el PDF igualmente?`);
+        if (!ok) return;
       }
       const recordId = String(panel.dataset.recordId || "").trim();
       if (recordId) openHipotecaFichaPrint(recordId, section);
