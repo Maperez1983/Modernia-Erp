@@ -49833,22 +49833,23 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/usuarios":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_actor_is_privileged(conn, session):
-                user_id = str(session.get("user_id") or "").strip()
-                if not user_id:
-                    json_response(self, {"rows": []})
-                    return
-                row = conn.execute(
+            if not session:
+                json_response(self, {"rows": []}, status=401)
+                return
+            is_privileged = bool(workspace_actor_is_privileged(conn, session))
+            if not is_privileged:
+                # Necesario para operativa (p.ej. seleccionar "Responsable" en CRM Inmobiliaria).
+                # No devolvemos emails a usuarios no privilegiados.
+                rows = conn.execute(
                     """
-                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
+                    SELECT id, nombre, apellido, usuario, servicio, rol, activo,
                            COALESCE(registro_horario_activo, 0) AS registro_horario_activo
                     FROM usuarios
-                    WHERE id = ?
-                    LIMIT 1
-                    """,
-                    (user_id,),
-                ).fetchone()
-                json_response(self, {"rows": [dict(row)] if row else []})
+                    WHERE COALESCE(activo, 1) = 1
+                    ORDER BY nombre, apellido
+                    """
+                ).fetchall()
+                json_response(self, {"rows": [dict(r) for r in rows]})
                 return
             rows = conn.execute(
                 """

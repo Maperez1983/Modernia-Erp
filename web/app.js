@@ -17516,6 +17516,10 @@ const openCrmInmobiliario = () => {
     }
   })();
   if (!userCanAccessService("inmobiliaria")) return;
+  // Necesario para selects (Responsable/Asesor) dentro del CRM Inmobiliaria.
+  if (!state.usersList || !state.usersList.length) {
+    loadUsuarios().catch(() => {});
+  }
   if (isTenantWorkspaceMode()) {
     const companies = state.currentWorkspaceDetail?.companies || [];
     if (!Array.isArray(companies) || !companies.length) {
@@ -26772,6 +26776,7 @@ const populateResponsableSelects = () => {
 
 const populateAsesorSelects = () => {
   if (!asesorSelects || !asesorSelects.length) return;
+  const users = state.usersList || [];
   asesorSelects.forEach((selectEl) => {
     if (!selectEl) return;
     const serviceFilter = normalizeSimple(selectEl.dataset.service || "");
@@ -26780,7 +26785,34 @@ const populateAsesorSelects = () => {
     selectEl.innerHTML = "";
     selectEl.appendChild(createOption("", "Selecciona asesor"));
     if (serviceFilter === "inmobiliaria") {
-      INMOBILIARIA_ASESORES.forEach((name) => selectEl.appendChild(createOption(name, name)));
+      const used = new Set();
+      const addOptionUnique = (value, label) => {
+        const finalValue = String(value || "").trim();
+        if (!finalValue) return;
+        const key = normalizeSimple(finalValue);
+        if (used.has(key)) return;
+        used.add(key);
+        selectEl.appendChild(createOption(finalValue, label || finalValue));
+      };
+      const userCandidates = users
+        .filter((user) => {
+          const service = normalizeSimple(user.servicio || "");
+          if (!service) return false;
+          if (service.includes("inmobiliaria")) return true;
+          if (["direccion", "administracion"].includes(service)) return true;
+          return false;
+        })
+        .map((user) => {
+          const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
+          const value = user.usuario || label || user.nombre || "";
+          return { value, label };
+        })
+        .filter((item) => item.value);
+      if (userCandidates.length) {
+        userCandidates.forEach((item) => addOptionUnique(item.value, item.label));
+      } else {
+        INMOBILIARIA_ASESORES.forEach((name) => addOptionUnique(name, name));
+      }
     }
     if (current) {
       selectEl.value = current;
