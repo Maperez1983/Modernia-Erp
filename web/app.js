@@ -55479,10 +55479,9 @@ if (gestoriaCrmTabs) {
 
 if (gestoriaCrmUploadRentaBtn) {
   gestoriaCrmUploadRentaBtn.addEventListener("click", () => {
-    // Lleva al usuario a Agenda → Renta, donde está el flujo de subida/ocr por DNI/NIF.
+    // Lleva al usuario a Agenda, donde está el flujo de subida/ocr por DNI/NIF (Renta).
     setTab("gestoria-agenda");
     window.requestAnimationFrame(() => {
-      setGestoriaClientModuleTab("renta");
       try {
         gestoriaRentaQuickForm?.scrollIntoView({ behavior: "smooth", block: "start" });
       } catch {}

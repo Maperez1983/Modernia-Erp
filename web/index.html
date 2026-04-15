@@ -4611,15 +4611,72 @@
             <div class="footer" id="gestoriaContabilidadInfo"></div>
           </div>
         </div>
-	        <div id="gestoriaAgendaSection" class="hidden">
-	          <div class="crm-header">
-	            <div>
-	              <h3>Gestoría · Agenda</h3>
-	              <p class="muted">Agenda operativa y acciones recurrentes del equipo.</p>
-	            </div>
+		        <div id="gestoriaAgendaSection" class="hidden">
+		          <div class="crm-header">
+		            <div>
+		              <h3>Gestoría · Agenda</h3>
+		              <p class="muted">Agenda operativa y acciones recurrentes del equipo.</p>
+		            </div>
+		          </div>
+	          <div class="form-card">
+	            <h3>Carga rápida por DNI/NIF (Renta)</h3>
+	            <p class="muted">Sube un borrador o declaración presentada. El OCR intentará detectar el DNI/NIF y localizar al cliente existente.</p>
+	            <form id="gestoriaRentaQuickForm" class="form-grid">
+	              <label>
+	                Ejercicio
+	                <select name="ejercicio" id="gestoriaRentaQuickEjercicio"></select>
+	              </label>
+	              <label>
+	                Estado documental
+	                <select name="estado_presentacion" id="gestoriaRentaQuickEstado">
+	                  <option>Borrador</option>
+	                  <option>Presentada</option>
+	                </select>
+	              </label>
+	              <label>
+	                Responsable
+	                <select
+	                  name="responsable"
+	                  id="gestoriaRentaQuickResponsable"
+	                  class="responsable-select"
+	                  data-service="Gestoría"
+	                ></select>
+	              </label>
+	              <label>
+	                Precio
+	                <input name="precio_servicio" id="gestoriaRentaQuickPrecio" type="number" step="0.01" min="0" />
+	              </label>
+	              <label class="pill-option">
+	                <input type="checkbox" name="cobrada" id="gestoriaRentaQuickCobrada" />
+	                Cobrada
+	              </label>
+	              <label>
+	                Forma de pago
+	                <select name="forma_cobro" id="gestoriaRentaQuickFormaCobro">
+	                  <option value="">Sin definir</option>
+	                  <option>Efectivo</option>
+	                  <option>Transferencia</option>
+	                  <option>Tarjeta</option>
+	                  <option>Remesa</option>
+	                </select>
+	              </label>
+	              <label class="pill-option hidden" id="gestoriaRentaQuickRemesadaWrap">
+	                <input type="checkbox" name="remesada" id="gestoriaRentaQuickRemesada" />
+	                Remesada
+	              </label>
+	              <label class="span-2">
+	                Archivo
+	                <input name="archivo" id="gestoriaRentaQuickFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+	              </label>
+	              <div class="form-actions span-2">
+	                <button type="submit">Detectar cliente</button>
+	                <span id="gestoriaRentaQuickStatus" class="muted"></span>
+	              </div>
+	            </form>
+	            <div id="gestoriaRentaQuickMatches"></div>
 	          </div>
-          <div class="form-card">
-            <form id="gestoriaAgendaForm" class="form-grid">
+	          <div class="form-card">
+	            <form id="gestoriaAgendaForm" class="form-grid">
               <label>
                 Cliente
                 <input id="gestoriaAgendaClienteInput" name="cliente_nombre" list="gestoriaAgendaClientes" autocomplete="off" />
@@ -8285,72 +8342,15 @@
                       <span id="gestoriaLaboralStatus" class="muted"></span>
                     </div>
                   </form>
-                  <div id="gestoriaLaboralTable"></div>
-                  <div class="footer" id="gestoriaLaboralInfo"></div>
-                </div>
-              </div>
-              <div id="gestoriaModuleRenta" class="hidden">
-                <div class="form-card">
-                  <h3>Carga rápida por DNI/NIF</h3>
-                  <p class="muted">Sube un borrador o declaración presentada. El OCR intentará detectar el DNI/NIF y localizar al cliente existente.</p>
-                  <form id="gestoriaRentaQuickForm" class="form-grid">
-                    <label>
-                      Ejercicio
-                      <select name="ejercicio" id="gestoriaRentaQuickEjercicio"></select>
-                    </label>
-                    <label>
-                      Estado documental
-                      <select name="estado_presentacion" id="gestoriaRentaQuickEstado">
-                        <option>Borrador</option>
-                        <option>Presentada</option>
-                      </select>
-                    </label>
-                    <label>
-                      Responsable
-                      <select
-                        name="responsable"
-                        id="gestoriaRentaQuickResponsable"
-                        class="responsable-select"
-                        data-service="Gestoría"
-                      ></select>
-                    </label>
-                    <label>
-                      Precio
-                      <input name="precio_servicio" id="gestoriaRentaQuickPrecio" type="number" step="0.01" min="0" />
-                    </label>
-                    <label class="pill-option">
-                      <input type="checkbox" name="cobrada" id="gestoriaRentaQuickCobrada" />
-                      Cobrada
-                    </label>
-                    <label>
-                      Forma de pago
-                      <select name="forma_cobro" id="gestoriaRentaQuickFormaCobro">
-                        <option value="">Sin definir</option>
-                        <option>Efectivo</option>
-                        <option>Transferencia</option>
-                        <option>Tarjeta</option>
-                        <option>Remesa</option>
-                      </select>
-                    </label>
-                    <label class="pill-option hidden" id="gestoriaRentaQuickRemesadaWrap">
-                      <input type="checkbox" name="remesada" id="gestoriaRentaQuickRemesada" />
-                      Remesada
-                    </label>
-                    <label class="span-2">
-                      Archivo
-                      <input name="archivo" id="gestoriaRentaQuickFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
-                    </label>
-                    <div class="form-actions span-2">
-                      <button type="submit">Detectar cliente</button>
-                      <span id="gestoriaRentaQuickStatus" class="muted"></span>
-                    </div>
-                  </form>
-                  <div id="gestoriaRentaQuickMatches"></div>
-                </div>
-                <div class="form-card">
-	                  <h3>Renta · Expedientes</h3>
-	                  <p class="muted">Declaraciones, extemporáneas, requerimientos y seguimiento.</p>
-                  <form id="gestoriaRentaForm" class="form-grid">
+	              <div id="gestoriaLaboralTable"></div>
+	              <div class="footer" id="gestoriaLaboralInfo"></div>
+	            </div>
+	          </div>
+	          <div id="gestoriaModuleRenta" class="hidden">
+	            <div class="form-card">
+		              <h3>Renta · Expedientes</h3>
+		              <p class="muted">Declaraciones, extemporáneas, requerimientos y seguimiento.</p>
+	              <form id="gestoriaRentaForm" class="form-grid">
                     <label>
                       Tipo
                       <select name="tipo_trabajo">
@@ -8996,7 +8996,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=548"></script>
+			    <script src="app.js?v=549"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
