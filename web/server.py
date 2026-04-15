@@ -29250,6 +29250,84 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
     return buffer.getvalue()
 
 
+def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Helvetica", font_size=10, leading=12):
+    """
+    Devuelve bytes PDF con texto "plano" (no editable) para superponer sobre un template.
+    `fields_by_page`: {page_index: [ {x,y,width,height,value,multiline?} ]}
+    """
+    if rl_canvas is None or rl_colors is None:
+        return None
+    buffer = BytesIO()
+    first_size = pagesize_list[0] if pagesize_list else (595, 842)
+    c = rl_canvas.Canvas(buffer, pagesize=first_size)
+    try:
+        c.setFillColor(rl_colors.black)
+    except Exception:
+        pass
+    for idx, size in enumerate(pagesize_list or [first_size]):
+        try:
+            c.setPageSize(size)
+        except Exception:
+            pass
+        for field in (fields_by_page or {}).get(idx, []):
+            try:
+                value = _pdf_form_value(field.get("value") or "")
+                if not value:
+                    continue
+                x = float(field.get("x") or 0)
+                y = float(field.get("y") or 0)
+                w = float(field.get("width") or field.get("w") or 0)
+                h = float(field.get("height") or field.get("h") or 0)
+                is_multiline = bool(field.get("multiline"))
+                fs = float(field.get("fontSize") or font_size or 10)
+                lead = float(field.get("leading") or leading or (fs + 2))
+                try:
+                    c.setFont(font_name, fs)
+                except Exception:
+                    c.setFont("Helvetica", fs)
+                if is_multiline:
+                    # Dibuja desde arriba del bbox hacia abajo.
+                    lines = [line for line in str(value).replace("\r", "").split("\n") if line is not None]
+                    cursor_y = y + max(0.0, h - fs)
+                    max_lines = int(max(1, (h / lead))) if h else len(lines)
+                    for line in lines[:max_lines]:
+                        c.drawString(x + 1.0, cursor_y, str(line))
+                        cursor_y -= lead
+                else:
+                    # Alineación simple dentro del bbox.
+                    c.drawString(x + 1.0, y + 3.0, str(value))
+            except Exception:
+                continue
+        if idx < len(pagesize_list) - 1:
+            c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+def _merge_template_with_overlay_pdf(template_bytes, overlay_bytes):
+    if PdfReader is None or PdfWriter is None:
+        return None
+    try:
+        template_reader = PdfReader(BytesIO(template_bytes))
+        overlay_reader = PdfReader(BytesIO(overlay_bytes))
+    except Exception:
+        return None
+    writer = PdfWriter()
+    for idx, tpage in enumerate(template_reader.pages):
+        if idx < len(overlay_reader.pages):
+            try:
+                tpage.merge_page(overlay_reader.pages[idx])
+            except Exception:
+                pass
+        writer.add_page(tpage)
+    out = BytesIO()
+    try:
+        writer.write(out)
+    except Exception:
+        return None
+    return out.getvalue()
+
+
 def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
     if PdfReader is None or PdfWriter is None or NameObject is None:
         return None
@@ -29446,6 +29524,146 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
     if not overlay_bytes:
         return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
     merged = _merge_template_with_overlay_acroform(template_bytes, overlay_bytes)
+    if not merged:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    return merged
+
+
+def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, extra=None):
+    """
+    Nota de encargo basada en PDF plantilla (Modernia) pero "plana" (no editable).
+    Fallback: documento PDF simple si faltan dependencias/plantilla.
+    """
+    extra = extra or {}
+    owners = owners or []
+
+    def normalize_tipo_operacion(value):
+        raw = str(value or "").strip().lower()
+        if raw in {"alquiler", "arrendamiento", "renta"}:
+            return "alquiler"
+        return "venta"
+
+    tipo_operacion = normalize_tipo_operacion(extra.get("tipo_operacion") or extra.get("tipo"))
+    template_path = INMO_NOTA_ENCARGO_ALQUILER_TEMPLATE if tipo_operacion == "alquiler" else INMO_NOTA_ENCARGO_VENTA_TEMPLATE
+    if not template_path.exists():
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    if rl_canvas is None or PdfReader is None:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    try:
+        template_bytes = template_path.read_bytes()
+        reader = PdfReader(BytesIO(template_bytes))
+    except Exception:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+
+    pagesizes = []
+    for page in reader.pages:
+        try:
+            pagesizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+        except Exception:
+            pagesizes.append((595.0, 842.0))
+
+    direccion = _pdf_form_value(inmueble.get("direccion"))
+    cp = _pdf_form_value(inmueble.get("codigo_postal"), "")
+    poblacion = _pdf_form_value(inmueble.get("poblacion"), "")
+    provincia = _pdf_form_value(inmueble.get("provincia"), "")
+    direccion_full = ", ".join([part for part in [direccion, " ".join([p for p in [cp, poblacion] if p]).strip(), provincia] if part]).strip()
+
+    ref_catastral = _pdf_form_value(inmueble.get("referencia_catastral"), "")
+    datos_registrales = _pdf_form_value(extra.get("datos_registrales"), "")
+    m2_construidos = _pdf_form_value(inmueble.get("m2"), "")
+    m2_utiles = _pdf_form_value(extra.get("m2_utiles"), "")
+    otros = _pdf_form_value(extra.get("otros"), "")
+    cargas = _pdf_form_value(extra.get("cargas"), "NADA")
+
+    owner1 = owners[0] if len(owners) > 0 else {}
+    owner2 = owners[1] if len(owners) > 1 else {}
+
+    def owner_block(owner):
+        if not owner:
+            return ""
+        parts = []
+        nombre = _pdf_form_value(owner.get("nombre"), "")
+        nif = _pdf_form_value(owner.get("nif"), "")
+        dom = _pdf_form_value(owner.get("direccion") or owner.get("domicilio"), "")
+        tel = _pdf_form_value(owner.get("telefono"), "")
+        email_val = _pdf_form_value(owner.get("email"), "")
+        if nombre:
+            parts.append(nombre)
+        if nif:
+            parts.append(f"NIF: {nif}")
+        if dom:
+            parts.append(f"Domicilio: {dom}")
+        if tel:
+            parts.append(f"Tel: {tel}")
+        if email_val:
+            parts.append(f"Email: {email_val}")
+        return "\n".join(parts)
+
+    owner1_text = owner_block(owner1)
+    owner2_text = owner_block(owner2)
+
+    if tipo_operacion == "alquiler":
+        precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
+        honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
+        plazo = _pdf_form_value(extra.get("plazo_arrendamiento"), "")
+    else:
+        precio = _pdf_form_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"), "")
+        honorarios = _pdf_form_value(extra.get("honorarios_text") or extra.get("honorarios_pct"), "")
+        plazo = ""
+
+    fecha_venta_desde = _pdf_form_value(extra.get("fecha_venta_desde"), "")
+    fecha_venta_antes = _pdf_form_value(extra.get("fecha_venta_antes"), "")
+    fecha_inicio = _pdf_form_value(extra.get("fecha_inicio"), "")
+    fecha_fin = _pdf_form_value(extra.get("fecha_fin"), "")
+    lugar_firma = _pdf_form_value(extra.get("lugar_firma") or poblacion or provincia, "")
+    fecha_firma = _pdf_form_value(extra.get("fecha_firma"), "")
+
+    fields = {}
+    if tipo_operacion == "venta":
+        w, h = pagesizes[0]
+        fields[0] = [
+            {"x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full},
+            {"x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales},
+            {"x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral},
+            {"x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles},
+            {"x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos},
+            {"x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros},
+            {"x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True},
+            {"x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True},
+            {"x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas},
+            {"x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio},
+            {"x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde},
+            {"x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes},
+            {"x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios},
+            {"x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio},
+            {"x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin},
+        ]
+        if len(pagesizes) > 1:
+            w2, h2 = pagesizes[1]
+            fields[1] = [
+                {"x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma},
+                {"x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma},
+            ]
+    else:
+        w, h = pagesizes[0]
+        fields[0] = [
+            {"x": 105.6, "y": h - 430.70, "width": w - 130, "height": 14, "value": direccion_full},
+            {"x": 147.5, "y": h - 442.82, "width": 360, "height": 14, "value": datos_registrales},
+            {"x": 150, "y": h - 454.94, "width": 200, "height": 14, "value": ref_catastral},
+            {"x": 428.6, "y": h - 454.94, "width": 55, "height": 14, "value": m2_construidos},
+            {"x": 513.4, "y": h - 454.94, "width": 55, "height": 14, "value": m2_utiles},
+            {"x": 100, "y": h - 467.02, "width": w - 130, "height": 14, "value": otros},
+            {"x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
+            {"x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
+            {"x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
+            {"x": 60, "y": h - 246.0, "width": w - 90, "height": 80, "value": owner1_text, "multiline": True},
+            {"x": 60, "y": h - 340.0, "width": w - 90, "height": 80, "value": owner2_text, "multiline": True},
+        ]
+
+    overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields)
+    if not overlay_bytes:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
     if not merged:
         return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
     return merged
@@ -51284,6 +51502,8 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            mode = (params.get("mode", [""])[0] or "").strip().lower()
+            is_final = mode in {"final", "flat", "noedit", "no_edit", "noneditable", "non-editable"}
             tipo_operacion = (params.get("tipo_operacion", [""])[0] or params.get("tipo", [""])[0] or "venta").strip().lower()
             if tipo_operacion in {"arrendamiento", "renta"}:
                 tipo_operacion = "alquiler"
@@ -51410,7 +51630,8 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "precio_venta requerido"}, status=400)
                     return
 
-            pdf_bytes = build_inmueble_nota_encargo_pdf_editable(
+            builder = build_inmueble_nota_encargo_pdf_final if is_final else build_inmueble_nota_encargo_pdf_editable
+            pdf_bytes = builder(
                 dict(empresa) if empresa else {},
                 dict(inmueble),
                 dict(captacion),
@@ -51418,19 +51639,19 @@ class Handler(BaseHTTPRequestHandler):
                 extra=extra,
             )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
-            filename = f"nota_encargo_{safe_ref}.pdf"
+            filename = f"{'nota_encargo_final' if is_final else 'nota_encargo'}_{safe_ref}.pdf"
             persist_generated_inmueble_pdf(
                 conn,
                 inmueble_id,
-                "Nota de encargo",
-                f"Nota de encargo · {inmueble['direccion'] or safe_ref}",
+                "Nota de encargo (PDF final)" if is_final else "Nota de encargo (PDF editable)",
+                f"{'Nota de encargo (final)' if is_final else 'Nota de encargo (editable)'} · {inmueble['direccion'] or safe_ref}",
                 pdf_bytes,
                 filename.replace(".pdf", ""),
                 now,
                 replace_existing=False,
                 empresa_id=inmueble["empresa_id"],
-                plantilla_clave="nota_encargo",
-                origen_tipo="inmueble_encargo_pdf",
+                plantilla_clave="nota_encargo_final" if is_final else "nota_encargo",
+                origen_tipo="inmueble_encargo_pdf_final" if is_final else "inmueble_encargo_pdf",
                 origen_id=inmueble_id,
                 payload_json=extra,
             )
