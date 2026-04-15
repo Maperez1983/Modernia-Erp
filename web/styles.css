@@ -9834,7 +9834,12 @@ body.theme-operativa::before {
 }
 
 body.theme-operativa header {
-  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  /* Alinea el "card" del header con el ancho real del contenido de `main`
+     (que está limitado por padding horizontal). */
+  width: min(
+    calc(100% - (var(--layout-gutter) * 2)),
+    calc(var(--layout-max) - (var(--layout-gutter) * 2))
+  );
   margin: 18px auto 0;
   padding:
     calc(28px + var(--safe-top))
@@ -9966,7 +9971,10 @@ body.theme-operativa .density-btn.active {
 }
 
 body.theme-operativa .ui-context-bar {
-  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  width: min(
+    calc(100% - (var(--layout-gutter) * 2)),
+    calc(var(--layout-max) - (var(--layout-gutter) * 2))
+  );
   margin: 14px auto 0;
   padding:
     12px
@@ -10360,7 +10368,10 @@ body.theme-operativa .muted {
 }
 
 body.theme-operativa .alert {
-  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  width: min(
+    calc(100% - (var(--layout-gutter) * 2)),
+    calc(var(--layout-max) - (var(--layout-gutter) * 2))
+  );
   margin-top: 12px;
   border-radius: 22px;
   border: 1px solid rgba(18, 50, 71, 0.14);
