@@ -83,6 +83,7 @@ DB_LOCAL_FALLBACK = ROOT.parent / "data" / "erp_import2.local.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
+NOTARIAS_MALAGA_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "notarias_malaga.txt"
 ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
@@ -51730,6 +51731,78 @@ class Handler(BaseHTTPRequestHandler):
 
             out = sorted(list(items), key=lambda x: x.lower())
             json_response(self, {"items": out})
+            return
+
+        if path == "/api/notarias":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            municipio = (params.get("municipio", [""])[0] or "").strip()
+            q = (params.get("q", [""])[0] or "").strip()
+            if not provincia:
+                json_response(self, {"error": "provincia requerida"}, status=400)
+                return
+
+            target_prov = normalize_lookup_text(provincia)
+            target_mun = normalize_lookup_text(municipio)
+            target_q = normalize_lookup_text(q)
+
+            items = set()
+
+            # Catálogo local (preferido para listados completos).
+            try:
+                if "malaga" in target_prov and NOTARIAS_MALAGA_CATALOG_PATH.exists():
+                    with NOTARIAS_MALAGA_CATALOG_PATH.open("r", encoding="utf-8") as fh:
+                        for raw_line in fh:
+                            line = (raw_line or "").strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            if target_q and target_q not in normalize_lookup_text(line):
+                                continue
+                            if len(items) < 1000:
+                                items.add(line)
+            except Exception:
+                pass
+
+            # Best-effort: enriquecer con notarias ya usadas en operaciones.
+            if empresa_id:
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT liquidacion_json
+                        FROM hipotecas
+                        WHERE empresa_id = ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 4000
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    rows = []
+
+                for row in rows or []:
+                    raw = row["liquidacion_json"] if row else None
+                    parsed = _safe_json_object(raw or "{}")
+                    notaria = parsed.get("notaria") if isinstance(parsed.get("notaria"), dict) else {}
+                    comprador = parsed.get("comprador") if isinstance(parsed.get("comprador"), dict) else {}
+                    nombre = str(notaria.get("nombre") or "").strip()
+                    if not nombre:
+                        continue
+                    if target_q and target_q not in normalize_lookup_text(nombre):
+                        continue
+                    if target_mun:
+                        loc = normalize_lookup_text(comprador.get("localidad") or "")
+                        if target_mun not in loc and target_mun not in normalize_lookup_text(nombre):
+                            continue
+                    if target_prov:
+                        prov = normalize_lookup_text(comprador.get("provincia") or "")
+                        if target_prov not in prov and target_prov not in normalize_lookup_text(nombre):
+                            continue
+                    items.add(nombre)
+                    if len(items) >= 200:
+                        break
+
+            out = sorted(list(items), key=lambda x: x.lower())
+            json_response(self, {"items": out[:200]})
             return
 
         if path == "/api/hipotecas_firmadas_excel":

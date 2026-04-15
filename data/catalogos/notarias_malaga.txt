@@ -1,0 +1,19 @@
+# Catálogo de notarias (Provincia de Málaga)
+# - Una entrada por línea.
+# - Puedes usar el formato que prefieras: nombre de notario/a, notaría, municipio, etc.
+# - Se ignoran líneas vacías y las que empiezan por '#'.
+#
+# Nota: este fichero se usa para poblar el desplegable de Notaría en la ficha de financiación.
+# Si quieres el listado completo y oficial, pásanos la fuente/listado y lo importamos aquí.
+
+Miguel Ángel Delgado
+Notaría de Don Pedro Díaz Serrano
+Notaría (Málaga)
+Notaría (Vélez-Málaga)
+Notaría (Torrox)
+Notaría (Rincón de la Victoria)
+Notaría (Marbella)
+Notaría (Fuengirola)
+Notaría (Torremolinos)
+Notaría (Benalmádena)
+Notaría (Estepona)

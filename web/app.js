@@ -29354,19 +29354,7 @@ const ensureHipotecaFichaPanel = () => {
         </div>
       </form>
       <datalist id="hipotecaRegistroList"></datalist>
-      <datalist id="notariaMalagaList">
-        <option value="Miguel Ángel Delgado"></option>
-        <option value="Notaría de Don Pedro Díaz Serrano"></option>
-        <option value="Notaría (Málaga)"></option>
-        <option value="Notaría (Vélez-Málaga)"></option>
-        <option value="Notaría (Torrox)"></option>
-        <option value="Notaría (Rincón de la Victoria)"></option>
-        <option value="Notaría (Marbella)"></option>
-        <option value="Notaría (Fuengirola)"></option>
-        <option value="Notaría (Torremolinos)"></option>
-        <option value="Notaría (Benalmádena)"></option>
-        <option value="Notaría (Estepona)"></option>
-      </datalist>
+      <datalist id="notariaMalagaList"></datalist>
     </div>
   `;
   document.body.appendChild(panel);
@@ -30027,6 +30015,106 @@ const updateHipotecaRegistroDatalist = async (panel) => {
   list.innerHTML = options.map((opt) => `<option value="${escapeHtml(opt)}"></option>`).join("");
 };
 
+const updateHipotecaNotariasDatalist = async (panel) => {
+  if (!panel) return;
+  const list = panel.querySelector("#notariaMalagaList");
+  if (!list) return;
+  const empresa = resolveCrmFinEmpresa();
+  const params = new URLSearchParams();
+  if (empresa?.id) params.set("empresa_id", empresa.id);
+  params.set("provincia", "Málaga");
+
+  let items = [];
+  try {
+    const data = await api(`/api/notarias?${params.toString()}`);
+    items = Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    items = [];
+  }
+  if (!items.length) {
+    items = [
+      "Miguel Ángel Delgado",
+      "Notaría de Don Pedro Díaz Serrano",
+      "Notaría (Málaga)",
+      "Notaría (Vélez-Málaga)",
+      "Notaría (Torrox)",
+      "Notaría (Rincón de la Victoria)",
+      "Notaría (Marbella)",
+      "Notaría (Fuengirola)",
+      "Notaría (Torremolinos)",
+      "Notaría (Benalmádena)",
+      "Notaría (Estepona)",
+    ];
+  }
+
+  const normalized = new Set();
+  const options = [];
+  items.forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    const key = normalizeSimple(text);
+    if (normalized.has(key)) return;
+    normalized.add(key);
+    options.push(text);
+  });
+  list.innerHTML = options.map((opt) => `<option value="${escapeHtml(opt)}"></option>`).join("");
+};
+
+const setupHipotecaPrestamoCuotasAuto = (panel) => {
+  if (!panel) return;
+  if (panel.dataset.prestamoAutoCuotas === "1") {
+    // Recalcular en cada apertura, por si cambian valores.
+    panel._hipotecaPrestamoAutoSync?.();
+    return;
+  }
+  panel.dataset.prestamoAutoCuotas = "1";
+  const plazoEl = panel.querySelector('[data-json="liquidacion_json"][data-path="prestamo.plazo_anos"]');
+  const cuotasEl = panel.querySelector('[data-json="liquidacion_json"][data-path="prestamo.numero_cuotas"]');
+  if (!plazoEl || !cuotasEl) return;
+  // Permitir decimales si hace falta (p.e. cuotas no múltiplo de 12).
+  try {
+    plazoEl.step = "0.01";
+  } catch {}
+
+  let guard = false;
+  const syncFromPlazo = () => {
+    if (guard) return;
+    const years = toNumber(plazoEl.value);
+    if (years === null) return;
+    const cuotas = Math.round(years * 12);
+    guard = true;
+    cuotasEl.value = String(cuotas);
+    guard = false;
+  };
+  const syncFromCuotas = () => {
+    if (guard) return;
+    const cuotas = toNumber(cuotasEl.value);
+    if (cuotas === null) return;
+    const years = cuotas / 12;
+    const rounded = Math.abs(years - Math.round(years)) <= 0.001 ? String(Math.round(years)) : years.toFixed(2);
+    guard = true;
+    plazoEl.value = rounded;
+    guard = false;
+  };
+  panel._hipotecaPrestamoAutoSync = () => {
+    if (String(cuotasEl.value || "").trim() && !String(plazoEl.value || "").trim()) {
+      syncFromCuotas();
+    } else if (String(plazoEl.value || "").trim() && !String(cuotasEl.value || "").trim()) {
+      syncFromPlazo();
+    }
+  };
+
+  plazoEl.addEventListener("input", () => {
+    syncFromPlazo();
+    refreshHipotecaLiquidacionComputedControls(panel);
+  });
+  cuotasEl.addEventListener("input", () => {
+    syncFromCuotas();
+    refreshHipotecaLiquidacionComputedControls(panel);
+  });
+  panel._hipotecaPrestamoAutoSync();
+};
+
 const fetchHipotecaRowById = async (recordId) => {
   const id = String(recordId || "").trim();
   if (!id) return null;
@@ -30365,6 +30453,8 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   setupHipotecaFichaDomicilioSync(panel);
   setupHipotecaFichaComputedInputs(panel);
   updateHipotecaRegistroDatalist(panel);
+  updateHipotecaNotariasDatalist(panel);
+  setupHipotecaPrestamoCuotasAuto(panel);
 
   if (panel.dataset.liquidacionListeners !== "1") {
     panel.dataset.liquidacionListeners = "1";
