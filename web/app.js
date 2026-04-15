@@ -21878,6 +21878,7 @@ const CAPTACION_FIELDS = [
   { key: "probabilidad", label: "Probabilidad (%)", type: "number", section: "Pipeline" },
   { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Pipeline" },
   { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Pipeline" },
+  { key: "precio_valoracion", label: "Precio valoración", type: "number", section: "Pipeline" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Pipeline" },
   { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Pipeline" },
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
@@ -21932,6 +21933,11 @@ const CAPTACION_FIELDS_MAP = Object.fromEntries(
   CAPTACION_FIELDS.filter((field) => field && field.key).map((field) => [field.key, field])
 );
 const pickCaptacionFields = (keys = []) => keys.map((key) => CAPTACION_FIELDS_MAP[key]).filter(Boolean);
+const cloneCaptacionField = (key, overrides = {}) => {
+  const base = CAPTACION_FIELDS_MAP[key];
+  if (!base) return null;
+  return { ...base, ...(overrides || {}) };
+};
 
 // Ficha Tecnocloud-like: al pasar a Noticia, los datos de Noticia viven en una pestaña separada.
 const CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA = pickCaptacionFields([
@@ -21949,24 +21955,23 @@ const CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA = pickCaptacionFields([
 
 const CAPTACION_FIELDS_NOTICIA = [
   // Origen
-  ...pickCaptacionFields(["canal", "tipo_procedencia", "necesidad_venta_alquiler", "urgencia"]),
-  // Valoración / pricing
-  ...pickCaptacionFields([
-    "precio_pedido_cliente",
-    "precio_valoracion",
-    "fecha_valoracion",
-    "desviacion_pct",
-    "valor_referencia",
-  ]).map((field) => (field?.key === "desviacion_pct" ? { ...field, readonly: true } : field)),
+  cloneCaptacionField("canal", { section: "Origen" }),
+  cloneCaptacionField("tipo_procedencia", { section: "Origen" }),
+  cloneCaptacionField("necesidad_venta_alquiler", { section: "Origen" }),
+  cloneCaptacionField("urgencia", { section: "Origen" }),
+  // Valoración
+  cloneCaptacionField("precio_pedido_cliente", { section: "Valoración" }),
+  cloneCaptacionField("precio_valoracion", { section: "Valoración" }),
+  cloneCaptacionField("fecha_valoracion", { section: "Valoración" }),
+  cloneCaptacionField("desviacion_pct", { section: "Valoración", readonly: true }),
   // Pipeline
-  ...pickCaptacionFields([
-    "noticia_verificada",
-    "probabilidad",
-    "prioridad_noticia",
-    "encargo_competencia",
-    "encargo_competencia_agencia",
-    "encargo_competencia_hasta",
-  ]),
+  cloneCaptacionField("noticia_verificada", { section: "Pipeline" }),
+  cloneCaptacionField("probabilidad", { section: "Pipeline" }),
+  cloneCaptacionField("prioridad_noticia", { section: "Pipeline" }),
+  cloneCaptacionField("encargo_competencia", { section: "Pipeline" }),
+  cloneCaptacionField("encargo_competencia_agencia", { section: "Pipeline" }),
+  cloneCaptacionField("encargo_competencia_hasta", { section: "Pipeline" }),
+  cloneCaptacionField("notas", { section: "Notas internas" }),
 ].filter(Boolean);
 
 // En la ficha de Encargo solo mostramos lo esencial para no saturar al equipo.
@@ -23540,7 +23545,7 @@ const rerenderCurrentInmuebleGrids = () => {
   const captacion = state.currentInmuebleContext?.captacion || {};
   const docs = state.currentInmuebleContext?.docs || [];
   state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, docs);
-  const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
+	      const etapaMain = normalizeCrmMainEtapa(inmueble.estado || normalizedCaptacion.situacion_comercial || captacion.etapa || "");
   syncInmuebleNoticiaTab(inmueble, captacion);
   if (inmuebleDatosGrid) {
     const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
@@ -24121,19 +24126,27 @@ const renderEditableGrid = (grid, fields, data, target) => {
       input = document.createElement("textarea");
       input.rows = 3;
       input.value = currentValue || "";
-    } else {
-      input = document.createElement("input");
-      input.type = field.type || "text";
-      if (target === "cliente" && field.key === "nif") {
-        input.value = normalizeDocumento(currentValue);
-      } else if (target === "cliente" && field.key === "nombre") {
-        input.value = formatNombreCliente(currentValue);
-      } else if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
-        input.value = formatMoneyInputValue(currentValue);
-      } else {
-        input.value = currentValue || "";
-      }
-    }
+	    } else {
+	      input = document.createElement("input");
+	      const isMoney =
+	        (target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key);
+	      // UX: los importes con formato (.,€) no deben ser <input type="number"> porque bloquea escritura en algunos navegadores.
+	      if (isMoney && String(field.type || "").toLowerCase() === "number") {
+	        input.type = "text";
+	        input.inputMode = "decimal";
+	      } else {
+	        input.type = field.type || "text";
+	      }
+	      if (target === "cliente" && field.key === "nif") {
+	        input.value = normalizeDocumento(currentValue);
+	      } else if (target === "cliente" && field.key === "nombre") {
+	        input.value = formatNombreCliente(currentValue);
+	      } else if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
+	        input.value = formatMoneyInputValue(currentValue);
+	      } else {
+	        input.value = currentValue || "";
+	      }
+	    }
     if (input && input.tagName === "INPUT" && field.list) {
       try {
         input.setAttribute("list", String(field.list || "").trim());
@@ -41595,7 +41608,7 @@ const openInmuebleDetail = (id, originView = "") => {
 	        compradores: [],
 	      };
       state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
-      const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
+  const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.situacion_comercial || captacion.etapa || "");
 	      if (hasPendingPrefill) {
 	        applyPendingInmuebleCitaPrefill();
 	      }
