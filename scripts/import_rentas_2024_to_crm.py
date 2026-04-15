@@ -1710,7 +1710,11 @@ def ensure_cliente(conn: sqlite3.Connection, empresa_id: str, service: str, reco
             if value:
                 updates[key] = value
         if updates:
-            set_clause = ", ".join([f"{key} = COALESCE({key}, ?)" for key in updates])
+            # Rellenamos campos vacíos sin pisar datos existentes:
+            # - En la BD hay muchos campos guardados como "" en vez de NULL.
+            # - COALESCE(campo, ?) NO rellena cuando campo == "".
+            # Usamos NULLIF(TRIM(campo),'') para tratar "" como NULL.
+            set_clause = ", ".join([f"{key} = COALESCE(NULLIF(TRIM({key}), ''), ?)" for key in updates])
             conn.execute(
                 f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 (*updates.values(), now, cliente_id),
