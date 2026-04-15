@@ -42339,6 +42339,52 @@ const generateInmuebleChecklist = (etapa) => {
     .catch(() => {});
 };
 
+const safeParseJsonMaybe = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") return value;
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (!raw.startsWith("{") && !raw.startsWith("[")) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const buildTimelineKindPresentation = (kindRaw = "", item = null) => {
+  const kind = normalizeSimple(kindRaw || "");
+  if (kind === "documento") return { label: "Documento", tone: "accent", icon: ICONS.doc };
+  if (kind === "transicion") return { label: "Etapa", tone: "accent", icon: ICONS.timeline };
+  if (kind === "campo") return { label: "Cambio", tone: "soft", icon: ICONS.edit };
+  if (kind === "operacion") return { label: "Operación", tone: "soft", icon: ICONS.timeline };
+  if (kind === "auditoria") {
+    const accion = normalizeSimple(item?.title || "");
+    if (accion.includes("documento")) return { label: "Sistema", tone: "soft", icon: ICONS.doc };
+    return { label: "Sistema", tone: "soft", icon: ICONS.timeline };
+  }
+  return { label: "Actividad", tone: "accent", icon: ICONS.timeline };
+};
+
+const buildTimelineDetailsSummary = (details) => {
+  const parsed = safeParseJsonMaybe(details);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const parts = [];
+    const tipo = String(parsed.tipo || "").trim();
+    const version = parsed.version;
+    const estado = String(parsed.estado || "").trim();
+    const origenTipo = String(parsed.origen_tipo || "").trim();
+    const origenId = String(parsed.origen_id || "").trim();
+    if (tipo) parts.push(tipo);
+    if (version !== undefined && version !== null && String(version).trim() !== "") parts.push(`v${String(version).trim()}`);
+    if (estado) parts.push(estado);
+    if (origenTipo && origenId) parts.push(`${origenTipo}: ${origenId}`);
+    if (parts.length) return parts.join(" · ");
+  }
+  const raw = typeof details === "string" ? details : details === null || details === undefined ? "" : JSON.stringify(details);
+  return String(raw || "").trim().slice(0, 180);
+};
+
 const loadInmuebleActividad = (inmuebleId, empresaId) => {
   if (!inmuebleActividadTable || !inmuebleId || !empresaId) {
     return;
@@ -42400,7 +42446,7 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
       } else {
         timeline.slice(0, 10).forEach((item) => {
           const kind = normalizeSimple(item.kind || "accion");
-          const tone = kind === "documento" ? "accent" : kind === "auditoria" ? "soft" : "accent";
+          const kindPreset = buildTimelineKindPresentation(kind, item);
           const rawDate = String(item.date || "").trim();
           const day = rawDate ? formatCell("fecha", rawDate.slice(0, 10)) : "-";
           const time = rawDate.length > 10 ? rawDate.slice(11, 16) : item?.meta?.hora || "";
@@ -42428,22 +42474,87 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
             if (item?.status) metaParts.push(item.status);
             if (item?.meta?.resultado) metaParts.push(`Resultado: ${item.meta.resultado}`);
           }
-          const notes =
-            kind === "auditoria"
-              ? item?.meta?.detalles || ""
-              : kind === "documento"
-                ? item?.meta?.url || ""
-                : "";
           const card = document.createElement("div");
           card.className = "crm-timeline-item";
-          card.innerHTML = `
-            <div class="title">
-              ${escapeHtml(item.title || item.titulo || "Actividad")}
-              <span class="inmueble-badge tone-${tone}">${escapeHtml(kind || "evento")}</span>
-            </div>
-            <div class="meta">${escapeHtml([day, time, ...metaParts].filter(Boolean).join(" · "))}</div>
-            ${notes ? `<div class="notes">${escapeHtml(notes)}</div>` : ""}
-          `;
+          const titleRow = document.createElement("div");
+          titleRow.className = "title";
+          const titleText = document.createElement("span");
+          titleText.className = "timeline-title";
+          titleText.textContent = item.title || item.titulo || "Actividad";
+          const badge = document.createElement("span");
+          badge.className = `inmueble-badge tone-${kindPreset.tone} timeline-kind-badge`.trim();
+          const badgeIcon = document.createElement("span");
+          badgeIcon.className = "icon";
+          badgeIcon.innerHTML = kindPreset.icon || "";
+          const badgeLabel = document.createElement("span");
+          badgeLabel.className = "label";
+          badgeLabel.textContent = kindPreset.label || "Evento";
+          badge.appendChild(badgeIcon);
+          badge.appendChild(badgeLabel);
+          titleRow.appendChild(titleText);
+          titleRow.appendChild(badge);
+
+          const metaRow = document.createElement("div");
+          metaRow.className = "meta";
+          metaRow.textContent = [day, time, ...metaParts].filter(Boolean).join(" · ");
+
+          card.appendChild(titleRow);
+          card.appendChild(metaRow);
+
+          const notesWrap = document.createElement("div");
+          notesWrap.className = "notes";
+          let hasNotes = false;
+
+          if (kind === "documento") {
+            const url = String(item?.meta?.url || "").trim();
+            if (url) {
+              const filename = url.split("/").filter(Boolean).pop() || "";
+              const link = document.createElement("a");
+              link.className = "timeline-link";
+              link.href = url;
+              link.target = "_blank";
+              link.rel = "noopener";
+              link.innerHTML = `${ICONS.open}<span>${escapeHtml(filename ? `Abrir: ${filename}` : "Abrir documento")}</span>`;
+              notesWrap.appendChild(link);
+              hasNotes = true;
+            }
+          } else if (kind === "auditoria") {
+            const details = item?.meta?.detalles;
+            const summaryText = buildTimelineDetailsSummary(details);
+            if (summaryText) {
+              const summary = document.createElement("div");
+              summary.className = "timeline-details-summary";
+              summary.textContent = summaryText;
+              notesWrap.appendChild(summary);
+              hasNotes = true;
+            }
+            const parsed = safeParseJsonMaybe(details);
+            const rawDetails =
+              typeof details === "string"
+                ? details
+                : details === null || details === undefined
+                  ? ""
+                  : JSON.stringify(details, null, 2);
+            if ((parsed && typeof parsed === "object") || (rawDetails && rawDetails.length > 140)) {
+              const toggle = document.createElement("button");
+              toggle.type = "button";
+              toggle.className = "timeline-details-toggle";
+              toggle.textContent = "Ver detalles";
+              const pre = document.createElement("pre");
+              pre.className = "timeline-details-pre hidden";
+              pre.textContent = parsed ? JSON.stringify(parsed, null, 2) : String(rawDetails || "").trim();
+              toggle.addEventListener("click", () => {
+                const isHidden = pre.classList.contains("hidden");
+                pre.classList.toggle("hidden");
+                toggle.textContent = isHidden ? "Ocultar detalles" : "Ver detalles";
+              });
+              notesWrap.appendChild(toggle);
+              notesWrap.appendChild(pre);
+              hasNotes = true;
+            }
+          }
+
+          if (hasNotes) card.appendChild(notesWrap);
           inmuebleActividadTimeline.appendChild(card);
         });
       }

@@ -8788,6 +8788,10 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .crm-timeline-item .title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   font-weight: 600;
   color: var(--ink);
 }
@@ -8801,6 +8805,69 @@ body.crm-context-inmo .crm-resumen-compact-note {
   margin-top: 4px;
   font-size: 13px;
   color: var(--ink);
+}
+
+.timeline-kind-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-kind-badge .icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+}
+
+.timeline-kind-badge .icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.timeline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #e3ddd3;
+  background: #fffdfa;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.timeline-link svg {
+  width: 16px;
+  height: 16px;
+}
+
+.timeline-details-summary {
+  color: var(--ink);
+}
+
+.timeline-details-toggle {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.timeline-details-pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #e3ddd3;
+  background: #fff;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .crm-kanban-column.drag-over {
