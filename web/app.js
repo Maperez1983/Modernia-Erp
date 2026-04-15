@@ -27872,6 +27872,14 @@ const updateTableVisibility = () => {
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
   const isServiceCrm = ["crm", "gestoria-crm", "gestoria-docs", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
+  // Identidad corporativa (Verifika²): Gestoría/CRMs deben usar la paleta "operativa".
+  // Evita que Gestoría se quede con el tema legacy.
+  const useOperativaTheme =
+    isServiceCrm ||
+    currentTab === "fin-sim" ||
+    crmContext === "gestoria" ||
+    currentTab === "operativa";
+  document.body.classList.toggle("theme-operativa", useOperativaTheme);
   const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
   const isFinSim = currentTab === "fin-sim";
   const selectedCompany =
