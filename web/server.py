@@ -18072,6 +18072,9 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     except Exception:
         limit_val = 50
     limit_val = max(1, min(limit_val, 200))
+    # Note: `estado` filtering normalizes accents/spaces; we keep it in Python for portability
+    # and to avoid backend-specific collation issues (SQLite vs Postgres).
+    prefetch_limit = min(max(limit_val * 12, 200), 2500)
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
@@ -18080,6 +18083,32 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
     )
+    where = [
+        "COALESCE(cg.mod_renta, 0) = 1",
+        f"""EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )""",
+    ]
+    values = [empresa_id]
+    if q_norm:
+        like = f"%{q_norm}%"
+        where.append(
+            "("
+            "LOWER(COALESCE(c.nombre, '')) LIKE ? OR "
+            "LOWER(COALESCE(c.nif, '')) LIKE ? OR "
+            "LOWER(COALESCE(c.email, '')) LIKE ? OR "
+            "LOWER(COALESCE(c.telefono, '')) LIKE ? OR "
+            "LOWER(COALESCE(c.poblacion, '')) LIKE ? OR "
+            "LOWER(COALESCE(c.provincia, '')) LIKE ?"
+            ")"
+        )
+        values.extend([like, like, like, like, like, like])
+    where_clause = " AND ".join(where) if where else "1=1"
+
     rows = conn.execute(
         f"""
         SELECT
@@ -18112,54 +18141,21 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
           ) AS servicio_estado
         FROM cliente_gestoria cg
         JOIN clientes c ON c.id = cg.cliente_id
-        WHERE COALESCE(cg.mod_renta, 0) = 1
-          AND EXISTS (
-            SELECT 1
-            FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
-              AND ce.cliente_id = c.id
-              AND {service_filter}
-          )
-        ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
+        WHERE {where_clause}
+        ORDER BY COALESCE(c.updated_at, c.created_at) DESC, LOWER(COALESCE(c.nombre, '')) ASC
+        LIMIT ?
         """,
-        (empresa_id, empresa_id),
+        tuple([empresa_id] + values + [prefetch_limit]),
     ).fetchall()
     items = []
+    selected_cliente_ids = []
     for row in rows:
         servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
         if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
             continue
-        search_blob = " ".join(
-            [
-                str(row["nombre"] or ""),
-                str(row["nif"] or ""),
-                str(row["email"] or ""),
-                str(row["telefono"] or ""),
-                str(row["poblacion"] or ""),
-                str(row["provincia"] or ""),
-            ]
-        ).lower()
-        if q_norm and q_norm not in search_blob:
-            continue
         renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         latest = entries[0] if entries else {}
-        docs = conn.execute(
-            """
-            SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, referencia_tipo, referencia_id
-            FROM gestoria_docs
-            WHERE cliente_id = ?
-              AND (
-                LOWER(COALESCE(referencia_tipo, '')) = 'renta'
-                OR LOWER(COALESCE(tipo, '')) = 'renta'
-                OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
-                OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
-              )
-            ORDER BY date(COALESCE(fecha, '0001-01-01')) DESC, updated_at DESC
-            """,
-            (row["cliente_id"],),
-        ).fetchall()
-        docs_list = [dict(doc) for doc in docs]
         pending_presentacion = 1 if latest and normalize_renta_presentacion_status(latest.get("estado_presentacion")) == "Borrador" else 0
         items.append(
             {
@@ -18178,13 +18174,44 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 "renta_latest": latest,
                 "renta_entry_count": len(entries),
                 "renta_pendiente_presentacion": pending_presentacion,
-                "docs": docs_list,
-                "doc_count": len(docs_list),
-                "preview_doc": docs_list[0] if docs_list else {},
+                "docs": [],
+                "doc_count": 0,
+                "preview_doc": {},
             }
         )
+        selected_cliente_ids.append(row["cliente_id"])
         if len(items) >= limit_val:
             break
+
+    if not items:
+        return []
+
+    placeholders = ",".join(["?"] * len(selected_cliente_ids))
+    docs = conn.execute(
+        f"""
+        SELECT id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, referencia_tipo, referencia_id, updated_at
+        FROM gestoria_docs
+        WHERE cliente_id IN ({placeholders})
+          AND (
+            LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+            OR LOWER(COALESCE(tipo, '')) = 'renta'
+            OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
+            OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+          )
+        ORDER BY cliente_id ASC,
+                 COALESCE(NULLIF(TRIM(COALESCE(fecha, '')), ''), '0001-01-01') DESC,
+                 updated_at DESC
+        """,
+        tuple(selected_cliente_ids),
+    ).fetchall()
+    docs_by_cliente = {}
+    for doc in docs:
+        docs_by_cliente.setdefault(doc["cliente_id"], []).append(dict(doc))
+    for item in items:
+        docs_list = docs_by_cliente.get(item["cliente_id"], []) or []
+        item["docs"] = docs_list
+        item["doc_count"] = len(docs_list)
+        item["preview_doc"] = docs_list[0] if docs_list else {}
     return items
 
 
