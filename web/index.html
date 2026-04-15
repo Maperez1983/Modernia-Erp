@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-		    <link rel="stylesheet" href="styles.css?v=192" />
+		    <link rel="stylesheet" href="styles.css?v=193" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3914,16 +3914,17 @@
                 <option>Alta</option>
                 <option>Baja</option>
               </select>
-              <select id="gestoriaCrmLimit">
-                <option value="25">Ver 25</option>
-                <option value="50" selected>Ver 50</option>
-                <option value="100">Ver 100</option>
-                <option value="200">Ver 200</option>
-              </select>
-              <button type="button" class="secondary ghost" id="gestoriaCrmToggleView">Ver tabla completa</button>
-              <button type="button" id="gestoriaCrmApply">Aplicar</button>
-              <button type="button" class="secondary" id="gestoriaCrmReset">Reset</button>
-            </div>
+	              <select id="gestoriaCrmLimit">
+	                <option value="25">Ver 25</option>
+	                <option value="50" selected>Ver 50</option>
+	                <option value="100">Ver 100</option>
+	                <option value="200">Ver 200</option>
+	              </select>
+	              <button type="button" class="secondary hidden" id="gestoriaCrmUploadRentaBtn" title="Subir renta y asignarla por DNI/NIF">Cargar rentas</button>
+	              <button type="button" class="secondary ghost" id="gestoriaCrmToggleView">Ver tabla completa</button>
+	              <button type="button" id="gestoriaCrmApply">Aplicar</button>
+	              <button type="button" class="secondary" id="gestoriaCrmReset">Reset</button>
+	            </div>
             <div id="gestoriaCrmSummary"></div>
             <div id="gestoriaCrmTable"></div>
             <div class="footer" id="gestoriaCrmInfo"></div>
@@ -8860,7 +8861,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=544"></script>
+			    <script src="app.js?v=546"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;

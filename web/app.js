@@ -2199,6 +2199,7 @@ const gestoriaCrmCliente = document.getElementById("gestoriaCrmCliente");
 const gestoriaCrmSummary = document.getElementById("gestoriaCrmSummary");
 const gestoriaCrmToggleView = document.getElementById("gestoriaCrmToggleView");
 const gestoriaCrmTabs = document.getElementById("gestoriaCrmTabs");
+const gestoriaCrmUploadRentaBtn = document.getElementById("gestoriaCrmUploadRentaBtn");
 const gestoriaTrabajoForm = document.getElementById("gestoriaTrabajoForm");
 const gestoriaTrabajoCliente = document.getElementById("gestoriaTrabajoCliente");
 const gestoriaTrabajoStatus = document.getElementById("gestoriaTrabajoStatus");
@@ -27409,6 +27410,9 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
     gestoriaCrmTabs.querySelectorAll(".tab").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.gestoriaTab === tabName);
     });
+  }
+  if (gestoriaCrmUploadRentaBtn) {
+    gestoriaCrmUploadRentaBtn.classList.toggle("hidden", tabName !== "renta");
   }
   if (!gestoriaCrmTipo || !gestoriaCrmSubtipo) return;
   if (tabName === "all") {
@@ -55470,6 +55474,22 @@ if (gestoriaCrmTabs) {
     if (gestoriaCrmLimit) gestoriaCrmLimit.value = "50";
     setGestoriaCrmTab(btn.dataset.gestoriaTab);
     loadGestoriaCrm();
+  });
+}
+
+if (gestoriaCrmUploadRentaBtn) {
+  gestoriaCrmUploadRentaBtn.addEventListener("click", () => {
+    // Lleva al usuario a Campañas → Renta, donde está el flujo de subida/ocr por DNI/NIF.
+    setTab("gestoria-agenda");
+    window.requestAnimationFrame(() => {
+      setGestoriaClientModuleTab("renta");
+      try {
+        gestoriaRentaQuickForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {}
+      if (gestoriaRentaQuickStatus) {
+        gestoriaRentaQuickStatus.textContent = "Sube la renta para localizar al cliente por DNI/NIF.";
+      }
+    });
   });
 }
 
