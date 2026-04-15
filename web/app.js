@@ -30084,6 +30084,8 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       const expected = Math.ceil(base / 100) * 100;
       ingresarBtn.dataset.expected = String(expected);
       const same = actual !== null && Math.abs(actual - expected) <= 0.01;
+      // El cliente puede ingresar el importe que quiera mientras cuadre la operación.
+      // El valor "expected" es solo sugerencia (estilo Excel) si está vacío.
       ingresarBtn.disabled = same;
       if (actual === null) {
         ingresarHint.classList.remove("is-error", "is-success");
@@ -30094,11 +30096,9 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
         ingresarHint.classList.add("is-success");
         ingresarHint.textContent = `Ingreso banco OK: ${formatMoneyInputValue(actual)}.`;
       } else {
-        ingresarHint.classList.remove("is-success", "is-empty");
-        ingresarHint.classList.add("is-error");
-        ingresarHint.textContent = `Ingreso banco no cuadra. Sugerido: ${formatMoneyInputValue(
-          expected
-        )} (actual: ${formatMoneyInputValue(actual)}).`;
+        ingresarHint.classList.remove("is-success");
+        ingresarHint.classList.add("is-empty");
+        ingresarHint.textContent = `Ingreso banco (manual): ${formatMoneyInputValue(actual)} · sugerido ${formatMoneyInputValue(expected)}.`;
       }
       if (!ingresarBtn.dataset.bound) {
         ingresarBtn.dataset.bound = "1";
@@ -30138,24 +30138,7 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       issues.push(`Medios de pago no cuadran con escriturado (Δ ${formatMoneyInputValue(diffMediosPago)}).`);
     }
     // Ingreso banco: aviso si no coincide con el cálculo Excel (aunque el PDF recalcula siempre en servidor).
-    if (ingresarEl) {
-      const necesaria = toNumber(getNestedValue(computed, "comprador.suma_total_necesaria"));
-      const prestamo = toNumber(getNestedValue(computed, "comprador.entregas.prestamo_concedido"));
-      const senal = toNumber(getNestedValue(computed, "comprador.entregas.senal"));
-      const transf = toNumber(getNestedValue(computed, "comprador.entregas.transf_modernia"));
-      const actual = toNumber(ingresarEl.value);
-      if (necesaria !== null && prestamo !== null && senal !== null && transf !== null && actual !== null) {
-        const base = Math.max(necesaria - prestamo - senal - transf, 0);
-        const expected = Math.ceil(base / 100) * 100;
-        if (Math.abs(actual - expected) > 0.01) {
-          issues.push(
-            `Ingreso banco no coincide con Excel (sugerido ${formatMoneyInputValue(expected)}; actual ${formatMoneyInputValue(
-              actual
-            )}).`
-          );
-        }
-      }
-    }
+    // Nota: "A ingresar en banco" puede ser manual mientras cuadre la operación; no bloquea PDFs.
 
     if (!issues.length) {
       review.classList.remove("is-error", "is-empty");
