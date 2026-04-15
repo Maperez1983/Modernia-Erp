@@ -27665,9 +27665,10 @@ const updateTableVisibility = () => {
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
+  const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
   document.body.classList.toggle(
     "crm-context-inmo",
-    currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria"
+    currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || isInmuebleDetailOpen
   );
   syncCrmTecnocloudVerticalNav();
 
@@ -41394,6 +41395,9 @@ const openInmuebleDetail = (id, originView = "") => {
   // Feedback inmediato: si falla la carga, el usuario debe ver la ficha y el error.
   if (crmWorkspaceShell) crmWorkspaceShell.classList.add("hidden");
   inmuebleDetail.classList.remove("hidden");
+  try {
+    updateTableVisibility();
+  } catch {}
   if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
   setInmuebleTab("datos");
@@ -58005,6 +58009,9 @@ if (inmuebleBackBtn) {
     if (crmWorkspaceShell) {
       crmWorkspaceShell.classList.remove("hidden");
     }
+    try {
+      updateTableVisibility();
+    } catch {}
     setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
     state.currentInmuebleOriginView = "inmuebles";
