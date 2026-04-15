@@ -56,6 +56,8 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+  max-width: 100%;
+  overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }

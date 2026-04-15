@@ -17127,6 +17127,8 @@ const setUrlParams = (params, { replace = false } = {}) => {
 
 const setPage = (page) => {
   state.currentPage = page;
+  // UI unificada: usamos siempre la identidad corporativa (misma base que CRM inmobiliario).
+  document.body.classList.add("theme-operativa");
   document.body.classList.toggle("page-empresa", page !== "home");
   if (homeSection) {
     homeSection.classList.toggle("hidden", page !== "home");
@@ -27879,9 +27881,8 @@ const updateTableVisibility = () => {
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
   const isServiceCrm = ["crm", "gestoria-crm", "gestoria-docs", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
-  // Tema: usamos una única identidad (la misma que Inmobiliaria/Home).
-  // `theme-operativa` se deja como tema opcional, pero NO se aplica automáticamente.
-  document.body.classList.remove("theme-operativa");
+  // Tema: identidad corporativa unificada (misma base visual que CRM Inmobiliaria).
+  document.body.classList.add("theme-operativa");
   const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
   const isFinSim = currentTab === "fin-sim";
   const selectedCompany =
