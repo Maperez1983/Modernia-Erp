@@ -2292,6 +2292,8 @@ const gestoriaRentaQuickRemesadaWrap = document.getElementById("gestoriaRentaQui
 const gestoriaRentaQuickFile = document.getElementById("gestoriaRentaQuickFile");
 const gestoriaRentaQuickStatus = document.getElementById("gestoriaRentaQuickStatus");
 const gestoriaRentaQuickMatches = document.getElementById("gestoriaRentaQuickMatches");
+const gestoriaRentaQuickModal = document.getElementById("gestoriaRentaQuickModal");
+const gestoriaRentaQuickModalClose = document.getElementById("gestoriaRentaQuickModalClose");
 const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
 const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
 const gestoriaRentaRelacionSelect = document.getElementById("gestoriaRentaRelacionSelect");
@@ -49282,6 +49284,43 @@ const syncGestoriaRentaRemesaToggles = () => {
   }
 };
 
+const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
+  if (!gestoriaRentaQuickModal) return;
+  gestoriaRentaQuickModal.classList.remove("hidden");
+  gestoriaRentaQuickModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  state.gestoriaRentaQuickAutoSubmit = true;
+  try {
+    populateResponsableSelects();
+  } catch {}
+  syncGestoriaRentaRemesaToggles();
+  if (gestoriaRentaQuickStatus) {
+    gestoriaRentaQuickStatus.textContent = "";
+  }
+  if (gestoriaRentaQuickMatches) {
+    gestoriaRentaQuickMatches.innerHTML = "";
+  }
+  if (autoPickFile && gestoriaRentaQuickFile) {
+    window.setTimeout(() => {
+      try {
+        gestoriaRentaQuickFile.focus();
+        gestoriaRentaQuickFile.click();
+      } catch {}
+    }, 0);
+  }
+};
+
+const closeGestoriaRentaQuickModal = () => {
+  if (!gestoriaRentaQuickModal) return;
+  gestoriaRentaQuickModal.classList.add("hidden");
+  gestoriaRentaQuickModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  state.gestoriaRentaQuickAutoSubmit = false;
+  if (gestoriaRentaQuickFile) {
+    gestoriaRentaQuickFile.value = "";
+  }
+};
+
 const getSortedRentaEntries = (row = {}) =>
   (parseGestoriaRentaPayload(row).entries || [])
     .slice()
@@ -49516,6 +49555,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
     openBtn.className = "secondary ghost";
     openBtn.textContent = "Ver cliente";
     openBtn.addEventListener("click", () => {
+      closeGestoriaRentaQuickModal();
       openClienteDetail(String(row.id || "").trim());
     });
     right.appendChild(attachBtn);
@@ -49585,6 +49625,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
         }
       } catch {}
     }
+    closeGestoriaRentaQuickModal();
     openClienteDetail(String(clienteId || "").trim());
   } catch (err) {
     if (gestoriaRentaQuickStatus) {
@@ -55479,16 +55520,7 @@ if (gestoriaCrmTabs) {
 
 if (gestoriaCrmUploadRentaBtn) {
   gestoriaCrmUploadRentaBtn.addEventListener("click", () => {
-    // Lleva al usuario a Agenda, donde está el flujo de subida/ocr por DNI/NIF (Renta).
-    setTab("gestoria-agenda");
-    window.requestAnimationFrame(() => {
-      try {
-        gestoriaRentaQuickForm?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } catch {}
-      if (gestoriaRentaQuickStatus) {
-        gestoriaRentaQuickStatus.textContent = "Sube la renta para localizar al cliente por DNI/NIF.";
-      }
-    });
+    openGestoriaRentaQuickModal({ autoPickFile: true });
   });
 }
 
@@ -60368,9 +60400,43 @@ if (gestoriaRentaQuickForm) {
   });
 }
 
+if (gestoriaRentaQuickModalClose) {
+  gestoriaRentaQuickModalClose.addEventListener("click", () => {
+    closeGestoriaRentaQuickModal();
+  });
+}
+
+if (gestoriaRentaQuickModal) {
+  gestoriaRentaQuickModal.addEventListener("click", (event) => {
+    if (event.target === gestoriaRentaQuickModal) {
+      closeGestoriaRentaQuickModal();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (gestoriaRentaQuickModal && !gestoriaRentaQuickModal.classList.contains("hidden")) {
+    closeGestoriaRentaQuickModal();
+  }
+});
+
 if (gestoriaRentaQuickFormaCobro) {
   gestoriaRentaQuickFormaCobro.addEventListener("change", () => {
     syncGestoriaRentaRemesaToggles();
+  });
+}
+
+if (gestoriaRentaQuickFile) {
+  gestoriaRentaQuickFile.addEventListener("change", async () => {
+    if (!state.gestoriaRentaQuickAutoSubmit) return;
+    const file =
+      gestoriaRentaQuickFile && gestoriaRentaQuickFile.files && gestoriaRentaQuickFile.files.length
+        ? gestoriaRentaQuickFile.files[0]
+        : null;
+    if (!file) return;
+    state.gestoriaRentaQuickAutoSubmit = false;
+    await submitGestoriaRentaQuick();
   });
 }
 
