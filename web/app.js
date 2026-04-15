@@ -21400,6 +21400,39 @@ const INMOBILIARIA_ASESORES = [
   "Daniel García",
 ];
 
+const INMOBILIARIA_CANALES = [
+  "",
+  "Web",
+  "Portal",
+  "Teléfono",
+  "WhatsApp",
+  "Email",
+  "Redes sociales",
+  "Google",
+  "Referido",
+  "Cartel",
+  "Escaparate",
+  "Buzoneo",
+  "Oficina",
+  "Colaborador",
+  "Otro",
+];
+
+const INMOBILIARIA_TIPOS_PROCEDENCIA = [
+  "",
+  "Entrada",
+  "Salida",
+  "Propietario",
+  "Comprador",
+  "Inquilino",
+  "Inversor",
+  "Banco",
+  "Promotora",
+  "Administración",
+  "Colaborador",
+  "Otro",
+];
+
 const INMOBILIARIA_TIPOS_INMUEBLE = [
   "",
   "Piso",
@@ -21796,8 +21829,8 @@ const CAPTACION_FIELDS = [
     options: INMOBILIARIA_ASESORES,
     section: "Propiedad y origen",
   },
-  { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
-  { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
+  { key: "canal", label: "Canal", type: "select", options: INMOBILIARIA_CANALES, section: "Propiedad y origen" },
+  { key: "tipo_procedencia", label: "Tipo procedencia", type: "select", options: INMOBILIARIA_TIPOS_PROCEDENCIA, section: "Propiedad y origen" },
   {
     key: "necesidad_venta_alquiler",
     label: "Necesidad",
@@ -23844,6 +23877,33 @@ const renderEditableGrid = (grid, fields, data, target) => {
   grid.classList.remove("editable-grid--inmueble", "editable-grid--captacion", "editable-grid--cliente");
   grid.classList.add(`editable-grid--${target}`);
   grid.innerHTML = "";
+  const ensureInlineDatalist = (id, options) => {
+    const listId = String(id || "").trim();
+    if (!listId) return null;
+    let node = document.getElementById(listId);
+    if (!node) {
+      node = document.createElement("datalist");
+      node.id = listId;
+      document.body.appendChild(node);
+    }
+    if (!options) return node;
+    const rawOptions = typeof options === "function" ? options() : options;
+    const items = Array.isArray(rawOptions) ? rawOptions : [];
+    const existing = new Set(
+      Array.from(node.querySelectorAll("option"))
+        .map((opt) => String(opt.value || "").trim())
+        .filter(Boolean)
+    );
+    items.forEach((value) => {
+      const v = String(value || "").trim();
+      if (!v || existing.has(v)) return;
+      const opt = document.createElement("option");
+      opt.value = v;
+      node.appendChild(opt);
+      existing.add(v);
+    });
+    return node;
+  };
   const tipoPersonaValue =
     target === "cliente" ? String(data?.tipo_persona || "").toLowerCase() : "";
   const isJuridica = target === "cliente" && tipoPersonaValue === "jurídica";
@@ -24077,6 +24137,11 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (input && input.tagName === "INPUT" && field.list) {
       try {
         input.setAttribute("list", String(field.list || "").trim());
+      } catch {}
+      try {
+        const current = String(input.value || "").trim();
+        const extras = current ? [current] : [];
+        ensureInlineDatalist(field.list, () => [...(field.listOptions || []), ...extras]);
       } catch {}
     }
     input.classList.add("inline-input");
