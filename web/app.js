@@ -1506,6 +1506,7 @@ const state = {
   homeTimeStatus: null,
   prevModule: "empresas",
   prevTab: "operativa",
+  pendingClienteOpen: null,
   crmWorkspaceView: "resumen",
   clientesShowAll: false,
   columnsPickerContext: null,
@@ -49699,17 +49700,27 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
         <span>${metaLocation}</span>
       </div>
     `;
-    const openCliente = () => {
+    const openClienteGeneric = () => {
       const clienteId = String(row.cliente_id || "").trim();
-      if (clienteId) {
-        openClienteDetail(clienteId);
-      }
+      if (!clienteId) return;
+      openClienteDetail(clienteId);
     };
-    card.addEventListener("click", openCliente);
+    const openClienteRenta = () => {
+      const clienteId = String(row.cliente_id || "").trim();
+      if (!clienteId) return;
+      state.pendingClienteOpen = {
+        id: clienteId,
+        clienteTab: "profesional",
+        operativaTab: "gestoria",
+        gestoriaModule: "renta",
+      };
+      openClienteDetail(clienteId);
+    };
+    card.addEventListener("click", openClienteRenta);
     card.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        openCliente();
+        openClienteRenta();
       }
     });
 
@@ -49722,7 +49733,7 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
     clienteBtn.textContent = "Ver cliente";
     clienteBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      openCliente();
+      openClienteGeneric();
     });
     footer.appendChild(clienteBtn);
 
@@ -52752,8 +52763,25 @@ const openClienteDetail = (id) => {
             : "seguros";
     setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
-    const defaultTab = "datos";
+    let defaultTab = "datos";
+    const pending = state.pendingClienteOpen;
+    const shouldApplyPending =
+      pending && typeof pending === "object" && String(pending.id || "") === String(id || "");
+    if (shouldApplyPending) {
+      state.pendingClienteOpen = null;
+      if (pending.clienteTab) {
+        defaultTab = pending.clienteTab;
+      }
+    }
     setClienteTab(defaultTab);
+    if (shouldApplyPending) {
+      if (pending.operativaTab) {
+        setClienteOperativaTab(pending.operativaTab);
+      }
+      if (pending.gestoriaModule && hasGestoria) {
+        setGestoriaClientModuleTab(pending.gestoriaModule);
+      }
+    }
     window.scrollTo({ top: clientesDetail.offsetTop - 120, behavior: "smooth" });
   });
 };
