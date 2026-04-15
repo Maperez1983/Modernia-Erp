@@ -415,8 +415,8 @@ button.secondary,
 .tab.active {
   background: var(--gold);
   color: #f5f5f5;
-  border-color: rgba(60, 110, 113, 0.6);
-  box-shadow: 0 10px 20px rgba(60, 110, 113, 0.25);
+  border-color: rgba(var(--gold-rgb), 0.6);
+  box-shadow: 0 10px 20px rgba(var(--gold-rgb), 0.22);
 }
 
 input,
@@ -434,8 +434,8 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: rgba(60, 110, 113, 0.8);
-  box-shadow: 0 0 0 3px rgba(60, 110, 113, 0.18);
+  border-color: rgba(var(--gold-rgb), 0.75);
+  box-shadow: 0 0 0 3px rgba(var(--gold-rgb), 0.18);
 }
 
 .data-table {
@@ -448,7 +448,7 @@ textarea:focus {
 }
 
 .data-table th {
-  background: rgba(60, 110, 113, 0.15);
+  background: rgba(var(--gold-rgb), 0.12);
   font-family: var(--font-ui);
   letter-spacing: 0.3px;
 }
@@ -2893,7 +2893,7 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 10px;
   padding: 16px;
   border-radius: 18px;
-  border: 1px solid rgba(60, 110, 113, 0.16);
+  border: 1px solid rgba(var(--gold-rgb), 0.18);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(244, 246, 244, 0.96));
 }
 
@@ -2919,7 +2919,7 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 .workspace-client-meta span {
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(60, 110, 113, 0.08);
+  background: rgba(var(--gold-rgb), 0.12);
   color: var(--muted);
   font-size: 12px;
 }
@@ -2935,8 +2935,8 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 8px;
   padding: 14px;
   border-radius: 16px;
-  border: 1px solid rgba(60, 110, 113, 0.14);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(217, 211, 199, 0.8);
+  background: var(--cloud);
 }
 
 .workspace-client-card h4 {
@@ -2967,8 +2967,8 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 10px;
   padding: 14px;
   border-radius: 16px;
-  border: 1px solid rgba(60, 110, 113, 0.14);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(217, 211, 199, 0.8);
+  background: var(--cloud);
 }
 
 .workspace-gestoria-card h4 {
@@ -2984,8 +2984,8 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 4px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(60, 110, 113, 0.14);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(217, 211, 199, 0.8);
+  background: var(--cloud);
 }
 
 .workspace-mini-kpi span {
@@ -3002,7 +3002,7 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   margin-bottom: 14px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(60, 110, 113, 0.16);
+  border: 1px solid rgba(217, 211, 199, 0.8);
   background: rgba(248, 244, 236, 0.92);
 }
 
@@ -6547,7 +6547,7 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   gap: 6px;
   padding: 14px 16px;
   border-radius: 16px;
-  border: 1px solid rgba(60, 110, 113, 0.16);
+  border: 1px solid rgba(var(--gold-rgb), 0.18);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 239, 0.98));
   text-align: left;
   color: var(--ink);
@@ -6564,12 +6564,12 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
 }
 
 .fin-stage-card.active {
-  border-color: rgba(60, 110, 113, 0.42);
-  box-shadow: 0 12px 26px rgba(60, 110, 113, 0.14);
+  border-color: rgba(var(--gold-rgb), 0.42);
+  box-shadow: 0 12px 26px rgba(var(--gold-rgb), 0.14);
 }
 
 tr.is-selected td {
-  background: rgba(60, 110, 113, 0.08);
+  background: rgba(var(--gold-rgb), 0.08);
 }
 
 .crm-focus-card {
@@ -6624,7 +6624,7 @@ tr.is-selected td {
 .crm-quick-action:focus-visible,
 .crm-focus-link:focus-visible {
   transform: translateY(-1px);
-  border-color: rgba(60, 110, 113, 0.4);
+  border-color: rgba(var(--gold-rgb), 0.32);
   box-shadow: 0 12px 26px rgba(16, 12, 8, 0.1);
   outline: none;
 }
@@ -6632,7 +6632,7 @@ tr.is-selected td {
 .crm-kpis .kpi-card {
   display: grid;
   gap: 8px;
-  border-left: 3px solid rgba(60, 110, 113, 0.6);
+  border-left: 3px solid rgba(var(--gold-rgb), 0.55);
 }
 
 .gestoria-renta-banner {
@@ -6643,7 +6643,7 @@ tr.is-selected td {
   align-items: center;
   margin-bottom: 18px;
   padding: 18px 20px;
-  border: 1px solid rgba(60, 110, 113, 0.18);
+  border: 1px solid rgba(var(--gold-rgb), 0.22);
   border-radius: 20px;
   background:
     radial-gradient(circle at top right, rgba(247, 232, 0, 0.18), transparent 28%),
@@ -6655,7 +6655,7 @@ tr.is-selected td {
 
 .gestoria-renta-banner:hover,
 .gestoria-renta-banner:focus-visible {
-  border-color: rgba(60, 110, 113, 0.45);
+  border-color: rgba(var(--gold-rgb), 0.45);
   box-shadow: 0 18px 34px rgba(18, 16, 12, 0.14);
   transform: translateY(-1px);
   outline: none;
@@ -7619,7 +7619,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   gap: 12px;
   padding: 18px;
   border-radius: 18px;
-  border: 1px solid rgba(60, 110, 113, 0.18);
+  border: 1px solid rgba(var(--gold-rgb), 0.22);
   background: linear-gradient(180deg, #fffdfa 0%, #f5efe4 100%);
   color: var(--ink);
   box-shadow: 0 12px 28px rgba(12, 10, 8, 0.08);
@@ -7628,7 +7628,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .gestoria-renta-overview-card:hover,
 .gestoria-renta-overview-card:focus-visible {
-  border-color: rgba(60, 110, 113, 0.46);
+  border-color: rgba(var(--gold-rgb), 0.46);
   box-shadow: 0 18px 32px rgba(12, 10, 8, 0.14);
   outline: none;
 }
