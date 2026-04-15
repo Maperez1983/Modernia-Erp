@@ -21650,7 +21650,7 @@ const INMUEBLE_FIELDS = [
   { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Precio" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Precio" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Precio" },
-  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Precio" },
+  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Precio", readonly: true },
   { key: "precio_valoracion", label: "Precio valoración", type: "number", section: "Precio" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Precio" },
 
@@ -21831,7 +21831,6 @@ const CAPTACION_FIELDS = [
     section: "Propiedad y origen",
   },
   { key: "canal", label: "Canal", type: "select", options: INMOBILIARIA_CANALES, section: "Propiedad y origen" },
-  { key: "tipo_procedencia", label: "Tipo procedencia", type: "select", options: INMOBILIARIA_TIPOS_PROCEDENCIA, section: "Propiedad y origen" },
   {
     key: "necesidad_venta_alquiler",
     label: "Necesidad",
@@ -21881,7 +21880,7 @@ const CAPTACION_FIELDS = [
   { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Pipeline" },
   { key: "precio_valoracion", label: "Precio valoración", type: "number", section: "Pipeline" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Pipeline" },
-  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Pipeline" },
+  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Pipeline", readonly: true },
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
   { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Pipeline" },
   { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Pipeline" },
@@ -21914,7 +21913,7 @@ const CAPTACION_FIELDS = [
   },
   { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Pipeline" },
   { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Pipeline" },
-  { key: "prioridad_noticia", label: "Prioridad noticia", type: "text", section: "Pipeline" },
+  { key: "prioridad_noticia", label: "Prioridad", type: "select", options: ["", "Alta", "Media", "Baja"], section: "Pipeline" },
   {
     key: "encargo_competencia",
     label: "Encargo de competencia",
@@ -21957,7 +21956,6 @@ const CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA = pickCaptacionFields([
 const CAPTACION_FIELDS_NOTICIA = [
   // Origen
   cloneCaptacionField("canal", { section: "Origen" }),
-  cloneCaptacionField("tipo_procedencia", { section: "Origen" }),
   cloneCaptacionField("necesidad_venta_alquiler", { section: "Origen" }),
   cloneCaptacionField("urgencia", { section: "Origen" }),
   // Valoración
@@ -23710,7 +23708,7 @@ const computeInmoDesviacionPct = (precioPedidoCliente, precioValoracion) => {
   const valor = toNumber(precioValoracion);
   if (pedido === null || valor === null) return null;
   if (!Number.isFinite(pedido) || !Number.isFinite(valor) || valor <= 0) return null;
-  const pct = Math.abs((pedido - valor) / valor) * 100;
+  const pct = ((pedido - valor) / valor) * 100;
   return Math.round(pct * 100) / 100;
 };
 
@@ -36314,34 +36312,33 @@ const renderCrmResumenDashboard = () => {
   const stageCount = (name) => pipelineItems.filter((row) => row.stage === name).length;
   const activePipelineItems = pipelineItems.filter((row) => !isClosedStage(row.stage));
 
-	  // Oportunidades (Tecnocloud-like): web/agencias y notificaciones en el menú superior.
-	  const clientesRows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
-	  const demandasRows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
-	  const captacionesRows = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
+  // Oportunidades (Tecnocloud-like): web/agencias y notificaciones en el menú superior.
+  const clientesRows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+  const demandasRows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
+  const captacionesRows = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
 
-	  const clientesWebCount = clientesRows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
-	  const pedidosNuevosCount = demandasRows.filter((row) => isDateWithinLastDays(row?.created_at || row?.updated_at || "", 5)).length;
-	  const pedidosWebCount = demandasRows.filter((row) => {
-	    const pedidoWeb = String(row?.pedido_web || "").trim() === "1";
-	    const origen = normalizeSimple(row?.origen || "");
-	    return pedidoWeb || origen.includes("web");
-	  }).length;
-	  const pedidosAgenciasCount = demandasRows.filter((row) => String(row?.agencia_insercion || "").trim()).length;
-	  const noticiasWebCount = captacionesRows.filter((row) => {
-	    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
-	    if (etapa !== "Noticia") return false;
-	    const canal = normalizeSimple(row?.canal || "");
-	    const procedencia = normalizeSimple(row?.tipo_procedencia || "");
-	    return canal.includes("web") || procedencia.includes("web");
-	  }).length;
-	  const noticiasSinVerificarCount = activePipelineItems.filter((row) => row.stage === "Noticia" && !row.noticia_verificada).length;
+  const clientesWebCount = clientesRows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
+  const pedidosNuevosCount = demandasRows.filter((row) => isDateWithinLastDays(row?.created_at || row?.updated_at || "", 5)).length;
+  const pedidosWebCount = demandasRows.filter((row) => {
+    const pedidoWeb = String(row?.pedido_web || "").trim() === "1";
+    const origen = normalizeSimple(row?.origen || "");
+    return pedidoWeb || origen.includes("web");
+  }).length;
+  const pedidosAgenciasCount = demandasRows.filter((row) => String(row?.agencia_insercion || "").trim()).length;
+  const noticiasWebCount = captacionesRows.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
+    if (etapa !== "Noticia") return false;
+    const canal = normalizeSimple(row?.canal || "");
+    return canal.includes("web");
+  }).length;
+  const noticiasSinVerificarCount = activePipelineItems.filter((row) => row.stage === "Noticia" && !row.noticia_verificada).length;
 
-	  const setBadge = (el, count) => {
-	    if (!el) return;
-	    const n = Number(count || 0) || 0;
-	    el.textContent = n > 99 ? "99+" : String(n);
-	    el.classList.toggle("hidden", n <= 0);
-	  };
+  const setBadge = (el, count) => {
+    if (!el) return;
+    const n = Number(count || 0) || 0;
+    el.textContent = n > 99 ? "99+" : String(n);
+    el.classList.toggle("hidden", n <= 0);
+  };
 	  setBadge(crmBadgePedidos, pedidosNuevosCount || pedidosWebCount || pedidosAgenciasCount);
 	  setBadge(crmBadgeNoticias, noticiasSinVerificarCount || noticiasWebCount);
 
