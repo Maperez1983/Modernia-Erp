@@ -23837,17 +23837,32 @@ const renderEditableGrid = (grid, fields, data, target) => {
 	      syncBtn.type = "button";
 	      syncBtn.className = "secondary catastro-button";
 	      syncBtn.innerHTML = buildCatastroButtonInner("Ficha PDF");
-	      syncBtn.addEventListener("click", async () => {
-	        setInlineStatus("Generando ficha PDF…");
-	        const res = await syncInmuebleCatastroFicha(inputMap);
-	        if (res?.error) {
-	          setInlineStatus(String(res.error || "No se pudo generar la ficha.").trim());
-	        } else if (res?.document?.url) {
-	          setInlineStatus("Ficha generada y guardada en Adjuntos.");
-	        } else {
-	          setInlineStatus("Datos sincronizados.");
-	        }
-	      });
+		      syncBtn.addEventListener("click", async () => {
+		        setInlineStatus("Generando ficha PDF…");
+		        const isStandalone =
+		          Boolean(window.navigator && window.navigator.standalone) ||
+		          Boolean(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+		        let popupWindow = null;
+		        if (!isStandalone) {
+		          try {
+		            popupWindow = window.open("about:blank", "_blank", "noopener,noreferrer");
+		          } catch {
+		            popupWindow = null;
+		          }
+		        }
+		        const res = await syncInmuebleCatastroFicha(inputMap, { popupWindow });
+		        if (!res) {
+		          setInlineStatus("No se pudo generar la ficha.");
+		          return;
+		        }
+		        if (res?.error) {
+		          setInlineStatus(String(res.error || "No se pudo generar la ficha.").trim());
+		        } else if (res?.document?.url) {
+		          setInlineStatus("Ficha generada y guardada en Adjuntos.");
+		        } else {
+		          setInlineStatus("Datos sincronizados.");
+		        }
+		      });
 	      actions.appendChild(syncBtn);
 	      valueWrap.appendChild(actions);
 	      valueWrap.appendChild(inlineStatus);
@@ -24982,11 +24997,12 @@ const lookupInmuebleCatastro = async (inputMap = {}, options = {}) => {
   }
 };
 
-const syncInmuebleCatastroFicha = async (inputMap = {}) => {
-  if (!state.currentInmuebleId) return null;
+const syncInmuebleCatastroFicha = async (inputMap = {}, opts = {}) => {
+  if (!state.currentInmuebleId) return { error: "Inmueble no seleccionado." };
+  const popupWindow = opts?.popupWindow || null;
   try {
     // Garantiza RC: si falta, la buscamos desde la dirección antes de pedir la ficha.
-    const currentRef = String(
+    let currentRef = String(
       inputMap?.referencia_catastral?.value ||
         state.currentInmueble?.referencia_catastral ||
         state.currentInmuebleContext?.inmueble?.referencia_catastral ||
@@ -24996,25 +25012,29 @@ const syncInmuebleCatastroFicha = async (inputMap = {}) => {
       setInmuebleSaveStatus("Buscando referencia catastral...");
       const ensured = await lookupInmuebleCatastro(inputMap, { silent: false });
       if (!ensured) {
-        setInmuebleSaveStatus("No se pudo detectar una referencia catastral única desde la dirección.");
-        return null;
+        const msg = "No se pudo detectar una referencia catastral única desde la dirección.";
+        setInmuebleSaveStatus(msg);
+        try {
+          if (popupWindow && !popupWindow.closed) popupWindow.close();
+        } catch {}
+        return { error: msg };
       }
+      currentRef = String(
+        inputMap?.referencia_catastral?.value ||
+          state.currentInmueble?.referencia_catastral ||
+          state.currentInmuebleContext?.inmueble?.referencia_catastral ||
+          ""
+      ).trim();
     }
+
     setInmuebleSaveStatus("Obteniendo ficha catastral...");
-    const data = await fetch("/api/inmueble_catastro_sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        inmueble_id: state.currentInmuebleId,
-        usuario: getCurrentUser(),
-        empresa_nombre: resolveCrmInmoEmpresaNombre(),
-      }),
-    }).then((res) => res.json());
-    if (data?.error) {
-      setInmuebleSaveStatus(data.error);
-      return null;
-    }
+    const data = await apiPost("/api/inmueble_catastro_sync", {
+      inmueble_id: state.currentInmuebleId,
+      usuario: getCurrentUser(),
+      empresa_nombre: resolveCrmInmoEmpresaNombre(),
+      referencia_catastral: currentRef || "",
+    });
+
     const updates = data?.updates || {};
     Object.entries(updates).forEach(([key, value]) => {
       if (inputMap[key]) {
@@ -25037,13 +25057,29 @@ const syncInmuebleCatastroFicha = async (inputMap = {}) => {
         ? "Ficha Catastro generada, datos sincronizados y documento guardado."
         : "Datos catastrales sincronizados."
     );
-	    if (docUrl) {
-	      openExternalUrl(docUrl);
-	    }
-	    return data;
-	  } catch {
-    setInmuebleSaveStatus("No se pudo sincronizar Catastro.");
-    return null;
+    if (docUrl) {
+      try {
+        if (popupWindow && !popupWindow.closed) {
+          popupWindow.location.href = docUrl;
+        } else {
+          openExternalUrl(docUrl);
+        }
+      } catch {
+        openExternalUrl(docUrl);
+      }
+    } else {
+      try {
+        if (popupWindow && !popupWindow.closed) popupWindow.close();
+      } catch {}
+    }
+    return data;
+  } catch (err) {
+    const msg = String(err?.message || "No se pudo sincronizar Catastro.").trim();
+    setInmuebleSaveStatus(msg);
+    try {
+      if (popupWindow && !popupWindow.closed) popupWindow.close();
+    } catch {}
+    return { error: msg };
   }
 };
 

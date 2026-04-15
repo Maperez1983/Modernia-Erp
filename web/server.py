@@ -15935,6 +15935,49 @@ def get_inmueble_propietarios(conn, inmueble_id):
     return [dict(row) for row in rows]
 
 
+def ensure_inmueble_servicios_schema(conn):
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS inmueble_servicios (
+              id TEXT PRIMARY KEY,
+              inmueble_id TEXT NOT NULL,
+              servicio TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE(inmueble_id, servicio),
+              FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
+            );
+            """
+        )
+    except Exception:
+        # Best-effort: if DDL fails we still want the request to return a controlled error.
+        return
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inmueble_servicios_inmueble ON inmueble_servicios(inmueble_id);")
+    except Exception:
+        pass
+
+
+def get_inmueble_servicios(conn, inmueble_id):
+    if not inmueble_id:
+        return []
+    ensure_inmueble_servicios_schema(conn)
+    try:
+        rows = conn.execute(
+            """
+            SELECT servicio
+            FROM inmueble_servicios
+            WHERE inmueble_id = ?
+            ORDER BY servicio
+            """,
+            (inmueble_id,),
+        ).fetchall()
+    except Exception:
+        return []
+    return [str(row_value(r, "servicio", "") or "").strip() for r in rows if str(row_value(r, "servicio", "") or "").strip()]
+
+
 def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_prefix="", demanda_id="", inmueble_id=""):
     nombre = normalize_person_name(payload.get(f"{role_prefix}_nombre")) if role_prefix else ""
     nif = normalize_nif(payload.get(f"{role_prefix}_nif")) if role_prefix else ""
@@ -31124,6 +31167,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_update",
             "/api/inmueble_delete",
             "/api/inmueble_compradores",
+            "/api/inmueble_servicios_update",
             "/api/inmueble_propietarios_update",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
@@ -42276,6 +42320,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not inmueble_id:
                     json_response(self, {"error": "inmueble_id requerido"}, status=400)
                     return
+                referencia = clean_catastro_reference(payload.get("referencia_catastral") or "")
+                if referencia:
+                    conn.execute(
+                        "UPDATE inmuebles SET referencia_catastral = ?, updated_at = datetime(?) WHERE id = ?",
+                        (referencia, now, inmueble_id),
+                    )
                 result = sync_catastro_for_inmueble(conn, inmueble_id, now, usuario=payload.get("usuario"))
                 conn.commit()
                 json_response(
@@ -50010,6 +50060,7 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchone()
+            servicios = get_inmueble_servicios(conn, inmueble_id)
             json_response(
                 self,
                 {
@@ -50017,6 +50068,7 @@ class Handler(BaseHTTPRequestHandler):
                     "propietarios": [dict(r) for r in propietarios],
                     "docs": [dict(r) for r in docs],
                     "captacion": dict(captacion) if captacion else {},
+                    "servicios": servicios,
                 },
             )
             return
