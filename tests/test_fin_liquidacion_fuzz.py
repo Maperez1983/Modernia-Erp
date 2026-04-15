@@ -110,9 +110,9 @@ class FinLiquidacionFuzzTests(unittest.TestCase):
         liquidacion = {"comprador": comprador, "vendedor": vendedor, "cuadre": {}, "notaria": {}, "prestamo": {}}
         return export_row, liquidacion
 
-    def test_10_operaciones_cuadran(self):
+    def test_1000_operaciones_cuadran(self):
         rng = random.Random(20260415)
-        for idx in range(10):
+        for idx in range(1000):
             export_row, liquidacion = self.build_operation(rng, idx)
             out = compute_hipoteca_liquidacion_print_data(export_row, liquidacion)
             liq = out["liq"]
@@ -130,4 +130,3 @@ class FinLiquidacionFuzzTests(unittest.TestCase):
 
             # Sobrantes deben coincidir.
             self.assertAlmostEqual(cuadre["sobran_en_cuenta"], comprador["sobran_en_cuenta"], places=2)
-
