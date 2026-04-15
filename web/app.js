@@ -2606,13 +2606,13 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 		const crmProfileBtn = document.getElementById("crmProfileBtn");
 		const crmBrandTitle = document.getElementById("crmBrandTitle");
 		const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
-		const crmLightningSidebar = document.getElementById("crmLightningSidebar");
-		const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
-			const crmInsertModal = document.getElementById("crmInsertModal");
-				const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
-				const crmInsertSearch = document.getElementById("crmInsertSearch");
-				const crmInsertList = document.getElementById("crmInsertList");
-				let crmInsertAnchorEl = null;
+			const crmLightningSidebar = document.getElementById("crmLightningSidebar");
+			const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
+				const crmInsertModal = document.getElementById("crmInsertModal");
+					const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
+					const crmInsertSearch = document.getElementById("crmInsertSearch");
+					const crmInsertList = document.getElementById("crmInsertList");
+					let crmInsertAnchorEl = null;
 				const crmClienteModal = document.getElementById("crmClienteModal");
 				const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
 				const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
@@ -17486,22 +17486,22 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
 		      crmInsertModal.style.removeProperty("--crm-insert-left");
 		      crmInsertModal.style.removeProperty("--crm-insert-top");
 		    }
-	    setCrmRecentOpen(false);
-	    setCrmClienteModalOpen(false);
-	    setCrmCaptacionModalOpen(false);
-	    if (crmInsertSearch) {
+		    setCrmRecentOpen(false);
+		    setCrmClienteModalOpen(false);
+		    setCrmCaptacionModalOpen(false);
+		    if (crmInsertSearch) {
       crmInsertSearch.value = "";
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
     filterCrmInsertList();
-	  } else {
-	    crmInsertAnchorEl = null;
-	    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-	    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
-	    crmInsertModal.style.removeProperty("--crm-insert-left");
-	    crmInsertModal.style.removeProperty("--crm-insert-top");
-	  }
-	};
+		  } else {
+		    crmInsertAnchorEl = null;
+		    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+		    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+		    crmInsertModal.style.removeProperty("--crm-insert-left");
+		    crmInsertModal.style.removeProperty("--crm-insert-top");
+		  }
+		};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -19855,8 +19855,11 @@ const enableCrmDenseTableResize = (table, storageKey = "") => {
 
   const tableKey = storageKey
     ? String(storageKey).trim()
-    : (() => {
-        const cls = Array.from(table.classList || []).find((c) => c.startsWith("crm-") && c.endsWith("-table"));
+      : (() => {
+        const classes = Array.from(table.classList || []);
+        const cls =
+          classes.find((c) => c.startsWith("crm-") && c.endsWith("-table")) ||
+          classes.find((c) => c.endsWith("-table") && c !== "crm-dense-table");
         return `crm.dense.widths.${cls || "dense"}`;
       })();
 
@@ -19945,32 +19948,61 @@ const enableCrmDenseTableResize = (table, storageKey = "") => {
       save();
       clearWidth(index);
     });
-    handle.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const startX = event.clientX;
+    const startResize = (startX, pointerId = null) => {
       const startWidth = th.getBoundingClientRect().width || 0;
       const prevCursor = document.body.style.cursor;
       const prevSelect = document.body.style.userSelect;
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
+      document.body.classList.add("tc-resizing");
+
       const onMove = (moveEvent) => {
+        if (pointerId !== null && moveEvent.pointerId !== pointerId) return;
         const dx = moveEvent.clientX - startX;
         applyWidth(index, Math.max(48, startWidth + dx));
       };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+
+      const onUp = (upEvent) => {
+        if (pointerId !== null && upEvent.pointerId !== pointerId) return;
+        window.removeEventListener(pointerId !== null ? "pointermove" : "mousemove", onMove, true);
+        window.removeEventListener(pointerId !== null ? "pointerup" : "mouseup", onUp, true);
+        window.removeEventListener("pointercancel", onUp, true);
         document.body.style.cursor = prevCursor || "";
         document.body.style.userSelect = prevSelect || "";
+        document.body.classList.remove("tc-resizing");
         const finalWidth = Math.round(th.getBoundingClientRect().width || 0);
         stored = { ...(stored || {}) };
         stored[colKey] = finalWidth;
         save();
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    });
+
+      if (pointerId !== null) {
+        window.addEventListener("pointermove", onMove, true);
+        window.addEventListener("pointerup", onUp, true);
+        window.addEventListener("pointercancel", onUp, true);
+      } else {
+        window.addEventListener("mousemove", onMove, true);
+        window.addEventListener("mouseup", onUp, true);
+      }
+    };
+
+    if (typeof window !== "undefined" && "PointerEvent" in window) {
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          handle.setPointerCapture(event.pointerId);
+        } catch {}
+        startResize(event.clientX, event.pointerId);
+      });
+    } else {
+      handle.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        startResize(event.clientX, null);
+      });
+    }
 
     th.appendChild(handle);
   });
@@ -33884,7 +33916,7 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
     tbody.appendChild(tr);
 	  });
 	  table.appendChild(tbody);
-	  enableCrmDenseTableResize(table, "crm.inmo.inmuebles");
+	  enableCrmDenseTableResize(table);
 	  return table;
 	};
 
@@ -34140,6 +34172,7 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   return table;
 };
 
@@ -34494,6 +34527,7 @@ const loadCrmAlquileres = () => {
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
+      enableCrmDenseTableResize(table);
       crmAlquileresTable.appendChild(table);
       if (crmAlquileresInfo) {
         crmAlquileresInfo.textContent = `Mostrando ${items.length} alquileres.`;
@@ -36647,6 +36681,7 @@ const renderInmueblePersonasTab = ({ inmueble = {}, captacion = {}, propietarios
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table, "crm.dense.widths.inmueble.personas");
   inmueblePersonasTabList.innerHTML = "";
   inmueblePersonasTabList.appendChild(table);
 };
@@ -36833,6 +36868,7 @@ const renderInmuebleEvolucionTab = ({ inmueble = {}, captacion = {} } = {}) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table, "crm.dense.widths.inmueble.evolucion");
   inmuebleEvolucionTabTable.innerHTML = "";
   inmuebleEvolucionTabTable.appendChild(table);
 };
@@ -37238,6 +37274,7 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   return table;
 };
 
@@ -37597,6 +37634,7 @@ const renderCrmMapaInmuebles = (rows = []) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   crmMapaInmueblesList.appendChild(table);
 
   const initial = pickInitial();
@@ -37885,6 +37923,7 @@ const loadCrmRelacionesCruce = ({ force = false } = {}) => {
           tbody.appendChild(tr);
         });
       table.appendChild(tbody);
+      enableCrmDenseTableResize(table);
 
       crmRelacionesTable.innerHTML = "";
       if (!filteredPairs.length) {
@@ -38147,6 +38186,7 @@ const loadCrmCompraventas = () => {
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
+    enableCrmDenseTableResize(table);
     crmCompraventasTable.innerHTML = "";
     crmCompraventasTable.appendChild(table);
     if (crmCompraventasInfo) {
@@ -38484,19 +38524,20 @@ const loadCrmDemandas = () => {
 		      tipoTd.textContent = [row.tipologia || "", row.subtipologia || ""].filter(Boolean).join(" · ") || "-";
 		      tr.appendChild(tipoTd);
 
-		      tbody.appendChild(tr);
-		    });
-		    table.appendChild(tbody);
-		    crmDemandasTable.innerHTML = "";
-	    crmDemandasTable.appendChild(table);
-	    syncCrmDemandasBulkActions();
-	  };
-	  const params = new URLSearchParams({ empresa_id: empresa.id });
-	  api(`/api/demandas?${params.toString()}`)
-	    .then((data) => {
-		    const rows = data.rows || [];
-		    cachedCrmDemandas = rows;
-			    renderDemandasSteps(rows);
+			      tbody.appendChild(tr);
+			    });
+			    table.appendChild(tbody);
+			    enableCrmDenseTableResize(table);
+			    crmDemandasTable.innerHTML = "";
+		    crmDemandasTable.appendChild(table);
+		    syncCrmDemandasBulkActions();
+		  };
+		  const params = new URLSearchParams({ empresa_id: empresa.id });
+		  api(`/api/demandas?${params.toString()}`)
+		    .then((data) => {
+			    const rows = data.rows || [];
+			    cachedCrmDemandas = rows;
+				    renderDemandasSteps(rows);
 		    const qRaw = String(crmDemandaSearch?.value || "").trim();
 		    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
 		    const az = String(state.crmAz?.demandas || "").trim().toUpperCase();
@@ -38736,6 +38777,7 @@ const buildCrmVisitasDenseTableNode = (rows = []) => {
       tbody.appendChild(tr);
     });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   return table;
 };
 
@@ -39250,6 +39292,7 @@ const buildCrmAgendaDenseTableNode = (rows = []) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   return table;
 };
 
@@ -40058,6 +40101,7 @@ const loadCrmInformadores = async () => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   crmInformadoresTable.innerHTML = "";
   crmInformadoresTable.appendChild(table);
   if (crmInformadoresInfo) {
@@ -40147,6 +40191,7 @@ const loadCrmEdificios = async () => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+  enableCrmDenseTableResize(table);
   crmEdificiosTable.innerHTML = "";
   crmEdificiosTable.appendChild(table);
   if (crmEdificiosInfo) {
@@ -41412,6 +41457,7 @@ const renderInmuebleDocs = (rows = []) => {
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
+      enableCrmDenseTableResize(table, "crm.dense.widths.tc-media-table");
       inmuebleFotosList.appendChild(table);
     }
   }

@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=191" />
+	    <link rel="stylesheet" href="styles.css?v=192" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2050,7 +2050,12 @@
       <section id="agendaSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>Agenda</h2>
+            <h2>
+              <span class="crm-title-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              Agenda
+            </h2>
             <p class="muted">Vista centralizada de tareas y seguimientos.</p>
           </div>
           <button id="agendaBackBtn" class="secondary ghost">Volver a home</button>
@@ -2073,7 +2078,12 @@
       <section id="adminSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>Panel admin</h2>
+            <h2>
+              <span class="crm-title-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 11v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 8h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+              </span>
+              Panel admin
+            </h2>
             <p class="muted">Gestión de usuarios y permisos.</p>
           </div>
           <button id="adminBackBtn" class="secondary ghost">Volver a home</button>
@@ -3999,15 +4009,31 @@
           </div>
         </div>
         <div id="gestoriaCrmSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Clientes</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v14H7V7Z" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v4H9V3Z" stroke="currentColor" stroke-width="2"/><path d="M9 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                Gestoría · Clientes
+              </h3>
               <p class="muted">Expedientes activos, segmentación comercial y alta de nuevos clientes.</p>
             </div>
           </div>
+          <div class="workspace-mini-kpis crm-mini-kpis" id="gestoriaHeaderMiniKpis"></div>
           <div class="tabs" id="gestoriaCrmViews">
-            <button type="button" class="tab active" data-gestoria-view="crm">Expedientes</button>
-            <button type="button" class="tab" data-gestoria-view="alta">Alta cliente</button>
+            <button type="button" class="tab active crm-tab-ico" data-gestoria-view="crm">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Expedientes</span>
+            </button>
+            <button type="button" class="tab crm-tab-ico" data-gestoria-view="alta">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Alta cliente</span>
+            </button>
           </div>
           <div id="gestoriaCrmViewCrm">
           <div class="form-card">
@@ -4018,11 +4044,36 @@
               </div>
             </div>
             <div class="tabs" id="gestoriaCrmTabs">
-              <button type="button" class="tab active" data-gestoria-tab="all">Todos</button>
-              <button type="button" class="tab" data-gestoria-tab="autonomo">Autónomo</button>
-              <button type="button" class="tab" data-gestoria-tab="empresa">Empresa</button>
-              <button type="button" class="tab" data-gestoria-tab="renta">Cliente Renta</button>
-              <button type="button" class="tab" data-gestoria-tab="admin">Gestiones Administrativas</button>
+              <button type="button" class="tab active crm-tab-ico" data-gestoria-tab="all">
+                <span class="crm-tab-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span>Todos</span>
+              </button>
+              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="autonomo">
+                <span class="crm-tab-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
+                </span>
+                <span>Autónomo</span>
+              </button>
+              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="empresa">
+                <span class="crm-tab-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V5a2 2 0 0 1 2-2h6v18H4Z" stroke="currentColor" stroke-width="2"/><path d="M12 8h8a2 2 0 0 1 2 2v11H12V8Z" stroke="currentColor" stroke-width="2"/><path d="M7 7h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 11h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 12h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 16h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span>Empresa</span>
+              </button>
+              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="renta">
+                <span class="crm-tab-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span>Renta</span>
+              </button>
+              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="admin">
+                <span class="crm-tab-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.94 7.94 0 0 0 .1-1 7.94 7.94 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a8.1 8.1 0 0 0-1.7-1l-.4-2.6H10l-.4 2.6a8.1 8.1 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.94 7.94 0 0 0-.1 1c0 .34.03.67.1 1l-2 1.5 2 3.5 2.4-1c.53.4 1.1.74 1.7 1l.4 2.6h4l.4-2.6c.6-.26 1.17-.6 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                </span>
+                <span>Gestiones</span>
+              </button>
             </div>
             <div class="toolbar">
               <div class="quick-search">
@@ -4287,9 +4338,14 @@
         </div>
         </div>
         <div id="gestoriaDocsSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Inbox documental</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v6l-2-2H6l-2 2V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 10v10h16V10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 14h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                Gestoría · Inbox documental
+              </h3>
               <p class="muted">Entrada documental del despacho, histórico importado y actividad reciente.</p>
             </div>
           </div>
@@ -4359,12 +4415,18 @@
           </div>
         </div>
         <div id="gestoriaDashboardSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Panel</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
+                </span>
+                Gestoría · Panel
+              </h3>
               <p class="muted">Vista principal del despacho: carga, alertas, vencimientos y foco operativo.</p>
             </div>
           </div>
+          <div class="workspace-mini-kpis crm-mini-kpis" id="gestoriaDashboardHeaderMiniKpis"></div>
           <button type="button" class="gestoria-renta-banner" id="gestoriaRentaCampaignBanner">
             <div class="gestoria-renta-banner-mark" aria-hidden="true">
               <div class="gestoria-renta-banner-gov"></div>
@@ -4520,9 +4582,14 @@
           </div>
         </div>
         <div id="gestoriaContaSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Contabilidad</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                Gestoría · Contabilidad
+              </h3>
               <p class="muted">Cola de trabajo contable y seguimiento global del despacho.</p>
             </div>
           </div>
@@ -4607,9 +4674,14 @@
           </div>
         </div>
         <div id="gestoriaAgendaSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Campañas</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                Gestoría · Campañas
+              </h3>
               <p class="muted">Seguimiento de campañas, agenda operativa y acciones recurrentes del equipo.</p>
             </div>
           </div>
@@ -4664,9 +4736,14 @@
           </div>
         </div>
         <div id="gestoriaFactSection" class="hidden">
-          <div class="crm-header">
+          <div class="crm-header crm-header-stack">
             <div>
-              <h3>Gestoría · Presupuestos</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16l-2-1-2 1-2-1-2 1-2-1-2 1V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                Gestoría · Presupuestos
+              </h3>
               <p class="muted">Presupuestos de administración de fincas y gestoría (con PDF y nota de encargo).</p>
             </div>
           </div>
@@ -7609,22 +7686,57 @@
         <div id="clientesDetail" class="form-card hidden">
           <div class="section-head">
             <div>
-              <h3 id="clienteDetailTitle">Ficha de cliente</h3>
+              <h3 class="crm-header-title">
+                <span class="crm-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
+                </span>
+                <span id="clienteDetailTitle">Ficha de cliente</span>
+              </h3>
               <p class="muted" id="clienteDetailSubtitle">Información general y asignaciones.</p>
             </div>
             <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
           </div>
           <div class="tabs" id="clienteTabs">
-            <button class="tab active" type="button" data-tab="datos">Expediente</button>
-            <button class="tab" type="button" data-tab="relaciones">Relaciones</button>
+            <button class="tab active crm-tab-ico" type="button" data-tab="datos">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v14H7V7Z" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v4H9V3Z" stroke="currentColor" stroke-width="2"/><path d="M9 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Expediente</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-tab="relaciones">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Relaciones</span>
+            </button>
             <button class="tab hidden" type="button" data-tab="economicos">Datos económicos</button>
             <button class="tab hidden" type="button" data-tab="dashboard">Resumen</button>
-            <button class="tab" type="button" data-tab="profesional">Servicios</button>
+            <button class="tab crm-tab-ico" type="button" data-tab="profesional">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16v12H4V8Z" stroke="currentColor" stroke-width="2"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span>Servicios</span>
+            </button>
             <button class="tab hidden" type="button" data-tab="operativa">Áreas de trabajo</button>
             <button class="tab hidden" type="button" data-tab="servicios">Servicios</button>
-            <button class="tab" type="button" data-tab="docs">Documentos</button>
-            <button class="tab" type="button" data-tab="facturas">Facturación</button>
-            <button class="tab" type="button" data-tab="trabajos">Historial</button>
+            <button class="tab crm-tab-ico" type="button" data-tab="docs">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h8l4 4v12H6V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 4v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Documentos</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-tab="facturas">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16l-2-1-2 1-2-1-2 1-2-1-2 1V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Facturación</span>
+            </button>
+            <button class="tab crm-tab-ico" type="button" data-tab="trabajos">
+              <span class="crm-tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M8 2h8v4H8V2Z" stroke="currentColor" stroke-width="2"/><path d="M7 10h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 14h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span>Historial</span>
+            </button>
           </div>
           <div id="clienteTabDatos">
             <div class="grid" id="clienteDetailGrid"></div>
@@ -9003,7 +9115,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=520"></script>
+					    <script src="app.js?v=521"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -9031,9 +9143,9 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-				          navigator.serviceWorker.register("/sw.js?v=146").catch(function () {});
-	        });
-	      })();
-	    </script>
+					          navigator.serviceWorker.register("/sw.js?v=147").catch(function () {});
+		        });
+		      })();
+		    </script>
   </body>
 </html>

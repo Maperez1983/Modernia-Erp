@@ -3608,7 +3608,8 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 }
 
 #crmSection table.crm-dense-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   table-layout: fixed;
@@ -3640,6 +3641,39 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   color: rgba(var(--ink-rgb), 0.78);
   background: rgba(248, 250, 252, 0.95);
   border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  position: relative;
+}
+
+#crmSection table.crm-dense-table th .tc-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+#crmSection table.crm-dense-table th .tc-col-resizer::after {
+  content: "";
+  position: absolute;
+  top: 22%;
+  left: 4px;
+  width: 2px;
+  height: 56%;
+  border-radius: 2px;
+  background: rgba(15, 23, 42, 0.22);
+  opacity: 0.25;
+}
+
+#crmSection table.crm-dense-table th:hover .tc-col-resizer::after {
+  opacity: 0.55;
+}
+
+body.tc-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 #crmSection table.crm-dense-table tr {
