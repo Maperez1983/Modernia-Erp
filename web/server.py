@@ -43724,6 +43724,46 @@ class Handler(BaseHTTPRequestHandler):
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+        elif parsed.path == "/api/inmueble_servicios_update":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            servicios_raw = payload.get("servicios", [])
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            if not isinstance(servicios_raw, list):
+                json_response(self, {"error": "servicios inválido"}, status=400)
+                return
+            ensure_inmueble_servicios_schema(conn)
+            servicios = []
+            seen = set()
+            for item in servicios_raw:
+                label = str(item or "").strip()
+                if not label:
+                    continue
+                if len(label) > 80:
+                    label = label[:80].strip()
+                key = normalize_lookup_text(label)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                servicios.append(label)
+                if len(servicios) >= 60:
+                    break
+            conn.execute("DELETE FROM inmueble_servicios WHERE inmueble_id = ?", (inmueble_id,))
+            for label in servicios:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO inmueble_servicios (
+                      id, inmueble_id, servicio, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (os.urandom(16).hex(), inmueble_id, label, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "servicios": servicios})
+            return
         elif parsed.path == "/api/inmueble_propietario_create":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()

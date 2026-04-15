@@ -40475,8 +40475,8 @@ const openInmuebleServiciosModal = () => {
       <div class="modal-content" style="max-width: 760px;">
         <div class="modal-header">
           <div>
-            <h3>Servicios del inmueble</h3>
-            <p class="muted" style="margin:0;">Marca características rápidas para operar igual de limpio que en Tecnocloud.</p>
+	            <h3>Servicios del inmueble</h3>
+	            <p class="muted" style="margin:0;">Selecciona servicios y características para el anuncio y la gestión.</p>
           </div>
           <button type="button" class="secondary ghost" data-serv-close>Cerrar</button>
         </div>

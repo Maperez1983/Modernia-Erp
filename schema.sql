@@ -1038,6 +1038,18 @@ CREATE TABLE IF NOT EXISTS inmueble_propietarios (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+CREATE TABLE IF NOT EXISTS inmueble_servicios (
+  id TEXT PRIMARY KEY,
+  inmueble_id TEXT NOT NULL,
+  servicio TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(inmueble_id, servicio),
+  FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inmueble_servicios_inmueble ON inmueble_servicios(inmueble_id);
+
 CREATE TABLE IF NOT EXISTS inmueble_docs (
   id TEXT PRIMARY KEY,
   inmueble_id TEXT NOT NULL,
