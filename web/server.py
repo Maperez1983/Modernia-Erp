@@ -45478,6 +45478,32 @@ class Handler(BaseHTTPRequestHandler):
             if "financiacion_asesoramiento_id" in updates:
                 response_payload["financiacion_asesoramiento_id"] = updates["financiacion_asesoramiento_id"]
                 response_payload["financiacion_missing_fields"] = updates.get("financiacion_missing_fields") or []
+            if inmueble_id:
+                response_payload["inmueble_id"] = inmueble_id
+                try:
+                    row_estado = conn.execute(
+                        "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    if row_estado:
+                        response_payload["inmueble_estado"] = row_estado["estado"]
+                except Exception:
+                    pass
+                try:
+                    row_cap = conn.execute(
+                        """
+                        SELECT etapa
+                        FROM captaciones
+                        WHERE inmueble_id = ?
+                        ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC
+                        LIMIT 1
+                        """,
+                        (inmueble_id,),
+                    ).fetchone()
+                    if row_cap:
+                        response_payload["captacion_etapa"] = row_cap["etapa"]
+                except Exception:
+                    pass
             conn.commit()
             json_response(self, response_payload)
             return

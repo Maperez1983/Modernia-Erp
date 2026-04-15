@@ -39489,6 +39489,25 @@ const openCrmAgendaEditModal = (row) => {
         loadCrmAgenda();
         renderCrmResumenDashboard();
         renderCrmResumenYtdBoard({ force: true }).catch(() => {});
+        try {
+          loadCrmCaptaciones();
+          loadCrmInmuebles();
+        } catch {}
+        if (data?.inmueble_id && String(data.inmueble_id) === String(state.currentInmuebleId || "")) {
+          try {
+            if (state.currentInmuebleContext?.inmueble && data?.inmueble_estado) {
+              state.currentInmuebleContext.inmueble.estado = data.inmueble_estado;
+            }
+            if (state.currentInmuebleContext?.captacion && data?.captacion_etapa) {
+              state.currentInmuebleContext.captacion.etapa = data.captacion_etapa;
+              state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
+            }
+            refreshCurrentInmuebleHeader();
+          } catch {}
+          try {
+            if (empresaId) loadInmuebleActividad(state.currentInmuebleId, empresaId);
+          } catch {}
+        }
       } catch (err) {
         if (statusEl) statusEl.textContent = err?.message || "No se pudo guardar.";
       }
@@ -42238,7 +42257,7 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   });
 };
 
-const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const closeInmuebleWorkflowAction = (row, empresaId) => {
   const submitClosePayload = (payload, type, resultado) => {
     fetch("/api/acciones_update", {
       method: "POST",
@@ -42261,8 +42280,31 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
             : "";
           financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
         }
+        const stageBits = [];
+        if (data?.inmueble_estado) stageBits.push(`Estado inmueble: ${data.inmueble_estado}`);
+        if (data?.captacion_etapa) stageBits.push(`Etapa: ${data.captacion_etapa}`);
         if (inmuebleActividadStatus) {
-          inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
+          inmuebleActividadStatus.textContent =
+            `${type} cerrada con resultado ${resultado}.` +
+            (stageBits.length ? ` ${stageBits.join(" · ")}.` : "") +
+            (financeMessages.length ? ` ${financeMessages.join(" ")}` : "");
+        }
+        // Refresca listados/kanban para que el inmueble se mueva de columna sin recargar.
+        try {
+          loadCrmCaptaciones();
+          loadCrmInmuebles();
+        } catch {}
+        if (state.currentInmuebleContext && String(data?.inmueble_id || "") === String(state.currentInmuebleId || "")) {
+          try {
+            if (state.currentInmuebleContext.inmueble && data?.inmueble_estado) {
+              state.currentInmuebleContext.inmueble.estado = data.inmueble_estado;
+            }
+            if (state.currentInmuebleContext.captacion && data?.captacion_etapa) {
+              state.currentInmuebleContext.captacion.etapa = data.captacion_etapa;
+              state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
+            }
+            refreshCurrentInmuebleHeader();
+          } catch {}
         }
         if (state.currentInmuebleId && empresaId) {
           loadInmuebleActividad(state.currentInmuebleId, empresaId);
