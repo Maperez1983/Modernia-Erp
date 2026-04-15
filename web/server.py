@@ -3767,7 +3767,15 @@ def _set_nested(obj, path, value):
 
 
 def _is_financiado(value):
-    return normalize_lookup_text(value) in {"si", "sí", "s", "true", "1", "financiado", "financiada"}
+    return str(normalize_lookup_text(value) or "").strip().lower() in {
+        "si",
+        "sí",
+        "s",
+        "true",
+        "1",
+        "financiado",
+        "financiada",
+    }
 
 
 def _round2(value):
@@ -3784,6 +3792,14 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
     entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
     prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
+    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
+    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
+    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
+    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
+    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
+    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
+    notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
 
     # Defaults desde ficha (si el JSON está incompleto).
     precio_base = parse_money_value(export_row.get("precio") or 0)
@@ -3861,6 +3877,81 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     sobran = _round2(prestamo_concedido + suma_entregada - suma_total_necesaria)
     comprador["sobran_en_cuenta"] = sobran
 
+    # Vendedor (replica Excel).
+    if not str(vendedor.get("precio_vivienda") or "").strip() and precio:
+        vendedor["precio_vivienda"] = precio
+    if not str(vendedor_ded.get("senal") or "").strip() and senal:
+        vendedor_ded["senal"] = senal
+
+    vend_precio = parse_money_value(vendedor.get("precio_vivienda") or 0)
+    vend_senal = parse_money_value(vendedor_ded.get("senal") or 0)
+    vend_can_eco = parse_money_value(vendedor_ded.get("cancelacion_economica") or 0)
+    vend_can_reg = parse_money_value(vendedor_ded.get("cancelacion_registral") or 0)
+    vend_ibi = parse_money_value(vendedor_ded.get("deuda_ibi") or 0)
+    vend_plus = parse_money_value(vendedor_ded.get("plusvalia") or 0)
+    vend_ret = parse_money_value(vendedor_ded.get("retencion_no_residente") or 0)
+    vend_gest_nr = parse_money_value(vendedor_ded.get("gestion_no_residente") or 0)
+
+    subtotal_pte = _round2(vend_precio - vend_senal - vend_can_eco - vend_can_reg - vend_ibi - vend_plus)
+    vendedor["subtotal_pte_percibir"] = subtotal_pte
+    total_percibir = _round2(subtotal_pte - vend_ret - vend_gest_nr)
+    vendedor["total_a_percibir"] = total_percibir
+
+    # Cuadre cheques (autorrelleno desde comprador/vendedor).
+    cuadre["prestamo_concedido"] = _round2(prestamo_concedido)
+    cuadre["ingreso_en_cuenta"] = _round2(ingresar_banco)
+    cuadre["cancelacion_economica"] = _round2(vend_can_eco)
+    cuadre["retencion_cancelacion_registral"] = _round2(vend_can_reg)
+    cuadre["retencion_ibi"] = _round2(vend_ibi)
+    cuadre["retencion_no_residente"] = _round2(vend_ret)
+    cuadre["gestion_no_residente"] = _round2(vend_gest_nr)
+
+    cuadre_gastos["compraventa"] = _round2(total_cv)
+    cuadre_gastos["hipoteca"] = _round2(hip_notaria_impuestos_gestoria)
+    cuadre_gastos["com_apertura"] = _round2(hip_com_apertura)
+    cuadre["comision_cheques"] = _round2(hip_com_cheques)
+    cuadre["cuota_socio"] = _round2(hip_cuota_socio)
+
+    sobran_cuadre = _round2(prestamo_concedido + senal + transf_modernia + ingresar_banco - suma_total_necesaria)
+    cuadre["sobran_en_cuenta"] = sobran_cuadre
+
+    # Beneficiarios por defecto (OMF vendedor/es).
+    v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
+    v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
+    v1_name = str(v1.get("nombre") or "").strip()
+    v2_name = str(v2.get("nombre") or "").strip()
+    if not str(cuadre_cheq1.get("beneficiario") or "").strip() and v1_name:
+        cuadre_cheq1["beneficiario"] = f"OMF {v1_name}"
+    if not str(cuadre_cheq2.get("beneficiario") or "").strip() and v2_name:
+        cuadre_cheq2["beneficiario"] = f"OMF {v2_name}"
+
+    # Reparto por defecto de cheques con el total_a_percibir (si están vacíos).
+    cheq1_has = str(cuadre_cheq1.get("importe") or "").strip() != ""
+    cheq2_has = str(cuadre_cheq2.get("importe") or "").strip() != ""
+    v2_exists = bool(v2_name)
+    if total_percibir > 0:
+        if not cheq1_has and not cheq2_has:
+            if v2_exists:
+                half = _round2(total_percibir / 2)
+                cuadre_cheq1["importe"] = half
+                cuadre_cheq2["importe"] = _round2(total_percibir - half)
+            else:
+                cuadre_cheq1["importe"] = _round2(total_percibir)
+        elif v2_exists and cheq1_has and not cheq2_has:
+            cuadre_cheq2["importe"] = _round2(total_percibir - parse_money_value(cuadre_cheq1.get("importe") or 0))
+        elif v2_exists and not cheq1_has and cheq2_has:
+            cuadre_cheq1["importe"] = _round2(total_percibir - parse_money_value(cuadre_cheq2.get("importe") or 0))
+
+    cheq1_imp = parse_money_value(cuadre_cheq1.get("importe") or 0)
+    cheq2_imp = parse_money_value(cuadre_cheq2.get("importe") or 0)
+    total_medios_pago = _round2(senal + vend_can_eco + vend_can_reg + vend_ibi + vend_ret + vend_gest_nr + cheq1_imp + cheq2_imp)
+    cuadre["total_medios_pago"] = total_medios_pago
+    cuadre["diferencia_medios_pago"] = _round2(escriturado - total_medios_pago)
+
+    # Flags de cuadre: el sobrante debe cuadrar (comprador vs cuadre).
+    sobrante_delta = _round2(sobran - sobran_cuadre)
+    sobrante_ok = abs(sobrante_delta) <= 0.01
+
     # Persist computed back into structure for rendering.
     comprador["precio_compra"] = precio
     comprador["escriturado"] = escriturado
@@ -3869,6 +3960,14 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     comprador["entregas"] = entregas
     liq["comprador"] = comprador
     liq["prestamo"] = prestamo
+    vendedor["deducciones"] = vendedor_ded
+    vendedor["vendedores"] = vendedor_vendedores
+    liq["vendedor"] = vendedor
+    cuadre["cheque1"] = cuadre_cheq1
+    cuadre["cheque2"] = cuadre_cheq2
+    cuadre["gastos_escrituras"] = cuadre_gastos
+    liq["cuadre"] = cuadre
+    liq["notaria"] = notaria
 
     return {
         "liq": liq,
@@ -3876,6 +3975,8 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
             "proteccion_financiado": prot_fin,
             "hogar_financiado": hogar_fin,
             "vida_financiado": vida_fin,
+            "cuadre_sobrante_ok": sobrante_ok,
+            "cuadre_sobrante_delta": sobrante_delta,
         },
     }
 
@@ -3908,17 +4009,43 @@ def render_hipoteca_print_html(payload, auto_print=False):
     def money(value):
         return html.escape(format_export_money(parse_money_value(value or 0)))
 
+    def num(value, decimals=4):
+        amount = parse_money_value(value)
+        if amount is None:
+            return "-"
+        text = f"{amount:,.{int(decimals)}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        if "," in text:
+            text = text.rstrip("0").rstrip(",")
+        return html.escape(text)
+
     comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
     gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
     hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
     entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
     prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
+    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
+    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
+    vend_v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
+    vend_v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
+    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
+    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
+    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
+    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
+    notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
 
     liq_section = ""
     if liq:
         prot_tag = " (Financiado)" if flags.get("proteccion_financiado") else ""
         hogar_tag = " (Financiado)" if flags.get("hogar_financiado") else ""
         vida_tag = " (Financiado)" if flags.get("vida_financiado") else ""
+        cuadre_ok = bool(flags.get("cuadre_sobrante_ok"))
+        cuadre_delta = parse_money_value(flags.get("cuadre_sobrante_delta") or 0)
+        cuadre_badge = (
+            '<span class="badge badge-ok">CUADRE OK</span>'
+            if cuadre_ok
+            else f'<span class="badge badge-bad">NO CUADRA · Δ {money(cuadre_delta)}</span>'
+        )
         liq_section = f"""
       <div class="panel" style="grid-column: 1 / -1;">
         <h2>Liquidación comprador</h2>
@@ -3972,9 +4099,126 @@ def render_hipoteca_print_html(payload, auto_print=False):
         <h2 style="margin-top: 0;">Condiciones del préstamo</h2>
         <dl>
           <dt>Tipo salida</dt><dd>{html.escape(str(prestamo.get("tipo_salida") or "-"))}</dd>
-          <dt>Revisión</dt><dd>{money(prestamo.get("revision"))}</dd>
-          <dt>Interés</dt><dd>{money(prestamo.get("interes"))}</dd>
+          <dt>Revisión</dt><dd>{num(prestamo.get("revision"), 4)}</dd>
+          <dt>Interés</dt><dd>{num(prestamo.get("interes"), 6)}</dd>
           <dt>Plazo (años)</dt><dd>{html.escape(str(prestamo.get("plazo_anos") or "-"))}</dd>
+          <dt>Nº cuotas</dt><dd>{html.escape(str(prestamo.get("numero_cuotas") or "-"))}</dd>
+          <dt>Cuota inicial</dt><dd>{money(prestamo.get("cuota_inicial"))}</dd>
+          <dt>Apertura</dt><dd>{num(prestamo.get("apertura"), 4)}</dd>
+          <dt>Ca. parcial</dt><dd>{num(prestamo.get("cancelacion_parcial"), 4)}</dd>
+          <dt>Cancelación</dt><dd>{num(prestamo.get("cancelacion"), 4)}</dd>
+        </dl>
+      </div>
+
+      <div class="page-break"></div>
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Liquidación vendedor</h2>
+        <dl>
+          <dt>Cliente (operación)</dt><dd>{html.escape(str(vendedor.get("cliente") or payload.get("cliente") or "-"))}</dd>
+          <dt>Dirección</dt><dd>{html.escape(str(vendedor.get("direccion") or ""))}</dd>
+          <dt>Localidad</dt><dd>{html.escape(str(vendedor.get("localidad") or ""))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Deducciones</th>
+              <th style="text-align:right; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding: 8px 0;">Precio vivienda</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor.get("precio_vivienda"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Señal</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("senal"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Cancelación económica préstamo</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("cancelacion_economica"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Cancelación registral préstamo</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("cancelacion_registral"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Deuda IBI</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("deuda_ibi"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Plusvalía municipal</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("plusvalia"))}</td></tr>
+            <tr><td style="padding: 10px 0; border-top: 1px solid var(--line); font-weight:800;">Subtotal pte. percibir</td><td style="padding: 10px 0; border-top: 1px solid var(--line); text-align:right; font-weight:800;">{money(vendedor.get("subtotal_pte_percibir"))}</td></tr>
+            <tr><td colspan="2" style="padding: 6px 0;"></td></tr>
+            <tr><td style="padding: 8px 0;">Retención 3% no residente</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("retencion_no_residente"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Gestión no residente</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(vendedor_ded.get("gestion_no_residente"))}</td></tr>
+            <tr><td style="padding: 10px 0; border-top: 1px solid var(--line); font-weight:800;">Total a percibir</td><td style="padding: 10px 0; border-top: 1px solid var(--line); text-align:right; font-weight:800;">{money(vendedor.get("total_a_percibir"))}</td></tr>
+          </tbody>
+        </table>
+        <div style="height: 14px;"></div>
+        <h2 style="margin-top: 0;">Vendedores y datos registrales</h2>
+        <dl>
+          <dt>Vendedor 1</dt><dd>{html.escape(str(vend_v1.get("nombre") or ""))} {html.escape(str(vend_v1.get("nif") or ""))}</dd>
+          <dt>Vendedor 2</dt><dd>{html.escape(str(vend_v2.get("nombre") or ""))} {html.escape(str(vend_v2.get("nif") or ""))}</dd>
+          <dt>Registro</dt><dd>{html.escape(str(vendedor.get("registro") or ""))}</dd>
+          <dt>Finca</dt><dd>{html.escape(str(vendedor.get("finca") or ""))}</dd>
+          <dt>Notas</dt><dd>{html.escape(str(vendedor.get("notas") or ""))}</dd>
+        </dl>
+      </div>
+
+      <div class="page-break"></div>
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Cuadre de cheques {cuadre_badge}</h2>
+        <dl>
+          <dt>Préstamo concedido</dt><dd>{money(cuadre.get("prestamo_concedido"))}</dd>
+          <dt>Ingreso en cuenta</dt><dd>{money(cuadre.get("ingreso_en_cuenta"))}</dd>
+          <dt>Cheque 1</dt><dd>{html.escape(str(cuadre_cheq1.get("beneficiario") or ""))} · {money(cuadre_cheq1.get("importe"))}</dd>
+          <dt>Cheque 2</dt><dd>{html.escape(str(cuadre_cheq2.get("beneficiario") or ""))} · {money(cuadre_cheq2.get("importe"))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Concepto</th>
+              <th style="text-align:right; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 8px 0; border-bottom: 1px solid var(--line);">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding: 8px 0;">Cancelación económica préstamo</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("cancelacion_economica"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Retención cancelación registral</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("retencion_cancelacion_registral"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Retención deuda IBI</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("retencion_ibi"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Retención 3% no residente</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("retencion_no_residente"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Gestión no residente</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("gestion_no_residente"))}</td></tr>
+            <tr><td colspan="2" style="padding: 6px 0;"></td></tr>
+            <tr><td style="padding: 8px 0;">Gastos escrituras · Compraventa</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre_gastos.get("compraventa"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Gastos escrituras · Hipoteca</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre_gastos.get("hipoteca"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Gastos escrituras · Com. apertura</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre_gastos.get("com_apertura"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Comisión cheques/OMF</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("comision_cheques"))}</td></tr>
+            <tr><td style="padding: 8px 0;">Cuota socio caja</td><td style="padding: 8px 0; text-align:right; font-weight:700;">{money(cuadre.get("cuota_socio"))}</td></tr>
+            <tr><td style="padding: 10px 0; border-top: 1px solid var(--line); font-weight:800;">Sobran en cuenta (auto)</td><td style="padding: 10px 0; border-top: 1px solid var(--line); text-align:right; font-weight:800;">{money(cuadre.get("sobran_en_cuenta"))}</td></tr>
+          </tbody>
+        </table>
+        <div style="height: 14px;"></div>
+        <dl>
+          <dt>Total medios de pago (auto)</dt><dd>{money(cuadre.get("total_medios_pago"))}</dd>
+          <dt>Diferencia vs escriturado (auto)</dt><dd>{money(cuadre.get("diferencia_medios_pago"))}</dd>
+          <dt>Sobrante (comprador)</dt><dd>{money(comprador.get("sobran_en_cuenta"))}</dd>
+        </dl>
+      </div>
+
+      <div class="page-break"></div>
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Parte notaría</h2>
+        <dl>
+          <dt>Notaría</dt><dd>{html.escape(str(notaria.get("nombre") or ""))}</dd>
+          <dt>Persona de contacto</dt><dd>{html.escape(str(notaria.get("contacto") or ""))}</dd>
+          <dt>A la atención de</dt><dd>{html.escape(str(notaria.get("atencion") or ""))}</dd>
+          <dt>Entidad hipoteca</dt><dd>{html.escape(str(notaria.get("entidad") or ""))}</dd>
+          <dt>Op. referencia</dt><dd>{html.escape(str(notaria.get("op_referencia") or ""))}</dd>
+          <dt>Fecha y hora firma</dt><dd>{html.escape(str(notaria.get("fecha_hora_firma") or ""))}</dd>
+          <dt>Forma de pago</dt><dd>{html.escape(str(notaria.get("forma_pago") or ""))}</dd>
+          <dt>Observaciones</dt><dd>{html.escape(str(notaria.get("observaciones") or ""))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <h2 style="margin-top: 0;">Valores (referencia)</h2>
+        <dl>
+          <dt>Valor escrituración</dt><dd>{money(comprador.get("escriturado"))}</dd>
+          <dt>Valor liquidación impuestos</dt><dd>{money(comprador.get("precio_compra"))}</dd>
+          <dt>Hipoteca (capital)</dt><dd>{money(hip.get("capital"))}</dd>
+        </dl>
+        <div style="height: 14px;"></div>
+        <h2 style="margin-top: 0;">Condiciones del préstamo</h2>
+        <dl>
+          <dt>Tipo salida</dt><dd>{html.escape(str(prestamo.get("tipo_salida") or "-"))}</dd>
+          <dt>Revisión</dt><dd>{num(prestamo.get("revision"), 4)}</dd>
+          <dt>Interés</dt><dd>{num(prestamo.get("interes"), 6)}</dd>
+          <dt>Plazo (años)</dt><dd>{html.escape(str(prestamo.get("plazo_anos") or "-"))}</dd>
+          <dt>Nº cuotas</dt><dd>{html.escape(str(prestamo.get("numero_cuotas") or "-"))}</dd>
           <dt>Cuota inicial</dt><dd>{money(prestamo.get("cuota_inicial"))}</dd>
         </dl>
       </div>
@@ -4091,6 +4335,33 @@ def render_hipoteca_print_html(payload, auto_print=False):
       text-transform: uppercase;
       letter-spacing: .08em;
       color: var(--brand);
+    }}
+    .page-break {{
+      break-before: page;
+      page-break-before: always;
+      height: 1px;
+    }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 12px;
+      letter-spacing: .08em;
+      margin-left: 10px;
+      vertical-align: middle;
+    }}
+    .badge-ok {{
+      background: rgba(22, 163, 74, .12);
+      color: #166534;
+      border: 1px solid rgba(22, 163, 74, .25);
+    }}
+    .badge-bad {{
+      background: rgba(220, 38, 38, .10);
+      color: #991b1b;
+      border: 1px solid rgba(220, 38, 38, .25);
     }}
     dl {{
       margin: 0;
