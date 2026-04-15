@@ -31120,6 +31120,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_convert",
             "/api/compraventas",
             "/api/inmueble_catastro_lookup",
+            "/api/inmueble_catastro_sync",
             "/api/inmueble_update",
             "/api/inmueble_delete",
             "/api/inmueble_compradores",

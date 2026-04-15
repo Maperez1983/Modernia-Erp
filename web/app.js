@@ -37348,10 +37348,10 @@ const loadCrmInmuebles = () => {
         summary: "Expedientes sin cliente propietario enlazado.",
       },
       {
-        title: "Sin pricing",
+        title: "Sin precio",
         value: sinPricing,
         meta: "Valoración",
-        summary: "Falta precio propietario/encargo y/o valoración.",
+        summary: "Falta precio (propietario/encargo) y/o valoración.",
       },
       {
         title: "En noticia",
@@ -37375,8 +37375,8 @@ const loadCrmInmuebles = () => {
             crmView: "inmuebles",
           },
           {
-            title: "Definir pricing",
-            summary: `${sinPricing} inmuebles siguen sin precio objetivo o adquisición.`,
+            title: "Definir precio",
+            summary: `${sinPricing} inmuebles siguen sin precio (propietario/encargo) o valoración.`,
             crmView: "inmuebles",
           },
           {
