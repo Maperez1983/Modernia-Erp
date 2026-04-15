@@ -3981,7 +3981,7 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     }
 
 
-def render_hipoteca_print_html(payload, auto_print=False):
+def render_hipoteca_print_html(payload, auto_print=False, section=None):
     cliente = html.escape(payload["cliente"] or "Cliente")
     banco = html.escape(payload["banco"] or "-")
     tipo = html.escape(payload["tipo_hipoteca"] or "-")
@@ -4034,8 +4034,13 @@ def render_hipoteca_print_html(payload, auto_print=False):
     cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
     notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
 
+    requested = str(section or "").strip().lower()
+    # Compat: si no hay section, imprimimos todo.
+    def wants(key):
+        return not requested or requested in {"all", "todo", "todas"} or requested == str(key).strip().lower()
+
     liq_section = ""
-    if liq:
+    if liq and (wants("comprador") or wants("vendedor") or wants("cheques") or wants("notaria")):
         prot_tag = " (Financiado)" if flags.get("proteccion_financiado") else ""
         hogar_tag = " (Financiado)" if flags.get("hogar_financiado") else ""
         vida_tag = " (Financiado)" if flags.get("vida_financiado") else ""
@@ -4046,8 +4051,10 @@ def render_hipoteca_print_html(payload, auto_print=False):
             if cuadre_ok
             else f'<span class="badge badge-bad">NO CUADRA · Δ {money(cuadre_delta)}</span>'
         )
+        page_break = '<div class="page-break"></div>' if not requested else ""
         liq_section = f"""
-      <div class="panel" style="grid-column: 1 / -1;">
+      {f'<div class="panel" style="grid-column: 1 / -1;">' if wants("comprador") else ''}
+      {f'''
         <h2>Liquidación comprador</h2>
         <dl>
           <dt>Precio compra vivienda</dt><dd>{money(comprador.get("precio_compra"))}</dd>
@@ -4108,10 +4115,12 @@ def render_hipoteca_print_html(payload, auto_print=False):
           <dt>Ca. parcial</dt><dd>{num(prestamo.get("cancelacion_parcial"), 4)}</dd>
           <dt>Cancelación</dt><dd>{num(prestamo.get("cancelacion"), 4)}</dd>
         </dl>
-      </div>
+      ''' if wants("comprador") else ''}
+      {f'</div>' if wants("comprador") else ''}
 
-      <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      {page_break if wants("comprador") and wants("vendedor") else ""}
+      {f'<div class="panel" style="grid-column: 1 / -1;">' if wants("vendedor") else ''}
+      {f'''
         <h2>Liquidación vendedor</h2>
         <dl>
           <dt>Cliente (operación)</dt><dd>{html.escape(str(vendedor.get("cliente") or payload.get("cliente") or "-"))}</dd>
@@ -4149,10 +4158,12 @@ def render_hipoteca_print_html(payload, auto_print=False):
           <dt>Finca</dt><dd>{html.escape(str(vendedor.get("finca") or ""))}</dd>
           <dt>Notas</dt><dd>{html.escape(str(vendedor.get("notas") or ""))}</dd>
         </dl>
-      </div>
+      ''' if wants("vendedor") else ''}
+      {f'</div>' if wants("vendedor") else ''}
 
-      <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      {page_break if wants("vendedor") and wants("cheques") else ""}
+      {f'<div class="panel" style="grid-column: 1 / -1;">' if wants("cheques") else ''}
+      {f'''
         <h2>Cuadre de cheques {cuadre_badge}</h2>
         <dl>
           <dt>Préstamo concedido</dt><dd>{money(cuadre.get("prestamo_concedido"))}</dd>
@@ -4189,10 +4200,12 @@ def render_hipoteca_print_html(payload, auto_print=False):
           <dt>Diferencia vs escriturado (auto)</dt><dd>{money(cuadre.get("diferencia_medios_pago"))}</dd>
           <dt>Sobrante (comprador)</dt><dd>{money(comprador.get("sobran_en_cuenta"))}</dd>
         </dl>
-      </div>
+      ''' if wants("cheques") else ''}
+      {f'</div>' if wants("cheques") else ''}
 
-      <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      {page_break if wants("cheques") and wants("notaria") else ""}
+      {f'<div class="panel" style="grid-column: 1 / -1;">' if wants("notaria") else ''}
+      {f'''
         <h2>Parte notaría</h2>
         <dl>
           <dt>Notaría</dt><dd>{html.escape(str(notaria.get("nombre") or ""))}</dd>
@@ -4221,7 +4234,8 @@ def render_hipoteca_print_html(payload, auto_print=False):
           <dt>Nº cuotas</dt><dd>{html.escape(str(prestamo.get("numero_cuotas") or "-"))}</dd>
           <dt>Cuota inicial</dt><dd>{money(prestamo.get("cuota_inicial"))}</dd>
         </dl>
-      </div>
+      ''' if wants("notaria") else ''}
+      {f'</div>' if wants("notaria") else ''}
 """
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -51968,6 +51982,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/hipoteca_ficha_print":
             record_id = (params.get("id", [""])[0] or "").strip()
             auto_print = (params.get("autoprint", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
+            section = (params.get("section", [""])[0] or "").strip()
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
@@ -51994,6 +52009,7 @@ class Handler(BaseHTTPRequestHandler):
             content = render_hipoteca_print_html(
                 export_row,
                 auto_print=auto_print,
+                section=section,
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

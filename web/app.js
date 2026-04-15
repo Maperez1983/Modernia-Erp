@@ -29347,9 +29347,13 @@ const ensureHipotecaFichaPanel = () => {
           </div>
         </div>
         <div class="form-actions">
-          <button type="button" id="hipotecaFichaPdf" class="secondary">Generar PDF</button>
+          <button type="button" id="hipotecaFichaPdfComprador" class="secondary">PDF comprador</button>
+          <button type="button" id="hipotecaFichaPdfVendedor" class="secondary">PDF vendedor</button>
+          <button type="button" id="hipotecaFichaPdfCheques" class="secondary">PDF cheques</button>
+          <button type="button" id="hipotecaFichaPdfNotaria" class="secondary">PDF notaría</button>
           <button type="submit">Guardar cambios</button>
           <button type="button" id="hipotecaFichaCancel" class="secondary">Cancelar</button>
+          <span id="hipotecaPdfReviewStatus" class="ui-status is-empty"></span>
           <span id="hipotecaFichaStatus" class="muted"></span>
         </div>
       </form>
@@ -29365,12 +29369,16 @@ const ensureHipotecaFichaPanel = () => {
   };
   panel.querySelector("#hipotecaFichaClose")?.addEventListener("click", closeHipotecaFichaPanel);
   panel.querySelector("#hipotecaFichaCancel")?.addEventListener("click", closeHipotecaFichaPanel);
-  panel.querySelector("#hipotecaFichaPdf")?.addEventListener("click", () => {
-    const recordId = String(panel.dataset.recordId || "").trim();
-    if (recordId) {
-      openHipotecaFichaPrint(recordId);
-    }
-  });
+  const bindPdf = (id, section) => {
+    panel.querySelector(id)?.addEventListener("click", () => {
+      const recordId = String(panel.dataset.recordId || "").trim();
+      if (recordId) openHipotecaFichaPrint(recordId, section);
+    });
+  };
+  bindPdf("#hipotecaFichaPdfComprador", "comprador");
+  bindPdf("#hipotecaFichaPdfVendedor", "vendedor");
+  bindPdf("#hipotecaFichaPdfCheques", "cheques");
+  bindPdf("#hipotecaFichaPdfNotaria", "notaria");
   panel.querySelectorAll('#hipotecaFichaTabs [data-hipoteca-ficha-tab]')?.forEach((btn) => {
     btn.addEventListener("click", () => setHipotecaFichaTab(btn.dataset.hipotecaFichaTab));
   });
@@ -29910,6 +29918,54 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       }
     }
   }
+
+  const review = panel.querySelector("#hipotecaPdfReviewStatus");
+  if (review) {
+    const issues = [];
+    const sobranComprador = toNumber(getNestedValue(computed, "comprador.sobran_en_cuenta"));
+    const sobranCuadre = toNumber(getNestedValue(computed, "cuadre.sobran_en_cuenta"));
+    const diffMediosPago = toNumber(getNestedValue(computed, "cuadre.diferencia_medios_pago"));
+    if (sobranComprador !== null && sobranCuadre !== null && Math.abs(sobranComprador - sobranCuadre) > 0.01) {
+      issues.push(
+        `Sobrante comprador (${formatMoneyInputValue(sobranComprador)}) ≠ sobrante cheques (${formatMoneyInputValue(
+          sobranCuadre
+        )}).`
+      );
+    }
+    if (diffMediosPago !== null && Math.abs(diffMediosPago) > 0.01) {
+      issues.push(`Medios de pago no cuadran con escriturado (Δ ${formatMoneyInputValue(diffMediosPago)}).`);
+    }
+    // Ingreso banco: aviso si no coincide con el cálculo Excel (aunque el PDF recalcula siempre en servidor).
+    if (ingresarEl) {
+      const necesaria = toNumber(getNestedValue(computed, "comprador.suma_total_necesaria"));
+      const prestamo = toNumber(getNestedValue(computed, "comprador.entregas.prestamo_concedido"));
+      const senal = toNumber(getNestedValue(computed, "comprador.entregas.senal"));
+      const transf = toNumber(getNestedValue(computed, "comprador.entregas.transf_modernia"));
+      const actual = toNumber(ingresarEl.value);
+      if (necesaria !== null && prestamo !== null && senal !== null && transf !== null && actual !== null) {
+        const base = Math.max(necesaria - prestamo - senal - transf, 0);
+        const expected = Math.ceil(base / 100) * 100;
+        if (Math.abs(actual - expected) > 0.01) {
+          issues.push(
+            `Ingreso banco no coincide con Excel (sugerido ${formatMoneyInputValue(expected)}; actual ${formatMoneyInputValue(
+              actual
+            )}).`
+          );
+        }
+      }
+    }
+
+    if (!issues.length) {
+      review.classList.remove("is-error", "is-empty");
+      review.classList.add("is-success");
+      review.textContent = "Revisión Excel: OK";
+    } else {
+      review.classList.remove("is-success", "is-empty");
+      review.classList.add("is-error");
+      const first = issues[0];
+      review.textContent = issues.length === 1 ? `Revisión Excel: ${first}` : `Revisión Excel: ${first} (+${issues.length - 1})`;
+    }
+  }
 };
 
 const collectHipotecaFichaJson = (panel, jsonKey) => {
@@ -30140,10 +30196,13 @@ const fetchHipotecaRowById = async (recordId) => {
   }
 };
 
-const openHipotecaFichaPrint = (recordId) => {
+const openHipotecaFichaPrint = (recordId, section = "") => {
   const id = String(recordId || "").trim();
   if (!id) return;
-  const url = `/api/hipoteca_ficha_print?id=${encodeURIComponent(id)}&autoprint=1`;
+  const params = new URLSearchParams({ id, autoprint: "1" });
+  const normalized = String(section || "").trim();
+  if (normalized) params.set("section", normalized);
+  const url = `/api/hipoteca_ficha_print?${params.toString()}`;
   window.open(url, "_blank", "noopener");
 };
 
@@ -30159,15 +30218,20 @@ const downloadHipotecasFirmadasExcel = () => {
 
 const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
   if (!panel) return;
-  const button = panel.querySelector("#hipotecaFichaPdf");
-  if (!button) return;
+  const buttons = [
+    panel.querySelector("#hipotecaFichaPdfComprador"),
+    panel.querySelector("#hipotecaFichaPdfVendedor"),
+    panel.querySelector("#hipotecaFichaPdfCheques"),
+    panel.querySelector("#hipotecaFichaPdfNotaria"),
+  ].filter(Boolean);
+  if (!buttons.length) return;
   const enabled =
     !!String(rowData.fecha_firma || "").trim() &&
     ["firmada", "firmado"].includes(normalizeSimple(rowData.estado || ""));
-  button.disabled = !enabled;
-  button.title = enabled
-    ? ""
-    : "Disponible solo para hipotecas firmadas con fecha de firma.";
+  buttons.forEach((btn) => {
+    btn.disabled = !enabled;
+    btn.title = enabled ? "" : "Disponible solo para hipotecas firmadas con fecha de firma.";
+  });
 };
 
 const setupHipotecaFichaMoneyInputs = (panel) => {
