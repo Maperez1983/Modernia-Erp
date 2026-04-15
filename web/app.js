@@ -19846,6 +19846,138 @@ const formatHeader = (value) => {
   return normalized.toUpperCase();
 };
 
+const enableCrmDenseTableResize = (table, storageKey = "") => {
+  if (!table || table.dataset.colResizeBound === "1") return;
+  const headRow = table.querySelector("thead tr");
+  if (!headRow) return;
+  const ths = Array.from(headRow.querySelectorAll("th"));
+  if (!ths.length) return;
+
+  const tableKey = storageKey
+    ? String(storageKey).trim()
+    : (() => {
+        const cls = Array.from(table.classList || []).find((c) => c.startsWith("crm-") && c.endsWith("-table"));
+        return `crm.dense.widths.${cls || "dense"}`;
+      })();
+
+  const safeParse = (raw) => {
+    try {
+      const parsed = JSON.parse(raw || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+  let stored = safeParse(localStorage.getItem(tableKey));
+
+  const applyWidth = (colIndex, widthPx) => {
+    const width = Math.max(48, Math.round(Number(widthPx || 0)));
+    if (!Number.isFinite(width) || width <= 0) return;
+    const th = ths[colIndex];
+    if (th) th.style.width = `${width}px`;
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      const cell = tr.children?.[colIndex];
+      if (cell && cell.style) cell.style.width = `${width}px`;
+    });
+  };
+
+  const clearWidth = (colIndex) => {
+    const th = ths[colIndex];
+    if (th) th.style.width = "";
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      const cell = tr.children?.[colIndex];
+      if (cell && cell.style) cell.style.width = "";
+    });
+  };
+
+  const save = () => {
+    try {
+      localStorage.setItem(tableKey, JSON.stringify(stored || {}));
+    } catch {}
+  };
+
+  ths.forEach((th, index) => {
+    if (!th.dataset.colkey) {
+      const label = String(th.textContent || "").trim();
+      th.dataset.colkey = `c${index}_${normalizeSimple(label || `col${index}`)}`;
+    }
+    const colKey = th.dataset.colkey;
+    const saved = stored && Object.prototype.hasOwnProperty.call(stored, colKey) ? Number(stored[colKey]) : null;
+    if (saved && Number.isFinite(saved) && saved > 0) {
+      applyWidth(index, saved);
+    }
+    if (th.querySelector(".tc-col-resizer")) return;
+    if (!th.style.position) th.style.position = "relative";
+
+    const handle = document.createElement("span");
+    handle.className = "tc-col-resizer";
+    handle.title = "Arrastra para ajustar (doble clic para reset)";
+    handle.style.position = "absolute";
+    handle.style.top = "0";
+    handle.style.right = "-2px";
+    handle.style.width = "8px";
+    handle.style.height = "100%";
+    handle.style.cursor = "col-resize";
+    handle.style.userSelect = "none";
+    handle.style.touchAction = "none";
+    handle.style.zIndex = "4";
+
+    const line = document.createElement("span");
+    line.style.position = "absolute";
+    line.style.left = "50%";
+    line.style.top = "20%";
+    line.style.bottom = "20%";
+    line.style.width = "2px";
+    line.style.transform = "translateX(-50%)";
+    line.style.borderRadius = "99px";
+    line.style.background = "rgba(15, 23, 42, 0.14)";
+    handle.appendChild(line);
+
+    handle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    handle.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      stored = { ...(stored || {}) };
+      delete stored[colKey];
+      save();
+      clearWidth(index);
+    });
+    handle.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = th.getBoundingClientRect().width || 0;
+      const prevCursor = document.body.style.cursor;
+      const prevSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        applyWidth(index, Math.max(48, startWidth + dx));
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = prevCursor || "";
+        document.body.style.userSelect = prevSelect || "";
+        const finalWidth = Math.round(th.getBoundingClientRect().width || 0);
+        stored = { ...(stored || {}) };
+        stored[colKey] = finalWidth;
+        save();
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+
+    th.appendChild(handle);
+  });
+
+  table.dataset.colResizeBound = "1";
+};
+
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -33714,10 +33846,11 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
     tr.appendChild(locCell);
 
     tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  return table;
-};
+	  });
+	  table.appendChild(tbody);
+	  enableCrmDenseTableResize(table, "crm.inmo.inmuebles");
+	  return table;
+	};
 
 const scheduleCrmClientesReload = ({ force = false } = {}) => {
   if (crmClientesReloadTimer) {
