@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=193" />
+    <link rel="stylesheet" href="styles.css?v=183" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -69,52 +69,17 @@
           <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
         </div>
         <div class="crm-workspace-shell">
-          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--compact" id="workspaceViewTabs" role="navigation" aria-label="Workspace">
-            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v6H4z" stroke="currentColor" stroke-width="2"/><path d="M4 14h8v6H4z" stroke="currentColor" stroke-width="2"/><path d="M14 14h6v6h-6z" stroke="currentColor" stroke-width="2"/></svg>
-              </span>
-              <span class="tc-mod-label">Resumen</span>
-            </button>
-            <button class="tab tc-module" type="button" data-workspace-view-tab="tenant" title="Configuración">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3h-6L8.7 5.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.8 7.8 0 0 0-.1 1 7.8 7.8 0 0 0 .1 1l-2 1.5 2 3.5 2.4-1a7.4 7.4 0 0 0 1.7 1L9 21h6l.3-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Config</span>
-            </button>
+          <div class="crm-workspace-tabs" id="workspaceViewTabs">
+            <button class="tab active" type="button" data-workspace-view-tab="overview">Resumen</button>
+            <button class="tab" type="button" data-workspace-view-tab="tenant">Configuración</button>
           </div>
           <div class="crm-workspace-view" data-workspace-view="tenant">
-            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--compact" id="workspaceTenantTabs" role="navigation" aria-label="Configuración workspace">
-              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
-                <span class="tc-mod-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <span class="tc-mod-label">General</span>
-              </button>
-              <button class="tab tc-module" type="button" data-workspace-tenant-tab="permisos" title="Permisos">
-                <span class="tc-mod-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-                </span>
-                <span class="tc-mod-label">Permisos</span>
-              </button>
-              <button class="tab tc-module" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
-                <span class="tc-mod-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V7h10v14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 10h6v11h-6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7 11h3M7 15h3M7 19h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <span class="tc-mod-label">Empresas</span>
-              </button>
-              <button class="tab tc-module" type="button" data-workspace-tenant-tab="usuarios" title="Usuarios">
-                <span class="tc-mod-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
-                </span>
-                <span class="tc-mod-label">Usuarios</span>
-              </button>
-              <button class="tab tc-module" type="button" data-workspace-tenant-tab="modulos" title="Módulos">
-                <span class="tc-mod-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" stroke="currentColor" stroke-width="2"/></svg>
-                </span>
-                <span class="tc-mod-label">Módulos</span>
-              </button>
+            <div class="crm-workspace-tabs" id="workspaceTenantTabs">
+              <button class="tab active" type="button" data-workspace-tenant-tab="general">General</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="permisos">Permisos</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="empresas">Empresas</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="usuarios">Usuarios</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="modulos">Módulos</button>
             </div>
           </div>
         <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
@@ -1506,49 +1471,14 @@
               <p class="muted">Dashboard, comunidades, incidencias, proveedores, juntas, contabilidad y presupuestos.</p>
             </div>
           </div>
-          <div class="crm-workspace-tabs tc-modulebar" id="workspaceFincasTabs" role="navigation" aria-label="Fincas">
-            <button class="tab tc-module active" type="button" data-fincas-tab-btn="dashboard" title="Dashboard">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v7H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Dashboard</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="comunidades" title="Comunidades">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V10l8-5 8 5v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-6h6v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Comunidad</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="incidencias" title="Incidencias">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 9v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3h3.4l8.3 14H2l8.3-14Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Incid.</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="proveedores" title="Proveedores">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 20V10l6-4 6 4v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20v-6h4v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Prov.</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="juntas" title="Juntas">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/></svg>
-              </span>
-              <span class="tc-mod-label">Juntas</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="contabilidad" title="Contabilidad">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/><path d="M9 8h6M9 12h6M9 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Conta.</span>
-            </button>
-            <button class="tab tc-module" type="button" data-fincas-tab-btn="presupuestos" title="Presupuestos">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h10v18H7z" stroke="currentColor" stroke-width="2"/><path d="M9 7h6M9 11h6M9 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Presup.</span>
-            </button>
+          <div class="crm-workspace-tabs" id="workspaceFincasTabs">
+            <button class="tab active" type="button" data-fincas-tab-btn="dashboard">Dashboard</button>
+            <button class="tab" type="button" data-fincas-tab-btn="comunidades">Comunidades</button>
+            <button class="tab" type="button" data-fincas-tab-btn="incidencias">Incidencias</button>
+            <button class="tab" type="button" data-fincas-tab-btn="proveedores">Proveedores</button>
+            <button class="tab" type="button" data-fincas-tab-btn="juntas">Juntas</button>
+            <button class="tab" type="button" data-fincas-tab-btn="contabilidad">Contabilidad</button>
+            <button class="tab" type="button" data-fincas-tab-btn="presupuestos">Presupuestos</button>
           </div>
         </div>
 
@@ -2050,12 +1980,7 @@
       <section id="agendaSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>
-              <span class="crm-title-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              Agenda
-            </h2>
+            <h2>Agenda</h2>
             <p class="muted">Vista centralizada de tareas y seguimientos.</p>
           </div>
           <button id="agendaBackBtn" class="secondary ghost">Volver a home</button>
@@ -2078,12 +2003,7 @@
       <section id="adminSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>
-              <span class="crm-title-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 11v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 8h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
-              </span>
-              Panel admin
-            </h2>
+            <h2>Panel admin</h2>
             <p class="muted">Gestión de usuarios y permisos.</p>
           </div>
           <button id="adminBackBtn" class="secondary ghost">Volver a home</button>
@@ -2193,85 +2113,20 @@
           </div>
           <div class="company-summary-meta" id="companySummaryMeta"></div>
         </div>
-        <div class="tabs tc-modulebar" id="viewTabs" role="navigation" aria-label="Menú principal">
-          <button class="tab tc-module active" data-tab="operativa" title="Dashboard">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v7H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Dashboard</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="crm" id="crmTab" title="Inmobiliaria">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Inmobiliaria</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-dash" id="gestoriaDashTab" title="Panel gestoría">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 15v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 15V8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 15V11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Panel</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-crm" id="fincasCrmTab" title="Clientes gestoría">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
-            </span>
-            <span class="tc-mod-label">Clientes</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-docs" id="gestoriaDocsTab" title="Inbox documental">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v12H4z" stroke="currentColor" stroke-width="2"/><path d="m4 7 8 7 8-7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Inbox</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab" title="Campañas">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M7 11h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Campañas</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="seguros-crm" id="segurosCrmTab" title="CRM Seguros">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Seguros</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="fin-crm" id="finCrmTab" title="CRM Financiaciones">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 21V10l5-3 5 3v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Finan.</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-fact" id="gestoriaFactTab" title="Presupuestos">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h10v18H7z" stroke="currentColor" stroke-width="2"/><path d="M9 7h6M9 11h6M9 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Presup.</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="gestoria-conta" id="gestoriaContaTab" title="Contabilidad">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2"/><path d="M9 8h6M9 12h6M9 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Conta.</span>
-          </button>
-          <button class="tab tc-module" data-tab="alta" title="Alta">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Alta</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="fin-sim" id="finSimTab" title="Simulador">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10v20H7z" stroke="currentColor" stroke-width="2"/><path d="M9 6h6M9 10h2M13 10h2M9 14h2M13 14h2M9 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Simul.</span>
-          </button>
-          <button class="tab tc-module hidden" data-tab="aie" id="aieTab" title="Personal AIE">
-            <span class="tc-mod-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="2"/><path d="M12 9h6M12 13h6M6 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </span>
-            <span class="tc-mod-label">Personal</span>
-          </button>
+        <div class="tabs" id="viewTabs">
+          <button class="tab active" data-tab="operativa">Dashboard</button>
+          <button class="tab hidden" data-tab="crm" id="crmTab">Inmobiliaria</button>
+          <button class="tab hidden" data-tab="gestoria-dash" id="gestoriaDashTab">Panel</button>
+          <button class="tab hidden" data-tab="gestoria-crm" id="fincasCrmTab">Clientes</button>
+          <button class="tab hidden" data-tab="gestoria-docs" id="gestoriaDocsTab">Inbox documental</button>
+          <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Campañas</button>
+          <button class="tab hidden" data-tab="seguros-crm" id="segurosCrmTab">CRM Seguros</button>
+          <button class="tab hidden" data-tab="fin-crm" id="finCrmTab">CRM Financiaciones</button>
+          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Presupuestos</button>
+          <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad</button>
+	          <button class="tab" data-tab="alta">Alta</button>
+          <button class="tab hidden" data-tab="fin-sim" id="finSimTab">Simulador</button>
+          <button class="tab hidden" data-tab="aie" id="aieTab">Personal AIE</button>
         </div>
 	          <div id="crmSection" class="hidden">
 	          <div class="crm-lightning-shell">
@@ -2280,7 +2135,7 @@
 			                <span class="crm-side-ico" aria-hidden="true">+</span>
 			                <span class="crm-side-txt">Crear nuevo</span>
 			              </button>
-			              <div id="crmInsertModal" class="crm-insert-modal hidden" role="dialog" aria-modal="false" aria-label="Insertar">
+		              <div id="crmInsertModal" class="crm-insert-modal crm-insert-modal--dropdown hidden" role="dialog" aria-modal="false" aria-label="Insertar">
 		                <div class="crm-insert-card">
 		                  <div class="crm-insert-head">
 		                    <strong>Insertar</strong>
@@ -2379,10 +2234,10 @@
 		                      Puerta
 		                      <input name="puerta" placeholder="Ej. B" />
 		                    </label>
-			                    <label>
-			                      Código postal
-			                      <input name="codigo_postal" list="inmoPostalOptions" placeholder="Ej. 29001" inputmode="numeric" />
-			                    </label>
+		                    <label>
+		                      Código postal
+		                      <input name="codigo_postal" placeholder="Ej. 29001" inputmode="numeric" />
+		                    </label>
 		                    <label>
 		                      Población
 		                      <input name="poblacion" list="inmoPoblacionOptions" placeholder="Ej. Málaga" />
@@ -2513,36 +2368,21 @@
 		                  </form>
 		                </div>
 		              </div>
-			              <datalist id="inmoPoblacionOptions"></datalist>
-			              <datalist id="inmoPostalOptions"></datalist>
-			              <datalist id="inmoEstadoContactoOptions">
-		                <option value="Sin gestionar"></option>
-		                <option value="Gestionado"></option>
-		                <option value="Pendiente de contacto"></option>
-		                <option value="Contactado"></option>
-		                <option value="Cita pendiente"></option>
-		                <option value="Descartado"></option>
-		              </datalist>
+		              <datalist id="inmoPoblacionOptions"></datalist>
 
 		              <div class="crm-side-sep" aria-hidden="true"></div>
 		              <button type="button" class="crm-side-item" data-crm-view="captaciones" title="Nuevas oportunidades">
-		                <span class="crm-side-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-		                </span>
+		                <span class="crm-side-ico" aria-hidden="true">🏠</span>
 		                <span class="crm-side-txt">Nuevas<br />Oport.</span>
 		              </button>
 			              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-agenda-open="day" title="Agenda">
-			                <span class="crm-side-ico" aria-hidden="true">
-			                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-			                </span>
+			                <span class="crm-side-ico" aria-hidden="true">📅</span>
 			                <span class="crm-side-txt">Agenda</span>
 			              </button>
 			              <div class="crm-side-grow" aria-hidden="true"></div>
 
 		              <button class="crm-side-item hidden" id="crmRecentBtn" type="button" title="Recientes" aria-haspopup="dialog" aria-controls="crmRecentMenu">
-		                <span class="crm-side-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-		                </span>
+		                <span class="crm-side-ico" aria-hidden="true">🕘</span>
 		                <span class="crm-side-txt">Recientes</span>
 		              </button>
 		              <div id="crmRecentMenu" class="crm-recent-menu hidden" role="dialog" aria-label="Elementos recientes">
@@ -2590,7 +2430,7 @@
 		                  </div>
 		                </div>
 
-			                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú CRM">
+			                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú Tecnocloud">
 			                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
 			                    + Nuevo
 			                  </button>
@@ -2617,18 +2457,6 @@
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
 			                    </span>
 			                    <span class="tc-mod-label">Inmuebles</span>
-			                  </button>
-			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="seguros" title="Seguros">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Seguros</span>
-			                  </button>
-			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 21V10l5-3 5 3v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-6h4v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Finan.</span>
 			                  </button>
 				                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
 				                    <span class="tc-mod-ico" aria-hidden="true">
@@ -2792,24 +2620,24 @@
 					                  </div>
 					                </div>
 					              </div>
-	              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
-	                <div class="tc-listview">
-	                  <div class="tc-listhead">
-	                    <div class="tc-listleft">
-	                      <strong class="tc-title">Búsq./Informes</strong>
-	                    </div>
-	                  </div>
-	                  <div class="tc-quickgrid">
-	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
-	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
-	                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
-	                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
-	                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
-	                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
-	                  </div>
-	                  <div class="footer muted">Vista depurada para mantener la sencillez visual (sin KPIs ni “calidad/control operativo”).</div>
-	                </div>
-	              </div>
+              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
+                <div class="tc-listview">
+                  <div class="tc-listhead">
+                    <div class="tc-listleft">
+                      <strong class="tc-title">Búsq./Informes</strong>
+                    </div>
+                  </div>
+                  <div class="tc-quickgrid">
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
+                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
+                  </div>
+                  <div class="footer muted">Vista depurada para mantener la sencillez visual tipo Tecnocloud (sin KPIs ni “calidad/control operativo”).</div>
+                </div>
+              </div>
 		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
 		                <div class="tc-listview">
 		                    <div class="tc-listhead">
@@ -2871,12 +2699,6 @@
 		                    <div class="footer" id="crmClientesInfo"></div>
 		                  </div>
 		                </div>
-		              </div>
-		              <div id="crmViewSeguros" class="crm-workspace-view hidden">
-		                <div id="crmSegurosMount"></div>
-		              </div>
-		              <div id="crmViewFin" class="crm-workspace-view hidden">
-		                <div id="crmFinMount"></div>
 		              </div>
 			              <div id="crmViewInmuebles" class="crm-workspace-view hidden">
 			                <div class="tc-listview">
@@ -3500,7 +3322,6 @@
               </div>
               <div class="form-actions">
                 <span id="inmuebleSaveStatus" class="muted"></span>
-                <button class="secondary" type="button" id="inmuebleManualSaveBtn" disabled>Guardar</button>
                 <button class="secondary hidden" type="button" id="inmuebleVisitaPdfBtn">Hoja de visita PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaFichaPdfBtn">Ficha venta PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaPrecioPdfBtn">Nota precio PDF</button>
@@ -3545,7 +3366,7 @@
                   <div class="section-head">
                     <div>
                       <h3>Datos del inmueble</h3>
-                      <p class="muted">Dirección, características, precio, honorarios, ocupación y Catastro.</p>
+                      <p class="muted">Dirección, características, pricing, honorarios, ocupación y Catastro.</p>
                     </div>
                   </div>
                   <div class="grid" id="inmuebleDatosGrid" data-layout="tecno"></div>
@@ -3710,7 +3531,6 @@
                     <input id="inmuebleActividadClienteInput" list="inmuebleActividadClientes" />
                     <datalist id="inmuebleActividadClientes"></datalist>
                     <input type="hidden" name="cliente_id" id="inmuebleActividadClienteId" />
-                    <select id="inmuebleActividadClienteQuick" class="inline-input hidden"></select>
                   </label>
                   <label>
                     Fecha
@@ -3829,7 +3649,7 @@
 	                <div class="section-head">
 	                  <div>
 	                    <h3>Historial de cambios</h3>
-	                    <p class="muted">Registro de cambios sobre la ficha (historial real).</p>
+	                    <p class="muted">Registro de cambios sobre la ficha (estilo Tecnocloud).</p>
 	                  </div>
 	                </div>
 	                <div id="inmuebleHistorialTabList" class="crm-focus-list"></div>
@@ -3851,7 +3671,7 @@
 	                <div class="section-head">
 	                  <div>
 	                    <h3>Servicios inmobiliarios</h3>
-	                    <p class="muted">Características rápidas de la vivienda.</p>
+	                    <p class="muted">Características rápidas de la vivienda (como en Tecnocloud).</p>
 	                  </div>
 	                  <button type="button" class="secondary" id="inmuebleServiciosTabEditBtn">Editar servicios</button>
 	                </div>
@@ -3863,7 +3683,7 @@
 		                <div class="section-head">
 		                  <div>
 		                    <h3>Imágenes <span class="pill" id="inmuebleFotosCount">0</span></h3>
-		                    <p class="muted">Fotos del inmueble.</p>
+		                    <p class="muted">Fotos del inmueble (estilo Tecnocloud).</p>
 		                  </div>
 		                  <div class="form-actions">
 		                    <button type="button" class="secondary" id="inmuebleFotosUploadBtn">Cargar imagen</button>
@@ -3924,7 +3744,7 @@
                 </div>
                 <div id="inmuebleEstadoInfo" class="muted"></div>
               </div>
-	              <div class="form-card inmueble-advanced hidden">
+	              <div class="form-card inmueble-advanced">
                 <div class="section-head">
                   <div>
                     <h3>Validación del estado</h3>
@@ -3933,7 +3753,7 @@
                 </div>
                 <div id="inmuebleEstadoValidation" class="crm-mini-list"></div>
               </div>
-	              <div class="form-card inmueble-advanced hidden">
+	              <div class="form-card inmueble-advanced">
                 <div class="section-head">
                   <div>
                     <h3>Checklist por etapa</h3>
@@ -3995,7 +3815,7 @@
 		                  <div class="section-head">
 		                    <div>
 		                      <h3>Servicios <span class="pill" id="inmuebleTecnoSideServiciosCount">0</span></h3>
-			                      <p class="muted">Características rápidas del inmueble.</p>
+		                      <p class="muted">Características rápidas (para tener la ficha igual de operativa que Tecnocloud).</p>
 		                    </div>
 		                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideServiciosEdit">Nuevo</button>
 		                  </div>
@@ -4009,31 +3829,15 @@
           </div>
         </div>
         <div id="gestoriaCrmSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v14H7V7Z" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v4H9V3Z" stroke="currentColor" stroke-width="2"/><path d="M9 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                Gestoría · Clientes
-              </h3>
+              <h3>Gestoría · Clientes</h3>
               <p class="muted">Expedientes activos, segmentación comercial y alta de nuevos clientes.</p>
             </div>
           </div>
-          <div class="workspace-mini-kpis crm-mini-kpis" id="gestoriaHeaderMiniKpis"></div>
           <div class="tabs" id="gestoriaCrmViews">
-            <button type="button" class="tab active crm-tab-ico" data-gestoria-view="crm">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Expedientes</span>
-            </button>
-            <button type="button" class="tab crm-tab-ico" data-gestoria-view="alta">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Alta cliente</span>
-            </button>
+            <button type="button" class="tab active" data-gestoria-view="crm">Expedientes</button>
+            <button type="button" class="tab" data-gestoria-view="alta">Alta cliente</button>
           </div>
           <div id="gestoriaCrmViewCrm">
           <div class="form-card">
@@ -4044,36 +3848,11 @@
               </div>
             </div>
             <div class="tabs" id="gestoriaCrmTabs">
-              <button type="button" class="tab active crm-tab-ico" data-gestoria-tab="all">
-                <span class="crm-tab-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <span>Todos</span>
-              </button>
-              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="autonomo">
-                <span class="crm-tab-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
-                </span>
-                <span>Autónomo</span>
-              </button>
-              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="empresa">
-                <span class="crm-tab-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 21V5a2 2 0 0 1 2-2h6v18H4Z" stroke="currentColor" stroke-width="2"/><path d="M12 8h8a2 2 0 0 1 2 2v11H12V8Z" stroke="currentColor" stroke-width="2"/><path d="M7 7h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 11h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 12h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 16h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <span>Empresa</span>
-              </button>
-              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="renta">
-                <span class="crm-tab-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <span>Renta</span>
-              </button>
-              <button type="button" class="tab crm-tab-ico" data-gestoria-tab="admin">
-                <span class="crm-tab-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.94 7.94 0 0 0 .1-1 7.94 7.94 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a8.1 8.1 0 0 0-1.7-1l-.4-2.6H10l-.4 2.6a8.1 8.1 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.94 7.94 0 0 0-.1 1c0 .34.03.67.1 1l-2 1.5 2 3.5 2.4-1c.53.4 1.1.74 1.7 1l.4 2.6h4l.4-2.6c.6-.26 1.17-.6 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-                </span>
-                <span>Gestiones</span>
-              </button>
+              <button type="button" class="tab active" data-gestoria-tab="all">Todos</button>
+              <button type="button" class="tab" data-gestoria-tab="autonomo">Autónomo</button>
+              <button type="button" class="tab" data-gestoria-tab="empresa">Empresa</button>
+              <button type="button" class="tab" data-gestoria-tab="renta">Cliente Renta</button>
+              <button type="button" class="tab" data-gestoria-tab="admin">Gestiones Administrativas</button>
             </div>
             <div class="toolbar">
               <div class="quick-search">
@@ -4338,14 +4117,9 @@
         </div>
         </div>
         <div id="gestoriaDocsSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v6l-2-2H6l-2 2V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 10v10h16V10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 14h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                Gestoría · Inbox documental
-              </h3>
+              <h3>Gestoría · Inbox documental</h3>
               <p class="muted">Entrada documental del despacho, histórico importado y actividad reciente.</p>
             </div>
           </div>
@@ -4415,18 +4189,12 @@
           </div>
         </div>
         <div id="gestoriaDashboardSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
-                </span>
-                Gestoría · Panel
-              </h3>
+              <h3>Gestoría · Panel</h3>
               <p class="muted">Vista principal del despacho: carga, alertas, vencimientos y foco operativo.</p>
             </div>
           </div>
-          <div class="workspace-mini-kpis crm-mini-kpis" id="gestoriaDashboardHeaderMiniKpis"></div>
           <button type="button" class="gestoria-renta-banner" id="gestoriaRentaCampaignBanner">
             <div class="gestoria-renta-banner-mark" aria-hidden="true">
               <div class="gestoria-renta-banner-gov"></div>
@@ -4582,14 +4350,9 @@
           </div>
         </div>
         <div id="gestoriaContaSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                Gestoría · Contabilidad
-              </h3>
+              <h3>Gestoría · Contabilidad</h3>
               <p class="muted">Cola de trabajo contable y seguimiento global del despacho.</p>
             </div>
           </div>
@@ -4674,14 +4437,9 @@
           </div>
         </div>
         <div id="gestoriaAgendaSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                Gestoría · Campañas
-              </h3>
+              <h3>Gestoría · Campañas</h3>
               <p class="muted">Seguimiento de campañas, agenda operativa y acciones recurrentes del equipo.</p>
             </div>
           </div>
@@ -4736,14 +4494,9 @@
           </div>
         </div>
         <div id="gestoriaFactSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16l-2-1-2 1-2-1-2 1-2-1-2 1V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                Gestoría · Presupuestos
-              </h3>
+              <h3>Gestoría · Presupuestos</h3>
               <p class="muted">Presupuestos de administración de fincas y gestoría (con PDF y nota de encargo).</p>
             </div>
           </div>
@@ -4877,55 +4630,19 @@
           </div>
         </div>
         <div id="segurosCrmSection" class="hidden">
-          <div class="crm-header crm-header-stack">
+          <div class="crm-header">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                CRM Seguros
-              </h3>
+              <h3>CRM Seguros</h3>
               <p class="muted">Pólizas, seguimiento y oportunidades.</p>
             </div>
           </div>
-          <div class="workspace-mini-kpis crm-mini-kpis" id="segurosHeaderMiniKpis"></div>
           <div class="tabs" id="segurosTabs">
-            <button class="tab active crm-tab-ico" type="button" data-seguros-tab="dashboard">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
-              </span>
-              <span>Dashboard</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-seguros-tab="bdt">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Pólizas</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-seguros-tab="alta">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Alta</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-seguros-tab="gestion">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.94 7.94 0 0 0 .1-1 7.94 7.94 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a8.1 8.1 0 0 0-1.7-1l-.4-2.6H10l-.4 2.6a8.1 8.1 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.94 7.94 0 0 0-.1 1c0 .34.03.67.1 1l-2 1.5 2 3.5 2.4-1c.53.4 1.1.74 1.7 1l.4 2.6h4l.4-2.6c.6-.26 1.17-.6 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span>Gestión</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-seguros-tab="campanas">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 22a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22Z" fill="currentColor"/><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span>Campañas</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-seguros-tab="contabilidad">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Contabilidad</span>
-            </button>
+            <button class="tab active" type="button" data-seguros-tab="dashboard">Dashboard Seguros</button>
+            <button class="tab" type="button" data-seguros-tab="bdt">Pólizas cargadas</button>
+            <button class="tab" type="button" data-seguros-tab="alta">Alta pólizas</button>
+            <button class="tab" type="button" data-seguros-tab="gestion">Gestión</button>
+            <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
+            <button class="tab" type="button" data-seguros-tab="contabilidad">Contabilidad Seguros</button>
           </div>
           <datalist id="segurosCompaniasList">
             <option value="Allianz"></option>
@@ -5878,6 +5595,10 @@
               <form id="captacionForm">
                 <div class="form-grid inmo-grid">
                   <label>
+                    Focalización
+                    <input name="focalizacion" />
+                  </label>
+                  <label>
                     Responsable
                     <input name="responsable" />
                   </label>
@@ -6196,39 +5917,35 @@
                       <option value="1">Sí</option>
                     </select>
                   </label>
-	                  <label>
-	                    Prioridad noticia
-	                    <select name="prioridad_noticia">
-	                      <option value=""></option>
-	                      <option>Alta</option>
-	                      <option>Media</option>
-	                      <option>Baja</option>
-	                    </select>
-	                  </label>
-	                  <label>
-	                    Última renov./rebaja
-	                    <input name="fecha_ultima_renov_rebaja" type="date" />
-	                  </label>
-	                  <label>
-	                    Encargo de competencia
-	                    <select name="encargo_competencia">
-	                      <option value="0">No</option>
-	                      <option value="1">Sí</option>
-	                    </select>
-	                  </label>
-	                  <label>
-	                    Agencia competencia
-	                    <input name="encargo_competencia_agencia" />
-	                  </label>
-	                  <label>
-	                    Vigente hasta
-	                    <input name="encargo_competencia_hasta" type="date" />
-	                  </label>
-	                  <label class="span-2">
-	                    Necesidad venta/alquiler
-	                    <select name="necesidad_venta_alquiler">
-	                      <option value=""></option>
-	                      <option>Venta</option>
+                  <label>
+                    Prioridad noticia
+                    <select name="prioridad_noticia">
+                      <option value=""></option>
+                      <option>Alta</option>
+                      <option>Media</option>
+                      <option>Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Planificación encargo
+                    <input name="planificacion_encargo" placeholder="Ej. Llamada semanal / Seguimiento quincenal" />
+                  </label>
+                  <label>
+                    Última renov./rebaja
+                    <input name="fecha_ultima_renov_rebaja" type="date" />
+                  </label>
+                  <label>
+                    Encargo competencia
+                    <select name="encargo_competencia">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    Necesidad venta/alquiler
+                    <select name="necesidad_venta_alquiler">
+                      <option value=""></option>
+                      <option>Venta</option>
                       <option>Alquiler</option>
                       <option>Alquiler con opción a compra</option>
                       <option>Traspaso</option>
@@ -6440,6 +6157,10 @@
               <p class="muted">Registro de compradores e inquilinos.</p>
               <form id="demandaForm">
                 <div class="form-grid">
+                  <label>
+                    Focalización
+                    <input name="focalizacion" />
+                  </label>
                   <label>
                     Pedido
                     <input name="pedido" placeholder="Código o referencia interna" />
@@ -6757,55 +6478,13 @@
           </div>
         </div>
           <div id="hipotecaSection" class="hidden">
-          <div class="crm-header crm-header-stack">
-            <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 21V10l5-3 5 3v11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-6h4v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-                </span>
-                CRM Financiaciones
-              </h3>
-              <p class="muted">Hipotecas, asesoramientos, workflow y seguimiento bancario.</p>
-            </div>
-          </div>
-          <div class="workspace-mini-kpis crm-mini-kpis" id="finHeaderMiniKpis"></div>
           <div id="hipotecaTabs" class="tabs">
-            <button class="tab active crm-tab-ico" type="button" data-hipoteca-section="dashboard">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 4h7v4h-7V4Z" stroke="currentColor" stroke-width="2"/><path d="M13 10h7v10h-7V10Z" stroke="currentColor" stroke-width="2"/><path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="2"/></svg>
-              </span>
-              <span>Dashboard</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="alta">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Workflow</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="asesoramiento">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 18V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12" stroke="currentColor" stroke-width="2"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Asesoramiento</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="agenda">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v16H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Agenda</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="bdt">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>BDT</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-hipoteca-section="contabilidad">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.5 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Contabilidad</span>
-            </button>
+            <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
+            <button class="tab" type="button" data-hipoteca-section="alta">Workflow</button>
+            <button class="tab" type="button" data-hipoteca-section="asesoramiento">Asesoramiento</button>
+            <button class="tab" type="button" data-hipoteca-section="agenda">Agenda</button>
+            <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
+            <button class="tab" type="button" data-hipoteca-section="contabilidad">Contabilidad</button>
           </div>
           <div id="hipotecaDashboardPanel" class="form-card">
             <div class="dashboard-head">
@@ -7686,57 +7365,22 @@
         <div id="clientesDetail" class="form-card hidden">
           <div class="section-head">
             <div>
-              <h3 class="crm-header-title">
-                <span class="crm-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
-                </span>
-                <span id="clienteDetailTitle">Ficha de cliente</span>
-              </h3>
+              <h3 id="clienteDetailTitle">Ficha de cliente</h3>
               <p class="muted" id="clienteDetailSubtitle">Información general y asignaciones.</p>
             </div>
             <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
           </div>
           <div class="tabs" id="clienteTabs">
-            <button class="tab active crm-tab-ico" type="button" data-tab="datos">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v14H7V7Z" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v4H9V3Z" stroke="currentColor" stroke-width="2"/><path d="M9 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Expediente</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-tab="relaciones">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Relaciones</span>
-            </button>
+            <button class="tab active" type="button" data-tab="datos">Expediente</button>
+            <button class="tab" type="button" data-tab="relaciones">Relaciones</button>
             <button class="tab hidden" type="button" data-tab="economicos">Datos económicos</button>
             <button class="tab hidden" type="button" data-tab="dashboard">Resumen</button>
-            <button class="tab crm-tab-ico" type="button" data-tab="profesional">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16v12H4V8Z" stroke="currentColor" stroke-width="2"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="2"/></svg>
-              </span>
-              <span>Servicios</span>
-            </button>
+            <button class="tab" type="button" data-tab="profesional">Servicios</button>
             <button class="tab hidden" type="button" data-tab="operativa">Áreas de trabajo</button>
             <button class="tab hidden" type="button" data-tab="servicios">Servicios</button>
-            <button class="tab crm-tab-ico" type="button" data-tab="docs">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h8l4 4v12H6V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 4v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Documentos</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-tab="facturas">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16l-2-1-2 1-2-1-2 1-2-1-2 1V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Facturación</span>
-            </button>
-            <button class="tab crm-tab-ico" type="button" data-tab="trabajos">
-              <span class="crm-tab-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4V6Z" stroke="currentColor" stroke-width="2"/><path d="M8 2h8v4H8V2Z" stroke="currentColor" stroke-width="2"/><path d="M7 10h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 14h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </span>
-              <span>Historial</span>
-            </button>
+            <button class="tab" type="button" data-tab="docs">Documentos</button>
+            <button class="tab" type="button" data-tab="facturas">Facturación</button>
+            <button class="tab" type="button" data-tab="trabajos">Historial</button>
           </div>
           <div id="clienteTabDatos">
             <div class="grid" id="clienteDetailGrid"></div>
@@ -9111,11 +8755,11 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
-		    <script src="ui-foundation.js?v=3"></script>
-		    <script src="app-auth.js?v=10"></script>
-		    <script src="app-routing.js?v=7"></script>
-		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=522"></script>
+	    <script src="ui-foundation.js?v=3"></script>
+	    <script src="app-auth.js?v=10"></script>
+	    <script src="app-routing.js?v=7"></script>
+	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+		    <script src="app.js?v=497"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -9143,9 +8787,9 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-					          navigator.serviceWorker.register("/sw.js?v=148").catch(function () {});
-		        });
-		      })();
-		    </script>
+		          navigator.serviceWorker.register("/sw.js?v=117").catch(function () {});
+        });
+      })();
+    </script>
   </body>
 </html>

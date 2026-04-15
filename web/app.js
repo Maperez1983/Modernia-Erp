@@ -29069,7 +29069,7 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="cuadre.cuota_socio" inputmode="decimal" readonly />
               </label>
               <label>
-                <span>Sobran en cuenta</span>
+                <span>Sobran en cuenta (auto)</span>
                 <input data-json="liquidacion_json" data-path="cuadre.sobran_en_cuenta" inputmode="decimal" readonly />
               </label>
               <label>
