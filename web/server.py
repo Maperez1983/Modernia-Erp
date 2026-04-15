@@ -14323,26 +14323,32 @@ def persist_generated_inmueble_pdf(
             now,
         ),
     )
-    audit_event(
-        conn,
-        empresa_id,
-        "inmueble_docs",
-        doc_id,
-        "Generar documento",
-        usuario=usuario,
-        detalles={
-            "inmueble_id": inmueble_id,
-            "tipo": tipo,
-            "version": next_version,
-            "estado": "Vigente",
-            "plantilla_clave": plantilla_clave or slugify_text(tipo),
-            "origen_tipo": origen_tipo,
-            "origen_id": origen_id,
-            "replace_existing": bool(replace_existing),
-        },
-        now=now,
-    )
-    sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+    try:
+        audit_event(
+            conn,
+            empresa_id,
+            "inmueble_docs",
+            doc_id,
+            "Generar documento",
+            usuario=usuario,
+            detalles={
+                "inmueble_id": inmueble_id,
+                "tipo": tipo,
+                "version": next_version,
+                "estado": "Vigente",
+                "plantilla_clave": plantilla_clave or slugify_text(tipo),
+                "origen_tipo": origen_tipo,
+                "origen_id": origen_id,
+                "replace_existing": bool(replace_existing),
+            },
+            now=now,
+        )
+    except Exception:
+        pass
+    try:
+        sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+    except Exception:
+        pass
     return {"id": doc_id, "url": url, "path": str(file_path), "version": next_version, "estado": "Vigente"}
 
 
@@ -51688,31 +51694,48 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
             builder = build_inmueble_nota_encargo_pdf_final if is_final else build_inmueble_nota_encargo_pdf_editable
-            pdf_bytes = builder(
-                dict(empresa) if empresa else {},
-                dict(inmueble),
-                dict(captacion),
-                owners,
-                extra=extra,
-            )
+            try:
+                pdf_bytes = builder(
+                    dict(empresa) if empresa else {},
+                    dict(inmueble),
+                    dict(captacion),
+                    owners,
+                    extra=extra,
+                )
+            except Exception:
+                # No bloqueamos la generación si la plantilla editable falla por dependencias/formato.
+                pdf_bytes = build_inmueble_nota_encargo_pdf(
+                    dict(empresa) if empresa else {},
+                    dict(inmueble),
+                    dict(captacion),
+                    owners,
+                    extra=extra,
+                )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
             filename = f"{'nota_encargo_final' if is_final else 'nota_encargo'}_{safe_ref}.pdf"
-            persist_generated_inmueble_pdf(
-                conn,
-                inmueble_id,
-                "Nota de encargo (PDF final)" if is_final else "Nota de encargo (PDF editable)",
-                f"{'Nota de encargo (final)' if is_final else 'Nota de encargo (editable)'} · {inmueble['direccion'] or safe_ref}",
-                pdf_bytes,
-                filename.replace(".pdf", ""),
-                now,
-                replace_existing=False,
-                empresa_id=inmueble["empresa_id"],
-                plantilla_clave="nota_encargo_final" if is_final else "nota_encargo",
-                origen_tipo="inmueble_encargo_pdf_final" if is_final else "inmueble_encargo_pdf",
-                origen_id=inmueble_id,
-                payload_json=extra,
-            )
-            conn.commit()
+            try:
+                persist_generated_inmueble_pdf(
+                    conn,
+                    inmueble_id,
+                    "Nota de encargo (PDF final)" if is_final else "Nota de encargo (PDF editable)",
+                    f"{'Nota de encargo (final)' if is_final else 'Nota de encargo (editable)'} · {inmueble['direccion'] or safe_ref}",
+                    pdf_bytes,
+                    filename.replace(".pdf", ""),
+                    now,
+                    replace_existing=False,
+                    empresa_id=inmueble["empresa_id"],
+                    plantilla_clave="nota_encargo_final" if is_final else "nota_encargo",
+                    origen_tipo="inmueble_encargo_pdf_final" if is_final else "inmueble_encargo_pdf",
+                    origen_id=inmueble_id,
+                    payload_json=extra,
+                )
+                conn.commit()
+            except Exception:
+                # Si falla persistencia/sync en DB o filesystem, servimos el PDF igualmente.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
