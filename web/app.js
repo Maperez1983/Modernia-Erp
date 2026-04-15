@@ -2856,9 +2856,10 @@ const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
-const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
-const inmuebleTabs = document.getElementById("inmuebleTabs");
-const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
+	const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
+	const inmuebleTabs = document.getElementById("inmuebleTabs");
+	const inmuebleNoticiaTabBtn = document.getElementById("inmuebleNoticiaTabBtn");
+	const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
 const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
 const inmuebleTecnoStages = document.getElementById("inmuebleTecnoStages");
@@ -2888,8 +2889,10 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
 		const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
 		const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
 		const inmuebleTecnoSideServiciosCount = document.getElementById("inmuebleTecnoSideServiciosCount");
-	const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
-const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
+		const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
+		const inmuebleTabNoticia = document.getElementById("inmuebleTabNoticia");
+		const inmuebleNoticiaGrid = document.getElementById("inmuebleNoticiaGrid");
+	const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
 	const inmuebleTabVisitas = document.getElementById("inmuebleTabVisitas");
 	const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
@@ -21892,6 +21895,47 @@ const CAPTACION_FIELDS = [
   { key: "notas", label: "Notas", type: "textarea", section: "Notas internas" },
 ];
 
+const CAPTACION_FIELDS_MAP = Object.fromEntries(
+  CAPTACION_FIELDS.filter((field) => field && field.key).map((field) => [field.key, field])
+);
+const pickCaptacionFields = (keys = []) => keys.map((key) => CAPTACION_FIELDS_MAP[key]).filter(Boolean);
+
+// Ficha Tecnocloud-like: al pasar a Noticia, los datos de Noticia viven en una pestaña separada.
+const CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA = pickCaptacionFields([
+  "asesor",
+  "etapa",
+  "proxima_accion",
+  "fecha_contacto",
+  "modalidad_ultimo_contacto",
+  "estado_contacto",
+  "no_molestar",
+  "planificado",
+  "fecha_planificacion",
+  "notas",
+]);
+
+const CAPTACION_FIELDS_NOTICIA = [
+  // Origen
+  ...pickCaptacionFields(["canal", "tipo_procedencia", "necesidad_venta_alquiler", "urgencia"]),
+  // Valoración / pricing
+  ...pickCaptacionFields([
+    "precio_pedido_cliente",
+    "precio_valoracion",
+    "fecha_valoracion",
+    "desviacion_pct",
+    "valor_referencia",
+  ]).map((field) => (field?.key === "desviacion_pct" ? { ...field, readonly: true } : field)),
+  // Pipeline
+  ...pickCaptacionFields([
+    "noticia_verificada",
+    "probabilidad",
+    "prioridad_noticia",
+    "encargo_competencia",
+    "encargo_competencia_agencia",
+    "encargo_competencia_hasta",
+  ]),
+].filter(Boolean);
+
 // En la ficha de Encargo solo mostramos lo esencial para no saturar al equipo.
 const CAPTACION_FIELDS_ENCARGO = [
   { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Seguimiento" },
@@ -22934,8 +22978,8 @@ const refreshInmuebleVisitSheetButton = () => {
   const isEncargo = status === "encargo";
   const isNoticia = status === "noticia";
   const isAlquiler = status === "alquiler";
-  // Hoja de encargo disponible desde Noticia (generación) y Encargo (uso operativo).
-  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !(isEncargo || isNoticia));
+  // Nota de encargo: solo disponible en fase Encargo (evita confusión en Noticia).
+  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !isEncargo);
   // Documentación de visita/venta solo cuando ya es Encargo.
   inmuebleVisitaPdfBtn.classList.toggle("hidden", !isEncargo);
   inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !isEncargo);
@@ -23464,6 +23508,7 @@ const rerenderCurrentInmuebleGrids = () => {
   const docs = state.currentInmuebleContext?.docs || [];
   state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, docs);
   const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
+  syncInmuebleNoticiaTab(inmueble, captacion);
   if (inmuebleDatosGrid) {
     const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
     const stageFiltered = filterInmuebleFieldsForStage(baseFields, etapaMain);
@@ -23471,8 +23516,21 @@ const rerenderCurrentInmuebleGrids = () => {
     renderEditableGrid(inmuebleDatosGrid, fields, inmueble, "inmueble");
   }
   if (inmuebleCaptacionGrid) {
-    const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
+    const fields =
+      etapaMain === "Noticia"
+        ? CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA
+        : (etapaMain === "Encargo" || etapaMain === "Propuesta" || etapaMain === "Vendido")
+          ? CAPTACION_FIELDS_ENCARGO
+          : CAPTACION_FIELDS;
     renderEditableGrid(inmuebleCaptacionGrid, fields, captacion, "captacion");
+  }
+  if (inmuebleNoticiaGrid) {
+    const stage = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || captacion.situacion_comercial || "");
+    if (["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage)) {
+      renderEditableGrid(inmuebleNoticiaGrid, CAPTACION_FIELDS_NOTICIA, captacion, "captacion");
+    } else {
+      inmuebleNoticiaGrid.innerHTML = "<p class='muted'>Disponible al convertir el inmueble en Noticia.</p>";
+    }
   }
   refreshCurrentInmuebleProfile();
   refreshInmuebleVisitSheetButton();
@@ -23496,17 +23554,20 @@ const saveInmuebleFields = async (updates = {}) => {
         state.currentInmuebleContext.inmueble[field] = value;
       }
     });
-    refreshCurrentInmuebleHeader();
-    setInmuebleSaveStatus("Guardado · cambios aplicados");
-    loadCrmInmuebles();
-    refreshCurrentInmuebleProfile();
-    refreshInmuebleVisitSheetButton();
-	    if (Object.prototype.hasOwnProperty.call(updates || {}, "tipo_operacion")) {
-	      rerenderCurrentInmuebleGrids();
-	    }
-	    clearPendingInlineEdits("inmueble", Object.keys(updates || {}));
-	    return data;
-	  } catch (error) {
+	    refreshCurrentInmuebleHeader();
+	    setInmuebleSaveStatus("Guardado · cambios aplicados");
+	    loadCrmInmuebles();
+	    refreshCurrentInmuebleProfile();
+	    refreshInmuebleVisitSheetButton();
+		    if (Object.prototype.hasOwnProperty.call(updates || {}, "tipo_operacion") || Object.prototype.hasOwnProperty.call(updates || {}, "estado")) {
+		      rerenderCurrentInmuebleGrids();
+		    }
+		    if (Object.prototype.hasOwnProperty.call(updates || {}, "estado")) {
+		      syncInmuebleGenerarEncargoTab(state.currentInmuebleContext?.inmueble || state.currentInmueble || {});
+		    }
+		    clearPendingInlineEdits("inmueble", Object.keys(updates || {}));
+		    return data;
+		  } catch (error) {
 	    setInmuebleSaveStatus(error?.message || "Error al guardar.");
 	    return { error: error?.message || "Error al guardar." };
 	  }
@@ -23575,26 +23636,40 @@ const saveCaptacionField = (field, value) => {
     }
   }
   setInmuebleSaveStatus("Guardando...");
-  postJsonWithDbRetry(
-    "/api/captacion_update",
-    { inmueble_id: state.currentInmuebleId, [field]: value },
-    { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
-  )
-	    .then((data) => {
-	      if (data?.error) {
-	        setInmuebleSaveStatus(data.error);
-	        return;
+	  postJsonWithDbRetry(
+	    "/api/captacion_update",
+	    { inmueble_id: state.currentInmuebleId, [field]: value },
+	    { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
+	  )
+		    .then((data) => {
+		      if (data?.error) {
+		        setInmuebleSaveStatus(data.error);
+		        return;
+		      }
+	      if (state.currentInmuebleContext?.captacion) {
+	        state.currentInmuebleContext.captacion[field] = value;
 	      }
-      if (state.currentInmuebleContext?.captacion) {
-        state.currentInmuebleContext.captacion[field] = value;
-      }
-      clearPendingInlineEdits("captacion", [field]);
-      setInmuebleSaveStatus("Guardado · cambios aplicados");
-      refreshCurrentInmuebleProfile();
-	    })
-	    .catch((error) => {
-	      setInmuebleSaveStatus(error?.message || "Error al guardar.");
-	    });
+	      if ((field === "etapa" || field === "situacion_comercial") && state.currentInmuebleContext?.inmueble) {
+	        state.currentInmuebleContext.inmueble.estado = value;
+	        rerenderCurrentInmuebleGrids();
+	        syncInmuebleGenerarEncargoTab(state.currentInmuebleContext.inmueble);
+	      }
+	      clearPendingInlineEdits("captacion", [field]);
+	      setInmuebleSaveStatus("Guardado · cambios aplicados");
+	      refreshCurrentInmuebleProfile();
+		    })
+		    .catch((error) => {
+		      setInmuebleSaveStatus(error?.message || "Error al guardar.");
+		    });
+};
+
+const computeInmoDesviacionPct = (precioPedidoCliente, precioValoracion) => {
+  const pedido = toNumber(precioPedidoCliente);
+  const valor = toNumber(precioValoracion);
+  if (pedido === null || valor === null) return null;
+  if (!Number.isFinite(pedido) || !Number.isFinite(valor) || valor <= 0) return null;
+  const pct = Math.abs((pedido - valor) / valor) * 100;
+  return Math.round(pct * 100) / 100;
 };
 
 const saveClienteField = (field, value) => {
@@ -23765,6 +23840,7 @@ const saveClienteEmpresaField = (relId, field, value) => {
 const renderEditableGrid = (grid, fields, data, target) => {
   if (!grid) return;
   const useTecnoLayout = String(grid.dataset.layout || "").trim().toLowerCase() === "tecno";
+  const gridContext = normalizeSimple(grid.dataset.context || "");
   grid.classList.remove("editable-grid--inmueble", "editable-grid--captacion", "editable-grid--cliente");
   grid.classList.add(`editable-grid--${target}`);
   grid.innerHTML = "";
@@ -23833,7 +23909,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     // Simplificación precios Inmobiliaria: solo 2 precios visibles según etapa.
     if (target === "inmueble" || target === "captacion") {
       if (field.key === "precio_objetivo") return;
-      if (field.key === "precio_pedido_cliente" && !showOwnerPrice) return;
+      if (field.key === "precio_pedido_cliente" && !showOwnerPrice && gridContext !== "noticia") return;
       if (field.key === "precio_encargo" && !showEncargoPrice) return;
     }
     // Encargo: la "Duración encargo" solo tiene sentido cuando el expediente ya está en fase Encargo.
@@ -23844,7 +23920,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (
       target === "captacion" &&
       (field.key === "encargo_competencia" || field.key === "encargo_competencia_agencia" || field.key === "encargo_competencia_hasta") &&
-      !isInmoStageNoticia
+      !isInmoStageNoticia &&
+      gridContext !== "noticia"
     ) {
       return;
     }
@@ -24005,8 +24082,12 @@ const renderEditableGrid = (grid, fields, data, target) => {
     input.classList.add("inline-input");
     input.dataset.target = target;
     input.dataset.field = field.key;
-    if (target === "cliente" || isInmueble) {
+    if (target === "cliente" || isInmueble || target === "captacion") {
       inputMap[field.key] = input;
+    }
+    if (field.readonly) {
+      input.disabled = true;
+      input.classList.add("inline-input--readonly");
     }
 
     let status;
@@ -24038,38 +24119,40 @@ const renderEditableGrid = (grid, fields, data, target) => {
 	      }
 	    };
 
-	    if (field.type === "select") {
-	      input.addEventListener("change", () => {
-	        markPendingInlineEdit(target, field.key, input.value);
-	        if (target === "inmueble" || target === "captacion") return;
-	        saveHandler();
-	      });
-	    } else {
-	      input.addEventListener("input", () => {
-	        if (status) {
-	          const val = input.value;
-	          status.textContent = val
-	            ? isValidDocumento(val)
-	              ? "Documento válido"
-	              : "Documento no válido"
-	            : "";
-	        }
-	        markPendingInlineEdit(target, field.key, input.value);
-	        if (target === "inmueble" || target === "captacion") return;
-	        scheduleSave(`${target}:${field.key}`, saveHandler);
-	      });
-	      if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
-	        input.addEventListener("blur", () => {
-	          const parsed = toNumber(input.value);
-	          if (parsed !== null) {
-	            input.value = formatMoneyInputValue(parsed);
-	          }
-	        });
-	      }
-	      if (target !== "inmueble" && target !== "captacion") {
-	        input.addEventListener("blur", saveHandler);
-	      }
-	    }
+		    if (!field.readonly) {
+		      if (field.type === "select") {
+		        input.addEventListener("change", () => {
+		          markPendingInlineEdit(target, field.key, input.value);
+		          if (target === "inmueble" || target === "captacion") return;
+		          saveHandler();
+		        });
+		      } else {
+		        input.addEventListener("input", () => {
+		          if (status) {
+		            const val = input.value;
+		            status.textContent = val
+		              ? isValidDocumento(val)
+		                ? "Documento válido"
+		                : "Documento no válido"
+		              : "";
+		          }
+		          markPendingInlineEdit(target, field.key, input.value);
+		          if (target === "inmueble" || target === "captacion") return;
+		          scheduleSave(`${target}:${field.key}`, saveHandler);
+		        });
+		        if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
+		          input.addEventListener("blur", () => {
+		            const parsed = toNumber(input.value);
+		            if (parsed !== null) {
+		              input.value = formatMoneyInputValue(parsed);
+		            }
+		          });
+		        }
+		        if (target !== "inmueble" && target !== "captacion") {
+		          input.addEventListener("blur", saveHandler);
+		        }
+		      }
+		    }
 	    valueWrap.appendChild(input);
 	    if (status) {
 	      valueWrap.appendChild(status);
@@ -40919,6 +41002,7 @@ const normalizeInmuebleTabKey = (tab) => {
 
 const resolveInmuebleTopTabKey = (tabKey = "") => {
   const key = normalizeInmuebleTabKey(tabKey);
+  if (key === "noticia") return "datos";
   if (["datos", "evolucion", "imagenes", "adjuntos"].includes(key)) return key;
   if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado", "generar_encargo"].includes(key)) {
     return "evolucion";
@@ -40967,6 +41051,7 @@ const setInmuebleTab = (tab) => {
   });
   // Tabs Tecnocloud-like (4): Información / Evolución / Imágenes / Adjuntos.
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
+  if (inmuebleTabNoticia) inmuebleTabNoticia.classList.toggle("hidden", key !== "noticia");
   if (inmuebleTabEvolucion) inmuebleTabEvolucion.classList.toggle("hidden", key !== "evolucion");
   if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", !(key === "evolucion" || key === "historial"));
   if (inmuebleTabImagenes) inmuebleTabImagenes.classList.toggle("hidden", key !== "imagenes");
@@ -40994,6 +41079,20 @@ const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
     inmuebleTabGenerarEncargo.classList.add("hidden");
     const active = inmuebleTabs.querySelector(".tab.active")?.dataset?.tab || "";
     if (active === "generar_encargo") {
+      setInmuebleTab("datos");
+    }
+  }
+};
+
+const syncInmuebleNoticiaTab = (inmueble = {}, captacion = {}) => {
+  if (!inmuebleTabs || !inmuebleNoticiaTabBtn || !inmuebleTabNoticia) return;
+  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || captacion?.situacion_comercial || "");
+  const available = ["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage);
+  inmuebleNoticiaTabBtn.classList.toggle("hidden", !available);
+  if (!available) {
+    inmuebleTabNoticia.classList.add("hidden");
+    const active = inmuebleTabs.querySelector(".tab.active")?.dataset?.tab || "";
+    if (active === "noticia") {
       setInmuebleTab("datos");
     }
   }
@@ -41448,10 +41547,11 @@ const openInmuebleDetail = (id, originView = "") => {
 	      };
       state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
       const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
-      if (hasPendingPrefill) {
-        applyPendingInmuebleCitaPrefill();
-      }
-      syncInmuebleGenerarEncargoTab(inmueble);
+	      if (hasPendingPrefill) {
+	        applyPendingInmuebleCitaPrefill();
+	      }
+	      syncInmuebleGenerarEncargoTab(inmueble);
+	      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
       if (inmuebleTitle) {
         const etapa = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "") || "Inmueble";
         const tecnoStage = etapa === "Inmueble" || etapa === "Noticia" ? etapa : "Encargo";
@@ -41487,11 +41587,24 @@ const openInmuebleDetail = (id, originView = "") => {
 	          bindPostalLookup(inmuebleDatosGrid);
 	        } catch {}
       }
-      if (inmuebleCaptacionGrid) {
-        const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
-        renderEditableGrid(inmuebleCaptacionGrid, fields, normalizedCaptacion, "captacion");
-        renderPropietariosEditor(data.propietarios || []);
-      }
+	      if (inmuebleCaptacionGrid) {
+	        const fields =
+	          etapaMain === "Noticia"
+	            ? CAPTACION_FIELDS_SEGUIMIENTO_NOTICIA
+	            : (etapaMain === "Encargo" || etapaMain === "Propuesta" || etapaMain === "Vendido")
+	              ? CAPTACION_FIELDS_ENCARGO
+	              : CAPTACION_FIELDS;
+	        renderEditableGrid(inmuebleCaptacionGrid, fields, normalizedCaptacion, "captacion");
+	        renderPropietariosEditor(data.propietarios || []);
+	      }
+	      if (inmuebleNoticiaGrid) {
+	        const stage = normalizeCrmMainEtapa(inmueble.estado || normalizedCaptacion.etapa || normalizedCaptacion.situacion_comercial || "");
+	        if (["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage)) {
+	          renderEditableGrid(inmuebleNoticiaGrid, CAPTACION_FIELDS_NOTICIA, normalizedCaptacion, "captacion");
+	        } else {
+	          inmuebleNoticiaGrid.innerHTML = "<p class='muted'>Disponible al convertir el inmueble en Noticia.</p>";
+	        }
+	      }
       if (inmuebleDemandaCliente) {
         populateClientesSelect(inmuebleDemandaCliente);
       }
@@ -41572,14 +41685,46 @@ if (inmuebleManualSaveBtn) {
     if (Object.prototype.hasOwnProperty.call(inmuebleUpdates, "asesor") && !Object.prototype.hasOwnProperty.call(inmuebleUpdates, "responsable")) {
       inmuebleUpdates.responsable = inmuebleUpdates.asesor;
     }
-    if (Object.prototype.hasOwnProperty.call(captacionUpdates, "asesor") && !Object.prototype.hasOwnProperty.call(captacionUpdates, "responsable")) {
-      captacionUpdates.responsable = captacionUpdates.asesor;
-    }
-    if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
-      setInmuebleSaveStatus("Sin cambios");
-      syncInmuebleManualSaveButton();
-      return;
-    }
+	    if (Object.prototype.hasOwnProperty.call(captacionUpdates, "asesor") && !Object.prototype.hasOwnProperty.call(captacionUpdates, "responsable")) {
+	      captacionUpdates.responsable = captacionUpdates.asesor;
+	    }
+
+	    // Valoración: calcula desviación automáticamente para evitar datos incoherentes.
+	    try {
+	      const ctxInmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+	      const ctxCaptacion = state.currentInmuebleContext?.captacion || {};
+	      const pedidoRaw =
+	        Object.prototype.hasOwnProperty.call(inmuebleUpdates, "precio_pedido_cliente")
+	          ? inmuebleUpdates.precio_pedido_cliente
+	          : Object.prototype.hasOwnProperty.call(captacionUpdates, "precio_pedido_cliente")
+	            ? captacionUpdates.precio_pedido_cliente
+	            : (ctxInmueble.precio_pedido_cliente ?? ctxCaptacion.precio_pedido_cliente);
+	      const valorRaw =
+	        Object.prototype.hasOwnProperty.call(inmuebleUpdates, "precio_valoracion")
+	          ? inmuebleUpdates.precio_valoracion
+	          : Object.prototype.hasOwnProperty.call(captacionUpdates, "precio_valoracion")
+	            ? captacionUpdates.precio_valoracion
+	            : (ctxInmueble.precio_valoracion ?? ctxCaptacion.precio_valoracion);
+	      const touchedInmueble =
+	        Object.prototype.hasOwnProperty.call(inmuebleUpdates, "precio_pedido_cliente")
+	        || Object.prototype.hasOwnProperty.call(inmuebleUpdates, "precio_valoracion");
+	      const touchedCaptacion =
+	        Object.prototype.hasOwnProperty.call(captacionUpdates, "precio_pedido_cliente")
+	        || Object.prototype.hasOwnProperty.call(captacionUpdates, "precio_valoracion");
+	      if (touchedInmueble || touchedCaptacion) {
+	        const pct = computeInmoDesviacionPct(pedidoRaw, valorRaw);
+	        if (pct !== null) {
+	          if (touchedInmueble) inmuebleUpdates.desviacion_pct = pct;
+	          if (touchedCaptacion) captacionUpdates.desviacion_pct = pct;
+	        }
+	      }
+	    } catch {}
+
+	    if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
+	      setInmuebleSaveStatus("Sin cambios");
+	      syncInmuebleManualSaveButton();
+	      return;
+	    }
     setInmuebleSaveStatus("Guardando...");
     inmuebleManualSaveBtn.disabled = true;
     try {

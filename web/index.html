@@ -3375,15 +3375,16 @@
 	              </div>
 	              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
 	            </div>
-		            <div class="tabs" id="inmuebleTabs">
-		              <button class="tab active" type="button" data-tab="datos">Información</button>
-		              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
-		              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
-		              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
-		            </div>
-	            <div class="inmueble-tecno-grid">
-	              <div class="inmueble-tecno-main">
-	            <div id="inmuebleTabDatos">
+			            <div class="tabs" id="inmuebleTabs">
+			              <button class="tab active" type="button" data-tab="datos">Información</button>
+			              <button class="tab hidden" type="button" data-tab="noticia" id="inmuebleNoticiaTabBtn">Noticia</button>
+			              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+			              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
+			              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
+			            </div>
+		            <div class="inmueble-tecno-grid">
+		              <div class="inmueble-tecno-main">
+		            <div id="inmuebleTabDatos">
 	              <div class="inmueble-profile inmueble-profile-top">
 	                <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
 	              </div>
@@ -3413,11 +3414,22 @@
                   </div>
                 </div>
               </div>
-	            </div>
-	            <div id="inmuebleTabGenerarEncargo" class="hidden">
-              <div class="form-card">
-                <div class="section-head">
-                  <div>
+		            </div>
+		            <div id="inmuebleTabNoticia" class="hidden">
+		              <div class="form-card">
+		                <div class="section-head">
+		                  <div>
+		                    <h3>Datos de la noticia</h3>
+		                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
+		                  </div>
+		                </div>
+		                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
+		              </div>
+		            </div>
+		            <div id="inmuebleTabGenerarEncargo" class="hidden">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
                     <h3>Hoja de encargo</h3>
                     <p class="muted">Genera la hoja de encargo (PDF editable) con datos del propietario, del inmueble y condiciones. La fase del inmueble se actualiza al cerrar la cita correspondiente.</p>
                   </div>
@@ -8781,11 +8793,11 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
-	    <script src="ui-foundation.js?v=3"></script>
-	    <script src="app-auth.js?v=10"></script>
-	    <script src="app-routing.js?v=7"></script>
-	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-			    <script src="app.js?v=532"></script>
+		    <script src="ui-foundation.js?v=3"></script>
+		    <script src="app-auth.js?v=10"></script>
+		    <script src="app-routing.js?v=7"></script>
+		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+		    <script src="app.js?v=533"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
