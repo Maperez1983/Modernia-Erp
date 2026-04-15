@@ -1508,6 +1508,8 @@ const state = {
   prevTab: "operativa",
   crmWorkspaceView: "resumen",
   clientesShowAll: false,
+  columnsPickerContext: null,
+  lastTableRender: null,
   gestoriaCrmFull: false,
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
@@ -1693,6 +1695,7 @@ const bdtSection = document.getElementById("bdtSection");
 const clientesColumnsBtn = document.getElementById("clientesColumnsBtn");
 const clientesColumnsPanel = document.getElementById("clientesColumnsPanel");
 const clientesColumnsList = document.getElementById("clientesColumnsList");
+const columnsResetBtn = document.getElementById("columnsResetBtn");
 const clientesShowAllBtn = document.getElementById("clientesShowAllBtn");
 const coreCards = document.getElementById("coreCards");
 const userSelect = document.getElementById("userSelect");
@@ -3174,6 +3177,168 @@ const getClientesVisibleColumns = () => {
 
 const saveClientesVisibleColumns = (cols) => {
   localStorage.setItem(CLIENTES_COLUMNS_STORAGE, JSON.stringify(cols));
+};
+
+const COLUMNS_PREF_PREFIX = "crm.visibleColumns.";
+
+const getColumnsPrefStorageKey = (contextKey) =>
+  `${COLUMNS_PREF_PREFIX}${String(contextKey || "").trim() || "default"}`;
+
+const loadVisibleColumnsFromStorage = (contextKey, availableColumns = [], defaultColumns = []) => {
+  const available = Array.isArray(availableColumns) ? availableColumns : [];
+  const defaults = Array.isArray(defaultColumns) && defaultColumns.length ? defaultColumns : available;
+  const storageKey = getColumnsPrefStorageKey(contextKey);
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [...defaults];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return [...defaults];
+    const filtered = parsed.filter((col) => available.includes(col));
+    return filtered.length ? filtered : [...defaults];
+  } catch {
+    return [...defaults];
+  }
+};
+
+const saveVisibleColumnsToStorage = (contextKey, columns = []) => {
+  const storageKey = getColumnsPrefStorageKey(contextKey);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(Array.isArray(columns) ? columns : []));
+  } catch {}
+};
+
+const setColumnsPickerContext = (context) => {
+  state.columnsPickerContext = context || null;
+  if (clientesColumnsBtn) {
+    clientesColumnsBtn.disabled = !state.columnsPickerContext;
+    clientesColumnsBtn.title = state.columnsPickerContext
+      ? "Configurar columnas"
+      : "No hay columnas configurables en esta vista";
+  }
+  // Si dejamos la vista sin contexto, cerramos el panel para evitar que se quede “colgado”.
+  if (!state.columnsPickerContext && clientesColumnsPanel) {
+    clientesColumnsPanel.classList.add("hidden");
+  }
+  if (state.columnsPickerContext && clientesColumnsPanel && !clientesColumnsPanel.classList.contains("hidden")) {
+    renderActiveColumnsPicker();
+  }
+  try {
+    if (typeof updateTableVisibility === "function") {
+      updateTableVisibility();
+    }
+  } catch {}
+};
+
+const renderActiveColumnsPicker = () => {
+  if (!clientesColumnsList) return;
+  clientesColumnsList.innerHTML = "";
+  const ctx = state.columnsPickerContext;
+  if (!ctx) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No hay columnas configurables en esta vista.";
+    clientesColumnsList.appendChild(empty);
+    return;
+  }
+  const allColumns = Array.isArray(ctx.columns) ? ctx.columns : [];
+  const locked = new Set(Array.isArray(ctx.lockedColumns) ? ctx.lockedColumns : []);
+  const visibleRaw = Array.isArray(ctx.getVisibleColumns?.()) ? ctx.getVisibleColumns() : [];
+  const visible = visibleRaw.filter((c) => allColumns.includes(c));
+  const visibleSet = new Set(visible);
+
+  const ordered = [];
+  visible.forEach((col) => {
+    if (!ordered.includes(col)) ordered.push(col);
+  });
+  allColumns.forEach((col) => {
+    if (!ordered.includes(col)) ordered.push(col);
+  });
+
+  const applyVisible = (nextVisible) => {
+    const normalized = Array.isArray(nextVisible) ? nextVisible.filter((c) => allColumns.includes(c)) : [];
+    locked.forEach((col) => {
+      if (!normalized.includes(col) && allColumns.includes(col)) normalized.push(col);
+    });
+    const finalCols = normalized.length ? normalized : [...visible];
+    ctx.setVisibleColumns?.(finalCols);
+    // Re-render para reflejar el orden/selección actual sin tener que cerrar el panel.
+    renderActiveColumnsPicker();
+  };
+
+  const moveVisible = (col, direction) => {
+    const current = Array.isArray(ctx.getVisibleColumns?.()) ? ctx.getVisibleColumns() : visible;
+    const list = current.filter((c) => allColumns.includes(c));
+    const idx = list.indexOf(col);
+    if (idx < 0) return;
+    const nextIdx = idx + (direction === "up" ? -1 : 1);
+    if (nextIdx < 0 || nextIdx >= list.length) return;
+    const copy = [...list];
+    const tmp = copy[idx];
+    copy[idx] = copy[nextIdx];
+    copy[nextIdx] = tmp;
+    applyVisible(copy);
+  };
+
+  ordered.forEach((col) => {
+    const label = document.createElement("label");
+    label.className = "column-toggle";
+
+    const left = document.createElement("span");
+    left.className = "column-toggle-main";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = visibleSet.has(col) || locked.has(col);
+    if (locked.has(col)) {
+      input.checked = true;
+      input.disabled = true;
+    }
+    input.addEventListener("change", () => {
+      const next = Array.isArray(ctx.getVisibleColumns?.()) ? ctx.getVisibleColumns() : visible;
+      const nextList = next.filter((c) => allColumns.includes(c));
+      const nextSet = new Set(nextList);
+      if (input.checked) {
+        nextSet.add(col);
+        nextList.push(col);
+      } else {
+        nextSet.delete(col);
+      }
+      const cleaned = nextList.filter((c, idx) => nextSet.has(c) && nextList.indexOf(c) === idx);
+      applyVisible(cleaned);
+    });
+    left.appendChild(input);
+    left.appendChild(document.createTextNode(formatHeader(col)));
+    label.appendChild(left);
+
+    const actions = document.createElement("span");
+    actions.className = "column-toggle-actions";
+    if (visibleSet.has(col) && !locked.has(col)) {
+      const upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.className = "column-move";
+      upBtn.textContent = "↑";
+      upBtn.title = "Subir";
+      upBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        moveVisible(col, "up");
+      });
+
+      const downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "column-move";
+      downBtn.textContent = "↓";
+      downBtn.title = "Bajar";
+      downBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        moveVisible(col, "down");
+      });
+
+      actions.appendChild(upBtn);
+      actions.appendChild(downBtn);
+    }
+    label.appendChild(actions);
+    clientesColumnsList.appendChild(label);
+  });
 };
 
 const DASHBOARD_COMPANY = "Estudio Velazquez 2012 SL";
@@ -19730,6 +19895,7 @@ const setModule = (moduleName) => {
     loadClientesDashboard();
     renderClientesColumnsPicker();
   } else {
+    setColumnsPickerContext(null);
     if (searchInput) {
       searchInput.placeholder = "Buscar por texto o número...";
     }
@@ -27558,8 +27724,6 @@ const updateTableVisibility = () => {
     if (clientesEstadoFilter) clientesEstadoFilter.classList.add("hidden");
     if (applyBtn) applyBtn.classList.add("hidden");
     if (resetBtn) resetBtn.classList.add("hidden");
-    if (clientesColumnsBtn) clientesColumnsBtn.classList.add("hidden");
-    if (clientesShowAllBtn) clientesShowAllBtn.classList.add("hidden");
     if (searchInput) {
       searchInput.classList.remove("hidden");
       searchInput.placeholder = "Buscar cliente...";
@@ -27568,8 +27732,6 @@ const updateTableVisibility = () => {
     if (empresaSelect) empresaSelect.classList.remove("hidden");
     if (applyBtn) applyBtn.classList.remove("hidden");
     if (resetBtn) resetBtn.classList.remove("hidden");
-    if (clientesColumnsBtn) clientesColumnsBtn.classList.remove("hidden");
-    if (clientesShowAllBtn) clientesShowAllBtn.classList.remove("hidden");
     if (searchInput) {
       searchInput.placeholder = "Buscar por texto o número...";
     }
@@ -27589,14 +27751,21 @@ const updateTableVisibility = () => {
   if (clientesAltaSection && state.currentModule === "clientes") {
     clientesAltaSection.classList.toggle("hidden", !isClientesAlta);
   }
+  const columnsUiAllowed =
+    !isClientePage &&
+    !isClientesAlta &&
+    !isFinSim &&
+    Boolean(tableToolbar && !tableToolbar.classList.contains("hidden")) &&
+    Boolean(tableContainer && !tableContainer.classList.contains("hidden"));
+  const hasColumnsContext = Boolean(state.columnsPickerContext);
   if (clientesColumnsBtn) {
-    clientesColumnsBtn.classList.toggle("hidden", true);
-  }
-  if (clientesColumnsPanel) {
-    clientesColumnsPanel.classList.toggle("hidden", true);
+    clientesColumnsBtn.classList.toggle("hidden", !columnsUiAllowed || !hasColumnsContext);
   }
   if (clientesShowAllBtn) {
-    clientesShowAllBtn.classList.toggle("hidden", true);
+    clientesShowAllBtn.classList.toggle("hidden", !columnsUiAllowed || state.currentModule !== "clientes");
+  }
+  if (clientesColumnsPanel && (!columnsUiAllowed || !hasColumnsContext)) {
+    clientesColumnsPanel.classList.add("hidden");
   }
   const showTable = state.currentModule === "clientes";
   if (bdtSection) {
@@ -32636,6 +32805,22 @@ const loadClientesTable = () => {
   const empresaId = empresaSelect.value || "";
   const q = searchInput.value.trim();
   const estado = clientesEstadoFilter ? clientesEstadoFilter.value.trim() : "";
+  setColumnsPickerContext({
+    key: "clientes",
+    columns: [...CLIENTES_COLUMNS],
+    lockedColumns: ["servicios"],
+    defaultColumns: [...CLIENTES_COLUMNS],
+    getVisibleColumns: () => getClientesVisibleColumns(),
+    setVisibleColumns: (cols) => {
+      const next = Array.isArray(cols) ? cols.filter((c) => CLIENTES_COLUMNS.includes(c)) : [];
+      saveClientesVisibleColumns(next);
+      loadClientesTable();
+    },
+    resetVisibleColumns: () => {
+      saveClientesVisibleColumns([...CLIENTES_COLUMNS]);
+      loadClientesTable();
+    },
+  });
   loadClientesDashboard();
   if (!q && !empresaId && !state.clientesShowAll) {
     tableContainer.innerHTML = "<p class='muted'>Usa búsqueda o filtros para cargar clientes.</p>";
@@ -32775,35 +32960,7 @@ const loadClientesTable = () => {
   });
 };
 
-const renderClientesColumnsPicker = () => {
-  if (!clientesColumnsList) return;
-  clientesColumnsList.innerHTML = "";
-  const selected = new Set(getClientesVisibleColumns());
-  CLIENTES_COLUMNS.forEach((col) => {
-    const label = document.createElement("label");
-    label.className = "column-toggle";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = selected.has(col);
-    if (col === "servicios") {
-      input.checked = true;
-      input.disabled = true;
-    }
-    input.addEventListener("change", () => {
-      if (input.checked) {
-        selected.add(col);
-      } else {
-        selected.delete(col);
-      }
-      const next = CLIENTES_COLUMNS.filter((c) => selected.has(c));
-      saveClientesVisibleColumns(next);
-      loadClientesTable();
-    });
-    label.appendChild(input);
-    label.appendChild(document.createTextNode(formatHeader(col)));
-    clientesColumnsList.appendChild(label);
-  });
-};
+const renderClientesColumnsPicker = () => renderActiveColumnsPicker();
 
 const loadFincasRenewalAlert = () => {
   const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
@@ -32951,13 +33108,23 @@ const renderTable = (data, options = {}) => {
   const tableMount = options.container || tableContainer;
   if (!tableMount) return;
   const editableFields = editableTable ? EDITABLE_FIELDS[editableTable] : null;
+  const internalCols = new Set(["id", "poliza_key", "poliza_url"]);
+  const allDisplayableColumns = (Array.isArray(columns) ? columns : []).filter(
+    (col) => col && !internalCols.has(col)
+  );
+  const requestedVisible = Array.isArray(options.visibleColumns) ? options.visibleColumns : null;
+  const visibleColumns = requestedVisible?.length
+    ? requestedVisible.filter((col) => allDisplayableColumns.includes(col))
+    : allDisplayableColumns;
+  const colIndexMap = new Map();
+  (Array.isArray(columns) ? columns : []).forEach((col, idx) => {
+    colIndexMap.set(col, idx);
+  });
+  const idIndex = Array.isArray(columns) ? columns.indexOf("id") : -1;
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  columns.forEach((col) => {
-    if (col === "id" || col === "poliza_key" || col === "poliza_url") {
-      return;
-    }
+  visibleColumns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = formatHeader(col);
     trHead.appendChild(th);
@@ -32971,15 +33138,12 @@ const renderTable = (data, options = {}) => {
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-  rows.forEach((row) => {
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
     const tr = document.createElement("tr");
-    let rowId = "";
-    row.forEach((cell, idx) => {
-      const colName = columns[idx] || "";
-      if (colName === "id" || colName === "poliza_key" || colName === "poliza_url") {
-        rowId = cell;
-        return;
-      }
+    const rowId = idIndex >= 0 && Array.isArray(row) ? row[idIndex] : "";
+    visibleColumns.forEach((colName) => {
+      const idx = colIndexMap.get(colName);
+      const cell = idx === undefined || !Array.isArray(row) ? "" : row[idx];
       const td = document.createElement("td");
       if (editableFields && editableFields[colName]) {
         const config = editableFields[colName];
@@ -51762,7 +51926,38 @@ const loadTable = () => {
       if (state.currentModule !== requestModule || currentTab !== requestTab) {
         return;
       }
-      renderTable(data, { showActions, editableTable: isEditableTable ? tabla : null });
+      const internalCols = new Set(["id", "poliza_key", "poliza_url"]);
+      const availableColumns = (Array.isArray(data?.columns) ? data.columns : []).filter(
+        (col) => col && !internalCols.has(col)
+      );
+      const contextKey = `tabla.${tabla}`;
+      const getVisibleColumns = () =>
+        loadVisibleColumnsFromStorage(contextKey, availableColumns, availableColumns);
+      const rerender = () => {
+        renderTable(data, {
+          showActions,
+          editableTable: isEditableTable ? tabla : null,
+          visibleColumns: getVisibleColumns(),
+        });
+      };
+      state.lastTableRender = rerender;
+      setColumnsPickerContext({
+        key: contextKey,
+        columns: availableColumns,
+        lockedColumns: [],
+        defaultColumns: [...availableColumns],
+        getVisibleColumns,
+        setVisibleColumns: (cols) => {
+          const next = Array.isArray(cols) ? cols.filter((c) => availableColumns.includes(c)) : [];
+          saveVisibleColumnsToStorage(contextKey, next);
+          rerender();
+        },
+        resetVisibleColumns: () => {
+          saveVisibleColumnsToStorage(contextKey, [...availableColumns]);
+          rerender();
+        },
+      });
+      rerender();
       const baseText = `Mostrando ${data.rows.length} filas de ${TABLE_LABELS[tabla] || tabla}.`;
       tableInfo.textContent = baseText;
       tableInfo.dataset.baseText = baseText;
@@ -54040,7 +54235,16 @@ if (clientesColumnsBtn) {
   clientesColumnsBtn.addEventListener("click", () => {
     if (!clientesColumnsPanel) return;
     clientesColumnsPanel.classList.toggle("hidden");
-    renderClientesColumnsPicker();
+    renderActiveColumnsPicker();
+  });
+}
+if (columnsResetBtn) {
+  columnsResetBtn.addEventListener("click", () => {
+    const ctx = state.columnsPickerContext;
+    if (ctx?.resetVisibleColumns) {
+      ctx.resetVisibleColumns();
+      renderActiveColumnsPicker();
+    }
   });
 }
 if (clientesShowAllBtn) {

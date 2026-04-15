@@ -5572,11 +5572,19 @@
             <input id="searchInput" placeholder="Buscar en la lista..." />
             <button id="applyBtn">Aplicar</button>
             <button id="resetBtn" class="secondary">Reset</button>
-            <button id="clientesColumnsBtn" class="ghost columns-toggle">Ajustes</button>
+            <button id="clientesColumnsBtn" class="ghost columns-toggle" type="button">Columnas</button>
             <button id="clientesShowAllBtn" class="ghost columns-toggle">Ver lista completa</button>
           </div>
           <div id="clientesColumnsPanel" class="form-card hidden">
-            <h3>Columnas visibles</h3>
+            <div class="section-head">
+              <div>
+                <h3>Columnas visibles</h3>
+                <p class="muted">Personaliza qué campos se muestran y en qué orden.</p>
+              </div>
+              <div class="toolbar">
+                <button id="columnsResetBtn" class="secondary ghost" type="button">Restaurar</button>
+              </div>
+            </div>
             <div class="grid" id="clientesColumnsList"></div>
           </div>
           <div id="tableContainer"></div>
