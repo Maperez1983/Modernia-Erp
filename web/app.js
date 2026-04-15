@@ -2282,6 +2282,12 @@ const gestoriaRentaInfo = document.getElementById("gestoriaRentaInfo");
 const gestoriaRentaQuickForm = document.getElementById("gestoriaRentaQuickForm");
 const gestoriaRentaQuickEjercicio = document.getElementById("gestoriaRentaQuickEjercicio");
 const gestoriaRentaQuickEstado = document.getElementById("gestoriaRentaQuickEstado");
+const gestoriaRentaQuickResponsable = document.getElementById("gestoriaRentaQuickResponsable");
+const gestoriaRentaQuickPrecio = document.getElementById("gestoriaRentaQuickPrecio");
+const gestoriaRentaQuickCobrada = document.getElementById("gestoriaRentaQuickCobrada");
+const gestoriaRentaQuickFormaCobro = document.getElementById("gestoriaRentaQuickFormaCobro");
+const gestoriaRentaQuickRemesada = document.getElementById("gestoriaRentaQuickRemesada");
+const gestoriaRentaQuickRemesadaWrap = document.getElementById("gestoriaRentaQuickRemesadaWrap");
 const gestoriaRentaQuickFile = document.getElementById("gestoriaRentaQuickFile");
 const gestoriaRentaQuickStatus = document.getElementById("gestoriaRentaQuickStatus");
 const gestoriaRentaQuickMatches = document.getElementById("gestoriaRentaQuickMatches");
@@ -2292,6 +2298,9 @@ const gestoriaRentaDeclaracionConjunta = document.getElementById("gestoriaRentaD
 const gestoriaRentaEntryEjercicio = document.getElementById("gestoriaRentaEntryEjercicio");
 const gestoriaRentaEstadoPresentacion = document.getElementById("gestoriaRentaEstadoPresentacion");
 const gestoriaRentaCobrada = document.getElementById("gestoriaRentaCobrada");
+const gestoriaRentaFormaCobro = document.getElementById("gestoriaRentaFormaCobro");
+const gestoriaRentaRemesada = document.getElementById("gestoriaRentaRemesada");
+const gestoriaRentaRemesadaWrap = document.getElementById("gestoriaRentaRemesadaWrap");
 const gestoriaRentaDocId = document.getElementById("gestoriaRentaDocId");
 const gestoriaRentaDocumentoForm = document.getElementById("gestoriaRentaDocumentoForm");
 const gestoriaRentaDocumentoFile = document.getElementById("gestoriaRentaDocumentoFile");
@@ -49243,6 +49252,28 @@ const formatRentaResult = (value) => {
   };
 };
 
+const isRentaRemesa = (value) => normalizeSimple(String(value || "")).includes("remesa");
+
+const syncGestoriaRentaRemesaToggles = () => {
+  const formaQuick = String(gestoriaRentaQuickFormaCobro?.value || "").trim();
+  const showQuick = isRentaRemesa(formaQuick);
+  if (gestoriaRentaQuickRemesadaWrap) {
+    gestoriaRentaQuickRemesadaWrap.classList.toggle("hidden", !showQuick);
+  }
+  if (!showQuick && gestoriaRentaQuickRemesada) {
+    gestoriaRentaQuickRemesada.checked = false;
+  }
+
+  const forma = String(gestoriaRentaFormaCobro?.value || "").trim();
+  const show = isRentaRemesa(forma);
+  if (gestoriaRentaRemesadaWrap) {
+    gestoriaRentaRemesadaWrap.classList.toggle("hidden", !show);
+  }
+  if (!show && gestoriaRentaRemesada) {
+    gestoriaRentaRemesada.checked = false;
+  }
+};
+
 const getSortedRentaEntries = (row = {}) =>
   (parseGestoriaRentaPayload(row).entries || [])
     .slice()
@@ -49267,8 +49298,10 @@ const formatRentaCobro = (entry = {}) => {
   if (!entry || typeof entry !== "object") return "-";
   const cobrada = Number(entry.cobrada || 0) === 1;
   const forma = String(entry.forma_cobro || "").trim();
-  if (!cobrada) return "Pendiente";
-  return forma ? `Cobrada · ${forma}` : "Cobrada";
+  const remesada = Number(entry.remesada || 0) === 1;
+  const remesaMeta = isRentaRemesa(forma) && remesada ? " · Remesada" : "";
+  if (!cobrada) return forma ? `Pendiente · ${forma}${remesaMeta}` : "Pendiente";
+  return forma ? `Cobrada · ${forma}${remesaMeta}` : "Cobrada";
 };
 
 const normalizeRentaPresentacionStatus = (value) => {
@@ -49422,12 +49455,26 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
   const title = document.createElement("h4");
   title.textContent = "Resultado OCR";
   container.appendChild(title);
+  if (ctx.doc_key || ctx.doc_url) {
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Abrir archivo";
+    openBtn.addEventListener("click", () => openS3File(String(ctx.doc_key || ""), String(ctx.doc_url || "")));
+    container.appendChild(openBtn);
+  }
   const meta = document.createElement("p");
   meta.className = "muted";
   meta.textContent = ctx.nif
     ? `DNI/NIF detectado: ${ctx.nif}`
     : "No se pudo detectar un DNI/NIF con suficiente fiabilidad.";
   container.appendChild(meta);
+  if (ctx.doc_id) {
+    const docMeta = document.createElement("p");
+    docMeta.className = "muted";
+    docMeta.textContent = `Documento guardado en repositorio (ID: ${ctx.doc_id}).`;
+    container.appendChild(docMeta);
+  }
   if (!ctx.nif) {
     gestoriaRentaQuickMatches.appendChild(container);
     return;
@@ -49435,7 +49482,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
   if (!Array.isArray(matches) || matches.length === 0) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "No hay clientes con ese DNI/NIF. Crea el cliente y vuelve a subir el documento.";
+    empty.textContent = "No hay clientes con ese DNI/NIF. Crea el cliente y vuelve a intentar asignarlo.";
     container.appendChild(empty);
     gestoriaRentaQuickMatches.appendChild(container);
     return;
@@ -49486,6 +49533,9 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
   }
   if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Asignando a cliente...";
   try {
+    const quickFormaCobro = String(gestoriaRentaQuickFormaCobro?.value || "").trim();
+    const quickIsRemesa = isRentaRemesa(quickFormaCobro);
+    const quickRemesada = quickIsRemesa && gestoriaRentaQuickRemesada?.checked ? 1 : 0;
     const payload = {
       empresa_nombre: empresa.nombre,
       usuario: getCurrentUser(),
@@ -49495,8 +49545,14 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       nombre: String(ctx.nombre || "").trim(),
       presentacion_fecha: String(ctx.presentacion_fecha || "").trim(),
       notas: String(ctx.notas || "").trim(),
+      doc_id: String(ctx.doc_id || "").trim(),
       doc_key: String(ctx.doc_key || "").trim(),
       doc_url: String(ctx.doc_url || "").trim(),
+      precio_servicio: String(gestoriaRentaQuickPrecio?.value || "").trim(),
+      responsable: String(gestoriaRentaQuickResponsable?.value || "").trim(),
+      cobrada: gestoriaRentaQuickCobrada?.checked ? 1 : 0,
+      forma_cobro: quickFormaCobro,
+      remesada: quickRemesada,
     };
     const data = await fetch("/api/renta_quick_attach", {
       method: "POST",
@@ -49546,6 +49602,9 @@ const submitGestoriaRentaQuick = async () => {
   }
   const ejercicio = String(gestoriaRentaQuickEjercicio?.value || "").trim();
   const estado_presentacion = String(gestoriaRentaQuickEstado?.value || "Borrador").trim() || "Borrador";
+  const quickFormaCobro = String(gestoriaRentaQuickFormaCobro?.value || "").trim();
+  const quickIsRemesa = isRentaRemesa(quickFormaCobro);
+  const quickRemesada = quickIsRemesa && gestoriaRentaQuickRemesada?.checked ? 1 : 0;
   if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Subiendo...";
   if (gestoriaRentaQuickMatches) gestoriaRentaQuickMatches.innerHTML = "";
   try {
@@ -49562,11 +49621,14 @@ const submitGestoriaRentaQuick = async () => {
         doc_key: upload.key || "",
         doc_url: upload.public_url || "",
         filename: file.name || "renta.pdf",
+        ejercicio,
+        estado_presentacion,
       }),
     }).then((r) => r.json());
     if (ocrStart?.error) {
       throw new Error(ocrStart.error);
     }
+    const docId = String(ocrStart?.doc_id || "").trim();
     const jobId = ocrStart?.ocr_job_id;
     if (!jobId) {
       throw new Error("No se pudo iniciar OCR.");
@@ -49584,8 +49646,17 @@ const submitGestoriaRentaQuick = async () => {
     const fields = (result && typeof result === "object" ? result.fields : null) || {};
     const nif = String(fields.nif_detectado || "").trim();
     if (!nif) {
-      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR listo, pero no detectó DNI/NIF.";
-      renderGestoriaRentaQuickMatches([], { nif: "" });
+      if (gestoriaRentaQuickStatus) {
+        gestoriaRentaQuickStatus.textContent = "OCR listo. Documento guardado, pero no detectó DNI/NIF.";
+      }
+      renderGestoriaRentaQuickMatches([], {
+        nif: "",
+        ejercicio,
+        estado_presentacion,
+        doc_id: docId,
+        doc_key: upload.key || "",
+        doc_url: upload.public_url || "",
+      });
       return;
     }
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = `DNI/NIF detectado: ${nif}. Buscando cliente...`;
@@ -49595,11 +49666,17 @@ const submitGestoriaRentaQuick = async () => {
       nif,
       ejercicio,
       estado_presentacion,
+      doc_id: docId,
       doc_key: upload.key || "",
       doc_url: upload.public_url || "",
       presentacion_fecha: String(fields.presentacion_fecha || "").trim(),
       nombre: `Renta ${ejercicio} · ${estado_presentacion}.pdf`,
       notas: "",
+      precio_servicio: String(gestoriaRentaQuickPrecio?.value || "").trim(),
+      responsable: String(gestoriaRentaQuickResponsable?.value || "").trim(),
+      cobrada: gestoriaRentaQuickCobrada?.checked ? 1 : 0,
+      forma_cobro: quickFormaCobro,
+      remesada: quickRemesada,
     };
     renderGestoriaRentaQuickMatches(rows, ctx);
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = rows.length ? "Selecciona cliente." : "Cliente no encontrado.";
@@ -49638,6 +49715,10 @@ const fillGestoriaRentaDetailsForm = (row = {}) => {
   if (gestoriaRentaCobrada) {
     gestoriaRentaCobrada.checked = Number(entry?.cobrada || 0) === 1;
   }
+  if (gestoriaRentaRemesada) {
+    gestoriaRentaRemesada.checked = Number(entry?.remesada || 0) === 1;
+  }
+  syncGestoriaRentaRemesaToggles();
   if (gestoriaRentaDocumentoForm) {
     const docSetValue = (name, value) => {
       const el = gestoriaRentaDocumentoForm.querySelector(`[name="${name}"]`);
@@ -49680,6 +49761,8 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     referencia_hacienda: String(formPayload.referencia_hacienda || "").trim(),
     cobrada: gestoriaRentaCobrada?.checked ? 1 : 0,
     forma_cobro: String(formPayload.forma_cobro || "").trim(),
+    remesada:
+      isRentaRemesa(String(formPayload.forma_cobro || "").trim()) && gestoriaRentaRemesada?.checked ? 1 : 0,
     doc_presentada_id: selectedEntry?.doc_presentada_id || "",
     doc_borrador_id: selectedEntry?.doc_borrador_id || "",
     gestion_notas: String(formPayload.renta_detalles || "").trim(),
@@ -49732,6 +49815,7 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
   payload.responsable = entry.responsable || "";
   payload.cobrada = Number(entry.cobrada || 0) === 1 ? 1 : 0;
   payload.forma_cobro = entry.forma_cobro || "";
+  payload.remesada = Number(entry.remesada || 0) === 1 ? 1 : 0;
   payload.doc_id = String(gestoriaRentaDocId?.value || entry.doc_presentada_id || entry.doc_borrador_id || "").trim();
   const file =
     gestoriaRentaDocumentoFile &&
@@ -60261,6 +60345,20 @@ if (gestoriaRentaQuickForm) {
   });
 }
 
+if (gestoriaRentaQuickFormaCobro) {
+  gestoriaRentaQuickFormaCobro.addEventListener("change", () => {
+    syncGestoriaRentaRemesaToggles();
+  });
+}
+
+if (gestoriaRentaFormaCobro) {
+  gestoriaRentaFormaCobro.addEventListener("change", () => {
+    syncGestoriaRentaRemesaToggles();
+  });
+}
+
+syncGestoriaRentaRemesaToggles();
+
 if (gestoriaRentaCampaignCreateBtn) {
   gestoriaRentaCampaignCreateBtn.addEventListener("click", async () => {
     await createGestoriaRentaCampaign();
@@ -63429,4 +63527,8 @@ try {
 
 try {
   initGestoriaRentaQuickEjercicio();
+} catch {}
+
+try {
+  syncGestoriaRentaQuickRemesaToggle();
 } catch {}

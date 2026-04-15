@@ -18125,6 +18125,11 @@ def sanitize_renta_entry(entry):
         cobrada_val = 1
     sanitized["cobrada"] = cobrada_val
     sanitized["forma_cobro"] = str(entry.get("forma_cobro") or "").strip()
+    remesada_raw = entry.get("remesada")
+    remesada_val = 1 if str(remesada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+    if "REMESA" not in normalize_lookup_text(sanitized["forma_cobro"]):
+        remesada_val = 0
+    sanitized["remesada"] = remesada_val
     sanitized["precio_servicio"] = coerce_renta_money(entry.get("precio_servicio"))
     sanitized["responsable"] = str(entry.get("responsable") or "").strip()
     return sanitized
@@ -45473,6 +45478,11 @@ class Handler(BaseHTTPRequestHandler):
             doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
             doc_key = str(payload.get("doc_key") or "").strip()
             doc_url = str(payload.get("doc_url") or "").strip()
+            forma_cobro = str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip()
+            remesada_raw = payload.get("remesada", current_entry.get("remesada"))
+            remesada_val = 1 if str(remesada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+            if "REMESA" not in normalize_lookup_text(forma_cobro):
+                remesada_val = 0
             if not doc_key and not doc_url:
                 json_response(self, {"error": "Debes subir un archivo antes de guardar el documento"}, status=400)
                 return
@@ -45538,7 +45548,8 @@ class Handler(BaseHTTPRequestHandler):
                     "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
                     "responsable": payload.get("responsable", current_entry.get("responsable")),
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
-                    "forma_cobro": payload.get("forma_cobro", current_entry.get("forma_cobro")),
+                    "forma_cobro": forma_cobro,
+                    "remesada": remesada_val,
                     "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
                     "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
                     "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
@@ -45627,10 +45638,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/renta_quick_ocr":
             doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
+            doc_url = str(payload.get("doc_url") or "").strip()
             filename = str(payload.get("filename") or "renta.pdf").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()
+            estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
             if not doc_key:
                 json_response(self, {"error": "doc_key requerido"}, status=400)
                 return
+            doc_id = uuid.uuid4().hex
+            doc_nombre = str(payload.get("nombre") or "").strip() or (
+                f"Renta {ejercicio or datetime.now().year} · {estado_presentacion}.pdf"
+            )
+            doc_tipo = str(payload.get("tipo") or "").strip() or f"Renta {estado_presentacion}"
+            doc_estado = "Pendiente"
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_docs (
+                      id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                      nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, NULL, 'renta', ?, ?, ?, '', ?, '', ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        doc_id,
+                        empresa["id"] if empresa else None,
+                        f"renta-pendiente-{doc_id}",
+                        doc_nombre,
+                        doc_tipo,
+                        doc_estado,
+                        doc_key or None,
+                        doc_url or None,
+                        now,
+                        now,
+                    ),
+                )
+            except Exception:
+                # Si falla por cualquier motivo, seguimos con el OCR (la subida ya está hecha en S3).
+                doc_id = ""
             try:
                 ensure_ocr_tables(self.ocr_db_path)
                 ocr_job_id = enqueue_ocr_job(
@@ -45645,7 +45692,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}"}, status=500)
                 return
-            json_response(self, {"ok": True, "ocr_job_id": ocr_job_id})
+            json_response(self, {"ok": True, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
             return
         elif parsed.path == "/api/renta_quick_attach":
             cliente_id = str(payload.get("cliente_id") or "").strip()
@@ -45704,6 +45751,11 @@ class Handler(BaseHTTPRequestHandler):
             doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
             doc_tipo = str(payload.get("tipo") or f"Renta {estado_presentacion}").strip()
             doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
+            forma_cobro = str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip()
+            remesada_raw = payload.get("remesada", current_entry.get("remesada"))
+            remesada_val = 1 if str(remesada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+            if "REMESA" not in normalize_lookup_text(forma_cobro):
+                remesada_val = 0
             if doc_id:
                 conn.execute(
                     """
@@ -45766,7 +45818,8 @@ class Handler(BaseHTTPRequestHandler):
                     "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
                     "responsable": payload.get("responsable", current_entry.get("responsable")),
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
-                    "forma_cobro": payload.get("forma_cobro", current_entry.get("forma_cobro")),
+                    "forma_cobro": forma_cobro,
+                    "remesada": remesada_val,
                     "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
                     "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
                     "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
