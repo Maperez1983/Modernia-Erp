@@ -40540,10 +40540,11 @@ const openInmuebleServiciosModal = () => {
         .map((el) => String(el.value || "").trim())
         .filter(Boolean);
       try {
-        const data = await apiPost("/api/inmueble_servicios_update", {
-          inmueble_id: state.currentInmuebleId,
-          servicios: selectedValues,
-        });
+	        const data = await apiPost("/api/inmueble_servicios_update", {
+	          empresa_nombre: resolveCrmInmoEmpresaNombre(),
+	          inmueble_id: state.currentInmuebleId,
+	          servicios: selectedValues,
+	        });
         if (data?.error) {
           if (statusEl) statusEl.textContent = data.error;
           return;
@@ -40686,10 +40687,11 @@ const openInmueblePersonasModal = async () => {
         .map((opt) => String(opt.value || "").trim())
         .filter(Boolean);
       try {
-        const data = await apiPost("/api/inmueble_propietarios_update", {
-          inmueble_id: state.currentInmuebleId,
-          cliente_ids: values,
-        });
+	        const data = await apiPost("/api/inmueble_propietarios_update", {
+	          empresa_nombre: resolveCrmInmoEmpresaNombre(),
+	          inmueble_id: state.currentInmuebleId,
+	          cliente_ids: values,
+	        });
         if (data?.error) {
           if (statusEl) statusEl.textContent = data.error;
           return;
