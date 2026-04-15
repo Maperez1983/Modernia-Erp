@@ -11051,3 +11051,72 @@ body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTop
 body.crm-context-inmo #crmSection .crm-lightning-topbar {
   border-color: rgba(var(--gold-rgb), 0.18);
 }
+
+/* === Verifika²: Sistema visual unificado de cards (todo el sistema) === */
+body.theme-operativa {
+  --v2-card-radius: 20px;
+  --v2-card-border: rgba(var(--ink-rgb), 0.10);
+  --v2-card-border-hover: rgba(var(--gold-rgb), 0.32);
+  --v2-card-accent: rgba(var(--gold-rgb), 0.52);
+  --v2-card-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 248, 244, 0.92)),
+    radial-gradient(circle at 12% 0%, rgba(var(--gold-rgb), 0.16), transparent 55%),
+    radial-gradient(circle at 90% 18%, rgba(var(--ink-rgb), 0.06), transparent 52%);
+  --v2-card-shadow:
+    0 16px 40px rgba(var(--ink-rgb), 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --v2-card-shadow-hover:
+    0 24px 56px rgba(var(--ink-rgb), 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+body.theme-operativa .card,
+body.theme-operativa .form-card,
+body.theme-operativa .data-card,
+body.theme-operativa .dashboard-card,
+body.theme-operativa .company-summary,
+body.theme-operativa .crm-header,
+body.theme-operativa .company-card,
+body.theme-operativa .inline-row,
+body.theme-operativa .renta-detail-card,
+body.theme-operativa .agenda-side,
+body.theme-operativa .crm-mini-card,
+body.theme-operativa .crm-kanban-card,
+body.theme-operativa .agenda-day {
+  border-radius: var(--v2-card-radius);
+  border: 1px solid var(--v2-card-border);
+  border-top: 3px solid var(--v2-card-accent);
+  background: var(--v2-card-bg);
+  box-shadow: var(--v2-card-shadow);
+}
+
+body.theme-operativa .card:hover,
+body.theme-operativa .form-card:hover,
+body.theme-operativa .data-card:hover,
+body.theme-operativa .dashboard-card:hover,
+body.theme-operativa .company-card:hover {
+  border-color: var(--v2-card-border-hover);
+  box-shadow: var(--v2-card-shadow-hover);
+}
+
+body.theme-operativa .dashboard-kpis .card::before,
+body.theme-operativa .crm-kpis .card::before {
+  background: linear-gradient(90deg, rgba(var(--gold-rgb), 0.95) 0%, rgba(var(--gold-rgb), 0.65) 55%, rgba(var(--ink-rgb), 0.18) 100%);
+}
+
+body.theme-operativa .company-card button,
+body.theme-operativa .company-card .card-link,
+body.theme-operativa .toolbar button,
+body.theme-operativa .form-actions button,
+body.theme-operativa .inline-row button,
+body.theme-operativa .crm-pipeline button.active {
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  color: #0b1d33;
+  box-shadow: 0 14px 26px rgba(var(--ink-rgb), 0.18);
+}
+
+body.theme-operativa .pill {
+  background: rgba(var(--gold-rgb), 0.14);
+  color: rgba(var(--ink-rgb), 0.94);
+  border-color: rgba(var(--gold-rgb), 0.22);
+}
