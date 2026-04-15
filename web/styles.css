@@ -9836,7 +9836,11 @@ body.theme-operativa::before {
 body.theme-operativa header {
   width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
   margin: 18px auto 0;
-  padding: 28px clamp(18px, 2.6vw, 38px);
+  padding:
+    calc(28px + var(--safe-top))
+    calc(var(--section-pad-x) + var(--safe-right))
+    26px
+    calc(var(--section-pad-x) + var(--safe-left));
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 30px;
   position: relative;
@@ -9964,6 +9968,11 @@ body.theme-operativa .density-btn.active {
 body.theme-operativa .ui-context-bar {
   width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
   margin: 14px auto 0;
+  padding:
+    12px
+    calc(var(--section-pad-x) + var(--safe-right))
+    12px
+    calc(var(--section-pad-x) + var(--safe-left));
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.62);
