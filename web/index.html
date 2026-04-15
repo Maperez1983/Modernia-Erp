@@ -8760,36 +8760,72 @@
 	    <script src="app-routing.js?v=7"></script>
 	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 		    <script src="app.js?v=522"></script>
-    <script>
-      (function () {
-        if (!("serviceWorker" in navigator)) return;
-        try {
-          const params = new URLSearchParams(window.location.search || "");
-          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
-          if (disableSw) {
-            Promise.allSettled([
-              navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
-              (typeof caches !== "undefined" && caches && caches.keys)
-                ? caches.keys().then((keys) => Promise.allSettled(
-                    keys
-                      .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
-                      .map((k) => caches.delete(k))
-                  ))
-                : Promise.resolve(),
-            ]).finally(() => {
-              params.delete("sw");
-              params.delete("nosw");
-              const url = new URL(window.location.href);
-              url.search = params.toString();
-              window.location.replace(url.toString());
-            });
-            return;
-          }
-        } catch {}
-        window.addEventListener("load", function () {
-		          navigator.serviceWorker.register("/sw.js?v=148").catch(function () {});
-        });
-      })();
-    </script>
+	    <script>
+	      (function () {
+	        if (!("serviceWorker" in navigator)) return;
+	        const TARGET_SW = "/sw.js?v=148";
+	        try {
+	          const params = new URLSearchParams(window.location.search || "");
+	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
+	          const cleared = (params.get("swcleared") || "").trim() === "1";
+	          if (disableSw) {
+	            Promise.allSettled([
+	              navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
+	              (typeof caches !== "undefined" && caches && caches.keys)
+	                ? caches.keys().then((keys) => Promise.allSettled(
+	                    keys
+	                      .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
+	                      .map((k) => caches.delete(k))
+	                  ))
+	                : Promise.resolve(),
+	            ]).finally(() => {
+	              params.delete("sw");
+	              params.delete("nosw");
+	              params.set("swcleared", "1");
+	              const url = new URL(window.location.href);
+	              url.search = params.toString();
+	              window.location.replace(url.toString());
+	            });
+	            return;
+	          }
+	          // Auto-heal: si hay un SW activo viejo, lo desregistramos y limpiamos caches para evitar que se "quede pegado"
+	          // a una UI anterior. Esto pasa especialmente en PWAs instaladas o tras cambios grandes de estilos.
+	          if (!cleared) {
+	            Promise.resolve()
+	              .then(() => navigator.serviceWorker.getRegistrations())
+	              .then((regs) => {
+	                const mismatch = regs.some((r) => {
+	                  try {
+	                    const url = String(r?.active?.scriptURL || "");
+	                    return url && !url.includes(TARGET_SW);
+	                  } catch {
+	                    return false;
+	                  }
+	                });
+	                if (!mismatch) return;
+	                return Promise.allSettled([
+	                  Promise.allSettled(regs.map((r) => r.unregister())),
+	                  (typeof caches !== "undefined" && caches && caches.keys)
+	                    ? caches.keys().then((keys) => Promise.allSettled(
+	                        keys
+	                          .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
+	                          .map((k) => caches.delete(k))
+	                      ))
+	                    : Promise.resolve(),
+	                ]).finally(() => {
+	                  params.set("swcleared", "1");
+	                  const url = new URL(window.location.href);
+	                  url.search = params.toString();
+	                  window.location.replace(url.toString());
+	                });
+	              })
+	              .catch(function () {});
+	          }
+	        } catch {}
+	        window.addEventListener("load", function () {
+			          navigator.serviceWorker.register(TARGET_SW).catch(function () {});
+	        });
+	      })();
+	    </script>
   </body>
 </html>
