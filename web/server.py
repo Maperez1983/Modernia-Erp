@@ -44,6 +44,22 @@ from email.header import decode_header
 from email.utils import parseaddr
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 try:
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.lib import colors as rl_colors
+except Exception:  # pragma: no cover
+    rl_canvas = None
+    rl_colors = None
+try:
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import NameObject, DictionaryObject, ArrayObject, BooleanObject
+except Exception:  # pragma: no cover
+    PdfReader = None
+    PdfWriter = None
+    NameObject = None
+    DictionaryObject = None
+    ArrayObject = None
+    BooleanObject = None
+try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
     from .auth_security import verify_password as runtime_verify_password
@@ -75,6 +91,9 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
+INMO_TEMPLATES = ROOT / "templates" / "inmo"
+INMO_NOTA_ENCARGO_VENTA_TEMPLATE = INMO_TEMPLATES / "nota_encargo_venta_modernia.pdf"
+INMO_NOTA_ENCARGO_ALQUILER_TEMPLATE = INMO_TEMPLATES / "nota_encargo_alquiler_modernia.pdf"
 LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
 LEGAL_RADAR_SOURCES_PATH = ROOT.parent / "docs" / "legal_radar_sources.json"
 CONVENIOS_CATALOG_PATH = ROOT.parent / "docs" / "convenios_catalog.json"
@@ -29122,6 +29141,265 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
     )
 
 
+def _pdf_form_value(value, fallback=""):
+    raw = str(value or "").replace("\r", "").strip()
+    return raw if raw else str(fallback or "").strip()
+
+
+def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
+    """
+    Devuelve bytes PDF con solo campos AcroForm (sin bordes/relleno) para superponer sobre un template.
+    `fields_by_page`: {page_index: [ {name,x,y,width,height,value,multiline?} ]}
+    """
+    if rl_canvas is None or rl_colors is None:
+        return None
+    buffer = BytesIO()
+    first_size = pagesize_list[0] if pagesize_list else (595, 842)
+    c = rl_canvas.Canvas(buffer, pagesize=first_size)
+    form = c.acroForm
+    text_color = rl_colors.black
+    for idx, size in enumerate(pagesize_list):
+        try:
+            c.setPageSize(size)
+        except Exception:
+            pass
+        for field in (fields_by_page or {}).get(idx, []):
+            try:
+                name = str(field.get("name") or "").strip()
+                if not name:
+                    continue
+                x = float(field.get("x") or 0)
+                y = float(field.get("y") or 0)
+                w = float(field.get("width") or field.get("w") or 0)
+                h = float(field.get("height") or field.get("h") or 0)
+                value = _pdf_form_value(field.get("value") or "")
+                multiline = bool(field.get("multiline"))
+                flags = 4096 if multiline else 0  # Multiline
+                form.textfield(
+                    name=name,
+                    x=x,
+                    y=y,
+                    width=max(10.0, w),
+                    height=max(10.0, h),
+                    value=value,
+                    forceBorder=False,
+                    borderWidth=0,
+                    borderColor=None,
+                    fillColor=None,
+                    textColor=text_color,
+                    fontName="Helvetica",
+                    fontSize=10,
+                    fieldFlags=flags,
+                )
+            except Exception:
+                continue
+        if idx < len(pagesize_list) - 1:
+            c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
+    if PdfReader is None or PdfWriter is None or NameObject is None:
+        return None
+    try:
+        template_reader = PdfReader(BytesIO(template_bytes))
+        overlay_reader = PdfReader(BytesIO(overlay_bytes))
+    except Exception:
+        return None
+    writer = PdfWriter()
+    for idx, tpage in enumerate(template_reader.pages):
+        if idx < len(overlay_reader.pages):
+            opage = overlay_reader.pages[idx]
+            try:
+                tpage.merge_page(opage)
+            except Exception:
+                pass
+            try:
+                oann = opage.get("/Annots")
+                if oann:
+                    tann = tpage.get("/Annots")
+                    if tann:
+                        try:
+                            tann.extend(oann)
+                        except Exception:
+                            tpage[NameObject("/Annots")] = oann
+                    else:
+                        tpage[NameObject("/Annots")] = oann
+            except Exception:
+                pass
+        writer.add_page(tpage)
+    # Construye AcroForm a partir de las anotaciones /FT (campos).
+    try:
+        fields = ArrayObject()
+        for page in writer.pages:
+            annots = page.get("/Annots")
+            if not annots:
+                continue
+            for a in annots:
+                try:
+                    obj = a.get_object()
+                except Exception:
+                    obj = None
+                if obj and obj.get("/FT"):
+                    fields.append(a)
+        acro = DictionaryObject()
+        acro[NameObject("/Fields")] = fields
+        acro[NameObject("/NeedAppearances")] = BooleanObject(True)
+        writer._root_object.update({NameObject("/AcroForm"): writer._add_object(acro)})
+    except Exception:
+        pass
+    out = BytesIO()
+    try:
+        writer.write(out)
+    except Exception:
+        return None
+    return out.getvalue()
+
+
+def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owners, extra=None):
+    """
+    Nota de encargo basada en PDF plantilla (Modernia) con campos rellenables.
+    Fallback: documento PDF simple (no editable) si faltan dependencias/plantilla.
+    """
+    extra = extra or {}
+    owners = owners or []
+
+    def normalize_tipo_operacion(value):
+        raw = str(value or "").strip().lower()
+        if raw in {"alquiler", "arrendamiento", "renta"}:
+            return "alquiler"
+        return "venta"
+
+    tipo_operacion = normalize_tipo_operacion(extra.get("tipo_operacion") or extra.get("tipo"))
+    template_path = INMO_NOTA_ENCARGO_ALQUILER_TEMPLATE if tipo_operacion == "alquiler" else INMO_NOTA_ENCARGO_VENTA_TEMPLATE
+    if not template_path.exists():
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    if rl_canvas is None or PdfReader is None:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    try:
+        template_bytes = template_path.read_bytes()
+        reader = PdfReader(BytesIO(template_bytes))
+    except Exception:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+
+    pagesizes = []
+    for page in reader.pages:
+        try:
+            pagesizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+        except Exception:
+            pagesizes.append((595.0, 842.0))
+
+    direccion = _pdf_form_value(inmueble.get("direccion"))
+    cp = _pdf_form_value(inmueble.get("codigo_postal"), "")
+    poblacion = _pdf_form_value(inmueble.get("poblacion"), "")
+    provincia = _pdf_form_value(inmueble.get("provincia"), "")
+    direccion_full = ", ".join([part for part in [direccion, " ".join([p for p in [cp, poblacion] if p]).strip(), provincia] if part]).strip()
+
+    ref_catastral = _pdf_form_value(inmueble.get("referencia_catastral"), "")
+    datos_registrales = _pdf_form_value(extra.get("datos_registrales"), "")
+    m2_construidos = _pdf_form_value(inmueble.get("m2"), "")
+    m2_utiles = _pdf_form_value(extra.get("m2_utiles"), "")
+    otros = _pdf_form_value(extra.get("otros"), "")
+    cargas = _pdf_form_value(extra.get("cargas"), "NADA")
+
+    owner1 = owners[0] if len(owners) > 0 else {}
+    owner2 = owners[1] if len(owners) > 1 else {}
+
+    def owner_block(owner):
+        if not owner:
+            return ""
+        parts = []
+        nombre = _pdf_form_value(owner.get("nombre"), "")
+        nif = _pdf_form_value(owner.get("nif"), "")
+        dom = _pdf_form_value(owner.get("direccion") or owner.get("domicilio"), "")
+        tel = _pdf_form_value(owner.get("telefono"), "")
+        email_val = _pdf_form_value(owner.get("email"), "")
+        if nombre:
+            parts.append(nombre)
+        if nif:
+            parts.append(f"NIF: {nif}")
+        if dom:
+            parts.append(f"Domicilio: {dom}")
+        if tel:
+            parts.append(f"Tel: {tel}")
+        if email_val:
+            parts.append(f"Email: {email_val}")
+        return "\n".join(parts)
+
+    owner1_text = owner_block(owner1)
+    owner2_text = owner_block(owner2)
+
+    if tipo_operacion == "alquiler":
+        precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
+        honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
+        plazo = _pdf_form_value(extra.get("plazo_arrendamiento"), "")
+    else:
+        precio = _pdf_form_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"), "")
+        honorarios = _pdf_form_value(extra.get("honorarios_text") or extra.get("honorarios_pct"), "")
+        plazo = ""
+
+    fecha_venta_desde = _pdf_form_value(extra.get("fecha_venta_desde"), "")
+    fecha_venta_antes = _pdf_form_value(extra.get("fecha_venta_antes"), "")
+    fecha_inicio = _pdf_form_value(extra.get("fecha_inicio"), "")
+    fecha_fin = _pdf_form_value(extra.get("fecha_fin"), "")
+    lugar_firma = _pdf_form_value(extra.get("lugar_firma") or poblacion or provincia, "")
+    fecha_firma = _pdf_form_value(extra.get("fecha_firma"), "")
+
+    fields = {}
+
+    if tipo_operacion == "venta":
+        w, h = pagesizes[0]
+        # Coordenadas calculadas sobre plantilla Modernia venta (A4) usando bbox.
+        fields[0] = [
+            {"name": "direccion", "x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full},
+            {"name": "datos_registrales", "x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales},
+            {"name": "ref_catastral", "x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral},
+            {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles},
+            {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos},
+            {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros},
+            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True},
+            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True},
+            {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas},
+            {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio},
+            {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde},
+            {"name": "fecha_venta_antes", "x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes},
+            {"name": "honorarios", "x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios},
+            {"name": "fecha_inicio", "x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio},
+            {"name": "fecha_fin", "x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin},
+        ]
+        if len(pagesizes) > 1:
+            w2, h2 = pagesizes[1]
+            fields[1] = [
+                {"name": "lugar_firma", "x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma},
+                {"name": "fecha_firma", "x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma},
+            ]
+    else:
+        w, h = pagesizes[0]
+        # Coordenadas calculadas sobre plantilla Modernia arrendamiento (letter) usando bbox.
+        fields[0] = [
+            {"name": "direccion", "x": 105.6, "y": h - 430.70, "width": w - 130, "height": 14, "value": direccion_full},
+            {"name": "datos_registrales", "x": 147.5, "y": h - 442.82, "width": 360, "height": 14, "value": datos_registrales},
+            {"name": "ref_catastral", "x": 150, "y": h - 454.94, "width": 200, "height": 14, "value": ref_catastral},
+            {"name": "m2_construidos", "x": 428.6, "y": h - 454.94, "width": 55, "height": 14, "value": m2_construidos},
+            {"name": "m2_utiles", "x": 513.4, "y": h - 454.94, "width": 55, "height": 14, "value": m2_utiles},
+            {"name": "otros", "x": 100, "y": h - 467.02, "width": w - 130, "height": 14, "value": otros},
+            {"name": "precio_mensual", "x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
+            {"name": "plazo_arr", "x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
+            {"name": "honorarios", "x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
+            {"name": "owner1", "x": 60, "y": h - 246.0, "width": w - 90, "height": 80, "value": owner1_text, "multiline": True},
+            {"name": "owner2", "x": 60, "y": h - 340.0, "width": w - 90, "height": 80, "value": owner2_text, "multiline": True},
+        ]
+
+    overlay_bytes = _build_acroform_overlay_pdf(pagesizes, fields)
+    if not overlay_bytes:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    merged = _merge_template_with_overlay_acroform(template_bytes, overlay_bytes)
+    if not merged:
+        return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
+    return merged
+
+
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
     buyer_name = str((buyer or {}).get("nombre") or "").strip() or "-"
     buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
@@ -50782,10 +51060,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
-            if status not in {"encargo", "noticia"}:
+            if status != "encargo":
                 json_response(
                     self,
-                    {"error": "La nota de encargo solo está disponible para inmuebles en Noticia o Encargo"},
+                    {"error": "La nota de encargo solo está disponible para inmuebles en fase Encargo"},
                     status=400,
                 )
                 return
@@ -50878,7 +51156,7 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "precio_venta requerido"}, status=400)
                     return
 
-            pdf_bytes = build_inmueble_nota_encargo_pdf(
+            pdf_bytes = build_inmueble_nota_encargo_pdf_editable(
                 dict(empresa) if empresa else {},
                 dict(inmueble),
                 dict(captacion),
