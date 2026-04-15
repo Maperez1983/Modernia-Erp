@@ -59929,6 +59929,22 @@ if (inmuebleActividadForm) {
           if (empresa) {
             loadInmuebleActividad(state.currentInmuebleId, empresa.id);
           }
+          try {
+            loadCrmCaptaciones();
+            loadCrmInmuebles();
+          } catch {}
+          if (data?.inmueble_id && String(data.inmueble_id) === String(state.currentInmuebleId || "")) {
+            try {
+              if (state.currentInmuebleContext?.inmueble && data?.inmueble_estado) {
+                state.currentInmuebleContext.inmueble.estado = data.inmueble_estado;
+              }
+              if (state.currentInmuebleContext?.captacion && data?.captacion_etapa) {
+                state.currentInmuebleContext.captacion.etapa = data.captacion_etapa;
+                state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
+              }
+              refreshCurrentInmuebleHeader();
+            } catch {}
+          }
         }
       })
       .catch(() => {

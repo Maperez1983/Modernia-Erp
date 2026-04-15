@@ -13767,6 +13767,14 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
 
 
 def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
+    destino_norm = normalize_lookup_text(destino or "").lower()
+    destino_key = (
+        destino_norm.replace("/", "_")
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("__", "_")
+        .strip("_")
+    )
     destino_label = {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
@@ -13780,7 +13788,20 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
         "alquiler": "Alquiler",
-    }.get(str(destino or "").strip().lower())
+    }.get(destino_key) or {
+        "inmueble": "Inmueble",
+        "noticia": "Noticia",
+        "valoracion": "Valoración",
+        "adquisicion": "Adquisición",
+        "encargo": "Encargo",
+        "propuesta": "Propuesta",
+        "reservado": "Reservado",
+        "arras": "Contrato de arras",
+        "vendido": "Vendido",
+        "compraventa": "Vendido",
+        "cerrado negativamente": "Cerrado negativamente",
+        "alquiler": "Alquiler",
+    }.get(destino_norm)
     if not inmueble_id or not destino_label:
         return
     inmueble = conn.execute(
@@ -45145,27 +45166,63 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 now=now,
             )
-            if normalize_inmo_action_type(tipo) == "cita_adquisicion":
-                inmueble_id = str(payload.get("inmueble_id") or "").strip()
-                if inmueble_id:
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            tipo_norm = normalize_inmo_action_type(tipo)
+            if tipo_norm == "cita_adquisicion" and inmueble_id:
+                estado_norm = str(estado or "").strip().lower()
+                resultado_norm = normalize_lookup_text(resultado_cierre).lower()
+                # Si la cita se crea ya cerrada (p.ej. la registran a posteriori), debe disparar
+                # la transición a Noticia/Encargo igual que en /api/acciones_update.
+                if estado_norm != "pendiente" and resultado_norm in {"positivo", "negativo"}:
+                    destino = ""
+                    if resultado_norm == "positivo":
+                        destino = estado_siguiente or "Noticia"
+                    elif resultado_norm == "negativo":
+                        destino = estado_siguiente or "Cerrado negativamente"
+                    if destino:
+                        sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
+                else:
                     inmueble = conn.execute(
                         "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
                         (inmueble_id,),
                     ).fetchone()
                     estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "").lower()
-                    if estado_actual in {"", "noticia"}:
+                    # Al programar la cita (Pendiente) llevamos el expediente a Adquisición
+                    # desde fases iniciales (Inmueble/Noticia).
+                    if estado_actual in {"", "inmueble", "noticia"}:
                         sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
             elif servicio_norm == "financiaciones":
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+            response_payload = {"ok": True, "id": action_row["id"] if action_row else None}
+            if inmueble_id:
+                response_payload["inmueble_id"] = inmueble_id
+                try:
+                    row_estado = conn.execute(
+                        "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    if row_estado:
+                        response_payload["inmueble_estado"] = row_estado["estado"]
+                except Exception:
+                    pass
+                try:
+                    row_cap = conn.execute(
+                        """
+                        SELECT etapa
+                        FROM captaciones
+                        WHERE inmueble_id = ?
+                        ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC
+                        LIMIT 1
+                        """,
+                        (inmueble_id,),
+                    ).fetchone()
+                    if row_cap:
+                        response_payload["captacion_etapa"] = row_cap["etapa"]
+                except Exception:
+                    pass
             conn.commit()
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "id": action_row["id"] if action_row else None,
-                },
-            )
+            json_response(self, response_payload)
             return
         elif parsed.path == "/api/acciones_update":
             record_id = payload.get("id")
