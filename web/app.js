@@ -2279,6 +2279,12 @@ const gestoriaRentaForm = document.getElementById("gestoriaRentaForm");
 const gestoriaRentaStatus = document.getElementById("gestoriaRentaStatus");
 const gestoriaRentaTable = document.getElementById("gestoriaRentaTable");
 const gestoriaRentaInfo = document.getElementById("gestoriaRentaInfo");
+const gestoriaRentaQuickForm = document.getElementById("gestoriaRentaQuickForm");
+const gestoriaRentaQuickEjercicio = document.getElementById("gestoriaRentaQuickEjercicio");
+const gestoriaRentaQuickEstado = document.getElementById("gestoriaRentaQuickEstado");
+const gestoriaRentaQuickFile = document.getElementById("gestoriaRentaQuickFile");
+const gestoriaRentaQuickStatus = document.getElementById("gestoriaRentaQuickStatus");
+const gestoriaRentaQuickMatches = document.getElementById("gestoriaRentaQuickMatches");
 const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
 const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
 const gestoriaRentaRelacionSelect = document.getElementById("gestoriaRentaRelacionSelect");
@@ -2293,6 +2299,10 @@ const gestoriaRentaDocumentoStatus = document.getElementById("gestoriaRentaDocum
 const gestoriaRentaPresentarBtn = document.getElementById("gestoriaRentaPresentarBtn");
 const gestoriaRentaCards = document.getElementById("gestoriaRentaCards");
 const gestoriaRentaDetail = document.getElementById("gestoriaRentaDetail");
+const gestoriaRentaCampaignToolbar = document.getElementById("gestoriaRentaCampaignToolbar");
+const gestoriaRentaCampaignEjercicio = document.getElementById("gestoriaRentaCampaignEjercicio");
+const gestoriaRentaCampaignCreateBtn = document.getElementById("gestoriaRentaCampaignCreateBtn");
+const gestoriaRentaCampaignCreateStatus = document.getElementById("gestoriaRentaCampaignCreateStatus");
 const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
 const gestoriaAdminStatus = document.getElementById("gestoriaAdminStatus");
 const gestoriaAdminTable = document.getElementById("gestoriaAdminTable");
@@ -23232,12 +23242,13 @@ const openInmuebleNotaEncargoPdf = () => {
                 Copilot (mejoras legislativas / checklist)
                 <textarea name="copilot_mejoras" rows="5" placeholder="Pulsa “Copilot: mejoras” para obtener sugerencias."></textarea>
               </label>
-              <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
-                <button type="button" class="secondary" data-encargo-copilot-fill>Copilot: rellenar</button>
-                <button type="button" class="secondary ghost" data-encargo-copilot-legal>Copilot: mejoras</button>
-                <button type="button" data-encargo-generate>Generar PDF</button>
-                <span class="muted" data-encargo-status></span>
-              </div>
+	              <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
+	                <button type="button" class="secondary" data-encargo-copilot-fill>Copilot: rellenar</button>
+	                <button type="button" class="secondary ghost" data-encargo-copilot-legal>Copilot: mejoras</button>
+	                <button type="button" class="secondary" data-encargo-generate-final>PDF final</button>
+	                <button type="button" data-encargo-generate-editable>PDF editable</button>
+	                <span class="muted" data-encargo-status></span>
+	              </div>
             </form>
           </div>
         `;
@@ -23246,7 +23257,8 @@ const openInmuebleNotaEncargoPdf = () => {
 
       const form = modal.querySelector("[data-encargo-form]");
       const closeBtn = modal.querySelector("[data-encargo-close]");
-      const generateBtn = modal.querySelector("[data-encargo-generate]");
+	      const generateEditableBtn = modal.querySelector("[data-encargo-generate-editable]");
+	      const generateFinalBtn = modal.querySelector("[data-encargo-generate-final]");
       const fillBtn = modal.querySelector("[data-encargo-copilot-fill]");
       const legalBtn = modal.querySelector("[data-encargo-copilot-legal]");
       const statusEl = modal.querySelector("[data-encargo-status]");
@@ -23410,62 +23422,66 @@ const openInmuebleNotaEncargoPdf = () => {
         }
       };
 
-      generateBtn.onclick = async () => {
-        const values = readValues();
-        const tipo = values.tipo_operacion || "venta";
-        if (tipo === "alquiler") {
-          if (!values.renta_mensual) {
-            alert("Renta mensual requerida.");
-            return;
-          }
-          if (!values.honorarios_mensualidades) {
-            alert("Honorarios (mensualidades) requeridos.");
-            return;
-          }
-        } else {
-          if (!values.precio_venta) {
-            alert("Precio de venta requerido.");
-            return;
-          }
-          if (!values.honorarios_pct) {
-            alert("Honorarios (%) requeridos.");
-            return;
-          }
-          if (!values.iva_pct) {
-            alert("IVA (%) requerido.");
-            return;
-          }
-        }
-        if (!values.fecha_inicio) {
-          alert("Fecha inicio requerida.");
-          return;
-        }
-        if (!values.fecha_fin) {
-          alert("Fecha fin requerida.");
-          return;
-        }
-        // Persistencia: guarda la operación y los importes principales en la ficha del inmueble.
-        try {
-          const updates = { tipo_operacion: tipo };
-          if (tipo === "alquiler") {
-            updates.precio_objetivo = values.renta_mensual;
-            updates.precio_encargo = values.renta_mensual;
-            updates.honorarios = values.honorarios_mensualidades;
-          } else {
-            updates.precio_objetivo = values.precio_venta;
-            updates.precio_encargo = values.precio_venta;
-            updates.honorarios = values.honorarios_pct;
-          }
-          await saveInmuebleFields(updates);
-        } catch (_) {
-          // No bloquea la generación del PDF.
-        }
-        const params = new URLSearchParams({ id: state.currentInmuebleId });
-        [
-          "tipo_operacion",
-          "precio_venta",
-          "renta_mensual",
-          "honorarios_pct",
+	      const generateEncargoPdf = async (mode) => {
+	        const values = readValues();
+	        const tipo = values.tipo_operacion || "venta";
+	        if (tipo === "alquiler") {
+	          if (!values.renta_mensual) {
+	            alert("Renta mensual requerida.");
+	            return;
+	          }
+	          if (!values.honorarios_mensualidades) {
+	            alert("Honorarios (mensualidades) requeridos.");
+	            return;
+	          }
+	        } else {
+	          if (!values.precio_venta) {
+	            alert("Precio de venta requerido.");
+	            return;
+	          }
+	          if (!values.honorarios_pct) {
+	            alert("Honorarios (%) requeridos.");
+	            return;
+	          }
+	          if (!values.iva_pct) {
+	            alert("IVA (%) requerido.");
+	            return;
+	          }
+	        }
+	        if (!values.fecha_inicio) {
+	          alert("Fecha inicio requerida.");
+	          return;
+	        }
+	        if (!values.fecha_fin) {
+	          alert("Fecha fin requerida.");
+	          return;
+	        }
+	        // Persistencia: guarda la operación y los importes principales en la ficha del inmueble.
+	        try {
+	          const updates = { tipo_operacion: tipo };
+	          if (tipo === "alquiler") {
+	            updates.precio_objetivo = values.renta_mensual;
+	            updates.precio_encargo = values.renta_mensual;
+	            updates.honorarios = values.honorarios_mensualidades;
+	          } else {
+	            updates.precio_objetivo = values.precio_venta;
+	            updates.precio_encargo = values.precio_venta;
+	            updates.honorarios = values.honorarios_pct;
+	          }
+	          await saveInmuebleFields(updates);
+	        } catch (_) {
+	          // No bloquea la generación del PDF.
+	        }
+	        const params = new URLSearchParams({ id: state.currentInmuebleId });
+	        const normalizedMode = String(mode || "").trim().toLowerCase();
+	        if (normalizedMode === "final") {
+	          params.set("mode", "final");
+	        }
+	        [
+	          "tipo_operacion",
+	          "precio_venta",
+	          "renta_mensual",
+	          "honorarios_pct",
           "honorarios_mensualidades",
           "honorarios_text",
           "plazo_arrendamiento",
@@ -23485,11 +23501,22 @@ const openInmuebleNotaEncargoPdf = () => {
           "lugar_firma",
         ].forEach((key) => {
           const value = values[key];
-          if (value) params.set(key, value);
-        });
-        window.open(`/api/inmueble_encargo_pdf?${params.toString()}`, "_blank", "noopener");
-        cleanup(values);
-      };
+	          if (value) params.set(key, value);
+	        });
+	        window.open(`/api/inmueble_encargo_pdf?${params.toString()}`, "_blank", "noopener");
+	        cleanup(values);
+	      };
+
+	      if (generateEditableBtn) {
+	        generateEditableBtn.onclick = async () => {
+	          await generateEncargoPdf("editable");
+	        };
+	      }
+	      if (generateFinalBtn) {
+	        generateFinalBtn.onclick = async () => {
+	          await generateEncargoPdf("final");
+	        };
+	      }
 
       modal.classList.remove("hidden");
       modal.classList.add("open");
@@ -49268,6 +49295,325 @@ const toggleGestoriaRentaPresentarButton = (entry = {}) => {
   gestoriaRentaPresentarBtn.classList.toggle("hidden", !visible);
 };
 
+const initGestoriaRentaCampaignToolbar = () => {
+  if (!gestoriaRentaCampaignEjercicio) return;
+  const currentYear = new Date().getFullYear();
+  const defaultYear = currentYear - 1;
+  const years = [];
+  for (let year = currentYear + 1; year >= currentYear - 12; year -= 1) {
+    years.push(String(year));
+  }
+  gestoriaRentaCampaignEjercicio.innerHTML = "";
+  years.forEach((year) => {
+    gestoriaRentaCampaignEjercicio.appendChild(createOption(year, year));
+  });
+  gestoriaRentaCampaignEjercicio.value = String(defaultYear);
+};
+
+const initGestoriaRentaQuickEjercicio = () => {
+  if (!gestoriaRentaQuickEjercicio) return;
+  const currentYear = new Date().getFullYear();
+  const defaultYear = currentYear - 1;
+  const years = [];
+  for (let year = currentYear + 1; year >= currentYear - 12; year -= 1) {
+    years.push(String(year));
+  }
+  gestoriaRentaQuickEjercicio.innerHTML = "";
+  years.forEach((year) => {
+    gestoriaRentaQuickEjercicio.appendChild(createOption(year, year));
+  });
+  gestoriaRentaQuickEjercicio.value = String(defaultYear);
+};
+
+const buildRentaDetallesPayloadWithNewEntry = (row = {}, ejercicio = "") => {
+  const payload = parseGestoriaRentaPayload(row);
+  const entries = getSortedRentaEntries(row);
+  const ejercicioValue = String(ejercicio || "").trim();
+  const entryId = randomId();
+  const clienteNombre = state.currentClienteData?.nombre || "";
+  const clienteNif = state.currentClienteData?.nif || "";
+  const newEntry = {
+    id: entryId,
+    ejercicio: ejercicioValue,
+    cliente_nombre: clienteNombre,
+    cliente_nif: clienteNif,
+    estado_presentacion: "Borrador",
+    doc_status: "Borrador",
+    presentacion_fecha: "",
+    doc_presentada_id: "",
+    doc_borrador_id: "",
+    gestion_notas: "",
+  };
+  return {
+    entryId,
+    renta_detalles: {
+      notes: String(payload.notes || "").trim(),
+      entries: entries.concat([newEntry]),
+      related_cliente_id: String(row.renta_related_cliente_id || "").trim(),
+      related_relation_id: String(row.renta_related_relation_id || "").trim(),
+      declaracion_conjunta: Number(row.renta_declaracion_conjunta || 0) === 1 ? 1 : 0,
+    },
+  };
+};
+
+const createGestoriaRentaCampaign = async () => {
+  if (!state.currentClienteId) {
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = "Selecciona un cliente.";
+    }
+    return;
+  }
+  const ejercicio = String(gestoriaRentaCampaignEjercicio?.value || "").trim();
+  if (!ejercicio) {
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = "Selecciona ejercicio.";
+    }
+    return;
+  }
+  const row = state.currentClienteGestoriaData || {};
+  const entries = getSortedRentaEntries(row);
+  if (entries.some((entry) => String(entry?.ejercicio || "").trim() === ejercicio)) {
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = `Ya existe campaña ${ejercicio}.`;
+    }
+    return;
+  }
+  if (gestoriaRentaCampaignCreateStatus) {
+    gestoriaRentaCampaignCreateStatus.textContent = "Creando campaña...";
+  }
+  if (gestoriaRentaCampaignCreateBtn) {
+    gestoriaRentaCampaignCreateBtn.disabled = true;
+  }
+  try {
+    const { entryId, renta_detalles } = buildRentaDetallesPayloadWithNewEntry(row, ejercicio);
+    const res = await fetch("/api/cliente_gestoria_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cliente_id: state.currentClienteId,
+        mod_renta: 1,
+        renta_detalles,
+      }),
+    }).then((r) => r.json());
+    if (res?.error) {
+      throw new Error(res.error);
+    }
+    state.currentRentaEntryId = entryId;
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = `Campaña ${ejercicio} creada.`;
+    }
+    loadClienteGestoria(state.currentClienteId);
+  } catch (err) {
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = err?.message || "No se pudo crear la campaña.";
+    }
+  } finally {
+    if (gestoriaRentaCampaignCreateBtn) {
+      gestoriaRentaCampaignCreateBtn.disabled = false;
+    }
+  }
+};
+
+const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
+  if (!gestoriaRentaQuickMatches) return;
+  gestoriaRentaQuickMatches.innerHTML = "";
+  const container = document.createElement("div");
+  container.className = "form-card";
+  const title = document.createElement("h4");
+  title.textContent = "Resultado OCR";
+  container.appendChild(title);
+  const meta = document.createElement("p");
+  meta.className = "muted";
+  meta.textContent = ctx.nif
+    ? `DNI/NIF detectado: ${ctx.nif}`
+    : "No se pudo detectar un DNI/NIF con suficiente fiabilidad.";
+  container.appendChild(meta);
+  if (!ctx.nif) {
+    gestoriaRentaQuickMatches.appendChild(container);
+    return;
+  }
+  if (!Array.isArray(matches) || matches.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No hay clientes con ese DNI/NIF. Crea el cliente y vuelve a subir el documento.";
+    container.appendChild(empty);
+    gestoriaRentaQuickMatches.appendChild(container);
+    return;
+  }
+  const list = document.createElement("div");
+  list.className = "inline-list";
+  matches.slice(0, 6).forEach((row) => {
+    const card = document.createElement("div");
+    card.className = "inline-row";
+    const left = document.createElement("div");
+    left.innerHTML = `<strong>${row.nombre || "-"}</strong><div class="muted">${row.nif || "-"}</div>`;
+    const right = document.createElement("div");
+    right.className = "inline-actions";
+    const attachBtn = document.createElement("button");
+    attachBtn.type = "button";
+    attachBtn.className = "secondary";
+    attachBtn.textContent = "Asignar documento";
+    attachBtn.addEventListener("click", async () => {
+      await attachGestoriaRentaQuickToCliente(row.id, ctx);
+    });
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary ghost";
+    openBtn.textContent = "Ver cliente";
+    openBtn.addEventListener("click", () => {
+      openClienteDetail(String(row.id || "").trim());
+    });
+    right.appendChild(attachBtn);
+    right.appendChild(openBtn);
+    card.appendChild(left);
+    card.appendChild(right);
+    list.appendChild(card);
+  });
+  container.appendChild(list);
+  gestoriaRentaQuickMatches.appendChild(container);
+};
+
+const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa.";
+    return;
+  }
+  const ejercicio = String(ctx.ejercicio || "").trim();
+  if (!clienteId || !ejercicio || !ctx.doc_key) {
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Faltan datos para asignar.";
+    return;
+  }
+  if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Asignando a cliente...";
+  try {
+    const payload = {
+      empresa_nombre: empresa.nombre,
+      usuario: getCurrentUser(),
+      cliente_id: String(clienteId || "").trim(),
+      ejercicio,
+      estado_presentacion: String(ctx.estado_presentacion || "Borrador").trim() || "Borrador",
+      nombre: String(ctx.nombre || "").trim(),
+      presentacion_fecha: String(ctx.presentacion_fecha || "").trim(),
+      notas: String(ctx.notas || "").trim(),
+      doc_key: String(ctx.doc_key || "").trim(),
+      doc_url: String(ctx.doc_url || "").trim(),
+    };
+    const data = await fetch("/api/renta_quick_attach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => r.json());
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+    if (gestoriaRentaQuickStatus) {
+      gestoriaRentaQuickStatus.textContent = "Documento asignado. Procesando OCR...";
+    }
+    if (data?.ocr_job_id) {
+      try {
+        await pollOcrJob(data.ocr_job_id, (jobRow) => {
+          if (!gestoriaRentaQuickStatus) return;
+          if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR en curso...";
+          if (jobRow.status === "queued") gestoriaRentaQuickStatus.textContent = "OCR en cola...";
+        }, 4 * 60 * 1000);
+        if (gestoriaRentaQuickStatus) {
+          gestoriaRentaQuickStatus.textContent = "OCR aplicado. Abriendo cliente...";
+        }
+      } catch {}
+    }
+    openClienteDetail(String(clienteId || "").trim());
+  } catch (err) {
+    if (gestoriaRentaQuickStatus) {
+      gestoriaRentaQuickStatus.textContent = err?.message || "No se pudo asignar el documento.";
+    }
+  }
+};
+
+const submitGestoriaRentaQuick = async () => {
+  if (!gestoriaRentaQuickForm) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa.";
+    return;
+  }
+  const file =
+    gestoriaRentaQuickFile && gestoriaRentaQuickFile.files && gestoriaRentaQuickFile.files.length
+      ? gestoriaRentaQuickFile.files[0]
+      : null;
+  if (!file) {
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Selecciona un archivo.";
+    return;
+  }
+  const ejercicio = String(gestoriaRentaQuickEjercicio?.value || "").trim();
+  const estado_presentacion = String(gestoriaRentaQuickEstado?.value || "Borrador").trim() || "Borrador";
+  if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Subiendo...";
+  if (gestoriaRentaQuickMatches) gestoriaRentaQuickMatches.innerHTML = "";
+  try {
+    const upload = await uploadFileToS3(file, "gestoria", gestoriaRentaQuickStatus);
+    if (!upload?.key && !upload?.public_url) {
+      throw new Error("No se pudo subir el archivo.");
+    }
+    const ocrStart = await fetch("/api/renta_quick_ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        empresa_nombre: empresa.nombre,
+        usuario: getCurrentUser(),
+        doc_key: upload.key || "",
+        doc_url: upload.public_url || "",
+        filename: file.name || "renta.pdf",
+      }),
+    }).then((r) => r.json());
+    if (ocrStart?.error) {
+      throw new Error(ocrStart.error);
+    }
+    const jobId = ocrStart?.ocr_job_id;
+    if (!jobId) {
+      throw new Error("No se pudo iniciar OCR.");
+    }
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR en cola...";
+    const result = await pollOcrJob(
+      jobId,
+      (jobRow) => {
+        if (!gestoriaRentaQuickStatus) return;
+        if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR detectando DNI/NIF...";
+        if (jobRow.status === "queued") gestoriaRentaQuickStatus.textContent = "OCR en cola...";
+      },
+      4 * 60 * 1000
+    );
+    const fields = (result && typeof result === "object" ? result.fields : null) || {};
+    const nif = String(fields.nif_detectado || "").trim();
+    if (!nif) {
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR listo, pero no detectó DNI/NIF.";
+      renderGestoriaRentaQuickMatches([], { nif: "" });
+      return;
+    }
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = `DNI/NIF detectado: ${nif}. Buscando cliente...`;
+    const matches = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(nif)}&limit=6`);
+    const rows = Array.isArray(matches?.rows) ? matches.rows : [];
+    const ctx = {
+      nif,
+      ejercicio,
+      estado_presentacion,
+      doc_key: upload.key || "",
+      doc_url: upload.public_url || "",
+      presentacion_fecha: String(fields.presentacion_fecha || "").trim(),
+      nombre: `Renta ${ejercicio} · ${estado_presentacion}.pdf`,
+      notas: "",
+    };
+    renderGestoriaRentaQuickMatches(rows, ctx);
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = rows.length ? "Selecciona cliente." : "Cliente no encontrado.";
+  } catch (err) {
+    if (gestoriaRentaQuickStatus) {
+      gestoriaRentaQuickStatus.textContent = err?.message || "Fallo en la carga rápida.";
+    }
+  } finally {
+    if (gestoriaRentaQuickFile) {
+      gestoriaRentaQuickFile.value = "";
+    }
+  }
+};
+
 const fillGestoriaRentaDetailsForm = (row = {}) => {
   if (!gestoriaRentaDetallesForm) return;
   const payload = parseGestoriaRentaPayload(row);
@@ -59908,6 +60254,27 @@ if (gestoriaRentaDocumentoForm) {
   });
 }
 
+if (gestoriaRentaQuickForm) {
+  gestoriaRentaQuickForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitGestoriaRentaQuick();
+  });
+}
+
+if (gestoriaRentaCampaignCreateBtn) {
+  gestoriaRentaCampaignCreateBtn.addEventListener("click", async () => {
+    await createGestoriaRentaCampaign();
+  });
+}
+
+if (gestoriaRentaCampaignEjercicio) {
+  gestoriaRentaCampaignEjercicio.addEventListener("change", () => {
+    if (gestoriaRentaCampaignCreateStatus) {
+      gestoriaRentaCampaignCreateStatus.textContent = "";
+    }
+  });
+}
+
 if (gestoriaRentaPresentarBtn) {
   gestoriaRentaPresentarBtn.addEventListener("click", async () => {
     if (gestoriaRentaEstadoPresentacion) {
@@ -63055,3 +63422,11 @@ document.addEventListener("change", (event) => {
     renderInmoPostalDatalist(poblacion, String(target.value || "").trim());
   } catch {}
 });
+
+try {
+  initGestoriaRentaCampaignToolbar();
+} catch {}
+
+try {
+  initGestoriaRentaQuickEjercicio();
+} catch {}

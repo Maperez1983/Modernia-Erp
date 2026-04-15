@@ -8324,6 +8324,39 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     normalized = normalize_lookup_text(raw)
     fields: dict[str, object] = {}
 
+    def _normalize_nif(value: str) -> str:
+        return re.sub(r"[^0-9A-Z]", "", str(value or "").upper().strip())
+
+    def _extract_nifs() -> tuple[str, list[str]]:
+        patterns = [
+            r"(?:NIF|DNI|NIE)\s*(?:DEL\s+DECLARANTE|DECLARANTE|DEL\s+CONTRIBUYENTE|CONTRIBUYENTE)?\s*[:\-]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])",
+            r"(?:DECLARANTE)\s*[:\-]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])",
+        ]
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for pat in patterns:
+            m = re.search(pat, normalized, re.IGNORECASE)
+            if m:
+                candidate = _normalize_nif(m.group(1))
+                if candidate and candidate not in seen:
+                    seen.add(candidate)
+                    ordered.append(candidate)
+        global_candidates = re.findall(
+            r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
+            normalized,
+            re.IGNORECASE,
+        )
+        for cand in global_candidates:
+            candidate = _normalize_nif(cand)
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            ordered.append(candidate)
+            if len(ordered) >= 6:
+                break
+        primary = ordered[0] if ordered else ""
+        return primary, ordered
+
     casillas = {
         "rendimientos_trabajo_total": "0012",
         "base_imponible_general": "0432",
@@ -8361,6 +8394,12 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         presentacion = _parse_date_ddmmyyyy_to_iso(match.group(1))
     if presentacion:
         fields["presentacion_fecha"] = presentacion
+
+    nif_primary, nif_list = _extract_nifs()
+    if nif_primary:
+        fields["nif_detectado"] = nif_primary
+    if nif_list:
+        fields["nifs_detectados"] = nif_list
 
     return fields
 
@@ -45368,6 +45407,176 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        elif parsed.path == "/api/renta_quick_ocr":
+            doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
+            filename = str(payload.get("filename") or "renta.pdf").strip()
+            if not doc_key:
+                json_response(self, {"error": "doc_key requerido"}, status=400)
+                return
+            try:
+                ensure_ocr_tables(self.ocr_db_path)
+                ocr_job_id = enqueue_ocr_job(
+                    self.ocr_db_path,
+                    "renta",
+                    {
+                        "s3_key": doc_key,
+                        "filename": filename,
+                        "source_hint": "renta quick match",
+                    },
+                )
+            except Exception as exc:
+                json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}"}, status=500)
+                return
+            json_response(self, {"ok": True, "ocr_job_id": ocr_job_id})
+            return
+        elif parsed.path == "/api/renta_quick_attach":
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()
+            estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
+            doc_key = str(payload.get("doc_key") or "").strip()
+            doc_url = str(payload.get("doc_url") or "").strip()
+            if not cliente_id or not ejercicio:
+                json_response(self, {"error": "cliente_id y ejercicio requeridos"}, status=400)
+                return
+            if not doc_key and not doc_url:
+                json_response(self, {"error": "doc_key/doc_url requerido"}, status=400)
+                return
+            cg_row = conn.execute(
+                "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                (cliente_id,),
+            ).fetchone()
+            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+            entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+            current_entry = next((item for item in entries if str(item.get("ejercicio") or "").strip() == ejercicio), None)
+            if not current_entry:
+                cliente_row = conn.execute(
+                    "SELECT nombre, nif, telefono, email, fecha_nacimiento, poblacion, provincia, codigo_postal, direccion FROM clientes WHERE id = ? LIMIT 1",
+                    (cliente_id,),
+                ).fetchone()
+                entry_id = uuid.uuid4().hex
+                seed = {
+                    "id": entry_id,
+                    "ejercicio": ejercicio,
+                    "cliente_nombre": cliente_row["nombre"] if cliente_row else "",
+                    "cliente_nif": cliente_row["nif"] if cliente_row else "",
+                    "cliente_telefono": cliente_row["telefono"] if cliente_row else "",
+                    "cliente_email": cliente_row["email"] if cliente_row else "",
+                    "cliente_fecha_nacimiento": cliente_row["fecha_nacimiento"] if cliente_row else "",
+                    "poblacion": cliente_row["poblacion"] if cliente_row else "",
+                    "provincia": cliente_row["provincia"] if cliente_row else "",
+                    "codigo_postal": cliente_row["codigo_postal"] if cliente_row else "",
+                    "direccion": cliente_row["direccion"] if cliente_row else "",
+                    "estado_presentacion": "Borrador",
+                    "doc_status": "Borrador",
+                }
+                upsert_cliente_renta_entry(conn, cliente_id, seed, now)
+                cg_row = conn.execute(
+                    "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                    (cliente_id,),
+                ).fetchone()
+                renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+                entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+                current_entry = next((item for item in entries if str(item.get("ejercicio") or "").strip() == ejercicio), None)
+            if not current_entry:
+                json_response(self, {"error": "No se pudo crear la campaña"}, status=500)
+                return
+            entry_id = str(current_entry.get("id") or "").strip()
+            doc_id = str(payload.get("doc_id") or current_entry.get("doc_presentada_id") or current_entry.get("doc_borrador_id") or "").strip()
+            presentacion_fecha = str(payload.get("presentacion_fecha") or current_entry.get("presentacion_fecha") or "").strip()
+            doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
+            doc_tipo = str(payload.get("tipo") or f"Renta {estado_presentacion}").strip()
+            doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
+            if doc_id:
+                conn.execute(
+                    """
+                    UPDATE gestoria_docs
+                    SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
+                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        empresa["id"],
+                        cliente_id,
+                        f"renta-{ejercicio}-{entry_id}",
+                        doc_nombre,
+                        doc_tipo,
+                        presentacion_fecha,
+                        estado_presentacion,
+                        doc_notas,
+                        doc_key or None,
+                        doc_url or None,
+                        now,
+                        doc_id,
+                    ),
+                )
+            else:
+                doc_id = uuid.uuid4().hex
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_docs (
+                      id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                      nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        doc_id,
+                        empresa["id"],
+                        cliente_id,
+                        f"renta-{ejercicio}-{entry_id}",
+                        doc_nombre,
+                        doc_tipo,
+                        presentacion_fecha,
+                        estado_presentacion,
+                        doc_notas,
+                        doc_key or None,
+                        doc_url or None,
+                        now,
+                        now,
+                    ),
+                )
+            updated_entry = dict(current_entry)
+            updated_entry.update(
+                {
+                    "id": entry_id,
+                    "ejercicio": ejercicio,
+                    "estado_presentacion": estado_presentacion,
+                    "doc_status": estado_presentacion,
+                    "presentacion_fecha": presentacion_fecha,
+                    "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
+                    "responsable": payload.get("responsable", current_entry.get("responsable")),
+                    "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
+                    "forma_cobro": payload.get("forma_cobro", current_entry.get("forma_cobro")),
+                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+                }
+            )
+            upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
+            ocr_job_id = ""
+            if doc_key:
+                try:
+                    ensure_ocr_tables(self.ocr_db_path)
+                    ocr_job_id = enqueue_ocr_job(
+                        self.ocr_db_path,
+                        "renta",
+                        {
+                            "cliente_id": cliente_id,
+                            "entry_id": entry_id,
+                            "ejercicio": ejercicio,
+                            "doc_id": doc_id,
+                            "s3_key": doc_key,
+                            "filename": doc_nombre or f"Renta {ejercicio}.pdf",
+                            "source_hint": f"renta {ejercicio} {estado_presentacion}",
+                        },
+                    )
+                except Exception:
+                    ocr_job_id = ""
+            audit("renta_quick_attach", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
+            return
         elif parsed.path == "/api/cliente_relaciones":
             cliente_id = str(payload.get("cliente_id") or "").strip()
             related_cliente_id = str(payload.get("related_cliente_id") or "").strip()
@@ -48683,6 +48892,30 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             json_response(self, {"rows": fetch_cliente_relaciones(conn, cliente_id)})
+            return
+
+        if path == "/api/clientes_by_nif":
+            nif = params.get("nif", [""])[0]
+            limit = params.get("limit", ["6"])[0]
+            nif_norm = re.sub(r"[^0-9A-Za-z]", "", str(nif or "").upper().strip())
+            try:
+                limit_val = max(1, min(25, int(limit)))
+            except Exception:
+                limit_val = 6
+            if not nif_norm:
+                json_response(self, {"rows": []})
+                return
+            rows = conn.execute(
+                """
+                SELECT id, nombre, nif, telefono, email
+                FROM clientes
+                WHERE REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ?
+                """,
+                (nif_norm, limit_val),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
         if path == "/api/gestoria_renta_cards":

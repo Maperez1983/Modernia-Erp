@@ -8155,6 +8155,32 @@
               </div>
               <div id="gestoriaModuleRenta" class="hidden">
                 <div class="form-card">
+                  <h3>Carga rápida por DNI/NIF</h3>
+                  <p class="muted">Sube un borrador o declaración presentada. El OCR intentará detectar el DNI/NIF y localizar al cliente existente.</p>
+                  <form id="gestoriaRentaQuickForm" class="form-grid">
+                    <label>
+                      Ejercicio
+                      <select name="ejercicio" id="gestoriaRentaQuickEjercicio"></select>
+                    </label>
+                    <label>
+                      Estado documental
+                      <select name="estado_presentacion" id="gestoriaRentaQuickEstado">
+                        <option>Borrador</option>
+                        <option>Presentada</option>
+                      </select>
+                    </label>
+                    <label class="span-2">
+                      Archivo
+                      <input name="archivo" id="gestoriaRentaQuickFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Detectar cliente</button>
+                      <span id="gestoriaRentaQuickStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="gestoriaRentaQuickMatches"></div>
+                </div>
+                <div class="form-card">
                   <h3>Renta · Campañas y expedientes</h3>
                   <p class="muted">Seguimiento anual y requerimientos.</p>
                   <form id="gestoriaRentaForm" class="form-grid">
@@ -8291,6 +8317,11 @@
                   <div class="form-card">
                     <h4>Cards de renta</h4>
                     <p class="muted">Resumen por campaña y acceso directo a la ficha fiscal del cliente.</p>
+                    <div class="toolbar" id="gestoriaRentaCampaignToolbar">
+                      <select id="gestoriaRentaCampaignEjercicio" aria-label="Ejercicio renta"></select>
+                      <button type="button" class="secondary" id="gestoriaRentaCampaignCreateBtn">Nueva campaña</button>
+                      <span id="gestoriaRentaCampaignCreateStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaRentaCards"></div>
                     <div id="gestoriaRentaDetail" class="hidden"></div>
                   </div>
@@ -8794,7 +8825,7 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=539"></script>
+		    <script src="app.js?v=540"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
