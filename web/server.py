@@ -31547,6 +31547,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_delete",
             "/api/inmueble_compradores",
             "/api/inmueble_propietarios_update",
+            "/api/inmueble_servicios_update",
             "/api/captacion_update",
             "/api/captacion_delete",
             "/api/cliente_update",
