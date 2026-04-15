@@ -52467,6 +52467,102 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows]})
             return
 
+        if path == "/api/hipotecas_audit_descuadres":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["2000"])[0] or "2000").strip()
+            only_mismatch = (params.get("only_mismatch", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                limit = int(limit_raw)
+            except ValueError:
+                limit = 2000
+            limit = max(1, min(limit, 10000))
+
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE empresa_id = ?
+                ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+                LIMIT ?
+                """,
+                (empresa_id, limit),
+            ).fetchall()
+
+            counts = {"total": len(rows), "ok": 0, "mismatch": 0}
+            items = []
+            for row in rows:
+                record_id = str(row["id"] or "").strip()
+                cliente = str(row["cliente"] or "").strip()
+                banco = str(row["banco"] or "").strip()
+                fecha_firma = str(row["fecha_firma"] or "").strip()
+                estado = str(row["estado"] or "").strip()
+
+                liquidacion_raw = {}
+                try:
+                    if "liquidacion_json" in row.keys():
+                        liquidacion_raw = _safe_json_object(row["liquidacion_json"] or "{}")
+                except Exception:
+                    liquidacion_raw = {}
+
+                export_row = build_hipoteca_export_row(conn, row)
+                computed = compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw)
+                liq = computed.get("liq") if isinstance(computed.get("liq"), dict) else {}
+                flags = computed.get("flags") if isinstance(computed.get("flags"), dict) else {}
+
+                comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
+                cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
+
+                sobran_comprador = parse_money_value(comprador.get("sobran_en_cuenta") or 0)
+                sobran_cuadre = parse_money_value(cuadre.get("sobran_en_cuenta") or 0)
+                delta_sobrante = _round2(sobran_comprador - sobran_cuadre)
+                diff_medios_pago = parse_money_value(cuadre.get("diferencia_medios_pago") or 0)
+
+                issues = []
+                precio_compra = parse_money_value(comprador.get("precio_compra") or 0)
+                escriturado = parse_money_value(comprador.get("escriturado") or 0)
+                if not precio_compra or precio_compra <= 0:
+                    issues.append("Falta precio_compra.")
+                if not escriturado or escriturado <= 0:
+                    issues.append("Falta escriturado.")
+                if abs(delta_sobrante) > 0.01:
+                    issues.append(f"Descuadre sobrante: Δ {delta_sobrante:.2f}.")
+                if abs(diff_medios_pago) > 0.01:
+                    issues.append(f"Medios de pago no cuadran: Δ {diff_medios_pago:.2f}.")
+
+                ok = not issues
+                if ok:
+                    counts["ok"] += 1
+                else:
+                    counts["mismatch"] += 1
+
+                if only_mismatch and ok:
+                    continue
+
+                items.append(
+                    {
+                        "id": record_id,
+                        "cliente": cliente,
+                        "banco": banco,
+                        "estado": estado,
+                        "fecha_firma": fecha_firma,
+                        "sobran_comprador": sobran_comprador,
+                        "sobran_cuadre": sobran_cuadre,
+                        "delta_sobrante": delta_sobrante,
+                        "diferencia_medios_pago": diff_medios_pago,
+                        "cuadre_sobrante_ok": bool(flags.get("cuadre_sobrante_ok")),
+                        "issues": issues,
+                    }
+                )
+
+                if len(items) >= 500:
+                    break
+
+            json_response(self, {"counts": counts, "items": items})
+            return
+
         if path == "/api/hipoteca_ficha_print":
             record_id = (params.get("id", [""])[0] or "").strip()
             section = (params.get("section", [""])[0] or "").strip()
