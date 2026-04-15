@@ -30810,7 +30810,7 @@ class Handler(BaseHTTPRequestHandler):
             return raw_area or "inmobiliaria"
         if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
             return "inmobiliaria"
-        if path in {"/api/acciones", "/api/acciones_update"}:
+        if path in {"/api/acciones", "/api/acciones_update", "/api/acciones_delete"}:
             raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
             return normalize_service_key(raw)
         if path == "/api/empresa_presupuestos":
@@ -31484,6 +31484,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_empresa_update",
             "/api/acciones",
             "/api/acciones_update",
+            "/api/acciones_delete",
             "/api/cliente_gestoria_update",
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
@@ -32009,7 +32010,7 @@ class Handler(BaseHTTPRequestHandler):
                         json_response(self, {"error": err or "No autorizado"}, status=403)
                         return
         empresa = None
-        if parsed.path in ("/api/acciones", "/api/acciones_update") and empresa_nombre:
+        if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete") and empresa_nombre:
             empresa = conn.execute(
                 "SELECT id FROM empresas WHERE nombre = ?",
                 (empresa_nombre,),
@@ -45564,6 +45565,54 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, response_payload)
             return
+        elif parsed.path == "/api/acciones_delete":
+            record_id = str(payload.get("id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            current = conn.execute(
+                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if not current:
+                json_response(self, {"error": "Acción no encontrada"}, status=404)
+                return
+            actor = str(payload.get("usuario") or "").strip()
+            try:
+                trash_backup_row(
+                    conn,
+                    "acciones",
+                    record_id,
+                    empresa_id=current["empresa_id"],
+                    deleted_by=actor,
+                    reason="acciones_delete",
+                    now=now,
+                )
+            except Exception:
+                pass
+            try:
+                audit_event(
+                    conn,
+                    current["empresa_id"],
+                    "accion",
+                    record_id,
+                    "Eliminar acción",
+                    usuario=actor,
+                    detalles={
+                        "servicio": current["servicio"],
+                        "tipo": current["tipo"],
+                        "estado": current["estado"],
+                        "cliente_id": current["cliente_id"],
+                        "inmueble_id": current["inmueble_id"],
+                    },
+                    now=now,
+                )
+            except Exception:
+                pass
+            conn.execute("DELETE FROM acciones WHERE id = ?", (record_id,))
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/cliente_profesional":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
@@ -49792,6 +49841,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/auditoria":
             empresa_id = params.get("empresa_id", [""])[0]
+            entidad = (params.get("entidad", [""])[0] if params else "").strip()
+            entidad_id = (params.get("entidad_id", [""])[0] if params else "").strip()
             limit = params.get("limit", [""])[0]
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
@@ -49799,17 +49850,27 @@ class Handler(BaseHTTPRequestHandler):
             limit_clause = "LIMIT 50"
             if limit.isdigit():
                 limit_clause = f"LIMIT {int(limit)}"
+            where = ["a.empresa_id = ?"]
+            values = [empresa_id]
+            if entidad:
+                where.append("a.entidad = ?")
+                values.append(entidad)
+            if entidad_id:
+                where.append("a.entidad_id = ?")
+                values.append(entidad_id)
+            where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
                 SELECT a.id, a.entidad, a.entidad_id, a.accion, a.usuario, a.created_at,
+                       a.detalles,
                        COALESCE(c.nombre, '') AS cliente
                 FROM auditoria a
                 LEFT JOIN clientes c ON c.id = a.entidad_id
-                WHERE a.empresa_id = ?
+                WHERE {where_clause}
                 ORDER BY a.created_at DESC
                 {limit_clause}
                 """,
-                (empresa_id,),
+                tuple(values),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return

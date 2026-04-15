@@ -8693,6 +8693,40 @@ body.crm-context-inmo .crm-resumen-compact-note {
   cursor: pointer;
 }
 
+.icon-btn.icon-btn--sm {
+  padding: 4px 6px;
+  border-radius: 10px;
+  line-height: 1;
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.icon-btn.icon-btn--danger {
+  border-color: rgba(200, 40, 40, 0.25);
+  color: #b91c1c;
+}
+
+.icon-btn.icon-btn--danger:hover {
+  background: rgba(185, 28, 28, 0.06);
+}
+
+.icon-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.inline-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .crm-kanban-card {
   border: 1px solid #eee6db;
   border-radius: 12px;

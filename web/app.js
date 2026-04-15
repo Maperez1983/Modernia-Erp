@@ -3524,6 +3524,26 @@ const formatPercent = (value) => {
   return `${normalized.toFixed(2)}%`;
 };
 
+const ICONS = {
+  edit: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0 0-4L17.5 4a2.8 2.8 0 0 0-4 0L3 14.5V20Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M13.5 6.5 17.5 10.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10 11v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 7l1 14h10l1-14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V4h6v3" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  doc: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l3 3v15H7V3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  timeline: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4v16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 16h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 8v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  open: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3h7v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 3 10 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10 7H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+};
+
+const createIconButton = (iconKey, label, opts = {}) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `icon-btn icon-btn--sm ${opts.danger ? "icon-btn--danger" : ""}`.trim();
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.innerHTML = ICONS[iconKey] || String(opts.fallback || "•");
+  return btn;
+};
+
 const formatPercentOrDash = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? formatPercent(num) : "-";
@@ -41923,6 +41943,99 @@ const loadInmuebleVisitas = (inmuebleId, empresaId) => {
 
 const renderInmuebleDocs = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
+  const resolveInmuebleDocsEmpresaId = () => {
+    const ctxEmpresaId = String(state.currentInmuebleContext?.inmueble?.empresa_id || "").trim();
+    if (ctxEmpresaId) return ctxEmpresaId;
+    const fallback = String(resolveCrmInmoEmpresaId?.() || "").trim();
+    return fallback;
+  };
+
+  const ensureDocTrackingModal = () => {
+    let modal = document.getElementById("docTrackingModal");
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.id = "docTrackingModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 920px;">
+        <div class="modal-header">
+          <h3 id="docTrackingTitle">Tracking documento</h3>
+          <button type="button" class="icon-btn icon-btn--sm" data-doc-tracking-close aria-label="Cerrar">${ICONS.close}</button>
+        </div>
+        <div class="modal-body">
+          <div id="docTrackingMeta" class="muted"></div>
+          <div id="docTrackingBody" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const closeBtn = modal.querySelector("[data-doc-tracking-close]");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => modal.classList.add("hidden"));
+    }
+    modal.addEventListener("click", (ev) => {
+      if (ev.target === modal) modal.classList.add("hidden");
+    });
+    return modal;
+  };
+
+  const openDocTracking = async (docRow) => {
+    const docId = String(docRow?.id || "").trim();
+    if (!docId) return;
+    const empresaId = resolveInmuebleDocsEmpresaId();
+    if (!empresaId) {
+      alert("No se pudo resolver la empresa para cargar la auditoría.");
+      return;
+    }
+    const modal = ensureDocTrackingModal();
+    const titleEl = modal.querySelector("#docTrackingTitle");
+    const metaEl = modal.querySelector("#docTrackingMeta");
+    const bodyEl = modal.querySelector("#docTrackingBody");
+    if (titleEl) titleEl.textContent = "Tracking documento";
+    if (metaEl) metaEl.textContent = `${docRow?.nombre || "Documento"} · ${docRow?.tipo || ""}`.trim();
+    if (bodyEl) bodyEl.innerHTML = "<p class='muted'>Cargando...</p>";
+    modal.classList.remove("hidden");
+    try {
+      const data = await api(
+        `/api/auditoria?empresa_id=${encodeURIComponent(empresaId)}&entidad=inmueble_docs&entidad_id=${encodeURIComponent(docId)}&limit=50`
+      );
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      if (!bodyEl) return;
+      if (!rows.length) {
+        bodyEl.innerHTML = "<p class='muted'>Sin tracking todavía.</p>";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["fecha", "usuario", "accion", "detalles"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = formatHeader(col);
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((r) => {
+        const tr = document.createElement("tr");
+        const vals = [r.created_at || "-", r.usuario || "-", r.accion || "-", r.detalles || "-"];
+        const cols = ["fecha", "usuario", "accion", "detalles"];
+        vals.forEach((v, idx) => {
+          const td = document.createElement("td");
+          const formatted = formatCell(cols[idx], v);
+          td.textContent = formatted === null ? "" : formatted;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      bodyEl.innerHTML = "";
+      bodyEl.appendChild(table);
+    } catch (err) {
+      if (bodyEl) bodyEl.innerHTML = `<p class='muted'>No se pudo cargar el tracking.</p>`;
+    }
+  };
+
   const isPhotoRow = (row) => {
     const tipo = normalizeSimple(row?.tipo || "");
     if (tipo.includes("foto")) return true;
@@ -42015,6 +42128,11 @@ const renderInmuebleDocs = (rows = []) => {
         const estado = row.estado || "Sin estado";
         const plantilla = row.plantilla_clave || "";
         const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
+        const trackingParts = [];
+        const createdDay = row.created_at ? String(row.created_at).slice(0, 10) : "";
+        const updatedDay = row.updated_at ? String(row.updated_at).slice(0, 10) : "";
+        if (createdDay) trackingParts.push(`Creado ${formatCell("fecha", createdDay)}`);
+        if (updatedDay && updatedDay !== createdDay) trackingParts.push(`Actualizado ${formatCell("fecha", updatedDay)}`);
         const reviewers = [
           row.reviewed_by,
           row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : "",
@@ -42022,20 +42140,34 @@ const renderInmuebleDocs = (rows = []) => {
           .filter(Boolean)
           .join(" · ");
         const href = row.url ? buildPhotoSrc(row.url) : "";
-        const link = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Ver</a>` : "";
-        item.innerHTML = `
-          <div>
-            <strong>${escapeHtml(name)}</strong>
-            <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
-            ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
-            ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
-          </div>
-          <div class="inmueble-summary-badges">
-            ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
-            <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
-          </div>
-          <div>${link}</div>
+        const left = document.createElement("div");
+        left.innerHTML = `
+          <strong>${escapeHtml(name)}</strong>
+          <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
+          ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
+          ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
+          ${trackingParts.length ? `<div class="muted">Tracking: ${escapeHtml(trackingParts.join(" · "))}</div>` : ""}
         `;
+        const badges = document.createElement("div");
+        badges.className = "inmueble-summary-badges";
+        badges.innerHTML = `
+          ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
+          <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
+        `;
+        const actions = document.createElement("div");
+        actions.className = "inline-row-actions";
+        if (href) {
+          const openBtn = createIconButton("open", "Abrir documento");
+          openBtn.addEventListener("click", () => openExternalUrl(href));
+          actions.appendChild(openBtn);
+        }
+        const trackingBtn = createIconButton("timeline", "Ver tracking");
+        trackingBtn.addEventListener("click", () => openDocTracking(row));
+        actions.appendChild(trackingBtn);
+
+        item.appendChild(left);
+        item.appendChild(badges);
+        item.appendChild(actions);
         list.appendChild(item);
       });
       inmuebleAdjuntosList.innerHTML = "";
@@ -42329,11 +42461,10 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
       const actionsTd = document.createElement("td");
       const normalizedType = normalizeInmoActionType(row.tipo || "");
       const closableTypes = new Set(["cita_adquisicion", "cita_comprador", "cita_propuesta", "cita_propietarios", "cita_contraoferta"]);
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "ghost";
-      editBtn.textContent = "Editar";
-      editBtn.addEventListener("click", (event) => {
+      const actionsWrap = document.createElement("div");
+      actionsWrap.className = "icon-actions";
+      const editIconBtn = createIconButton("edit", "Editar cita");
+      editIconBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         openActionEditor(
@@ -42360,25 +42491,52 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
           }
         );
       });
-      actionsTd.appendChild(editBtn);
+      actionsWrap.appendChild(editIconBtn);
+
+      const deleteIconBtn = createIconButton("trash", "Borrar cita", { danger: true });
+      deleteIconBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = String(row.id || "").trim();
+        if (!id) return;
+        const ok = window.confirm("¿Borrar esta cita/acción? Esta acción no se puede deshacer.");
+        if (!ok) return;
+        try {
+          const res = await fetch("/api/acciones_delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id,
+              servicio: "inmobiliaria",
+              empresa_nombre: resolveCrmInmoEmpresaNombre(),
+              usuario: getCurrentUser(),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || data?.error) {
+            alert(data?.error || `HTTP ${res.status}`);
+            return;
+          }
+          loadInmuebleActividad(inmuebleId, empresaId);
+          openInmuebleDetail(inmuebleId, state.currentInmuebleOriginView || "inmuebles");
+        } catch (err) {
+          alert(err?.message || "No se pudo borrar la cita.");
+        }
+      });
+      actionsWrap.appendChild(deleteIconBtn);
       const isPending = String(row.estado || "").trim().toLowerCase() === "pendiente";
       if (closableTypes.has(normalizedType) && isPending) {
-        const closeBtn = document.createElement("button");
-        closeBtn.type = "button";
-        closeBtn.className = "secondary";
-        closeBtn.textContent = "Cerrar cita";
+        const closeBtn = createIconButton("check", "Cerrar cita");
         closeBtn.addEventListener("click", () => closeInmuebleWorkflowAction(row, empresaId));
-        actionsTd.appendChild(closeBtn);
+        actionsWrap.appendChild(closeBtn);
       } else if (String(row.documento_tipo || "").trim()) {
-        const docBtn = document.createElement("button");
-        docBtn.type = "button";
-        docBtn.className = "ghost";
-        docBtn.textContent = "Documento";
+        const docBtn = createIconButton("doc", "Abrir documento");
         docBtn.addEventListener("click", () => {
           window.open(`/api/inmueble_negociacion_pdf?action_id=${encodeURIComponent(row.id)}`, "_blank", "noopener");
         });
-        actionsTd.appendChild(docBtn);
+        actionsWrap.appendChild(docBtn);
       }
+      actionsTd.appendChild(actionsWrap);
       tr.appendChild(actionsTd);
       tbody.appendChild(tr);
     });
@@ -42389,7 +42547,7 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   });
 };
 
-  const closeInmuebleWorkflowAction = (row, empresaId) => {
+const closeInmuebleWorkflowAction = (row, empresaId) => {
   const submitClosePayload = (payload, type, resultado) => {
     fetch("/api/acciones_update", {
       method: "POST",
