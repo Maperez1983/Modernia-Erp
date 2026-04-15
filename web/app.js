@@ -22050,6 +22050,50 @@ const prepareCanvas = (canvas) => {
   return ctx;
 };
 
+const getCssVar = (el, name, fallback = "") => {
+  try {
+    const value = window.getComputedStyle(el).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const safeHexWithAlpha = (hex, alpha = 1) => {
+  const raw = String(hex || "").trim();
+  if (!raw.startsWith("#") || raw.length !== 7) return raw || "#000000";
+  const r = parseInt(raw.slice(1, 3), 16);
+  const g = parseInt(raw.slice(3, 5), 16);
+  const b = parseInt(raw.slice(5, 7), 16);
+  const a = Math.max(0, Math.min(1, Number(alpha)));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+};
+
+const fillRoundedRect = (ctx, x, y, w, h, r = 8) => {
+  const width = Number(w) || 0;
+  const height = Number(h) || 0;
+  if (width <= 0 || height <= 0) return;
+  const radius = Math.max(0, Math.min(Number(r) || 0, Math.min(width, height) / 2));
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, radius);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+  ctx.fill();
+};
+
 const drawBarChart = (canvas, labels, datasets, options = {}) => {
   if (!canvas) return;
   const ctx = prepareCanvas(canvas);
@@ -22063,6 +22107,22 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     canvas.style.height = `${height}px`;
   }
   ctx.clearRect(0, 0, width, height);
+
+  const theme = {
+    grid: getCssVar(canvas, "--chart-grid", "rgba(11, 29, 51, 0.08)"),
+    axis: getCssVar(canvas, "--chart-axis", "rgba(11, 29, 51, 0.22)"),
+    label: getCssVar(canvas, "--chart-label", "rgba(11, 29, 51, 0.72)"),
+    muted: getCssVar(canvas, "--chart-muted", "rgba(11, 29, 51, 0.56)"),
+    ink: getCssVar(canvas, "--ink", "#0B1D33"),
+    gold: getCssVar(canvas, "--gold", "#F2C14E"),
+    bg: getCssVar(canvas, "--chart-bg", "rgba(255,255,255,0.92)"),
+    fontBody: getCssVar(canvas, "--font-body", "system-ui, sans-serif"),
+    fontUi: getCssVar(canvas, "--font-ui", "system-ui, sans-serif"),
+  };
+
+  // Background (refuerza la identidad visual incluso si el card cambia).
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(0, 0, width, height);
 
   const labelCount = Math.max(1, labels.length);
   const maxLabelLen = labels.reduce(
@@ -22089,7 +22149,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const legendPosition = options.legendPosition || "top";
   let legendRightPadding = 0;
   if (options.legend && legendPosition === "right") {
-    ctx.font = "600 11px 'Source Sans 3', sans-serif";
+    ctx.font = `700 11px ${theme.fontUi}`;
     const maxLegendTextWidth = datasets.reduce((acc, dataset) => {
       const widthText = ctx.measureText(String(dataset.label || "")).width;
       return Math.max(acc, widthText);
@@ -22141,7 +22201,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const secondaryRange = Math.max(1, secondaryMax - secondaryMin);
 
   const gridLines = 4;
-  ctx.strokeStyle = "#efe9df";
+  ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
   for (let i = 0; i <= gridLines; i += 1) {
     const y = padding.top + (chartHeight / gridLines) * i;
@@ -22151,7 +22211,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "#e6e0d6";
+  ctx.strokeStyle = theme.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(padding.left, padding.top);
@@ -22160,7 +22220,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   ctx.stroke();
 
   if (hasSecondaryAxis) {
-    ctx.strokeStyle = "#e6e0d6";
+    ctx.strokeStyle = theme.axis;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(width - padding.right, padding.top);
@@ -22168,8 +22228,8 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     ctx.stroke();
     const rightFormat =
       options.secondaryAxisFormat || ((value) => numberFormatter.format(value));
-    ctx.fillStyle = "#8c857a";
-    ctx.font = "500 10px 'Source Sans 3', sans-serif";
+    ctx.fillStyle = theme.muted;
+    ctx.font = `500 10px ${theme.fontBody}`;
     for (let i = 0; i <= gridLines; i += 1) {
       const ratio = i / gridLines;
       const value = secondaryMax - ratio * secondaryRange;
@@ -22201,20 +22261,23 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       const barHeight = (Math.abs(value) / maxValue) * chartHeight;
       const x = xBase + 5 + j * barWidth;
       const y = height - padding.bottom - barHeight;
-      const barColor = (dataset.colors && dataset.colors[i]) || dataset.color;
+      const barColor =
+        (dataset.colors && dataset.colors[i]) ||
+        dataset.color ||
+        (j % 2 === 0 ? theme.gold : theme.ink);
       ctx.fillStyle = barColor;
-      ctx.fillRect(x, y, barWidth, barHeight);
+      fillRoundedRect(ctx, x, y, barWidth, barHeight, Math.min(10, barWidth / 2));
 
       if (options.showValues && barHeight >= 18 && labels.length <= 18 && groupWidth >= 24) {
         const labelText = dataset.format
           ? dataset.format(value)
           : numberFormatter.format(value);
-        ctx.font = "600 10px 'Source Sans 3', sans-serif";
+        ctx.font = `700 10px ${theme.fontUi}`;
         const textWidth = ctx.measureText(labelText).width;
         const textX = x + (barWidth - textWidth) / 2;
         const textY = y + 14;
         ctx.fillStyle = getTextColorForBar(barColor);
-        ctx.strokeStyle = "rgba(0,0,0,0.15)";
+        ctx.strokeStyle = safeHexWithAlpha(theme.ink, 0.18);
         ctx.lineWidth = 2;
         ctx.strokeText(labelText, textX, textY);
         ctx.fillText(labelText, textX, textY);
@@ -22229,8 +22292,8 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     const shouldRotate = rotateLabels || groupWidth < 40;
     const shouldSkip = labelSkipStep > 1 && i % labelSkipStep !== 0;
     if (!shouldSkip) {
-      ctx.fillStyle = "#6d665a";
-      ctx.font = `500 ${labelFontSize}px 'Source Sans 3', sans-serif`;
+      ctx.fillStyle = theme.label;
+      ctx.font = `600 ${labelFontSize}px ${theme.fontBody}`;
       if (shouldRotate) {
         ctx.save();
         const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(axisLabel).width) / 2);
@@ -22250,7 +22313,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const lineSets = datasets.filter((set) => set.type === "line");
   if (lineSets.length) {
     lineSets.forEach((dataset) => {
-      ctx.strokeStyle = dataset.color || "#3f5d5a";
+      ctx.strokeStyle = dataset.color || theme.ink;
       ctx.lineWidth = Number(dataset.lineWidth || 2);
       ctx.beginPath();
       dataset.values.forEach((value, i) => {
@@ -22286,7 +22349,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
             (Math.abs(normalized) / maxValue) * chartHeight;
         }
         const x = padding.left + i * groupWidth + groupWidth / 2;
-        ctx.fillStyle = dataset.color || "#3f5d5a";
+        ctx.fillStyle = dataset.color || theme.ink;
         ctx.beginPath();
         ctx.arc(x, y, Number(dataset.pointRadius || 3), 0, Math.PI * 2);
         ctx.fill();
@@ -22294,8 +22357,8 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
           const valueText = dataset.format
             ? dataset.format(value)
             : numberFormatter.format(Number(value || 0));
-          ctx.fillStyle = dataset.color || "#3f5d5a";
-          ctx.font = "600 10px 'Source Sans 3', sans-serif";
+          ctx.fillStyle = dataset.color || theme.ink;
+          ctx.font = `700 10px ${theme.fontUi}`;
           ctx.fillText(valueText, x + 4, y - 6);
         }
       });
@@ -22303,14 +22366,14 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   }
 
   if (options.legend) {
-    ctx.font = "600 11px 'Source Sans 3', sans-serif";
+    ctx.font = `700 11px ${theme.fontUi}`;
     if (legendPosition === "right") {
       const legendStartX = width - legendRightPadding + 8;
       let legendY = padding.top + 2;
       datasets.forEach((dataset) => {
-        ctx.fillStyle = dataset.color || "#4c4540";
+        ctx.fillStyle = dataset.color || theme.gold;
         ctx.fillRect(legendStartX, legendY, 10, 10);
-        ctx.fillStyle = "#4c4540";
+        ctx.fillStyle = theme.label;
         ctx.fillText(String(dataset.label || ""), legendStartX + 14, legendY + 9);
         legendY += 18;
       });
@@ -22318,9 +22381,9 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       let offsetX = padding.left;
       const offsetY = padding.top - 12;
       datasets.forEach((dataset) => {
-        ctx.fillStyle = dataset.color || "#4c4540";
+        ctx.fillStyle = dataset.color || theme.gold;
         ctx.fillRect(offsetX, offsetY, 10, 10);
-        ctx.fillStyle = "#4c4540";
+        ctx.fillStyle = theme.label;
         ctx.fillText(String(dataset.label || ""), offsetX + 14, offsetY + 9);
         offsetX += ctx.measureText(String(dataset.label || "")).width + 30;
       });
@@ -31015,13 +31078,27 @@ const drawSignedBarChart = (canvas, labels, values, color) => {
   const height = canvas.getBoundingClientRect().height;
   ctx.clearRect(0, 0, width, height);
 
+  const theme = {
+    axis: getCssVar(canvas, "--chart-axis", "rgba(11, 29, 51, 0.22)"),
+    label: getCssVar(canvas, "--chart-label", "rgba(11, 29, 51, 0.72)"),
+    muted: getCssVar(canvas, "--chart-muted", "rgba(11, 29, 51, 0.56)"),
+    ink: getCssVar(canvas, "--ink", "#0B1D33"),
+    gold: getCssVar(canvas, "--gold", "#F2C14E"),
+    bg: getCssVar(canvas, "--chart-bg", "rgba(255,255,255,0.92)"),
+    fontBody: getCssVar(canvas, "--font-body", "system-ui, sans-serif"),
+    fontUi: getCssVar(canvas, "--font-ui", "system-ui, sans-serif"),
+  };
+
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(0, 0, width, height);
+
   const padding = { top: 22, right: 18, bottom: 32, left: 36 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   const maxAbs = Math.max(1, ...values.map((v) => Math.abs(v)));
   const zeroY = padding.top + chartHeight / 2;
 
-  ctx.strokeStyle = "#efe9df";
+  ctx.strokeStyle = theme.axis;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(padding.left, zeroY);
@@ -31036,19 +31113,19 @@ const drawSignedBarChart = (canvas, labels, values, color) => {
     const barHeight = (Math.abs(value) / maxAbs) * (chartHeight / 2);
     const x = padding.left + i * groupWidth + (groupWidth - barWidth) / 2;
     const y = value >= 0 ? zeroY - barHeight : zeroY;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, barWidth, barHeight);
+    ctx.fillStyle = color || theme.gold;
+    fillRoundedRect(ctx, x, y, barWidth, barHeight, Math.min(10, barWidth / 2));
 
     const labelText = `${value.toFixed(1)}%`;
-    ctx.fillStyle = "#4f4941";
-    ctx.font = "10px Baskerville, serif";
+    ctx.fillStyle = theme.label;
+    ctx.font = `700 10px ${theme.fontUi}`;
     const textWidth = ctx.measureText(labelText).width;
     const textX = x + (barWidth - textWidth) / 2;
     const textY = value >= 0 ? y - 6 : y + barHeight + 12;
     ctx.fillText(labelText, textX, textY);
 
-    ctx.fillStyle = "#6d665a";
-    ctx.font = "10px Baskerville, serif";
+    ctx.fillStyle = theme.muted;
+    ctx.font = `600 10px ${theme.fontBody}`;
     const labelX = padding.left + i * groupWidth + (groupWidth - ctx.measureText(label).width) / 2;
     ctx.fillText(label, labelX, height - padding.bottom + 18);
   });
