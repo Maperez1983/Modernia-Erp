@@ -29164,7 +29164,7 @@ const ensureHipotecaFichaPanel = () => {
               </label>
               <label class="span-2">
                 <span>Registro (piso)</span>
-                <input data-json="liquidacion_json" data-path="vendedor.registro" placeholder="Registro de ..." />
+                <input data-json="liquidacion_json" data-path="vendedor.registro" placeholder="Registro de ..." list="hipotecaRegistroList" />
               </label>
               <label>
                 <span>Finca</span>
@@ -29353,6 +29353,7 @@ const ensureHipotecaFichaPanel = () => {
           <span id="hipotecaFichaStatus" class="muted"></span>
         </div>
       </form>
+      <datalist id="hipotecaRegistroList"></datalist>
       <datalist id="notariaMalagaList">
         <option value="Miguel Ángel Delgado"></option>
         <option value="Notaría de Don Pedro Díaz Serrano"></option>
@@ -29964,6 +29965,68 @@ const fillHipotecaFichaJson = (panel, jsonKey, obj) => {
   });
 };
 
+const normalizeRegistroName = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const buildRegistroFallbackSuggestions = ({ municipio = "", provincia = "" } = {}) => {
+  const mun = normalizeRegistroName(municipio);
+  if (!mun) return [];
+  const base = `Registro de la Propiedad de ${mun}`;
+  // Si existe provincia, también sugerimos con provincia entre paréntesis.
+  const baseWithProv = provincia ? `${base} (${normalizeRegistroName(provincia)})` : base;
+  const out = [baseWithProv];
+  for (let i = 1; i <= 6; i += 1) {
+    out.push(`${baseWithProv} ${i}`);
+  }
+  return out;
+};
+
+const updateHipotecaRegistroDatalist = async (panel) => {
+  if (!panel) return;
+  const list = panel.querySelector("#hipotecaRegistroList");
+  if (!list) return;
+  const empresa = resolveCrmFinEmpresa();
+  if (!empresa?.id) return;
+
+  const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+  const municipio =
+    String(getNestedValue(clienteInmueble, "inmueble.localidad") || "").trim() ||
+    String(panel.querySelector('[data-json="liquidacion_json"][data-path="vendedor.localidad"]')?.value || "").trim() ||
+    String(panel.querySelector('[data-json="liquidacion_json"][data-path="comprador.localidad"]')?.value || "").trim();
+  const provincia =
+    String(getNestedValue(clienteInmueble, "inmueble.provincia") || "").trim() ||
+    String(panel.querySelector('[data-json="liquidacion_json"][data-path="comprador.provincia"]')?.value || "").trim();
+
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  if (municipio) params.set("municipio", municipio);
+  if (provincia) params.set("provincia", provincia);
+
+  let items = [];
+  try {
+    const data = await api(`/api/hipoteca_registros?${params.toString()}`);
+    items = Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    items = [];
+  }
+
+  const normalized = new Set();
+  const options = [];
+  const add = (value) => {
+    const text = normalizeRegistroName(value);
+    if (!text) return;
+    const key = normalizeSimple(text);
+    if (normalized.has(key)) return;
+    normalized.add(key);
+    options.push(text);
+  };
+  items.forEach(add);
+  buildRegistroFallbackSuggestions({ municipio, provincia }).forEach(add);
+
+  list.innerHTML = options.map((opt) => `<option value="${escapeHtml(opt)}"></option>`).join("");
+};
+
 const fetchHipotecaRowById = async (recordId) => {
   const id = String(recordId || "").trim();
   if (!id) return null;
@@ -30301,6 +30364,7 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   setupHipotecaFichaMoneyInputs(panel);
   setupHipotecaFichaDomicilioSync(panel);
   setupHipotecaFichaComputedInputs(panel);
+  updateHipotecaRegistroDatalist(panel);
 
   if (panel.dataset.liquidacionListeners !== "1") {
     panel.dataset.liquidacionListeners = "1";
@@ -30333,6 +30397,17 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
     });
     panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="comprador.c2."]').forEach((el) => {
       el.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    });
+    panel.querySelectorAll(
+      [
+        '[data-json="cliente_inmueble_json"][data-path="inmueble.localidad"]',
+        '[data-json="cliente_inmueble_json"][data-path="inmueble.provincia"]',
+        '[data-json="liquidacion_json"][data-path="vendedor.localidad"]',
+        '[data-json="liquidacion_json"][data-path="comprador.localidad"]',
+        '[data-json="liquidacion_json"][data-path="comprador.provincia"]',
+      ].join(",")
+    ).forEach((el) => {
+      el.addEventListener("change", () => updateHipotecaRegistroDatalist(panel));
     });
   }
   const status = panel.querySelector("#hipotecaFichaStatus");

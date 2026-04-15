@@ -51681,6 +51681,57 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(content)
             return
 
+        if path == "/api/hipoteca_registros":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            municipio = (params.get("municipio", [""])[0] or "").strip()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+
+            target_mun = normalize_lookup_text(municipio)
+            target_prov = normalize_lookup_text(provincia)
+
+            items = set()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT liquidacion_json
+                    FROM hipotecas
+                    WHERE empresa_id = ?
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT 2000
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+            except Exception:
+                rows = []
+
+            for row in rows:
+                raw = row["liquidacion_json"] if row else None
+                parsed = _safe_json_object(raw or "{}")
+                comprador = parsed.get("comprador") if isinstance(parsed.get("comprador"), dict) else {}
+                vendedor = parsed.get("vendedor") if isinstance(parsed.get("vendedor"), dict) else {}
+                registro = str(vendedor.get("registro") or "").strip()
+                if not registro:
+                    continue
+                # Filtros best-effort: por municipio/provincia, usando localidad/provincia del JSON.
+                if target_mun:
+                    loc = normalize_lookup_text(vendedor.get("localidad") or comprador.get("localidad") or "")
+                    if target_mun not in loc and target_mun not in normalize_lookup_text(registro):
+                        continue
+                if target_prov:
+                    prov = normalize_lookup_text(comprador.get("provincia") or "")
+                    if target_prov and target_prov not in prov and target_prov not in normalize_lookup_text(registro):
+                        continue
+                items.add(registro)
+                if len(items) >= 50:
+                    break
+
+            out = sorted(list(items), key=lambda x: x.lower())
+            json_response(self, {"items": out})
+            return
+
         if path == "/api/hipotecas_firmadas_excel":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             selected_year = (params.get("year", [""])[0] or "").strip()
