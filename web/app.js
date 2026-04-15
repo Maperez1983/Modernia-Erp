@@ -28085,6 +28085,9 @@ const setCrmWorkspaceView = (view = "resumen") => {
   if (crmWorkspaceShell && inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
     inmuebleDetail.classList.add("hidden");
     crmWorkspaceShell.classList.remove("hidden");
+    try {
+      updateTableVisibility();
+    } catch {}
   }
 
 	if (nextView === "captaciones") {
@@ -41538,6 +41541,9 @@ const openInmuebleDetail = (id, originView = "") => {
         crmWorkspaceShell.classList.add("hidden");
       }
       inmuebleDetail.classList.remove("hidden");
+      try {
+        updateTableVisibility();
+      } catch {}
       setInmuebleSaveStatus(getPendingInlineEditsCount() ? "Cambios pendientes" : "Sin cambios");
       if (!hasPendingPrefill) {
         setInmuebleTab("datos");
@@ -58042,6 +58048,9 @@ if (inmuebleDeleteBtn) {
         if (crmWorkspaceShell) {
           crmWorkspaceShell.classList.remove("hidden");
         }
+        try {
+          updateTableVisibility();
+        } catch {}
         setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
         state.currentInmuebleId = "";
         state.currentInmueble = null;
