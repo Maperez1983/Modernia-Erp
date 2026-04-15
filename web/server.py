@@ -51081,10 +51081,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
-            if status != "encargo":
+            if status not in {"encargo", "noticia"}:
                 json_response(
                     self,
-                    {"error": "La nota de encargo solo está disponible para inmuebles en fase Encargo"},
+                    {"error": "La nota de encargo solo está disponible para inmuebles en fase Noticia o Encargo"},
                     status=400,
                 )
                 return

@@ -41136,7 +41136,7 @@ const setInmuebleTab = (tab) => {
 const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
   if (!inmuebleTabs || !inmuebleGenerarEncargoTabBtn || !inmuebleTabGenerarEncargo) return;
   const stage = normalizeSimple(inmueble?.estado || "");
-  const available = stage === "noticia";
+  const available = stage === "noticia" || stage === "encargo";
   inmuebleGenerarEncargoTabBtn.classList.toggle("hidden", !available);
   if (!available) {
     inmuebleTabGenerarEncargo.classList.add("hidden");
