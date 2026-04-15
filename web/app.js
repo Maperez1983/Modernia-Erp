@@ -29410,6 +29410,10 @@ const ensureHipotecaFichaPanel = () => {
   panel.querySelector("#hipotecaFichaCancel")?.addEventListener("click", closeHipotecaFichaPanel);
   const bindPdf = (id, section) => {
     panel.querySelector(id)?.addEventListener("click", () => {
+      if (panel.dataset.pdfReviewBlocked === "1") {
+        alert(String(panel.dataset.pdfReviewBlockedReason || "").trim() || "Corrige la Revisión Excel antes de imprimir.");
+        return;
+      }
       const recordId = String(panel.dataset.recordId || "").trim();
       if (recordId) openHipotecaFichaPrint(recordId, section);
     });
@@ -30013,17 +30017,13 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
       review.textContent = issues.length === 1 ? `Revisión Excel: ${first}` : `Revisión Excel: ${first} (+${issues.length - 1})`;
     }
 
-    const pdfButtons = [
-      panel.querySelector("#hipotecaFichaPdfComprador"),
-      panel.querySelector("#hipotecaFichaPdfVendedor"),
-      panel.querySelector("#hipotecaFichaPdfCheques"),
-      panel.querySelector("#hipotecaFichaPdfNotaria"),
-    ].filter(Boolean);
     const ok = !issues.length;
-    pdfButtons.forEach((btn) => {
-      btn.disabled = !ok;
-      btn.title = ok ? "" : "Corrige la Revisión Excel antes de imprimir.";
-    });
+    panel.dataset.pdfReviewBlocked = ok ? "0" : "1";
+    panel.dataset.pdfReviewBlockedReason = ok
+      ? ""
+      : (issues.length === 1
+        ? `Revisión Excel: ${issues[0]}`
+        : `Revisión Excel: ${issues[0]} (+${issues.length - 1})`);
   }
 };
 
@@ -30262,7 +30262,10 @@ const openHipotecaFichaPrint = (recordId, section = "") => {
   const normalized = String(section || "").trim();
   if (normalized) params.set("section", normalized);
   const url = `/api/hipoteca_ficha_print?${params.toString()}`;
-  window.open(url, "_blank", "noopener");
+  const w = window.open(url, "_blank", "noopener");
+  if (!w) {
+    alert("No se pudo abrir la impresión. Revisa si el navegador está bloqueando pop-ups para este sitio.");
+  }
 };
 
 const downloadHipotecasFirmadasExcel = () => {
