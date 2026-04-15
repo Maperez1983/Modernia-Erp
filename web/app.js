@@ -29231,6 +29231,10 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Ingreso en cuenta</span>
                 <input data-json="liquidacion_json" data-path="cuadre.ingreso_en_cuenta" inputmode="decimal" readonly />
               </label>
+              <label>
+                <span>Seguros</span>
+                <input data-json="liquidacion_json" data-path="cuadre.seguros" inputmode="decimal" />
+              </label>
               <label class="span-2">
                 <span>Cheque 1 (beneficiario)</span>
                 <input data-json="liquidacion_json" data-path="cuadre.cheque1.beneficiario" placeholder="OMF ..." />
@@ -29298,6 +29302,10 @@ const ensureHipotecaFichaPanel = () => {
               <label>
                 <span>Diferencia vs escriturado (auto)</span>
                 <input data-json="liquidacion_json" data-path="cuadre.diferencia_medios_pago" inputmode="decimal" readonly />
+              </label>
+              <label>
+                <span>Total salidas cheques (auto)</span>
+                <input data-json="liquidacion_json" data-path="cuadre.total_salidas" inputmode="decimal" readonly />
               </label>
             </div>
           </div>
@@ -29723,12 +29731,26 @@ const computeHipotecaLiquidacionComputed = (data) => {
   cuadreGastos.com_apertura = hip.comision_apertura ?? "";
   cuadre.comision_cheques = hip.comision_cheques ?? "";
   cuadre.cuota_socio = hip.cuota_socio ?? "";
+  // Excel (cuadre de cheques): sobrante = (préstamo + ingreso en cuenta) - (cheques + gastos + deducciones + seguros).
+  const totalSalidasCheques =
+    Number(cuadre.cancelacion_economica || 0) +
+    Number(cuadre.retencion_cancelacion_registral || 0) +
+    Number(cuadre.retencion_ibi || 0) +
+    Number(cuadre.retencion_no_residente || 0) +
+    Number(cuadre.gestion_no_residente || 0) +
+    Number(cuadreGastos.compraventa || 0) +
+    Number(cuadreGastos.hipoteca || 0) +
+    Number(cuadreGastos.com_apertura || 0) +
+    Number(cuadre.comision_cheques || 0) +
+    Number(cuadre.cuota_socio || 0) +
+    Number(cuadre.seguros || 0) +
+    Number(cuadreCheq1.importe || 0) +
+    Number(cuadreCheq2.importe || 0);
+  cuadre.total_salidas = round2(totalSalidasCheques);
   const sobranCuadre =
     Number(cuadre.prestamo_concedido || 0) +
-    Number(entregas.senal || 0) +
-    Number(entregas.transf_modernia || 0) +
     Number(cuadre.ingreso_en_cuenta || 0) -
-    Number(comprador.suma_total_necesaria || 0);
+    Number(cuadre.total_salidas || 0);
   cuadre.sobran_en_cuenta = round2(sobranCuadre);
 
   if (
@@ -29883,6 +29905,7 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
     "cuadre.sobran_en_cuenta",
     "cuadre.total_medios_pago",
     "cuadre.diferencia_medios_pago",
+    "cuadre.total_salidas",
   ];
   targets.forEach((path) => {
     const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);

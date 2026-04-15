@@ -3912,7 +3912,29 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     cuadre["comision_cheques"] = _round2(hip_com_cheques)
     cuadre["cuota_socio"] = _round2(hip_cuota_socio)
 
-    sobran_cuadre = _round2(prestamo_concedido + senal + transf_modernia + ingresar_banco - suma_total_necesaria)
+    seguros_cuadre = parse_money_value(cuadre.get("seguros") or 0)
+
+    # Total salidas en el cuadre (Excel): cheques + deducciones + gastos + seguros.
+    cheq1_imp = parse_money_value(cuadre_cheq1.get("importe") or 0)
+    cheq2_imp = parse_money_value(cuadre_cheq2.get("importe") or 0)
+    total_salidas = _round2(
+        cheq1_imp
+        + cheq2_imp
+        + parse_money_value(cuadre.get("cancelacion_economica") or 0)
+        + parse_money_value(cuadre.get("retencion_cancelacion_registral") or 0)
+        + parse_money_value(cuadre.get("retencion_ibi") or 0)
+        + parse_money_value(cuadre.get("retencion_no_residente") or 0)
+        + parse_money_value(cuadre.get("gestion_no_residente") or 0)
+        + parse_money_value(cuadre_gastos.get("compraventa") or 0)
+        + parse_money_value(cuadre_gastos.get("hipoteca") or 0)
+        + parse_money_value(cuadre_gastos.get("com_apertura") or 0)
+        + parse_money_value(cuadre.get("comision_cheques") or 0)
+        + parse_money_value(cuadre.get("cuota_socio") or 0)
+        + seguros_cuadre
+    )
+    cuadre["total_salidas"] = total_salidas
+
+    sobran_cuadre = _round2(prestamo_concedido + ingresar_banco - total_salidas)
     cuadre["sobran_en_cuenta"] = sobran_cuadre
 
     # Beneficiarios por defecto (OMF vendedor/es).
@@ -3942,8 +3964,6 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
         elif v2_exists and not cheq1_has and cheq2_has:
             cuadre_cheq1["importe"] = _round2(total_percibir - parse_money_value(cuadre_cheq2.get("importe") or 0))
 
-    cheq1_imp = parse_money_value(cuadre_cheq1.get("importe") or 0)
-    cheq2_imp = parse_money_value(cuadre_cheq2.get("importe") or 0)
     total_medios_pago = _round2(senal + vend_can_eco + vend_can_reg + vend_ibi + vend_ret + vend_gest_nr + cheq1_imp + cheq2_imp)
     cuadre["total_medios_pago"] = total_medios_pago
     cuadre["diferencia_medios_pago"] = _round2(escriturado - total_medios_pago)
@@ -4157,6 +4177,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
         <dl>
           <dt>Préstamo concedido</dt><dd>{money(cuadre.get("prestamo_concedido"))}</dd>
           <dt>Ingreso en cuenta</dt><dd>{money(cuadre.get("ingreso_en_cuenta"))}</dd>
+          <dt>Seguros</dt><dd>{money(cuadre.get("seguros"))}</dd>
           <dt>Cheque 1</dt><dd>{html.escape(str(cuadre_cheq1.get("beneficiario") or ""))} · {money(cuadre_cheq1.get("importe"))}</dd>
           <dt>Cheque 2</dt><dd>{html.escape(str(cuadre_cheq2.get("beneficiario") or ""))} · {money(cuadre_cheq2.get("importe"))}</dd>
         </dl>
@@ -4185,6 +4206,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
         </table>
         <div style="height: 14px;"></div>
         <dl>
+          <dt>Total salidas (auto)</dt><dd>{money(cuadre.get("total_salidas"))}</dd>
           <dt>Total medios de pago (auto)</dt><dd>{money(cuadre.get("total_medios_pago"))}</dd>
           <dt>Diferencia vs escriturado (auto)</dt><dd>{money(cuadre.get("diferencia_medios_pago"))}</dd>
           <dt>Sobrante (comprador)</dt><dd>{money(comprador.get("sobran_en_cuenta"))}</dd>
