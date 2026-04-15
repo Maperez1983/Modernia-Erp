@@ -29638,11 +29638,16 @@ const computeHipotecaLiquidacionComputed = (data) => {
   const cuadreGastos =
     cuadre.gastos_escrituras && typeof cuadre.gastos_escrituras === "object" ? cuadre.gastos_escrituras : {};
 
+  const num0 = (value) => {
+    const parsed = toNumber(value);
+    return parsed === null ? 0 : parsed;
+  };
+
   const totalCv =
-    Number(gastosCv.notaria || 0) +
-    Number(gastosCv.registro || 0) +
-    Number(gastosCv.itp || 0) +
-    Number(gastosCv.gestoria || 0);
+    num0(gastosCv.notaria) +
+    num0(gastosCv.registro) +
+    num0(gastosCv.itp) +
+    num0(gastosCv.gestoria);
   gastosCv.total = round2(totalCv);
 
   const isFinanciado = (value) => ["si", "sí", "s", "true", "1"].includes(normalizeSimple(value || "No"));
@@ -29651,33 +29656,33 @@ const computeHipotecaLiquidacionComputed = (data) => {
   const hogarFinanciado = isFinanciado(hip.seguro_hogar_financiado);
   const vidaFinanciado = isFinanciado(hip.seguro_vida_financiado);
 
-  const proteccionCash = proteccionFinanciado ? 0 : Number(hip.seguro_proteccion_pago || 0);
-  const hogarCash = hogarFinanciado ? 0 : Number(hip.seguro_hogar || 0);
-  const vidaCash = vidaFinanciado ? 0 : Number(hip.seguro_vida || 0);
+  const proteccionCash = proteccionFinanciado ? 0 : num0(hip.seguro_proteccion_pago);
+  const hogarCash = hogarFinanciado ? 0 : num0(hip.seguro_hogar);
+  const vidaCash = vidaFinanciado ? 0 : num0(hip.seguro_vida);
 
   const totalHip =
-    Number(hip.notaria_impuestos_gestoria || 0) +
-    Number(hip.comision_apertura || 0) +
-    Number(hip.cuota_socio || 0) +
-    Number(hip.comision_cheques || 0) +
+    num0(hip.notaria_impuestos_gestoria) +
+    num0(hip.comision_apertura) +
+    num0(hip.cuota_socio) +
+    num0(hip.comision_cheques) +
     proteccionCash;
   hip.total_gastos = round2(totalHip);
 
-  const totalSeguros = Number(hip.seguro_hogar || 0) + Number(hip.seguro_vida || 0);
+  const totalSeguros = num0(hip.seguro_hogar) + num0(hip.seguro_vida);
   hip.total_seguros = round2(totalSeguros);
   // Total de todos los gastos del bloque (incluye seguros aunque estén financiados).
   hip.total_bloque = round2(
-    Number(hip.notaria_impuestos_gestoria || 0) +
-      Number(hip.comision_apertura || 0) +
-      Number(hip.cuota_socio || 0) +
-      Number(hip.comision_cheques || 0) +
-      Number(hip.seguro_proteccion_pago || 0) +
-      Number(hip.seguro_hogar || 0) +
-      Number(hip.seguro_vida || 0)
+    num0(hip.notaria_impuestos_gestoria) +
+      num0(hip.comision_apertura) +
+      num0(hip.cuota_socio) +
+      num0(hip.comision_cheques) +
+      num0(hip.seguro_proteccion_pago) +
+      num0(hip.seguro_hogar) +
+      num0(hip.seguro_vida)
   );
 
   // Total que entra en "Suma total necesaria": solo lo NO financiado.
-  hip.total_necesario = round2(Number(hip.total_gastos || 0) + hogarCash + vidaCash);
+  hip.total_necesario = round2(num0(hip.total_gastos) + hogarCash + vidaCash);
 
   // Precio: si solo rellenan "Escriturado" (muy habitual), usarlo como precio de compra.
   if ((comprador.precio_compra ?? "") === "" && (comprador.escriturado ?? "") !== "") {
@@ -29688,21 +29693,21 @@ const computeHipotecaLiquidacionComputed = (data) => {
   }
 
   const sumaNecesaria =
-    Number(comprador.precio_compra || comprador.escriturado || 0) +
-    Number(gastosCv.total || 0) +
-    Number(hip.total_necesario || 0) +
-    Number(comprador.gestion_inmobiliaria || 0) +
-    Number(comprador.gestion_financiacion || 0);
+    num0(comprador.precio_compra || comprador.escriturado) +
+    num0(gastosCv.total) +
+    num0(hip.total_necesario) +
+    num0(comprador.gestion_inmobiliaria) +
+    num0(comprador.gestion_financiacion);
   comprador.suma_total_necesaria = round2(sumaNecesaria);
 
   // Autocalcular "A ingresar en banco" (solo si está vacío), replicando el flujo del Excel:
   // suma_total_necesaria - prestamo_concedido - señal - transf_modernia.
   if ((entregas.ingresar_banco ?? "") === "") {
     const autoIngresar =
-      Number(comprador.suma_total_necesaria || 0) -
-      Number(entregas.prestamo_concedido || 0) -
-      Number(entregas.senal || 0) -
-      Number(entregas.transf_modernia || 0);
+      num0(comprador.suma_total_necesaria) -
+      num0(entregas.prestamo_concedido) -
+      num0(entregas.senal) -
+      num0(entregas.transf_modernia);
     if (Number.isFinite(autoIngresar)) {
       const base = Math.max(autoIngresar, 0);
       const rounded100 = Math.ceil(base / 100) * 100;
@@ -29711,15 +29716,15 @@ const computeHipotecaLiquidacionComputed = (data) => {
   }
 
   const sumaEntregada =
-    Number(entregas.senal || 0) +
-    Number(entregas.transf_modernia || 0) +
-    Number(entregas.ingresar_banco || 0);
+    num0(entregas.senal) +
+    num0(entregas.transf_modernia) +
+    num0(entregas.ingresar_banco);
   comprador.suma_total_entregada = round2(sumaEntregada);
 
   const sobra =
-    Number(entregas.prestamo_concedido || 0) +
-    Number(comprador.suma_total_entregada || 0) -
-    Number(comprador.suma_total_necesaria || 0);
+    num0(entregas.prestamo_concedido) +
+    num0(comprador.suma_total_entregada) -
+    num0(comprador.suma_total_necesaria);
   comprador.sobran_en_cuenta = round2(sobra);
 
   // Vendedor (estilo Excel)
@@ -29737,18 +29742,18 @@ const computeHipotecaLiquidacionComputed = (data) => {
   }
 
   const subtotalPtePercibir =
-    Number(vendedor.precio_vivienda || 0) -
-    Number(vendedorDeducciones.senal || 0) -
-    Number(vendedorDeducciones.cancelacion_economica || 0) -
-    Number(vendedorDeducciones.cancelacion_registral || 0) -
-    Number(vendedorDeducciones.deuda_ibi || 0) -
-    Number(vendedorDeducciones.plusvalia || 0);
+    num0(vendedor.precio_vivienda) -
+    num0(vendedorDeducciones.senal) -
+    num0(vendedorDeducciones.cancelacion_economica) -
+    num0(vendedorDeducciones.cancelacion_registral) -
+    num0(vendedorDeducciones.deuda_ibi) -
+    num0(vendedorDeducciones.plusvalia);
   vendedor.subtotal_pte_percibir = round2(subtotalPtePercibir);
 
   const totalPercibir =
-    Number(vendedor.subtotal_pte_percibir || 0) -
-    Number(vendedorDeducciones.retencion_no_residente || 0) -
-    Number(vendedorDeducciones.gestion_no_residente || 0);
+    num0(vendedor.subtotal_pte_percibir) -
+    num0(vendedorDeducciones.retencion_no_residente) -
+    num0(vendedorDeducciones.gestion_no_residente);
   vendedor.total_a_percibir = round2(totalPercibir);
 
   // Cuadre de cheques (autorrelleno desde comprador/vendedor).
@@ -29765,26 +29770,31 @@ const computeHipotecaLiquidacionComputed = (data) => {
   cuadreGastos.com_apertura = hip.comision_apertura ?? "";
   cuadre.comision_cheques = hip.comision_cheques ?? "";
   cuadre.cuota_socio = hip.cuota_socio ?? "";
+
+  // Seguros (cuadre de cheques): por defecto, suma de los seguros NO financiados.
+  if ((cuadre.seguros ?? "") === "") {
+    cuadre.seguros = round2(proteccionCash + hogarCash + vidaCash);
+  }
   // Excel (cuadre de cheques): sobrante = (préstamo + ingreso en cuenta) - (cheques + gastos + deducciones + seguros).
   const totalSalidasCheques =
-    Number(cuadre.cancelacion_economica || 0) +
-    Number(cuadre.retencion_cancelacion_registral || 0) +
-    Number(cuadre.retencion_ibi || 0) +
-    Number(cuadre.retencion_no_residente || 0) +
-    Number(cuadre.gestion_no_residente || 0) +
-    Number(cuadreGastos.compraventa || 0) +
-    Number(cuadreGastos.hipoteca || 0) +
-    Number(cuadreGastos.com_apertura || 0) +
-    Number(cuadre.comision_cheques || 0) +
-    Number(cuadre.cuota_socio || 0) +
-    Number(cuadre.seguros || 0) +
-    Number(cuadreCheq1.importe || 0) +
-    Number(cuadreCheq2.importe || 0);
+    num0(cuadre.cancelacion_economica) +
+    num0(cuadre.retencion_cancelacion_registral) +
+    num0(cuadre.retencion_ibi) +
+    num0(cuadre.retencion_no_residente) +
+    num0(cuadre.gestion_no_residente) +
+    num0(cuadreGastos.compraventa) +
+    num0(cuadreGastos.hipoteca) +
+    num0(cuadreGastos.com_apertura) +
+    num0(cuadre.comision_cheques) +
+    num0(cuadre.cuota_socio) +
+    num0(cuadre.seguros) +
+    num0(cuadreCheq1.importe) +
+    num0(cuadreCheq2.importe);
   cuadre.total_salidas = round2(totalSalidasCheques);
   const sobranCuadre =
-    Number(cuadre.prestamo_concedido || 0) +
-    Number(cuadre.ingreso_en_cuenta || 0) -
-    Number(cuadre.total_salidas || 0);
+    num0(cuadre.prestamo_concedido) +
+    num0(cuadre.ingreso_en_cuenta) -
+    num0(cuadre.total_salidas);
   cuadre.sobran_en_cuenta = round2(sobranCuadre);
 
   if (
@@ -29801,7 +29811,7 @@ const computeHipotecaLiquidacionComputed = (data) => {
   }
 
   // Cheques: reparto por defecto del total_a_percibir.
-  const totalPercibirNum = Number(vendedor.total_a_percibir || 0);
+  const totalPercibirNum = num0(vendedor.total_a_percibir);
   const cheq1Has = (cuadreCheq1.importe ?? "") !== "";
   const cheq2Has = (cuadreCheq2.importe ?? "") !== "";
   const v2Exists = !!String(vendedorVendedores?.v2?.nombre || "").trim();
@@ -29815,25 +29825,25 @@ const computeHipotecaLiquidacionComputed = (data) => {
         cuadreCheq1.importe = round2(totalPercibirNum);
       }
     } else if (v2Exists && cheq1Has && !cheq2Has) {
-      cuadreCheq2.importe = round2(totalPercibirNum - Number(cuadreCheq1.importe || 0));
+      cuadreCheq2.importe = round2(totalPercibirNum - num0(cuadreCheq1.importe));
     } else if (v2Exists && !cheq1Has && cheq2Has) {
-      cuadreCheq1.importe = round2(totalPercibirNum - Number(cuadreCheq2.importe || 0));
+      cuadreCheq1.importe = round2(totalPercibirNum - num0(cuadreCheq2.importe));
     }
   }
 
   // Total medios de pago (como en el Excel): señal + deducciones vendedor + cheques.
   const totalMediosPago =
-    Number(entregas.senal || 0) +
-    Number(vendedorDeducciones.cancelacion_economica || 0) +
-    Number(vendedorDeducciones.cancelacion_registral || 0) +
-    Number(vendedorDeducciones.deuda_ibi || 0) +
-    Number(vendedorDeducciones.retencion_no_residente || 0) +
-    Number(vendedorDeducciones.gestion_no_residente || 0) +
-    Number(cuadreCheq1.importe || 0) +
-    Number(cuadreCheq2.importe || 0);
+    num0(entregas.senal) +
+    num0(vendedorDeducciones.cancelacion_economica) +
+    num0(vendedorDeducciones.cancelacion_registral) +
+    num0(vendedorDeducciones.deuda_ibi) +
+    num0(vendedorDeducciones.retencion_no_residente) +
+    num0(vendedorDeducciones.gestion_no_residente) +
+    num0(cuadreCheq1.importe) +
+    num0(cuadreCheq2.importe);
   cuadre.total_medios_pago = round2(totalMediosPago);
-  const escrituradoRef = Number(comprador.escriturado || comprador.precio_compra || 0);
-  cuadre.diferencia_medios_pago = round2(escrituradoRef - Number(cuadre.total_medios_pago || 0));
+  const escrituradoRef = num0(comprador.escriturado || comprador.precio_compra);
+  cuadre.diferencia_medios_pago = round2(escrituradoRef - num0(cuadre.total_medios_pago));
 
   liq.comprador = comprador;
   comprador.gastos_compraventa = gastosCv;

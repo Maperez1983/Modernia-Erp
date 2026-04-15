@@ -4,16 +4,103 @@
 # - Se ignoran líneas vacías y las que empiezan por '#'.
 #
 # Nota: este fichero se usa para poblar el desplegable de Notaría en la ficha de financiación.
-# Si quieres el listado completo y oficial, pásanos la fuente/listado y lo importamos aquí.
+# Fuente base (parcial, hasta 100 resultados): gestoriaonline.es/notariosmalaga.html
 
-Miguel Ángel Delgado
-Notaría de Don Pedro Díaz Serrano
-Notaría (Málaga)
-Notaría (Vélez-Málaga)
-Notaría (Torrox)
-Notaría (Rincón de la Victoria)
-Notaría (Marbella)
-Notaría (Fuengirola)
-Notaría (Torremolinos)
-Notaría (Benalmádena)
-Notaría (Estepona)
+Aguilar Navarro-Reverter, Angel
+Agustino Rueda, Fernando
+Alcalá Belón, Fernando Antonio
+Almagro Anaya, Joaquín
+Almansa Moreno-Barreda, Luis Javier
+Amado Solís, Enrique
+Andújar Hurtado, José
+Arco Ramos, David
+Barbe García, María Sierra
+Bayón Pedraza, Ignacio
+Bergillos Moretón, María Amelia
+Bianchi Ruiz del Portal, Carlos
+Blesa de la Parra, Ramón Alvaro
+Bosch Ojeda, Pedro Ángel
+Burgos Casero, José Antonio
+Carmona Castejón, Federico
+Carmona del Barco, Miguel Angel
+Carrasco Molina, Mateo Jesús
+Carreño Montejo, Luis María
+Carrillo de Albornoz Fisac, Filiberto
+Casasola Gómez-Aguado, María del Carmen
+Castaño Casanova, José
+Castillo López de Medrano, Ignacio Jorge
+Castillo Tamarit, Vicente José
+Chaves Rivas, Antonio
+Colomina Ribas, Isabel
+Corral Pedruzo, Pedro Antonio
+Crespo Candela, Joaquín María
+Deus Valencia, Juan
+Diaz Serrano, Pedro
+Esteban-Hanza Navarro, Emilio
+Fernández Henares, Agustín
+Fernández-Madrid Molina, Rodrigo
+Figuerola Santos, José Luis
+Fraile Guzmán, Pilar
+Fuente del Real, Miguel Ángel de la
+Fuente Solana, María Encarnación de la
+García de Fuentes Churruca, Manuel
+García Inda, María de las Nieves
+García Jaime, María Trinidad
+García Serrano, Francisco de Asís
+García Urbano, José María
+García Villar, José Luis
+Giménez Rodríguez, Luis
+Gómez Ávila, Juan Luis
+Gómez Olivares, Juan Luis
+González Cózar, Angélica
+Guerrero Arias, Fernando
+Gutiérrez Espada, Juan Carlos
+Hinojosa Bolivar, Alberto Jesús
+Jofre Loraque, José Joaquín
+Krauel Alonso, Miguel
+Lainez Casado de Amezua, Antonio Jesús
+Lauri Brotons, Santiago
+López-Herrero Pérez, Leopoldo
+Madera Flores, Julián
+Madero García, Juan Antonio
+Mantilla de los Rios Vergara, Milagros Margarita
+Marín García, Amelia
+Martín García, Antonio
+Martín Mayoral, Gregorio Isidro
+Martín Mérida, Francisco Javier
+Martín Romero, Juan Carlos
+Martínez Palomeque, Juan Manuel
+Mateo Estevez, Joaquín
+Membrado Martínez, José
+Misas Barba, Francisco Javier
+Montoya Molina, Manuel Desiderio
+Morales Alferez, Carlos
+Moreno Moreno, Jerónimo
+Moro Domingo, Jorge
+Motos Guirao, Juan Miguel
+Navas Hidalgo, José Andrés
+Nieto Cobo, Manuel
+Núñez González, José Alberto
+Obando Bigeriego, Alvaro José
+Olmedo Martínez, Miguel
+Padial Gómez-Torrente, Ignacio
+Pardo Morales, Mauricio
+Pérez de la Cruz Manrique, Francisco Carlos
+Pérez-Padilla García, Federico
+Piñero Valverde, Vicente
+Pino Lozano, Juan Angel
+Pinto Hita, José Manuel
+Prieto Fenech, Miguel
+Quilez Estremera, Martín Antonio
+Ramos Villanueva, Juan Luis
+Real Gamundi, Pedro
+Recatala Moles, José Ramón
+Requena Cabo, Rafael
+Rincón Salas, Ricardo
+Romero López, Almudena
+Sánchez Aguilera, José
+Soriano García, Vicente Ramón
+Tejuca García, Manuel José
+Tejuca García, Silvia Ana
+Toro Ariza, Alvaro
+Vaquero Aguirre, Antonio

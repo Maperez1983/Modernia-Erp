@@ -3912,6 +3912,10 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     cuadre["comision_cheques"] = _round2(hip_com_cheques)
     cuadre["cuota_socio"] = _round2(hip_cuota_socio)
 
+    # Seguros (cuadre de cheques): por defecto, suma de los seguros NO financiados.
+    if not str(cuadre.get("seguros") or "").strip():
+        cuadre["seguros"] = _round2(prot_cash + hogar_cash + vida_cash)
+
     seguros_cuadre = parse_money_value(cuadre.get("seguros") or 0)
 
     # Total salidas en el cuadre (Excel): cheques + deducciones + gastos + seguros.
@@ -4025,6 +4029,36 @@ def render_hipoteca_print_html(payload, auto_print=False):
         if auto_print
         else ""
     )
+    section_key = normalize_lookup_text(section or "").lower()
+    filter_script = ""
+    if section_key and section_key not in {"all", "todo", "todas"}:
+        filter_script = f"""
+<script>
+(function () {{
+  try {{
+    const norm = (value) => String(value || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\\u0300-\\u036f]/g, "");
+    const params = new URLSearchParams(window.location.search || "");
+    const fromUrl = norm(params.get("section"));
+    const fromServer = norm({json.dumps(section_key)});
+    const section = fromUrl || fromServer;
+    if (!section || ["all", "todo", "todas"].includes(section)) return;
+    const allowed = new Set(["comprador", "vendedor", "cheques", "notaria"]);
+    if (!allowed.has(section)) return;
+    document.querySelectorAll(".page-break").forEach((el) => {{
+      el.style.display = "none";
+    }});
+    document.querySelectorAll("[data-print-section]").forEach((el) => {{
+      const key = norm(el.getAttribute("data-print-section"));
+      if (key !== section) el.style.display = "none";
+    }});
+  }} catch (e) {{}}
+}})();
+</script>
+"""
 
     def money(value):
         return html.escape(format_export_money(parse_money_value(value or 0)))
@@ -4067,8 +4101,8 @@ def render_hipoteca_print_html(payload, auto_print=False):
             else f'<span class="badge badge-bad">NO CUADRA · Δ {money(cuadre_delta)}</span>'
         )
         liq_section = f"""
-      <div class="panel" style="grid-column: 1 / -1;">
-        <h2>Liquidación comprador</h2>
+	      <div class="panel" data-print-section="comprador" style="grid-column: 1 / -1;">
+	        <h2>Liquidación comprador</h2>
         <dl>
           <dt>Precio compra vivienda</dt><dd>{money(comprador.get("precio_compra"))}</dd>
           <dt>Escriturado</dt><dd>{money(comprador.get("escriturado"))}</dd>
@@ -4131,7 +4165,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
       </div>
 
       <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      <div class="panel" data-print-section="vendedor" style="grid-column: 1 / -1;">
         <h2>Liquidación vendedor</h2>
         <dl>
           <dt>Cliente (operación)</dt><dd>{html.escape(str(vendedor.get("cliente") or payload.get("cliente") or "-"))}</dd>
@@ -4172,7 +4206,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
       </div>
 
       <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      <div class="panel" data-print-section="cheques" style="grid-column: 1 / -1;">
         <h2>Cuadre de cheques {cuadre_badge}</h2>
         <dl>
           <dt>Préstamo concedido</dt><dd>{money(cuadre.get("prestamo_concedido"))}</dd>
@@ -4214,7 +4248,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
       </div>
 
       <div class="page-break"></div>
-      <div class="panel" style="grid-column: 1 / -1;">
+      <div class="panel" data-print-section="notaria" style="grid-column: 1 / -1;">
         <h2>Parte notaría</h2>
         <dl>
           <dt>Notaría</dt><dd>{html.escape(str(notaria.get("nombre") or ""))}</dd>
@@ -4411,6 +4445,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
     }}
   </style>
   {print_script}
+  {filter_script}
 </head>
 <body>
   <div class="sheet">
@@ -52108,6 +52143,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipoteca_ficha_print":
             record_id = (params.get("id", [""])[0] or "").strip()
+            section = (params.get("section", [""])[0] or "").strip()
             auto_print = (params.get("autoprint", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -52135,6 +52171,7 @@ class Handler(BaseHTTPRequestHandler):
             content = render_hipoteca_print_html(
                 export_row,
                 auto_print=auto_print,
+                section=section,
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
