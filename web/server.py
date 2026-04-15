@@ -19359,6 +19359,37 @@ def ensure_tables(db_path):
         apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
     ensure_s3_grants_table(conn)
+    # Performance: índices básicos en tablas muy consultadas (evita timeouts/502 en Render para listados).
+    # Best-effort: no bloqueamos arranque si alguna tabla aún no existe en un dataset legacy.
+    try:
+        if not _migration_done(conn, "perf_indexes_core_v1"):
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_acciones_servicio_empresa_fecha ON acciones (servicio, empresa_id, fecha, hora)"
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_acciones_servicio_inmueble_fecha ON acciones (servicio, inmueble_id, fecha, hora)"
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_demandas_empresa_created ON demandas (empresa_id, created_at)"
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_gestoria_empresa_created ON gestoria (empresa_id, created_at)"
+                )
+            except Exception:
+                pass
+            _migration_mark(conn, "perf_indexes_core_v1")
+    except Exception:
+        pass
     # Backfill/compat: algunos datasets legacy no tenían todavía tablas base usadas en el dashboard.
     # Evita 500 en endpoints como `/api/dashboard` cuando se despliegan nuevas vistas.
     try:

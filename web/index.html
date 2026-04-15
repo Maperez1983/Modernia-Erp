@@ -2573,7 +2573,7 @@
 		                  </div>
 		                </div>
 
-			                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú Tecnocloud">
+				                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú CRM">
 			                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
 			                    + Nuevo
 			                  </button>
@@ -2790,7 +2790,7 @@
                     <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
                     <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
                   </div>
-                  <div class="footer muted">Vista depurada para mantener la sencillez visual tipo Tecnocloud (sin KPIs ni “calidad/control operativo”).</div>
+	                  <div class="footer muted">Vista depurada para mantener la sencillez visual (sin KPIs ni bloques de “calidad/control operativo”).</div>
                 </div>
               </div>
 		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
@@ -3513,7 +3513,6 @@
 			            <div class="tabs" id="inmuebleTabs">
 			              <button class="tab active" type="button" data-tab="datos">Información</button>
 			              <button class="tab hidden" type="button" data-tab="noticia" id="inmuebleNoticiaTabBtn">Noticia</button>
-			              <button class="tab hidden" type="button" data-tab="generar_encargo" id="inmuebleGenerarEncargoTabBtn">Encargo</button>
 			              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
 			              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
 			              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
@@ -3551,36 +3550,25 @@
                 </div>
               </div>
 		            </div>
-		            <div id="inmuebleTabNoticia" class="hidden">
-		              <div class="form-card">
-		                <div class="section-head">
-		                  <div>
-		                    <h3>Datos de la noticia</h3>
-		                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
-		                  </div>
-		                </div>
-		                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
-		              </div>
-		            </div>
-		            <div id="inmuebleTabGenerarEncargo" class="hidden">
+			            <div id="inmuebleTabNoticia" class="hidden">
+			              <div class="form-card">
+			                <div class="section-head">
+			                  <div>
+			                    <h3>Datos de la noticia</h3>
+			                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
+			                  </div>
+			                  <div class="form-actions">
+			                    <button type="button" class="secondary hidden" id="inmuebleEncargoModalOpenBtn">Hoja de encargo</button>
+			                  </div>
+			                </div>
+			                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
+			              </div>
+			            </div>
+		            <div id="inmuebleTabDemandas" class="hidden">
 	              <div class="form-card">
-	                <div class="section-head">
-	                  <div>
-                    <h3>Hoja de encargo</h3>
-                    <p class="muted">Genera la hoja de encargo (PDF editable) con datos del propietario, del inmueble y condiciones. La fase del inmueble se actualiza al cerrar la cita correspondiente.</p>
-                  </div>
-                </div>
-                <div class="form-actions">
-                  <button type="button" class="secondary" id="inmuebleGenerarEncargoBtn">Generar hoja de encargo</button>
-                  <span class="muted" id="inmuebleGenerarEncargoStatus"></span>
-                </div>
-              </div>
-            </div>
-	            <div id="inmuebleTabDemandas" class="hidden">
-              <div class="form-card">
-                <h3>Iteración con compradores</h3>
-                <p class="muted">Lista operativa de compradores para este inmueble (contacto, próxima acción, notas).</p>
-                <div id="inmuebleCompradoresTable"></div>
+	                <h3>Iteración con compradores</h3>
+	                <p class="muted">Lista operativa de compradores para este inmueble (contacto, próxima acción, notas).</p>
+	                <div id="inmuebleCompradoresTable"></div>
                 <div class="footer" id="inmuebleCompradoresInfo"></div>
               </div>
               <div class="form-card">
@@ -3823,7 +3811,7 @@
 	                <div class="section-head">
 	                  <div>
 	                    <h3>Historial de cambios</h3>
-	                    <p class="muted">Registro de cambios sobre la ficha (estilo Tecnocloud).</p>
+		                    <p class="muted">Registro de cambios sobre la ficha.</p>
 	                  </div>
 	                </div>
 	                <div id="inmuebleHistorialTabList" class="crm-focus-list"></div>
@@ -3845,7 +3833,7 @@
 	                <div class="section-head">
 	                  <div>
 	                    <h3>Servicios inmobiliarios</h3>
-	                    <p class="muted">Características rápidas de la vivienda (como en Tecnocloud).</p>
+		                    <p class="muted">Características rápidas de la vivienda.</p>
 	                  </div>
 	                  <button type="button" class="secondary" id="inmuebleServiciosTabEditBtn">Editar servicios</button>
 	                </div>
@@ -3857,7 +3845,7 @@
 		                <div class="section-head">
 		                  <div>
 		                    <h3>Imágenes <span class="pill" id="inmuebleFotosCount">0</span></h3>
-		                    <p class="muted">Fotos del inmueble (estilo Tecnocloud).</p>
+			                    <p class="muted">Fotos del inmueble.</p>
 		                  </div>
 		                  <div class="form-actions">
 		                    <button type="button" class="secondary" id="inmuebleFotosUploadBtn">Cargar imagen</button>
@@ -3989,7 +3977,7 @@
 		                  <div class="section-head">
 		                    <div>
 		                      <h3>Servicios <span class="pill" id="inmuebleTecnoSideServiciosCount">0</span></h3>
-		                      <p class="muted">Características rápidas (para tener la ficha igual de operativa que Tecnocloud).</p>
+			                      <p class="muted">Características rápidas para el anuncio y la gestión.</p>
 		                    </div>
 		                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideServiciosEdit">Nuevo</button>
 		                  </div>
@@ -8770,12 +8758,12 @@
 		      </div>
 		    </div>
 
-		    <div id="inmuebleGuidedModal" class="modal hidden">
-		      <div class="modal-content">
-		        <div class="modal-header">
-	          <h3>Proceso guiado</h3>
-	          <button type="button" id="inmuebleGuidedClose" class="ghost">✕</button>
-	        </div>
+			    <div id="inmuebleGuidedModal" class="modal hidden">
+			      <div class="modal-content">
+			        <div class="modal-header">
+		          <h3>Proceso guiado</h3>
+		          <button type="button" id="inmuebleGuidedClose" class="ghost">✕</button>
+		        </div>
 	        <div class="modal-body">
 	          <div id="inmuebleGuidedHeader" class="crm-mini-list"></div>
 
@@ -8842,14 +8830,30 @@
 	          </div>
 	          <div class="footer muted" id="inmuebleGuidedStatus"></div>
 	        </div>
-	      </div>
-	    </div>
+		      </div>
+		    </div>
 
-	    <div id="workspaceCustomerModal" class="modal hidden">
-	      <div class="modal-content">
-	        <div class="modal-header">
-	          <h3>Nuevo cliente (workspace)</h3>
-	          <button type="button" id="workspaceCustomerModalClose" class="ghost">✕</button>
+		    <div id="inmuebleEncargoModal" class="modal hidden" aria-hidden="true">
+		      <div class="modal-content">
+		        <div class="modal-header">
+		          <h3>Hoja de encargo</h3>
+		          <button type="button" id="inmuebleEncargoModalClose" class="ghost">✕</button>
+		        </div>
+		        <div class="modal-body">
+		          <p class="muted">Genera la hoja de encargo (PDF) ya rellenada con los datos del propietario y del inmueble.</p>
+		          <div class="modal-actions">
+		            <button type="button" class="secondary" id="inmuebleGenerarEncargoBtn">Generar hoja de encargo</button>
+		            <span class="muted" id="inmuebleGenerarEncargoStatus"></span>
+		          </div>
+		        </div>
+		      </div>
+		    </div>
+
+		    <div id="workspaceCustomerModal" class="modal hidden">
+		      <div class="modal-content">
+		        <div class="modal-header">
+		          <h3>Nuevo cliente (workspace)</h3>
+		          <button type="button" id="workspaceCustomerModalClose" class="ghost">✕</button>
         </div>
         <form id="workspaceCustomerForm" class="modal-body form-grid">
           <label class="span-2">

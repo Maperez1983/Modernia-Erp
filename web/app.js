@@ -105,41 +105,57 @@ const sanitizeApiUrl = (value) => {
 };
 
 const api = async (path) => {
-  let res;
-  try {
-    res = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin" });
-  } catch (err) {
-    const message = err?.name === "AbortError"
-      ? "Tiempo de espera agotado."
-      : "No se pudo conectar con el servidor.";
-    const error = new Error(message);
-    error.cause = err;
-    error.status = 0;
-    throw error;
-  }
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-  if (!res.ok) {
-    const msg =
-      (data && data.detail)
-      || (data && data.error && data.error !== "API error" ? data.error : "")
-      || (data && data.error)
-      || `HTTP ${res.status}`;
-    const safePath = sanitizeApiUrl(path);
-    const error = new Error(safePath ? `${msg} · ${safePath}` : msg);
-    error.status = res.status;
-    error.data = data;
-    if (res.status === 401) {
-      error.isAuthError = true;
-      handleAuthExpired();
+  const maxAttempts = 3;
+  const retryableStatuses = new Set([502, 503, 504]);
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let res;
+    try {
+      res = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin" });
+    } catch (err) {
+      const message =
+        err?.name === "AbortError" ? "Tiempo de espera agotado." : "No se pudo conectar con el servidor.";
+      const error = new Error(message);
+      error.cause = err;
+      error.status = 0;
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        continue;
+      }
+      throw error;
     }
-    throw error;
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      if (retryableStatuses.has(res.status) && attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        continue;
+      }
+      const msg =
+        (data && data.detail) ||
+        (data && data.error && data.error !== "API error" ? data.error : "") ||
+        (data && data.error) ||
+        `HTTP ${res.status}`;
+      const safePath = sanitizeApiUrl(path);
+      const error = new Error(safePath ? `${msg} · ${safePath}` : msg);
+      error.status = res.status;
+      error.data = data;
+      if (res.status === 401) {
+        error.isAuthError = true;
+        handleAuthExpired();
+      }
+      lastError = error;
+      throw error;
+    }
+    return data;
   }
-  return data;
+  if (lastError) throw lastError;
+  throw new Error("No se pudo completar la petición.");
 };
 
 const apiPost = async (url, payload = {}) => {
@@ -2946,15 +2962,16 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
   const inmuebleHistorialTabList = document.getElementById("inmuebleHistorialTabList");
   const inmuebleTabEvolucion = document.getElementById("inmuebleTabEvolucion");
   const inmuebleEvolucionTabTable = document.getElementById("inmuebleEvolucionTabTable");
-  const inmuebleTabServicios = document.getElementById("inmuebleTabServicios");
-  const inmuebleServiciosTabEditBtn = document.getElementById("inmuebleServiciosTabEditBtn");
-  const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
-	const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
-const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
-const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
-	 const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
-	 const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
-	 const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
+	const inmuebleTabServicios = document.getElementById("inmuebleTabServicios");
+	const inmuebleServiciosTabEditBtn = document.getElementById("inmuebleServiciosTabEditBtn");
+	const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
+		const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
+const inmuebleEncargoModalOpenBtn = document.getElementById("inmuebleEncargoModalOpenBtn");
+const inmuebleEncargoModal = document.getElementById("inmuebleEncargoModal");
+const inmuebleEncargoModalClose = document.getElementById("inmuebleEncargoModalClose");
+		 const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
+		 const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
+		 const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
 	 const inmuebleGuidedBtn = document.getElementById("inmuebleGuidedBtn");
 	 const inmuebleGuidedModal = document.getElementById("inmuebleGuidedModal");
 	 const inmuebleGuidedClose = document.getElementById("inmuebleGuidedClose");
@@ -3623,6 +3640,9 @@ const normalizeLookupText = (value) =>
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+try {
+  window.normalizeLookupText = normalizeLookupText;
+} catch {}
 
 const tokenizeSearchQuery = (raw = "") => {
   const text = String(raw || "").trim();
@@ -17393,6 +17413,19 @@ const resolveCrmInmoEmpresa = () => {
 const resolveCrmInmoEmpresaNombre = () => resolveCrmInmoEmpresa()?.nombre || "";
 const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
 
+const resolveCurrentInmuebleEmpresa = () => {
+  const inmuebleEmpresaId = String(
+    state.currentInmuebleContext?.inmueble?.empresa_id ||
+      state.currentInmueble?.empresa_id ||
+      ""
+  ).trim();
+  const matched = inmuebleEmpresaId ? resolveEmpresaById(inmuebleEmpresaId) : null;
+  return matched || resolveCrmInmoEmpresa();
+};
+
+const resolveCurrentInmuebleEmpresaNombre = () =>
+  resolveCurrentInmuebleEmpresa()?.nombre || resolveCrmInmoEmpresaNombre() || "";
+
 const resolveCrmSegurosEmpresaNombre = () => resolveCrmSegurosEmpresa()?.nombre || FINCAS_COMPANY;
 const resolveCrmGestoriaEmpresaNombre = () => resolveCrmGestoriaEmpresa()?.nombre || FINCAS_COMPANY;
 const resolveCrmFinEmpresaNombre = () => resolveCrmFinEmpresa()?.nombre || FIN_COMPANY;
@@ -23661,7 +23694,7 @@ const saveInmuebleFields = async (updates = {}) => {
 		      rerenderCurrentInmuebleGrids();
 		    }
 		    if (Object.prototype.hasOwnProperty.call(updates || {}, "estado")) {
-		      syncInmuebleGenerarEncargoTab(state.currentInmuebleContext?.inmueble || state.currentInmueble || {});
+		      syncInmuebleEncargoModalButton(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}, state.currentInmuebleContext?.captacion || {});
 		    }
 		    clearPendingInlineEdits("inmueble", Object.keys(updates || {}));
 		    return data;
@@ -23747,14 +23780,14 @@ const saveCaptacionField = (field, value) => {
 	      if (state.currentInmuebleContext?.captacion) {
 	        state.currentInmuebleContext.captacion[field] = value;
 	      }
-	      if ((field === "etapa" || field === "situacion_comercial") && state.currentInmuebleContext?.inmueble) {
-	        state.currentInmuebleContext.inmueble.estado = value;
-	        rerenderCurrentInmuebleGrids();
-	        syncInmuebleGenerarEncargoTab(state.currentInmuebleContext.inmueble);
-	      }
-	      clearPendingInlineEdits("captacion", [field]);
-	      setInmuebleSaveStatus("Guardado · cambios aplicados");
-	      refreshCurrentInmuebleProfile();
+		      if ((field === "etapa" || field === "situacion_comercial") && state.currentInmuebleContext?.inmueble) {
+		        state.currentInmuebleContext.inmueble.estado = value;
+		        rerenderCurrentInmuebleGrids();
+		        syncInmuebleEncargoModalButton(state.currentInmuebleContext.inmueble, state.currentInmuebleContext?.captacion || {});
+		      }
+		      clearPendingInlineEdits("captacion", [field]);
+		      setInmuebleSaveStatus("Guardado · cambios aplicados");
+		      refreshCurrentInmuebleProfile();
 		    })
 		    .catch((error) => {
 		      setInmuebleSaveStatus(error?.message || "Error al guardar.");
@@ -25421,10 +25454,10 @@ const lookupCaptacionCatastro = async () => {
     const payload = {
       direccion,
       provincia: provinciaInput ? provinciaInput.value.trim() : "",
-      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
-      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
-      empresa_nombre: resolveCrmInmoEmpresaNombre(),
-    };
+	      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
+	      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+	      empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+	    };
     const data = await fetch("/api/inmueble_catastro_lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -25484,10 +25517,10 @@ const lookupInmuebleCatastro = async (inputMap = {}, options = {}) => {
     const payload = {
       direccion,
       provincia: provinciaInput ? provinciaInput.value.trim() : "",
-      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
-      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
-      empresa_nombre: resolveCrmInmoEmpresaNombre(),
-    };
+	      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
+	      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+	      empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+	    };
     const data = await fetch("/api/inmueble_catastro_lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -25562,12 +25595,12 @@ const syncInmuebleCatastroFicha = async (inputMap = {}, opts = {}) => {
     }
 
     setInmuebleSaveStatus("Obteniendo ficha catastral...");
-    const data = await apiPost("/api/inmueble_catastro_sync", {
-      inmueble_id: state.currentInmuebleId,
-      usuario: getCurrentUser(),
-      empresa_nombre: resolveCrmInmoEmpresaNombre(),
-      referencia_catastral: currentRef || "",
-    });
+	    const data = await apiPost("/api/inmueble_catastro_sync", {
+	      inmueble_id: state.currentInmuebleId,
+	      usuario: getCurrentUser(),
+	      empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+	      referencia_catastral: currentRef || "",
+	    });
 
     const updates = data?.updates || {};
     Object.entries(updates).forEach(([key, value]) => {
@@ -26967,22 +27000,27 @@ const populateResponsableSelects = () => {
     if (serviceFilter === "seguros") {
       SEGUROS_RESPONSABLES_FIJOS.forEach((name) => addOptionUnique(name, name));
     }
-	    users
-	      .filter((user) => {
-	        if (!serviceFilter) return true;
-	        const service = normalizeSimple(user.servicio || "");
-	        if (!service) return false;
-	        if (service.includes(serviceFilter)) return true;
-	        if (["direccion", "administracion"].includes(service)) {
-	          return true;
-	        }
-	        return false;
-	      })
+    const beforeUsersCount = used.size;
+    users
+      .filter((user) => {
+        if (!serviceFilter) return true;
+        const service = normalizeSimple(user.servicio || "");
+        if (!service) return false;
+        if (service.includes(serviceFilter)) return true;
+        if (["direccion", "administracion"].includes(service)) {
+          return true;
+        }
+        return false;
+      })
       .forEach((user) => {
       const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
       const value = user.usuario || label || user.nombre || "";
       addOptionUnique(value, label || value);
     });
+    if (serviceFilter === "inmobiliaria" && used.size === beforeUsersCount) {
+      // Fallback: si la lista de usuarios aún no está disponible, usa el catálogo fijo.
+      INMOBILIARIA_ASESORES.forEach((name) => addOptionUnique(name, name));
+    }
     if (current) {
       selectEl.value = current;
       if (normalizeSimple(selectEl.value) !== currentNorm) {
@@ -41130,7 +41168,7 @@ const resolveInmuebleTopTabKey = (tabKey = "") => {
   const key = normalizeInmuebleTabKey(tabKey);
   if (key === "noticia") return "datos";
   if (["datos", "evolucion", "imagenes", "adjuntos"].includes(key)) return key;
-  if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado", "generar_encargo"].includes(key)) {
+  if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado"].includes(key)) {
     return "evolucion";
   }
   return "datos";
@@ -41188,7 +41226,6 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabPersonas) inmuebleTabPersonas.classList.toggle("hidden", key !== "personas");
   if (inmuebleTabServicios) inmuebleTabServicios.classList.toggle("hidden", key !== "servicios");
   // Legacy tabs (solo accesibles desde acciones laterales si existen).
-  if (inmuebleTabGenerarEncargo) inmuebleTabGenerarEncargo.classList.toggle("hidden", key !== "generar_encargo");
   if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", key !== "demandas");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", key !== "estado");
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", key !== "docs");
@@ -41196,18 +41233,11 @@ const setInmuebleTab = (tab) => {
   syncInmuebleTecnocloudSidebar(key);
 };
 
-const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
-  if (!inmuebleTabs || !inmuebleGenerarEncargoTabBtn || !inmuebleTabGenerarEncargo) return;
-  const stage = normalizeSimple(inmueble?.estado || "");
-  const available = stage === "noticia" || stage === "encargo";
-  inmuebleGenerarEncargoTabBtn.classList.toggle("hidden", !available);
-  if (!available) {
-    inmuebleTabGenerarEncargo.classList.add("hidden");
-    const active = inmuebleTabs.querySelector(".tab.active")?.dataset?.tab || "";
-    if (active === "generar_encargo") {
-      setInmuebleTab("datos");
-    }
-  }
+const syncInmuebleEncargoModalButton = (inmueble = {}, captacion = {}) => {
+  if (!inmuebleEncargoModalOpenBtn) return;
+  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || captacion?.situacion_comercial || "");
+  const available = ["Noticia", "Encargo"].includes(stage);
+  inmuebleEncargoModalOpenBtn.classList.toggle("hidden", !available);
 };
 
 const syncInmuebleNoticiaTab = (inmueble = {}, captacion = {}) => {
@@ -41348,6 +41378,25 @@ const INMUEBLE_SERVICIOS_CATALOG = [
   "Reforma reciente",
 ];
 
+const openInmuebleEncargoModal = () => {
+  if (!inmuebleEncargoModal) return false;
+  inmuebleEncargoModal.classList.remove("hidden");
+  inmuebleEncargoModal.classList.add("open");
+  inmuebleEncargoModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  if (inmuebleGenerarEncargoStatus) inmuebleGenerarEncargoStatus.textContent = "";
+  return true;
+};
+
+const closeInmuebleEncargoModal = () => {
+  if (!inmuebleEncargoModal) return;
+  inmuebleEncargoModal.classList.add("hidden");
+  inmuebleEncargoModal.classList.remove("open");
+  inmuebleEncargoModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  if (inmuebleGenerarEncargoStatus) inmuebleGenerarEncargoStatus.textContent = "";
+};
+
 const openInmuebleServiciosModal = () => {
   if (!state.currentInmuebleId) {
     alert("No hay inmueble seleccionado.");
@@ -41427,11 +41476,11 @@ const openInmuebleServiciosModal = () => {
         .map((el) => String(el.value || "").trim())
         .filter(Boolean);
       try {
-	        const data = await apiPost("/api/inmueble_servicios_update", {
-	          empresa_nombre: resolveCrmInmoEmpresaNombre(),
-	          inmueble_id: state.currentInmuebleId,
-	          servicios: selectedValues,
-	        });
+		        const data = await apiPost("/api/inmueble_servicios_update", {
+		          empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+		          inmueble_id: state.currentInmuebleId,
+		          servicios: selectedValues,
+		        });
         if (data?.error) {
           if (statusEl) statusEl.textContent = data.error;
           return;
@@ -41574,11 +41623,11 @@ const openInmueblePersonasModal = async () => {
         .map((opt) => String(opt.value || "").trim())
         .filter(Boolean);
       try {
-	        const data = await apiPost("/api/inmueble_propietarios_update", {
-	          empresa_nombre: resolveCrmInmoEmpresaNombre(),
-	          inmueble_id: state.currentInmuebleId,
-	          cliente_ids: values,
-	        });
+		        const data = await apiPost("/api/inmueble_propietarios_update", {
+		          empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+		          inmueble_id: state.currentInmuebleId,
+		          cliente_ids: values,
+		        });
         if (data?.error) {
           if (statusEl) statusEl.textContent = data.error;
           return;
@@ -41673,11 +41722,11 @@ const openInmuebleDetail = (id, originView = "") => {
 	      };
       state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
   const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.situacion_comercial || captacion.etapa || "");
-	      if (hasPendingPrefill) {
-	        applyPendingInmuebleCitaPrefill();
-	      }
-	      syncInmuebleGenerarEncargoTab(inmueble);
-	      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
+		      if (hasPendingPrefill) {
+		        applyPendingInmuebleCitaPrefill();
+		      }
+		      syncInmuebleEncargoModalButton(inmueble, normalizedCaptacion);
+		      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
       if (inmuebleTitle) {
         const etapa = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "") || "Inmueble";
         const tecnoStage = etapa === "Inmueble" || etapa === "Noticia" ? etapa : "Encargo";
@@ -42949,16 +42998,16 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
         const ok = window.confirm("¿Borrar esta cita/acción? Esta acción no se puede deshacer.");
         if (!ok) return;
         try {
-          const res = await fetch("/api/acciones_delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id,
-              servicio: "inmobiliaria",
-              empresa_nombre: resolveCrmInmoEmpresaNombre(),
-              usuario: getCurrentUser(),
-            }),
-          });
+	          const res = await fetch("/api/acciones_delete", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify({
+	              id,
+	              servicio: "inmobiliaria",
+	              empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+	              usuario: getCurrentUser(),
+	            }),
+	          });
           const data = await res.json();
           if (!res.ok || data?.error) {
             alert(data?.error || `HTTP ${res.status}`);
@@ -59608,6 +59657,24 @@ if (inmuebleGenerarEncargoBtn) {
   });
 }
 
+if (inmuebleEncargoModalOpenBtn) {
+  inmuebleEncargoModalOpenBtn.addEventListener("click", () => {
+    openInmuebleEncargoModal();
+  });
+}
+
+if (inmuebleEncargoModalClose) {
+  inmuebleEncargoModalClose.addEventListener("click", () => {
+    closeInmuebleEncargoModal();
+  });
+}
+
+if (inmuebleEncargoModal) {
+  inmuebleEncargoModal.addEventListener("click", (event) => {
+    if (event.target === inmuebleEncargoModal) closeInmuebleEncargoModal();
+  });
+}
+
 if (clienteDetailBack) {
   clienteDetailBack.addEventListener("click", () => {
     closeClienteDetail();
@@ -61155,13 +61222,13 @@ const uploadInmuebleDocsFiles = async ({ files = [], tipo = "", nombreBase = "",
 
   for (let i = 0; i < queue.length; i += 1) {
     const file = queue[i];
-    const payload = {
-      inmueble_id: state.currentInmuebleId,
-      empresa_nombre: resolveCrmInmoEmpresaNombre(),
-      usuario: getCurrentUser(),
-      tipo,
-      nombre: queue.length === 1 && nombreBase ? nombreBase : file.name,
-    };
+	    const payload = {
+	      inmueble_id: state.currentInmuebleId,
+	      empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+	      usuario: getCurrentUser(),
+	      tipo,
+	      nombre: queue.length === 1 && nombreBase ? nombreBase : file.name,
+	    };
     try {
       if (file.size > maxInline) {
         try {
