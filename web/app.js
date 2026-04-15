@@ -4107,12 +4107,17 @@ const ensureModalDataLoaded = async () => {
   }
 };
 
-const openActionEditor = (ev) => {
+const openActionEditor = (ev, context = null) => {
   if (!actionModal) return;
   ensureModalDataLoaded();
   currentActionEdit = ev;
-  state.actionModalContext = null;
-  if (actionModalServicioSelect) actionModalServicioSelect.disabled = false;
+  state.actionModalContext = context && typeof context === "object" ? context : null;
+  if (actionModalServicioSelect) {
+    actionModalServicioSelect.disabled = Boolean(state.actionModalContext?.lock_service);
+  }
+  if (actionModalEstado) {
+    actionModalEstado.disabled = Boolean(state.actionModalContext?.lock_estado);
+  }
   if (actionModalStatus) actionModalStatus.textContent = "";
   if (actionModalClienteInput) actionModalClienteInput.value = ev.cliente || "";
   if (actionModalClienteId) actionModalClienteId.value = ev.cliente_id || "";
@@ -4139,6 +4144,16 @@ const openActionEditor = (ev) => {
       actionModalResponsable.value = ev.responsable;
     }
   }
+  if (state.actionModalContext) {
+    const ctx = state.actionModalContext;
+    if ((ctx.servicio || ctx.service) && actionModalServicioSelect) {
+      actionModalServicioSelect.value = String(ctx.servicio || ctx.service || "").trim();
+    }
+    const ctxClienteNombre = String(ctx.cliente_nombre || "").trim();
+    const ctxClienteId = String(ctx.cliente_id || "").trim();
+    if (ctxClienteNombre && actionModalClienteInput) actionModalClienteInput.value = ctxClienteNombre;
+    if (ctxClienteId && actionModalClienteId) actionModalClienteId.value = ctxClienteId;
+  }
   actionModal.classList.remove("hidden");
 };
 
@@ -4160,6 +4175,9 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   if (actionModalNotas) actionModalNotas.value = "";
   if (actionModalRecordatorio) actionModalRecordatorio.value = "";
   if (actionModalEstado) actionModalEstado.value = "Pendiente";
+  if (actionModalEstado) {
+    actionModalEstado.disabled = Boolean(state.actionModalContext?.lock_estado);
+  }
   if (actionModalResponsable) {
     populateActionModalResponsables(serviceValue || "gestoria");
   }
@@ -4181,6 +4199,7 @@ const closeActionEditor = () => {
   currentActionEdit = null;
   state.actionModalContext = null;
   if (actionModalServicioSelect) actionModalServicioSelect.disabled = false;
+  if (actionModalEstado) actionModalEstado.disabled = false;
 };
 
 const agendaStates = new Map();
@@ -42310,6 +42329,38 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
       const actionsTd = document.createElement("td");
       const normalizedType = normalizeInmoActionType(row.tipo || "");
       const closableTypes = new Set(["cita_adquisicion", "cita_comprador", "cita_propuesta", "cita_propietarios", "cita_contraoferta"]);
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "ghost";
+      editBtn.textContent = "Editar";
+      editBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openActionEditor(
+          {
+            id: row.id,
+            cliente: row.cliente || row.cliente_nombre || "",
+            cliente_id: row.cliente_id || "",
+            serviceId: "inmobiliaria",
+            service: "inmobiliaria",
+            dateKey: row.fecha || "",
+            time: row.hora || "",
+            tipo: row.tipo || "",
+            responsable: row.responsable || "",
+            estado: row.estado || "Pendiente",
+            notas: row.notas || "",
+            recordatorio_min: row.recordatorio_min,
+          },
+          {
+            lock_service: true,
+            lock_estado: closableTypes.has(normalizedType),
+            servicio: "inmobiliaria",
+            inmueble_id: inmuebleId,
+            empresa_id: empresaId,
+          }
+        );
+      });
+      actionsTd.appendChild(editBtn);
       const isPending = String(row.estado || "").trim().toLowerCase() === "pendiente";
       if (closableTypes.has(normalizedType) && isPending) {
         const closeBtn = document.createElement("button");
@@ -42327,8 +42378,6 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
           window.open(`/api/inmueble_negociacion_pdf?action_id=${encodeURIComponent(row.id)}`, "_blank", "noopener");
         });
         actionsTd.appendChild(docBtn);
-      } else {
-        actionsTd.textContent = "-";
       }
       tr.appendChild(actionsTd);
       tbody.appendChild(tr);
@@ -54409,7 +54458,9 @@ if (actionModalSave) {
         ? resolveCrmFinEmpresaNombre()
         : service === "seguros"
           ? resolveCrmSegurosEmpresaNombre()
-          : resolveCrmGestoriaEmpresaNombre();
+          : service === "inmobiliaria"
+            ? resolveCrmInmoEmpresaNombre()
+            : resolveCrmGestoriaEmpresaNombre();
     const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
     const payload = {
       id: currentActionEdit ? currentActionEdit.id : undefined,
@@ -54475,6 +54526,14 @@ if (actionModalSave) {
         if (actionModalStatus) actionModalStatus.textContent = "Guardado.";
         closeActionEditor();
         loadAgendaGeneral();
+        if (service === "inmobiliaria") {
+          const inmId =
+            String(payload.inmueble_id || state.currentInmuebleId || "").trim();
+          const empresaId = resolveCrmInmoEmpresaId();
+          if (inmId && empresaId) {
+            loadInmuebleActividad(inmId, empresaId);
+          }
+        }
         const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
         const fin = resolveCrmFinEmpresa();
         if (fincas) {
