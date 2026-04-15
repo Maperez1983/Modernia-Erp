@@ -22001,7 +22001,7 @@ const CAPTACION_FIELDS_ENCARGO = [
   { key: "notas", label: "Notas internas", type: "textarea", section: "Notas internas" },
 ];
 
-const CLIENTE_FIELDS = [
+const CLIENTE_FIELDS_BASE = [
   { key: "tipo_persona", label: "Tipo persona", type: "select", options: ["Física", "Jurídica"] },
   { key: "apellidos", label: "Apellidos", type: "text" },
   { key: "nombre", label: "Nombre", type: "text" },
@@ -22011,6 +22011,13 @@ const CLIENTE_FIELDS = [
   { key: "otro_telefono", label: "Otro teléfono", type: "text" },
   { key: "email", label: "Email", type: "text" },
   { key: "id_personal", label: "Id. personal", type: "text" },
+  { key: "fecha_nacimiento", label: "Fecha nacimiento", type: "date" },
+  { key: "direccion", label: "Dirección", type: "text" },
+  { key: "direccion_numero", label: "Número", type: "text" },
+  { key: "codigo_postal", label: "Código postal", type: "text" },
+  { key: "localidad", label: "Localidad", type: "text" },
+  { key: "poblacion", label: "Población", type: "text" },
+  { key: "provincia", label: "Provincia", type: "text" },
   {
     key: "cliente_generico_web",
     label: "Cliente genérico web",
@@ -22020,6 +22027,28 @@ const CLIENTE_FIELDS = [
       { value: "1", label: "Sí" },
     ],
   },
+  {
+    key: "perfil",
+    label: "Perfil",
+    type: "select",
+    options: [
+      "Autónomo",
+      "Empresa",
+      "Comunidad",
+      "Particular",
+      "Comprador",
+      "Vendedor",
+      "Inquilino",
+      "Arrendador",
+      "Informador",
+      "Promotor",
+      "Inversor",
+    ],
+  },
+  { key: "estado", label: "Estado", type: "text" },
+];
+
+const CLIENTE_FIELDS_INMO_FIN = [
   {
     key: "tiene_pedido",
     label: "Tiene pedido",
@@ -22042,33 +22071,20 @@ const CLIENTE_FIELDS = [
       { value: "1", label: "Sí" },
     ],
   },
-  { key: "fecha_nacimiento", label: "Fecha nacimiento", type: "date" },
-  { key: "direccion", label: "Dirección", type: "text" },
-  { key: "direccion_numero", label: "Número", type: "text" },
-  { key: "codigo_postal", label: "Código postal", type: "text" },
-  { key: "localidad", label: "Localidad", type: "text" },
-  { key: "poblacion", label: "Población", type: "text" },
-  { key: "provincia", label: "Provincia", type: "text" },
-  {
-    key: "perfil",
-    label: "Perfil",
-    type: "select",
-    options: [
-      "Autónomo",
-      "Empresa",
-      "Comunidad",
-      "Particular",
-      "Comprador",
-      "Vendedor",
-      "Inquilino",
-      "Arrendador",
-      "Informador",
-      "Promotor",
-      "Inversor",
-    ],
-  },
-  { key: "estado", label: "Estado", type: "text" },
 ];
+
+const getClienteFichaFields = (serviceParam = "") => {
+  const svc = normalizeSimple(serviceParam || "");
+  if (svc === "inmobiliaria" || svc === "financiaciones" || svc === "hipotecas") {
+    return [...CLIENTE_FIELDS_BASE, ...CLIENTE_FIELDS_INMO_FIN];
+  }
+  // Si entramos desde Gestoría/Seguros/etc, no mezclar campos de Inmo/Hipotecas en la ficha.
+  if (svc) {
+    return CLIENTE_FIELDS_BASE;
+  }
+  // Vista general (sin contexto): muestra todo.
+  return [...CLIENTE_FIELDS_BASE, ...CLIENTE_FIELDS_INMO_FIN];
+};
 
 const SERVICE_OPTIONS = [
   "Inmobiliaria",
@@ -52408,7 +52424,7 @@ const openClienteDetail = (id) => {
         nombre: split.nombre || cliente.nombre || "",
         apellidos: split.apellidos || "",
       };
-      renderEditableGrid(clienteDetailGrid, CLIENTE_FIELDS, clienteData, "cliente");
+      renderEditableGrid(clienteDetailGrid, getClienteFichaFields(serviceParam), clienteData, "cliente");
     }
     let hasGestoria = false;
     let hasSeguros = false;
