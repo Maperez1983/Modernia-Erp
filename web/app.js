@@ -3551,6 +3551,17 @@ const normalizeSimple = (value) =>
     .toLowerCase()
     .trim();
 
+// Normaliza textos de "lookups" (catálogos/alias) para comparaciones robustas.
+// - Quita tildes
+// - Minúsculas
+// - Convierte separadores/puntuación a espacios
+// - Colapsa espacios
+const normalizeLookupText = (value) =>
+  normalizeSimple(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const tokenizeSearchQuery = (raw = "") => {
   const text = String(raw || "").trim();
   if (!text) return [];
