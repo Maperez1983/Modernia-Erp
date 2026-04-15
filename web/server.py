@@ -3886,15 +3886,19 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     senal = parse_money_value(entregas.get("senal") or 0)
     transf_modernia = parse_money_value(entregas.get("transf_modernia") or 0)
     prestamo_concedido = parse_money_value(entregas.get("prestamo_concedido") or 0)
-    ingresar_actual_raw = str(entregas.get("ingresar_banco") or "").strip()
-    if ingresar_actual_raw:
-        ingresar_banco = parse_money_value(ingresar_actual_raw) or 0.0
-        entregas["ingresar_banco"] = _round2(ingresar_banco)
+    ingresar_actual = entregas.get("ingresar_banco")
+    ingresar_banco = None
+    if isinstance(ingresar_actual, (int, float)):
+        ingresar_banco = float(ingresar_actual)
     else:
+        ingresar_actual_raw = str(ingresar_actual or "").strip()
+        if ingresar_actual_raw:
+            ingresar_banco = parse_money_value(ingresar_actual_raw) or 0.0
+    if ingresar_banco is None:
         # A ingresar en banco autocalculado como Excel (solo si está vacío).
         base = max(suma_total_necesaria - prestamo_concedido - senal - transf_modernia, 0)
         ingresar_banco = float((int((base + 99) // 100) * 100)) if base > 0 else 0.0
-        entregas["ingresar_banco"] = _round2(ingresar_banco)
+    entregas["ingresar_banco"] = _round2(ingresar_banco)
 
     suma_entregada = _round2(senal + transf_modernia + ingresar_banco)
     comprador["suma_total_entregada"] = suma_entregada
@@ -3943,29 +3947,6 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
 
     seguros_cuadre = parse_money_value(cuadre.get("seguros") or 0)
 
-    # Total salidas en el cuadre (Excel): cheques + deducciones + gastos + seguros.
-    cheq1_imp = parse_money_value(cuadre_cheq1.get("importe") or 0)
-    cheq2_imp = parse_money_value(cuadre_cheq2.get("importe") or 0)
-    total_salidas = _round2(
-        cheq1_imp
-        + cheq2_imp
-        + parse_money_value(cuadre.get("cancelacion_economica") or 0)
-        + parse_money_value(cuadre.get("retencion_cancelacion_registral") or 0)
-        + parse_money_value(cuadre.get("retencion_ibi") or 0)
-        + parse_money_value(cuadre.get("retencion_no_residente") or 0)
-        + parse_money_value(cuadre.get("gestion_no_residente") or 0)
-        + parse_money_value(cuadre_gastos.get("compraventa") or 0)
-        + parse_money_value(cuadre_gastos.get("hipoteca") or 0)
-        + parse_money_value(cuadre_gastos.get("com_apertura") or 0)
-        + parse_money_value(cuadre.get("comision_cheques") or 0)
-        + parse_money_value(cuadre.get("cuota_socio") or 0)
-        + seguros_cuadre
-    )
-    cuadre["total_salidas"] = total_salidas
-
-    sobran_cuadre = _round2(prestamo_concedido + ingresar_banco - total_salidas)
-    cuadre["sobran_en_cuenta"] = sobran_cuadre
-
     # Beneficiarios por defecto (OMF vendedor/es).
     v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
     v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
@@ -3992,6 +3973,31 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
             cuadre_cheq2["importe"] = _round2(total_percibir - parse_money_value(cuadre_cheq1.get("importe") or 0))
         elif v2_exists and not cheq1_has and cheq2_has:
             cuadre_cheq1["importe"] = _round2(total_percibir - parse_money_value(cuadre_cheq2.get("importe") or 0))
+
+    # Importes de cheques (ya con reparto por defecto aplicado, si tocaba).
+    cheq1_imp = parse_money_value(cuadre_cheq1.get("importe") or 0)
+    cheq2_imp = parse_money_value(cuadre_cheq2.get("importe") or 0)
+
+    # Total salidas en el cuadre (Excel): cheques + deducciones + gastos + seguros.
+    total_salidas = _round2(
+        cheq1_imp
+        + cheq2_imp
+        + parse_money_value(cuadre.get("cancelacion_economica") or 0)
+        + parse_money_value(cuadre.get("retencion_cancelacion_registral") or 0)
+        + parse_money_value(cuadre.get("retencion_ibi") or 0)
+        + parse_money_value(cuadre.get("retencion_no_residente") or 0)
+        + parse_money_value(cuadre.get("gestion_no_residente") or 0)
+        + parse_money_value(cuadre_gastos.get("compraventa") or 0)
+        + parse_money_value(cuadre_gastos.get("hipoteca") or 0)
+        + parse_money_value(cuadre_gastos.get("com_apertura") or 0)
+        + parse_money_value(cuadre.get("comision_cheques") or 0)
+        + parse_money_value(cuadre.get("cuota_socio") or 0)
+        + seguros_cuadre
+    )
+    cuadre["total_salidas"] = total_salidas
+
+    sobran_cuadre = _round2(prestamo_concedido + ingresar_banco - total_salidas)
+    cuadre["sobran_en_cuenta"] = sobran_cuadre
 
     total_medios_pago = _round2(senal + vend_can_eco + vend_can_reg + vend_ibi + vend_ret + vend_gest_nr + cheq1_imp + cheq2_imp)
     cuadre["total_medios_pago"] = total_medios_pago
@@ -4030,7 +4036,7 @@ def compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw):
     }
 
 
-def render_hipoteca_print_html(payload, auto_print=False):
+def render_hipoteca_print_html(payload, auto_print=False, section=None):
     cliente = html.escape(payload["cliente"] or "Cliente")
     banco = html.escape(payload["banco"] or "-")
     tipo = html.escape(payload["tipo_hipoteca"] or "-")
