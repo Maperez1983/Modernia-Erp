@@ -637,7 +637,8 @@ def main() -> None:
         raise SystemExit("No se encontraron clientes de renta aplicados en la base local.")
 
     render_workdir = str(args.render_workdir or DEFAULT_RENDER_WORKDIR).rstrip("/")
-    scratch_dir = f"{render_workdir}/_scratch_sync"
+    # En Render, el repo puede no ser escribible en algunos despliegues. Usamos /tmp para ficheros temporales.
+    scratch_dir = "/tmp/rentas_sync"
     remote_payload = f"{scratch_dir}/rentas_sync.json"
     remote_script = f"{scratch_dir}/rentas_sync_remote_pg.py"
     render_python = str(args.render_python or "").strip() or f"{render_workdir}/.venv/bin/python"
