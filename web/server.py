@@ -30392,10 +30392,19 @@ def send_file(handler, path):
         # Los assets estáticos sí pueden cachearse fuerte porque van versionados con `?v=...`.
         # Importante: el service worker NO debe cachearse con immutable, o los clientes se quedan
         # enganchados a un SW viejo y la UI puede quedar desincronizada tras deploy.
+        request_path = str(getattr(handler, "path", "") or "")
+        has_version = "?v=" in request_path or "&v=" in request_path
         if path.suffix == ".html" or path.name == "sw.js":
             handler.send_header("Cache-Control", "no-store")
             handler.send_header("Pragma", "no-cache")
-        elif path.suffix in {".js", ".css", ".webmanifest", ".svg", ".png", ".jpg", ".jpeg", ".gif"}:
+        elif path.suffix in {".js", ".css", ".webmanifest"}:
+            # Si NO hay `?v=...`, no cachear fuerte para evitar que el navegador se quede con un app.js viejo.
+            if has_version:
+                handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            else:
+                handler.send_header("Cache-Control", "no-store")
+                handler.send_header("Pragma", "no-cache")
+        elif path.suffix in {".svg", ".png", ".jpg", ".jpeg", ".gif"}:
             handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
 
         # Compresión gzip para acelerar cargas (app.js es grande).
