@@ -524,7 +524,23 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl, contentType);
   } catch (xhrErr) {
     if (statusEl) statusEl.textContent = "Reintentando subida...";
-    await uploadBlobToSignedUrlWithFetch(presign.url, fileToUpload, contentType);
+    try {
+      await uploadBlobToSignedUrlWithFetch(presign.url, fileToUpload, contentType);
+    } catch (fetchErr) {
+      const origin = (() => {
+        try {
+          return String(window?.location?.origin || "").trim();
+        } catch {
+          return "";
+        }
+      })();
+      const hint = origin ? ` Revisa CORS del bucket para permitir PUT desde ${origin}.` : "";
+      const message = String(fetchErr?.message || xhrErr?.message || "").trim();
+      if (normalizeSimple(message) === "loadfailed") {
+        throw new Error(`No se pudo subir el archivo (bloqueo de red/CORS).${hint}`);
+      }
+      throw new Error(message || `No se pudo subir el archivo.${hint}`);
+    }
   }
   if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
     const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
@@ -26951,17 +26967,17 @@ const populateResponsableSelects = () => {
     if (serviceFilter === "seguros") {
       SEGUROS_RESPONSABLES_FIJOS.forEach((name) => addOptionUnique(name, name));
     }
-    users
-      .filter((user) => {
-        if (!serviceFilter) return true;
-        const service = normalizeSimple(user.servicio || "");
-        if (!service) return true;
-        if (service.includes(serviceFilter)) return true;
-        if (["direccion", "administracion"].includes(service)) {
-          return true;
-        }
-        return false;
-      })
+	    users
+	      .filter((user) => {
+	        if (!serviceFilter) return true;
+	        const service = normalizeSimple(user.servicio || "");
+	        if (!service) return false;
+	        if (service.includes(serviceFilter)) return true;
+	        if (["direccion", "administracion"].includes(service)) {
+	          return true;
+	        }
+	        return false;
+	      })
       .forEach((user) => {
       const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
       const value = user.usuario || label || user.nombre || "";
