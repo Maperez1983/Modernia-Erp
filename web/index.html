@@ -2370,7 +2370,15 @@
 		              </div>
 		              <datalist id="inmoPoblacionOptions"></datalist>
 
-		              <div class="crm-side-sep" aria-hidden="true"></div>
+			              <div class="crm-side-sep" aria-hidden="true"></div>
+		              <button type="button" class="crm-side-item hidden-context" data-crm-view="fin" title="Financiaciones">
+		                <span class="crm-side-ico" aria-hidden="true">🏦</span>
+		                <span class="crm-side-txt">Finan.</span>
+		              </button>
+		              <button type="button" class="crm-side-item hidden-context" data-crm-view="seguros" title="Seguros">
+		                <span class="crm-side-ico" aria-hidden="true">🛡️</span>
+		                <span class="crm-side-txt">Seguros</span>
+		              </button>
 		              <button type="button" class="crm-side-item" data-crm-view="captaciones" title="Nuevas oportunidades">
 		                <span class="crm-side-ico" aria-hidden="true">🏠</span>
 		                <span class="crm-side-txt">Nuevas<br />Oport.</span>
@@ -2439,6 +2447,18 @@
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 			                    </span>
 			                    <span class="tc-mod-label">Recientes</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Financiaciones</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="seguros" title="Seguros">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.4 9.4-8 10-4.6-.6-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Seguros</span>
 			                  </button>
 			                  <button type="button" class="tab tc-module active" data-crm-view="resumen" title="Inicio">
 			                    <span class="tc-mod-ico" aria-hidden="true">
@@ -3084,6 +3104,12 @@
 	                  </div>
 	                </div>
 	              </div>
+              <div id="crmViewSeguros" class="crm-workspace-view hidden">
+                <div id="crmSegurosMount"></div>
+              </div>
+              <div id="crmViewFin" class="crm-workspace-view hidden">
+                <div id="crmFinMount"></div>
+              </div>
               <div id="crmViewLegal" class="crm-workspace-view hidden">
                 <div class="crm-summary-grid">
                   <div class="form-card crm-focus-card">
@@ -8767,11 +8793,11 @@
 	    <script src="app-auth.js?v=10"></script>
 	    <script src="app-routing.js?v=7"></script>
 	    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=526"></script>
+		    <script src="app.js?v=527"></script>
 	    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
-	        const TARGET_SW = "/sw.js?v=152";
+	        const TARGET_SW = "/sw.js?v=153";
 	        try {
 	          const params = new URLSearchParams(window.location.search || "");
 	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
