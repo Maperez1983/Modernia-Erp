@@ -29237,6 +29237,11 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                 h = float(field.get("height") or field.get("h") or 0)
                 value = _pdf_form_value(field.get("value") or "")
                 multiline = bool(field.get("multiline"))
+                font_size = field.get("fontSize") or field.get("fontsize") or 10
+                try:
+                    font_size = float(font_size)
+                except Exception:
+                    font_size = 10
                 flags = 4096 if multiline else 0  # Multiline
                 form.textfield(
                     name=name,
@@ -29251,7 +29256,7 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                     fillColor=None,
                     textColor=text_color,
                     fontName="Helvetica",
-                    fontSize=10,
+                    fontSize=font_size,
                     fieldFlags=flags,
                 )
             except Exception:
@@ -29458,15 +29463,20 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         email_val = _pdf_form_value(owner.get("email"), "")
         if nombre:
             parts.append(nombre)
-        if nif:
-            parts.append(f"NIF: {nif}")
+        # Compactamos para que encaje en las cajas del template (evita solaparse).
         if dom:
-            parts.append(f"Domicilio: {dom}")
+            parts.append(dom)
+        meta_bits = []
+        if nif:
+            meta_bits.append(f"NIF: {nif}")
         if tel:
-            parts.append(f"Tel: {tel}")
+            meta_bits.append(f"Tel: {tel}")
         if email_val:
-            parts.append(f"Email: {email_val}")
-        return "\n".join(parts)
+            meta_bits.append(f"Email: {email_val}")
+        if meta_bits:
+            parts.append(" · ".join(meta_bits))
+        # Máximo 3 líneas para no invadir texto del template.
+        return "\n".join(parts[:3])
 
     owner1_text = owner_block(owner1)
     owner2_text = owner_block(owner2)
@@ -29499,8 +29509,8 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
             {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles},
             {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos},
             {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros},
-            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True},
-            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True},
+            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True, "fontSize": 9},
+            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True, "fontSize": 9},
             {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas},
             {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio},
             {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde},
@@ -29528,8 +29538,9 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
             {"name": "precio_mensual", "x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
             {"name": "plazo_arr", "x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
             {"name": "honorarios", "x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
-            {"name": "owner1", "x": 60, "y": h - 246.0, "width": w - 90, "height": 80, "value": owner1_text, "multiline": True},
-            {"name": "owner2", "x": 60, "y": h - 340.0, "width": w - 90, "height": 80, "value": owner2_text, "multiline": True},
+            # Bloques propietarios (plantilla letter): ajustados a los huecos "De D./Dª..." (evita solapes).
+            {"name": "owner1", "x": 93, "y": h - 181.3, "width": w - 140, "height": 56, "value": owner1_text, "multiline": True, "fontSize": 9},
+            {"name": "owner2", "x": 93, "y": h - 262.7, "width": w - 140, "height": 56, "value": owner2_text, "multiline": True, "fontSize": 9},
         ]
 
     overlay_bytes = _build_acroform_overlay_pdf(pagesizes, fields)
@@ -29601,15 +29612,18 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
         email_val = _pdf_form_value(owner.get("email"), "")
         if nombre:
             parts.append(nombre)
-        if nif:
-            parts.append(f"NIF: {nif}")
         if dom:
-            parts.append(f"Domicilio: {dom}")
+            parts.append(dom)
+        meta_bits = []
+        if nif:
+            meta_bits.append(f"NIF: {nif}")
         if tel:
-            parts.append(f"Tel: {tel}")
+            meta_bits.append(f"Tel: {tel}")
         if email_val:
-            parts.append(f"Email: {email_val}")
-        return "\n".join(parts)
+            meta_bits.append(f"Email: {email_val}")
+        if meta_bits:
+            parts.append(" · ".join(meta_bits))
+        return "\n".join(parts[:3])
 
     owner1_text = owner_block(owner1)
     owner2_text = owner_block(owner2)
@@ -29640,8 +29654,8 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
             {"x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles},
             {"x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos},
             {"x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros},
-            {"x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True},
-            {"x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True},
+            {"x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True, "fontSize": 9, "leading": 11},
+            {"x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True, "fontSize": 9, "leading": 11},
             {"x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas},
             {"x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio},
             {"x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde},
@@ -29668,8 +29682,8 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
             {"x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
             {"x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
             {"x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
-            {"x": 60, "y": h - 246.0, "width": w - 90, "height": 80, "value": owner1_text, "multiline": True},
-            {"x": 60, "y": h - 340.0, "width": w - 90, "height": 80, "value": owner2_text, "multiline": True},
+            {"x": 93, "y": h - 181.3, "width": w - 140, "height": 56, "value": owner1_text, "multiline": True, "fontSize": 9, "leading": 11},
+            {"x": 93, "y": h - 262.7, "width": w - 140, "height": 56, "value": owner2_text, "multiline": True, "fontSize": 9, "leading": 11},
         ]
 
     overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields)
@@ -52443,6 +52457,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
 
             total = conn.execute(
@@ -52457,6 +52472,9 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND """
                 + signed_expr
+                + """
+                  AND """
+                + closed_expr
                 + """
                   AND fecha_firma IS NOT NULL
                   AND length(fecha_firma) >= 7
@@ -52482,6 +52500,9 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND """
                 + signed_expr
+                + """
+                  AND """
+                + closed_expr
                 + """
                 """,
                 (empresa_id,),
@@ -52548,7 +52569,7 @@ class Handler(BaseHTTPRequestHandler):
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             signed_closed_expr = (
-                "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada')"
+                "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
                 " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             )
             estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
@@ -52725,16 +52746,17 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchone()
 
-            firmadas_mes = conn.execute(
-                f"""
-                SELECT COUNT(*) AS total
-                FROM hipotecas
-                WHERE empresa_id = ?
-                  AND {signed_expr}
-                  AND {signed_month_expr} = ?
-                """,
-                (empresa_id, current_month),
-            ).fetchone()
+	            firmadas_mes = conn.execute(
+	                f"""
+	                SELECT COUNT(*) AS total
+	                FROM hipotecas
+	                WHERE empresa_id = ?
+	                  AND {signed_expr}
+	                  AND {closed_expr}
+	                  AND {signed_month_expr} = ?
+	                """,
+	                (empresa_id, current_month),
+	            ).fetchone()
 
             series_totales = available_years
 
