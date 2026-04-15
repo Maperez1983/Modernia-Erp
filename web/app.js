@@ -22048,7 +22048,7 @@ const CLIENTE_FIELDS_BASE = [
   { key: "estado", label: "Estado", type: "text" },
 ];
 
-const CLIENTE_FIELDS_INMO_FIN = [
+const CLIENTE_FIELDS_FIN_PROFILE = [
   {
     key: "tiene_pedido",
     label: "Tiene pedido",
@@ -22072,19 +22072,6 @@ const CLIENTE_FIELDS_INMO_FIN = [
     ],
   },
 ];
-
-const getClienteFichaFields = (serviceParam = "") => {
-  const svc = normalizeSimple(serviceParam || "");
-  if (svc === "inmobiliaria" || svc === "financiaciones" || svc === "hipotecas") {
-    return [...CLIENTE_FIELDS_BASE, ...CLIENTE_FIELDS_INMO_FIN];
-  }
-  // Si entramos desde Gestoría/Seguros/etc, no mezclar campos de Inmo/Hipotecas en la ficha.
-  if (svc) {
-    return CLIENTE_FIELDS_BASE;
-  }
-  // Vista general (sin contexto): muestra todo.
-  return [...CLIENTE_FIELDS_BASE, ...CLIENTE_FIELDS_INMO_FIN];
-};
 
 const SERVICE_OPTIONS = [
   "Inmobiliaria",
@@ -50363,11 +50350,37 @@ const getTableRowsByEmpresa = async (tabla, empresaId, q = "") => {
   };
 };
 
+const ensureClienteFinPanel = (container) => {
+  if (!container) return { form: null, data: null };
+  let form = container.querySelector("[data-cliente-fin-form]");
+  let data = container.querySelector("[data-cliente-fin-data]");
+  if (form && data) return { form, data };
+  container.innerHTML = `
+    <div class="cliente-service-form" data-cliente-fin-form="1"></div>
+    <div class="cliente-service-data" data-cliente-fin-data="1"></div>
+  `;
+  form = container.querySelector("[data-cliente-fin-form]");
+  data = container.querySelector("[data-cliente-fin-data]");
+  return { form, data };
+};
+
 const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) => {
   if (!clienteHipotecaFicha) return;
+  const panel = ensureClienteFinPanel(clienteHipotecaFicha);
+  if (panel.form) {
+    try {
+      renderEditableGrid(panel.form, CLIENTE_FIELDS_FIN_PROFILE, cliente || {}, "cliente");
+    } catch {
+      panel.form.innerHTML = "";
+    }
+  }
   const clienteNombre = String(cliente?.nombre || "").trim();
   if (!clienteNombre) {
-    clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";
+    if (panel.data) {
+      panel.data.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";
+    } else {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";
+    }
     return;
   }
   const empresaByName = new Map((state.empresas || []).map((item) => [item.nombre, item.id]));
@@ -50380,7 +50393,11 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
     if (fin?.id) finEmpresaIds = [fin.id];
   }
   if (!finEmpresaIds.length) {
-    clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin empresa de financiaciones configurada.</p>";
+    if (panel.data) {
+      panel.data.innerHTML = "<p class='muted'>Sin empresa de financiaciones configurada.</p>";
+    } else {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin empresa de financiaciones configurada.</p>";
+    }
     return;
   }
   try {
@@ -50392,7 +50409,11 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
     const base = groups.find((item) => Array.isArray(item.columns) && item.columns.length) || { columns: [], rows: [] };
     const columns = base.columns || [];
     if (!columns.length) {
-      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      if (panel.data) {
+        panel.data.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      } else {
+        clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      }
       return;
     }
     const idIndex = columns.indexOf("id");
@@ -50411,12 +50432,24 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
         return normalizeSimple(String(row[clienteIdx] || "")).includes(clienteKey);
       });
     if (!rows.length) {
-      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      if (panel.data) {
+        panel.data.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      } else {
+        clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      }
       return;
     }
-    renderTableInto({ columns, rows }, clienteHipotecaFicha, null, "Hipotecas");
+    if (panel.data) {
+      renderTableInto({ columns, rows }, panel.data, null, "Hipotecas");
+    } else {
+      renderTableInto({ columns, rows }, clienteHipotecaFicha, null, "Hipotecas");
+    }
   } catch {
-    clienteHipotecaFicha.innerHTML = "<p class='muted'>No se pudo cargar la ficha de financiaciones.</p>";
+    if (panel.data) {
+      panel.data.innerHTML = "<p class='muted'>No se pudo cargar la ficha de financiaciones.</p>";
+    } else {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>No se pudo cargar la ficha de financiaciones.</p>";
+    }
   }
 };
 
@@ -52424,7 +52457,7 @@ const openClienteDetail = (id) => {
         nombre: split.nombre || cliente.nombre || "",
         apellidos: split.apellidos || "",
       };
-      renderEditableGrid(clienteDetailGrid, getClienteFichaFields(serviceParam), clienteData, "cliente");
+      renderEditableGrid(clienteDetailGrid, CLIENTE_FIELDS_BASE, clienteData, "cliente");
     }
     let hasGestoria = false;
     let hasSeguros = false;
