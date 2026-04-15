@@ -17037,10 +17037,21 @@ def fetch_catastro_public_summary(reference):
     items = summary.get("items") if isinstance(summary.get("items"), list) else []
     if items and clean_ref:
         needle = clean_ref[:14]
-        exact = next(
-            (item for item in items if clean_catastro_reference(item.get("referencia_catastral")) == needle),
-            None,
-        )
+        def _matches(item_ref: str) -> bool:
+            if not item_ref:
+                return False
+            if item_ref == clean_ref:
+                return True
+            if len(item_ref) >= 14 and item_ref[:14] == needle:
+                return True
+            return False
+
+        exact = None
+        for item in items:
+            ref_item = clean_catastro_reference(item.get("referencia_catastral"))
+            if _matches(ref_item):
+                exact = item
+                break
         if exact:
             parcel = {k: summary.get(k) for k in ("referencia_parcela", "tipo_parcela", "localizacion_parcela", "superficie_grafica_m2") if k in summary}
             summary = {**parcel, **exact}
@@ -17049,7 +17060,7 @@ def fetch_catastro_public_summary(reference):
             summary = {**parcel, **items[0]}
     # Asegura referencia en el resumen, aunque sea parcial.
     if clean_ref and not clean_catastro_reference(summary.get("referencia_catastral")):
-        summary["referencia_catastral"] = clean_ref[:14]
+        summary["referencia_catastral"] = clean_ref
     summary["source_url"] = source_url
     return summary, html_text
 
@@ -29895,6 +29906,18 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
     locality = " · ".join(
         [part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if str(part or "").strip()]
     ) or "Pendiente"
+    superficie_construida = catastro_summary.get("superficie_construida_m2")
+    superficie_construida_label = (
+        f"{_pdf_format_number(superficie_construida, 2)} m²"
+        if superficie_construida not in (None, "")
+        else "Pendiente"
+    )
+    superficie_parcela = catastro_summary.get("superficie_grafica_m2")
+    superficie_parcela_label = (
+        f"{_pdf_format_number(superficie_parcela, 2)} m²"
+        if superficie_parcela not in (None, "")
+        else "Pendiente"
+    )
     sections = [
         (
             "Identificación del inmueble",
@@ -29910,7 +29933,7 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
             [
                 ("Uso Catastro", catastro_summary.get("uso") or "Pendiente"),
                 ("Tipo sugerido", infer_inmueble_type_from_catastro_use(catastro_summary.get("uso"), inmueble.get("tipo_inmueble")) or "Pendiente"),
-                ("Superficie construida", f"{_pdf_format_number(catastro_summary.get('superficie_construida_m2'), 2) or 'Pendiente'} m²"),
+                ("Superficie construida", superficie_construida_label),
                 ("Año de construcción", catastro_summary.get("anio_construccion") or "Pendiente"),
                 ("Coeficiente de participación", catastro_summary.get("coef_participacion") or "Pendiente"),
             ],
@@ -29920,7 +29943,7 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
             [
                 ("Referencia de parcela", catastro_summary.get("referencia_parcela") or "Pendiente"),
                 ("Tipo de parcela", catastro_summary.get("tipo_parcela") or "Pendiente"),
-                ("Superficie gráfica parcela", f"{_pdf_format_number(catastro_summary.get('superficie_grafica_m2'), 2) or 'Pendiente'} m²"),
+                ("Superficie gráfica parcela", superficie_parcela_label),
                 ("Localización parcela", catastro_summary.get("localizacion_parcela") or "Pendiente"),
             ],
         ),
