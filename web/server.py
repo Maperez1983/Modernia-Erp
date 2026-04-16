@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sqlite3
+import uuid
 import urllib.parse
 import urllib.error
 import hashlib
