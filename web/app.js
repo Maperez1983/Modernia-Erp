@@ -49669,14 +49669,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       forma_cobro: quickFormaCobro,
       remesada: quickRemesada,
     };
-    const data = await fetch("/api/renta_quick_attach", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then((r) => r.json());
-    if (data?.error) {
-      throw new Error(data.error);
-    }
+    const data = await apiPost("/api/renta_quick_attach", payload);
     if (gestoriaRentaQuickStatus) {
       gestoriaRentaQuickStatus.textContent = "Documento asignado. Procesando OCR...";
     }
@@ -49728,22 +49721,15 @@ const submitGestoriaRentaQuick = async () => {
     if (!upload?.key && !upload?.public_url) {
       throw new Error("No se pudo subir el archivo.");
     }
-    const ocrStart = await fetch("/api/renta_quick_ocr", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        empresa_nombre: empresa.nombre,
-        usuario: getCurrentUser(),
-        doc_key: upload.key || "",
-        doc_url: upload.public_url || "",
-        filename: file.name || "renta.pdf",
-        ejercicio,
-        estado_presentacion,
-      }),
-    }).then((r) => r.json());
-    if (ocrStart?.error) {
-      throw new Error(ocrStart.error);
-    }
+    const ocrStart = await apiPost("/api/renta_quick_ocr", {
+      empresa_nombre: empresa.nombre,
+      usuario: getCurrentUser(),
+      doc_key: upload.key || "",
+      doc_url: upload.public_url || "",
+      filename: file.name || "renta.pdf",
+      ejercicio,
+      estado_presentacion,
+    });
     const docId = String(ocrStart?.doc_id || "").trim();
     const jobId = ocrStart?.ocr_job_id;
     if (!jobId) {

@@ -21080,23 +21080,29 @@ def ensure_usuarios_schema(conn):
 
 def ensure_ocr_tables(db_path):
     conn = open_sqlite_conn(db_path, with_row_factory=False)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ocr_jobs (
-          id TEXT PRIMARY KEY,
-          kind TEXT,
-          status TEXT,
-          payload_json TEXT,
-          result_json TEXT,
-          error TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          started_at TEXT,
-          finished_at TEXT
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ocr_jobs (
+              id TEXT PRIMARY KEY,
+              kind TEXT,
+              status TEXT,
+              payload_json TEXT,
+              result_json TEXT,
+              error TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT
+            )
+            """
         )
-        """
-        )
-    conn.commit()
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def ensure_auth_invites_table(conn):
@@ -45736,6 +45742,13 @@ class Handler(BaseHTTPRequestHandler):
                 # Si falla por cualquier motivo, seguimos con el OCR (la subida ya está hecha en S3).
                 doc_id = ""
             try:
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            try:
                 ensure_ocr_tables(self.ocr_db_path)
                 ocr_job_id = enqueue_ocr_job(
                     self.ocr_db_path,
@@ -45747,7 +45760,7 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             except Exception as exc:
-                json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}"}, status=500)
+                json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}", "detail": str(exc)}, status=503)
                 return
             json_response(self, {"ok": True, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
             return
@@ -52777,17 +52790,17 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchone()
 
-	            firmadas_mes = conn.execute(
-	                f"""
-	                SELECT COUNT(*) AS total
-	                FROM hipotecas
-	                WHERE empresa_id = ?
-	                  AND {signed_expr}
-	                  AND {closed_expr}
-	                  AND {signed_month_expr} = ?
-	                """,
-	                (empresa_id, current_month),
-	            ).fetchone()
+            firmadas_mes = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND {signed_expr}
+                  AND {closed_expr}
+                  AND {signed_month_expr} = ?
+                """,
+                (empresa_id, current_month),
+            ).fetchone()
 
             series_totales = available_years
 
