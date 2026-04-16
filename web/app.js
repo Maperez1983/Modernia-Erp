@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v101";
+const APP_SW_VERSION = "v170";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -4942,7 +4942,7 @@ const renderCompanyCards = () => {
 		      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
 		      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
 		      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
-		      const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
+		      const rrhhHref = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
       const displayName =
         employee?.nombre
         || homePersona?.nombre
@@ -5050,7 +5050,7 @@ const renderCompanyCards = () => {
           <h3>CRM Financiaciones</h3>
           <div class="company-meta">Hipotecas y seguimiento.</div>
           <div class="company-meta">Servicio financiero.</div>
-          <a class="card-link" href="?crm=fin" data-action="crm-fin">Entrar</a>
+	          <a class="card-link" href="/?crm=fin" data-action="crm-fin">Entrar</a>
         `;
       } else {
         return;
@@ -5084,7 +5084,7 @@ const renderCompanyCards = () => {
       <h3>Admin Verifika²</h3>
       <div class="company-meta">Configuración de workspaces, módulos, branding y control de plataforma.</div>
       <div class="company-meta">Vista de administración global.</div>
-      <a class="card-link" href="?holding=1&mode=platform" data-action="holding-admin">Entrar</a>
+	      <a class="card-link" href="/?holding=1&mode=platform" data-action="holding-admin">Entrar</a>
     `;
     coreCards.appendChild(platformCard);
 
@@ -5095,7 +5095,7 @@ const renderCompanyCards = () => {
       <h3>Workspaces</h3>
       <div class="company-meta">Cargando lista de workspaces...</div>
       <div class="company-meta">Selecciona dónde quieres entrar.</div>
-      <a class="card-link" href="?holding=1&mode=platform&view=tenant" data-action="holding-workspaces">Ver listado</a>
+	      <a class="card-link" href="/?holding=1&mode=platform&view=tenant" data-action="holding-workspaces">Ver listado</a>
     `;
 	    coreCards.appendChild(homeWorkspacesCard);
 
@@ -5146,9 +5146,9 @@ const renderCompanyCards = () => {
             const card = document.createElement("div");
             card.className = "company-card";
             card.dataset.action = `home-workspace:${workspaceId || rawName || brandedName}`;
-            const href = workspaceId
-              ? `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceId)}&view=operations`
-              : `?holding=1&mode=platform&view=tenant`;
+	            const href = workspaceId
+	              ? `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceId)}&view=operations`
+	              : `/?holding=1&mode=platform&view=tenant`;
             card.innerHTML = `
               <h3>${escapeHtml(rawName || brandedName || "Workspace")}</h3>
               <div class="company-meta">${escapeHtml(meta.join(" · "))}${showBranding ? ` · Marca: ${escapeHtml(brandedName)}` : ""}</div>
@@ -54158,12 +54158,12 @@ if (crmExitBtn) {
 }
 
 if (coreCards) {
-	  coreCards.addEventListener("click", (event) => {
-	    const target = closestFromEvent(event, "[data-action]");
-	    if (!target || !coreCards.contains(target)) {
-	      return;
-    }
-    const action = target.dataset.action;
+		  coreCards.addEventListener("click", (event) => {
+		    const target = closestFromEvent(event, "[data-action]");
+		    if (!target || !coreCards.contains(target)) {
+		      return;
+	    }
+	    const action = target.dataset.action;
     const authUser = getAuthScopeUser();
     const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
     const fallbackHref = (() => {
@@ -54203,14 +54203,17 @@ if (coreCards) {
     if (target.tagName === "A") {
       event.preventDefault();
     }
-	    try {
-	      if (action === "holding") {
-	        openHolding();
-	      } else if (action === "holding-admin") {
-	        openHolding({ mode: "platform", view: "overview" });
-	      } else if (action === "holding-tenant") {
-	        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "overview" });
-	      } else if (String(action || "").startsWith("home-workspace:")) {
+		    try {
+		      if (action === "holding") {
+		        openHolding();
+		      } else if (action === "holding-workspaces") {
+		        // Home: acceso directo a la vista de workspaces (admin).
+		        openHolding({ mode: "platform", view: "tenant" });
+		      } else if (action === "holding-admin") {
+		        openHolding({ mode: "platform", view: "overview" });
+		      } else if (action === "holding-tenant") {
+		        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "overview" });
+		      } else if (String(action || "").startsWith("home-workspace:")) {
 	        const rawWorkspace = String(action || "").split(":").slice(1).join(":").trim();
 	        const workspace = normalizeTenantWorkspaceSlug(rawWorkspace, "") || workspaceFromFallback || resolveDefaultTenantWorkspaceSlug();
 	        const view = "operations";
@@ -54240,17 +54243,20 @@ if (coreCards) {
         openAgenda();
 	      } else if (action === "admin") {
 	        openAdmin();
-	      } else if (action === "rrhh-home") {
-	        const workspace = normalizeTenantWorkspaceSlug(
-	          workspaceFromFallback || state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
-	        );
-	        // La card Personal siempre abre RRHH en modo self (también para admins).
-	        openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
-	      }
-    } catch (error) {
-      // Importante: si hay un error JS al abrir (estado incompleto / caché vieja),
-      // no bloqueamos el acceso: navegamos al href real.
-      fallbackNavigate();
+		      } else if (action === "rrhh-home") {
+		        const workspace = normalizeTenantWorkspaceSlug(
+		          workspaceFromFallback || state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
+		        );
+		        // La card Personal siempre abre RRHH en modo self (también para admins).
+		        openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
+		      } else {
+		        // Fallback defensivo: si aparece una nueva card sin handler, navega al href real.
+		        fallbackNavigate();
+		      }
+	    } catch (error) {
+	      // Importante: si hay un error JS al abrir (estado incompleto / caché vieja),
+	      // no bloqueamos el acceso: navegamos al href real.
+	      fallbackNavigate();
     }
   });
 }
