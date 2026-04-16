@@ -2577,12 +2577,6 @@
 			                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
 			                    + Nuevo
 			                  </button>
-			                  <button type="button" class="tab tc-module" data-crm-action="recientes" title="Recientes">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Recientes</span>
-			                  </button>
 			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
 			                    <span class="tc-mod-ico" aria-hidden="true">
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -9012,7 +9006,7 @@
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
-		        const TARGET_SW = "/sw.js?v=162";
+		        const TARGET_SW = "/sw.js?v=163";
 	        try {
 	          const params = new URLSearchParams(window.location.search || "");
 	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
