@@ -28868,12 +28868,13 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     const cached = state.hipotecaBdtCache.data || {};
     const columns = cached.columns || [];
     const rows = cached.rows || [];
-    renderHipotecaBdtTable({ columns, rows });
+    renderHipotecaBdtList({ columns, rows });
     const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
     hipotecaBdtInfo.textContent = baseText;
     hipotecaBdtInfo.dataset.baseText = baseText;
     syncHipotecaExportYears(rows, columns);
     populateHipotecaVincularSelect(rows, columns);
+    syncHipotecaBdtViewToggle();
     return;
   }
   const params = new URLSearchParams({
@@ -28892,12 +28893,13 @@ const loadHipotecaBdt = (forceRefresh = false) => {
         data: { columns, rows },
         ts: Date.now(),
       };
-      renderHipotecaBdtTable({ columns, rows });
+      renderHipotecaBdtList({ columns, rows });
       const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
       hipotecaBdtInfo.textContent = baseText;
       hipotecaBdtInfo.dataset.baseText = baseText;
       syncHipotecaExportYears(rows, columns);
       populateHipotecaVincularSelect(rows, columns);
+      syncHipotecaBdtViewToggle();
     })
     .catch((error) => {
       const message = error?.data?.error || error?.message || "No se pudo cargar la BDT.";
@@ -28906,6 +28908,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
       syncHipotecaExportYears([], []);
       populateHipotecaVincularSelect([], []);
+      syncHipotecaBdtViewToggle();
     });
 };
 
@@ -28941,6 +28944,44 @@ const HIPOTECA_FICHA_PRIORITY_FIELDS = [
   "fecha_firma",
   "anio",
 ];
+
+const HIPOTECA_BDT_VIEW_STORAGE_KEY = "hipotecaBdtView";
+
+const getHipotecaBdtView = () => {
+  let stored = "";
+  try {
+    stored = String(localStorage.getItem(HIPOTECA_BDT_VIEW_STORAGE_KEY) || "").trim().toLowerCase();
+  } catch {
+    stored = "";
+  }
+  if (stored === "table" || stored === "tabla") return "table";
+  return "cards";
+};
+
+const syncHipotecaBdtViewToggle = () => {
+  const view = getHipotecaBdtView();
+  const pairs = [
+    [hipotecaBdtViewCards, view === "cards"],
+    [hipotecaBdtViewTable, view === "table"],
+  ];
+  pairs.forEach(([btn, active]) => {
+    if (!btn) return;
+    btn.classList.toggle("active", Boolean(active));
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+};
+
+const setHipotecaBdtView = (view) => {
+  const next = String(view || "").trim().toLowerCase();
+  try {
+    localStorage.setItem(HIPOTECA_BDT_VIEW_STORAGE_KEY, next);
+  } catch {
+    // ignore
+  }
+  syncHipotecaBdtViewToggle();
+  const cached = state.hipotecaBdtCache?.data || {};
+  renderHipotecaBdtList({ columns: cached.columns || [], rows: cached.rows || [] });
+};
 
 const getHipotecaFichaFields = (columns = []) => {
   if (!Array.isArray(columns) || columns.length === 0) {
