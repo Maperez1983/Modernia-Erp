@@ -19326,9 +19326,17 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    const referenciaTipo = normalizeLookupText(row.referencia_tipo || "").toLowerCase();
+    const tipoCell = (() => {
+      const raw = String(row.tipo || "").trim();
+      if (referenciaTipo !== "renta") return raw;
+      const normalized = normalizeLookupText(raw).toLowerCase();
+      if (normalized.includes("modelo") && normalized.includes("100")) return raw;
+      return "Modelo 100";
+    })();
     const cells = [
       row.nombre || "",
-      row.tipo || "",
+      tipoCell,
       row.fecha || "",
       row.estado || "",
       row.notas || "",

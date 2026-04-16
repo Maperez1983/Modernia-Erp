@@ -45713,7 +45713,7 @@ class Handler(BaseHTTPRequestHandler):
             doc_nombre = str(payload.get("nombre") or "").strip() or (
                 f"Renta {ejercicio or datetime.now().year} · {estado_presentacion}.pdf"
             )
-            doc_tipo = str(payload.get("tipo") or "").strip() or f"Renta {estado_presentacion}"
+            doc_tipo = str(payload.get("tipo") or "").strip() or "Modelo 100"
             doc_estado = "Pendiente"
             try:
                 conn.execute(
@@ -45820,7 +45820,7 @@ class Handler(BaseHTTPRequestHandler):
             doc_id = str(payload.get("doc_id") or current_entry.get("doc_presentada_id") or current_entry.get("doc_borrador_id") or "").strip()
             presentacion_fecha = str(payload.get("presentacion_fecha") or current_entry.get("presentacion_fecha") or "").strip()
             doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
-            doc_tipo = str(payload.get("tipo") or f"Renta {estado_presentacion}").strip()
+            doc_tipo = str(payload.get("tipo") or "Modelo 100").strip()
             doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
             forma_cobro = str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip()
             remesada_raw = payload.get("remesada", current_entry.get("remesada"))
