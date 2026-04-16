@@ -258,6 +258,16 @@
         await deps.init();
         deps.state.appInitialized = true;
       }
+      // Si venimos de una sesión expirada, reabrimos la URL exacta que el usuario intentaba abrir
+      // (p.ej. un workspace tenant). Esto evita que, tras re-login, se quede en Home.
+      try {
+        const returnUrl = String(deps.state?.postAuthReturnUrl || "").trim();
+        deps.state.postAuthReturnUrl = "";
+        if (returnUrl && returnUrl !== window.location.href) {
+          window.location.assign(returnUrl);
+          return;
+        }
+      } catch {}
       // Si el usuario venía por un deep-link (p.ej. `?holding=1&mode=tenant&workspace=...`),
       // no lo pisamos con la navegación "por rol" (admin/workspace). Esto evita que al entrar
       // desde una card del Home, tras re-login se pierda el destino.

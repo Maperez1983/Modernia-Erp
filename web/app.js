@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v173";
+const APP_SW_VERSION = "v174";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -19543,7 +19543,10 @@ const openHolding = (options = {}) => {
     return;
   }
   if (!user) {
-    goHome();
+    // No limpiamos la URL ni forzamos home: dejamos el deep-link y pedimos login.
+    try {
+      showAuthOverlay("La sesión ha caducado. Inicia sesión de nuevo.");
+    } catch {}
     return;
   }
   const requestedWorkspace = normalizeTenantWorkspaceSlug(String(options.workspace || "").trim(), "");
@@ -53914,6 +53917,11 @@ async function ensureAuthAndBoot() {
 
 function handleAuthExpired() {
   if (!AuthModule) return;
+  // Si la sesión expira mientras el usuario intenta entrar en un deep-link (workspaces/CRM/etc),
+  // guardamos la URL para poder reabrirla tras el login (evita "vuelve a home" con query perdida).
+  try {
+    state.postAuthReturnUrl = window.location.href;
+  } catch {}
   return AuthModule.handleAuthExpired({
     state,
     authLoginOverlay,
