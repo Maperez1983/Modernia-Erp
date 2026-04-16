@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v183";
+const APP_SW_VERSION = "v184";
 
 const isDebugEnabled = () => {
   try {
@@ -28227,6 +28227,11 @@ const updateTableVisibility = () => {
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
+  const isCrmContext =
+    currentTab === "crm" ||
+    crmContext === "inmo" ||
+    crmContext === "inmobiliaria" ||
+    isInmuebleDetailOpen;
   document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || isInmuebleDetailOpen);
   document.body.classList.toggle(
     "crm-context-inmo",
