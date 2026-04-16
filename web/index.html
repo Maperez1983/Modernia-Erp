@@ -2270,7 +2270,7 @@
 			                <span class="crm-side-ico" aria-hidden="true">+</span>
 			                <span class="crm-side-txt">Crear nuevo</span>
 			              </button>
-		              <div id="crmInsertModal" class="crm-insert-modal crm-insert-modal--dropdown hidden" role="dialog" aria-modal="false" aria-label="Insertar">
+			              <div id="crmInsertModal" class="crm-insert-modal hidden" role="dialog" aria-modal="false" aria-label="Insertar">
 		                <div class="crm-insert-card">
 		                  <div class="crm-insert-head">
 		                    <strong>Insertar</strong>
@@ -2369,14 +2369,16 @@
 		                      Puerta
 		                      <input name="puerta" placeholder="Ej. B" />
 		                    </label>
-		                    <label>
-		                      Código postal
-		                      <input name="codigo_postal" placeholder="Ej. 29001" inputmode="numeric" />
-		                    </label>
-		                    <label>
-		                      Población
-		                      <input name="poblacion" list="inmoPoblacionOptions" placeholder="Ej. Málaga" />
-		                    </label>
+			                    <label>
+			                      Código postal
+			                      <input name="codigo_postal" list="inmoPostalOptions" placeholder="Ej. 29001" inputmode="numeric" />
+			                    </label>
+			                    <label>
+			                      Población
+			                      <select name="poblacion" class="inmo-poblacion-select">
+			                        <option value="">Selecciona población</option>
+			                      </select>
+			                    </label>
 		                    <label>
 		                      Provincia
 		                      <select name="provincia" class="inmo-province-select">
@@ -2504,6 +2506,7 @@
 		                </div>
 		              </div>
 		              <datalist id="inmoPoblacionOptions"></datalist>
+		              <datalist id="inmoPostalOptions"></datalist>
 
 			              <div class="crm-side-sep" aria-hidden="true"></div>
 		              <button type="button" class="crm-side-item hidden-context" data-crm-view="fin" title="Financiaciones">

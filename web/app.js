@@ -27930,7 +27930,20 @@ const updateTableVisibility = () => {
   } catch {
     crmContext = "";
   }
-  const isCrmContext =
+  const isServiceCrm = [
+    "crm",
+    "gestoria-dash",
+    "gestoria-crm",
+    "gestoria-docs",
+    "gestoria-agenda",
+    "gestoria-fact",
+    "gestoria-conta",
+    "seguros-crm",
+    "fin-crm",
+    "fin-sim",
+  ].includes(currentTab);
+  // "CRM vertical" (modo app): solo Inmobiliaria + Seguros + Fin. Gestoría sigue usando el tab-bar.
+  const isVerticalCrmContext =
     currentTab === "crm" ||
     currentTab === "seguros-crm" ||
     currentTab === "fin-crm" ||
@@ -27942,16 +27955,25 @@ const updateTableVisibility = () => {
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
-  document.body.classList.toggle("crm-context-vertical", isCrmContext || isInmuebleDetailOpen);
+  document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || isInmuebleDetailOpen);
   document.body.classList.toggle(
     "crm-context-inmo",
     currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || isInmuebleDetailOpen
+  );
+  document.body.classList.toggle("crm-context-gestoria", currentTab.startsWith("gestoria") || crmContext === "gestoria");
+  document.body.classList.toggle("crm-context-seguros", currentTab === "seguros-crm" || crmContext === "seguros");
+  document.body.classList.toggle(
+    "crm-context-fin",
+    currentTab === "fin-crm" ||
+      currentTab === "fin-sim" ||
+      crmContext === "fin" ||
+      crmContext === "financiaciones" ||
+      crmContext === "hipotecas"
   );
   syncCrmTecnocloudVerticalNav();
 
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
-  const isServiceCrm = ["crm", "gestoria-crm", "gestoria-docs", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
   // Tema: identidad corporativa unificada (misma base visual que CRM Inmobiliaria).
   document.body.classList.add("theme-operativa");
   const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
@@ -27972,7 +27994,7 @@ const updateTableVisibility = () => {
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
     // Dentro del CRM inmobiliario el tab-bar general se considera duplicado (confunde).
-    viewTabs.classList.toggle("hidden", isCrmContext);
+    viewTabs.classList.toggle("hidden", isVerticalCrmContext);
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
@@ -54307,15 +54329,15 @@ if (crmCaptacionCloseBtn) {
 
 if (crmCaptacionCatastroOpen) {
   crmCaptacionCatastroOpen.addEventListener("click", () => {
-    try {
-      const form = crmCaptacionCreateForm;
-      const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
-      const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
-      const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
-		      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
-		      const url = buildCatastroUrl("", address);
-		      openExternalUrl(url);
-		    } catch {
+	    try {
+	      const form = crmCaptacionCreateForm;
+	      const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
+	      const poblacion = String(form?.querySelector?.('select[name="poblacion"], input[name="poblacion"]')?.value || "").trim();
+	      const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
+			      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
+			      const url = buildCatastroUrl("", address);
+			      openExternalUrl(url);
+			    } catch {
 		      const fallback = "https://www.sedecatastro.gob.es/";
 		      openExternalUrl(fallback);
 		    }
@@ -63605,6 +63627,41 @@ const getInmoProvinciaFromContext = (el) => {
   }
 };
 
+const renderInmoPoblacionSelect = async (selectEl, provincia = "") => {
+  if (!selectEl) return;
+  const provKey = normalizeSimple(provincia || "");
+  let items = [];
+  try {
+    items = await loadInmoPoblacionesCatalog();
+  } catch {
+    items = [];
+  }
+  const filtered = provKey
+    ? items.filter((item) => normalizeSimple(item.provincia || "") === provKey)
+    : items;
+  const unique = [];
+  const seen = new Set();
+  filtered.forEach((item) => {
+    const value = String(item?.poblacion || "").trim();
+    const key = normalizeSimple(value);
+    if (!value || !key || seen.has(key)) return;
+    seen.add(key);
+    unique.push(value);
+  });
+  unique.sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  const current = String(selectEl.value || "").trim();
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Selecciona población"));
+  unique.slice(0, 25000).forEach((value) => {
+    selectEl.appendChild(createOption(value, value));
+  });
+  if (current && unique.some((v) => normalizeSimple(v) === normalizeSimple(current))) {
+    selectEl.value = current;
+  } else {
+    selectEl.value = "";
+  }
+};
+
 const renderInmoPoblacionDatalist = async (provincia = "") => {
   const datalist = document.getElementById("inmoPoblacionOptions");
   if (!datalist) return;
@@ -63637,6 +63694,11 @@ const renderInmoPoblacionDatalist = async (provincia = "") => {
 document.addEventListener("focusin", (event) => {
   const target = event.target;
   if (!target || !target.getAttribute) return;
+  if (target.classList && target.classList.contains("inmo-poblacion-select")) {
+    const provincia = getInmoProvinciaFromContext(target);
+    renderInmoPoblacionSelect(target, provincia);
+    return;
+  }
   const list = target.getAttribute("list");
   if (list !== "inmoPoblacionOptions") return;
   const provincia = getInmoProvinciaFromContext(target);
@@ -63649,7 +63711,13 @@ document.addEventListener("change", (event) => {
   try {
     const form = target.closest("form");
     const pop = form?.querySelector?.('input[list="inmoPoblacionOptions"][name="poblacion"]');
-    if (pop) renderInmoPoblacionDatalist(String(target.value || "").trim());
+    const popSel = form?.querySelector?.('select.inmo-poblacion-select[name="poblacion"]');
+    const provincia = String(target.value || "").trim();
+    if (popSel) {
+      renderInmoPoblacionSelect(popSel, provincia);
+    } else if (pop) {
+      renderInmoPoblacionDatalist(provincia);
+    }
   } catch {}
 });
 
@@ -63678,7 +63746,7 @@ const loadInmoPostalCodesCatalog = async (poblacion = "", provincia = "") => {
 const getInmoPoblacionFromContext = (el) => {
   try {
     const form = el?.closest?.("form");
-    const input = form?.querySelector?.('input[name="poblacion"]');
+    const input = form?.querySelector?.('select[name="poblacion"], input[name="poblacion"]');
     return String(input?.value || "").trim();
   } catch {
     return "";
@@ -63688,7 +63756,7 @@ const getInmoPoblacionFromContext = (el) => {
 const getInmoPostalContext = (el) => {
   try {
     const form = el?.closest?.("form");
-    const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
+    const poblacion = String(form?.querySelector?.('select[name="poblacion"], input[name="poblacion"]')?.value || "").trim();
     const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
     return { form, poblacion, provincia };
   } catch {
@@ -63744,11 +63812,25 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (!target) return;
+  if (target.name !== "poblacion") return;
+  if (String(target.tagName || "").toLowerCase() !== "select") return;
+  const form = target.closest?.("form");
+  const postalInput = form?.querySelector?.('input[list="inmoPostalOptions"][name="codigo_postal"]');
+  if (!postalInput) return;
+  const provincia = getInmoProvinciaFromContext(target);
+  const poblacion = getInmoPoblacionFromContext(target);
+  if (!poblacion) return;
+  renderInmoPostalDatalist(poblacion, provincia);
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!target) return;
   if (!target.classList || !target.classList.contains("inmo-province-select")) return;
   try {
     const form = target.closest("form");
     const postalInput = form?.querySelector?.('input[list="inmoPostalOptions"][name="codigo_postal"]');
-    const poblacionInput = form?.querySelector?.('input[name="poblacion"]');
+    const poblacionInput = form?.querySelector?.('select[name="poblacion"], input[name="poblacion"]');
     if (!postalInput || !poblacionInput) return;
     const poblacion = String(poblacionInput.value || "").trim();
     if (!poblacion) return;
