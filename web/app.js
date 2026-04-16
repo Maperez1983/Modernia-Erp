@@ -27005,9 +27005,17 @@ const populateResponsableSelects = () => {
       .filter((user) => {
         if (!serviceFilter) return true;
         const service = normalizeSimple(user.servicio || "");
-        if (!service) return false;
+        const role = normalizeSimple(user.rol || "");
+        if (!service) {
+          // Si no hay "servicio" (legacy), permitimos al menos roles privilegiados.
+          return ["administrador", "admin", "direccion", "administracion", "control"].includes(role);
+        }
         if (service.includes(serviceFilter)) return true;
-        if (["direccion", "administracion"].includes(service)) {
+        // Permite administración/dirección aunque el filtro sea otro (p.ej. Gestoría/Inmobiliaria).
+        if (service.includes("direccion") || service.includes("administracion")) {
+          return true;
+        }
+        if (["administrador", "admin", "direccion", "administracion", "control"].includes(role)) {
           return true;
         }
         return false;
