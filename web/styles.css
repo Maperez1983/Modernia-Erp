@@ -4475,7 +4475,7 @@ body.tc-resizing {
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module.active {
-  outline: 3px solid rgba(var(--sage-rgb), 0.25);
+  outline: 3px solid rgba(var(--gold-rgb), 0.28);
   outline-offset: 2px;
 }
 
