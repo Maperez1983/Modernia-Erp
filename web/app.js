@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v179";
+const APP_SW_VERSION = "v180";
 
 const isDebugEnabled = () => {
   try {
@@ -32,34 +32,44 @@ const debugLog = (title, detail = "") => {
   try {
     const panelId = "crmDebugPanel";
     let panel = document.getElementById(panelId);
-    if (!panel) {
+    const mount = document.body || document.documentElement;
+    if (!panel && mount) {
       panel = document.createElement("div");
       panel.id = panelId;
+      panel.setAttribute("role", "status");
       panel.style.position = "fixed";
       panel.style.left = "12px";
-      panel.style.top = "12px";
-      panel.style.maxWidth = "min(520px, calc(100vw - 24px))";
+      panel.style.bottom = "12px";
+      panel.style.top = "auto";
+      panel.style.right = "auto";
+      panel.style.maxWidth = "min(720px, calc(100vw - 24px))";
       panel.style.maxHeight = "min(70vh, 520px)";
       panel.style.overflow = "auto";
-      panel.style.zIndex = "10050";
+      panel.style.zIndex = "200000";
       panel.style.padding = "10px 12px";
       panel.style.borderRadius = "12px";
-      panel.style.background = "rgba(255,255,255,0.96)";
+      panel.style.background = "rgba(255,255,255,0.98)";
       panel.style.border = "1px solid rgba(130, 76, 69, 0.28)";
-      panel.style.boxShadow = "0 20px 60px rgba(43, 43, 43, 0.18)";
+      panel.style.boxShadow = "0 20px 60px rgba(43, 43, 43, 0.22)";
+      panel.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
       panel.style.fontSize = "12px";
       panel.style.lineHeight = "1.35";
       panel.style.whiteSpace = "pre-wrap";
       panel.style.color = "#1d241f";
-      panel.innerHTML = "<strong>Debug</strong>\n";
-      document.body.appendChild(panel);
+      panel.textContent = "Debug panel\n";
+      mount.appendChild(panel);
     }
+    if (!panel) return;
     const now = new Date().toISOString().slice(11, 19);
     const lines = [];
     lines.push(`[${now}] ${String(title || "").trim()}`);
     if (detail) lines.push(String(detail));
     lines.push("");
-    panel.textContent = `${panel.textContent || ""}${lines.join("\n")}`.slice(-8000);
+    const next = `${panel.textContent || ""}${lines.join("\n")}`.slice(-14000);
+    panel.textContent = next;
+    try {
+      window.__crmDebugLines = next;
+    } catch {}
   } catch {}
 };
 
