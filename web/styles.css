@@ -9281,6 +9281,129 @@ body.density-compact [id$="Table"] table {
   min-width: 860px;
 }
 
+#hipotecaBdtPanel .view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#hipotecaBdtPanel .view-toggle button.active {
+  background: var(--gold);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #1b1b1b;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card {
+  background: #fff;
+  border: 1px solid rgba(22, 27, 43, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 22px rgba(22, 27, 43, 0.05);
+  display: grid;
+  gap: 8px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card-title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-size: 13px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(255, 199, 0, 0.16);
+  border: 1px solid rgba(255, 199, 0, 0.28);
+  color: #1b1b1b;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-bank {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-bank-name {
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-bank-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-bank-initials {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-metric {
+  display: grid;
+  gap: 2px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-metric .k {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-metric .v {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card .inline-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 #hipotecaBdtPanel .company-badge {
   padding: 2px 6px;
   gap: 5px;

@@ -6938,14 +6938,18 @@
                 <h3>BDT Hipotecas</h3>
                 <p class="muted">Listado de clientes y operaciones cargadas.</p>
               </div>
-              <div class="crm-actions">
-                <input id="hipotecaBdtSearch" placeholder="Buscar en BDT..." />
-                <button type="button" id="hipotecaBdtRefresh" class="secondary">Actualizar</button>
-                <select id="hipotecaBdtExportYear" class="inline-input">
-                  <option value="">Declarativo · Todos</option>
-                </select>
-                <button type="button" id="hipotecaBdtExcelFirmadas" class="secondary">Excel declarativo</button>
-              </div>
+	              <div class="crm-actions">
+	                <input id="hipotecaBdtSearch" placeholder="Buscar en BDT..." />
+	                <button type="button" id="hipotecaBdtRefresh" class="secondary">Actualizar</button>
+	                <div class="view-toggle" aria-label="Vista BDT Hipotecas">
+	                  <button type="button" id="hipotecaBdtViewCards" class="secondary">Tarjetas</button>
+	                  <button type="button" id="hipotecaBdtViewTable" class="secondary">Tabla</button>
+	                </div>
+	                <select id="hipotecaBdtExportYear" class="inline-input">
+	                  <option value="">Declarativo · Todos</option>
+	                </select>
+	                <button type="button" id="hipotecaBdtExcelFirmadas" class="secondary">Excel declarativo</button>
+	              </div>
             </div>
             <div class="crm-actions" style="margin-bottom:10px; gap:8px; flex-wrap:wrap;">
               <select id="hipotecaBdtVincularSelect" style="min-width:260px; max-width:420px;">

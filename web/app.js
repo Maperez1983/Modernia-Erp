@@ -31043,30 +31043,204 @@ const saveHipotecaFicha = (event) => {
     });
 };
 
-const setSelectValueCaseInsensitive = (selectEl, rawValue) => {
-  if (!selectEl) return;
-  const value = String(rawValue ?? "").trim();
-  if (!value) {
-    selectEl.value = "";
+	const setSelectValueCaseInsensitive = (selectEl, rawValue) => {
+	  if (!selectEl) return;
+	  const value = String(rawValue ?? "").trim();
+	  if (!value) {
+	    selectEl.value = "";
+	    return;
+	  }
+	  const exact = Array.from(selectEl.options).find((opt) => String(opt.value) === value);
+	  if (exact) {
+	    selectEl.value = exact.value;
+	    return;
+	  }
+	  const normalized = normalizeSimple(value);
+	  const byNormalized = Array.from(selectEl.options).find(
+	    (opt) => normalizeSimple(String(opt.value || "")) === normalized
+	  );
+	  selectEl.value = byNormalized ? byNormalized.value : "";
+	};
+
+const renderHipotecaBdtList = ({ columns = [], rows = [] } = {}) => {
+  const view = getHipotecaBdtView();
+  if (view === "table") {
+    renderHipotecaBdtTable({ columns, rows });
     return;
   }
-  const exact = Array.from(selectEl.options).find((opt) => String(opt.value) === value);
-  if (exact) {
-    selectEl.value = exact.value;
-    return;
-  }
-  const normalized = normalizeSimple(value);
-  const byNormalized = Array.from(selectEl.options).find(
-    (opt) => normalizeSimple(String(opt.value || "")) === normalized
-  );
-  selectEl.value = byNormalized ? byNormalized.value : "";
+  renderHipotecaBdtCards({ columns, rows });
 };
 
-const renderHipotecaBdtTable = (data) => {
+const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
   if (!hipotecaBdtTable) return;
-  const columns = data?.columns || [];
-  const rows = data?.rows || [];
   const idIndex = columns.indexOf("id");
+  if (idIndex < 0) {
+    hipotecaBdtTable.innerHTML = "<p class='muted'>No hay identificador para abrir fichas.</p>";
+    return;
+  }
+
+  const getValue = (row, field) => {
+    const idx = columns.indexOf(field);
+    if (idx < 0) return "";
+    return row?.[idx] ?? "";
+  };
+
+  const cardGrid = document.createElement("div");
+  cardGrid.className = "hipoteca-bdt-cards";
+
+  rows.forEach((row) => {
+    const recordId = row[idIndex];
+    const cliente = getHipotecaDisplayName(row, columns) || String(getValue(row, "cliente") || "").trim() || "Sin cliente";
+    const banco = String(getValue(row, "banco") || "").trim();
+    const estado = String(getValue(row, "estado") || "").trim();
+    const oficina = String(getValue(row, "oficina") || "").trim();
+    const inmobiliaria = String(getValue(row, "inmobiliaria_compra") || "").trim();
+    const fechaFirma = getValue(row, "fecha_firma");
+    const fechaEncargo = getValue(row, "fecha_encargo");
+    const precio = getValue(row, "precio");
+    const importeHipoteca = getValue(row, "importe_hipoteca");
+    const comision = getValue(row, "comision");
+
+    const brand = resolveHipotecaBankBrand(banco);
+    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
+
+    const card = document.createElement("div");
+    card.className = "hipoteca-bdt-card";
+
+    const header = document.createElement("div");
+    header.className = "hipoteca-bdt-card-head";
+
+    const badge = document.createElement("div");
+    badge.className = "hipoteca-bdt-bank";
+    if (brand.logo) {
+      const logo = document.createElement("img");
+      logo.className = "hipoteca-bdt-bank-logo";
+      logo.src = brand.logo;
+      logo.alt = brand.displayName;
+      logo.loading = "lazy";
+      logo.addEventListener(
+        "error",
+        () => {
+          const initials = document.createElement("span");
+          initials.className = "hipoteca-bdt-bank-initials";
+          initials.style.background = brand.color;
+          initials.textContent = brand.short;
+          logo.replaceWith(initials);
+        },
+        { once: true }
+      );
+      badge.appendChild(logo);
+    } else {
+      const initials = document.createElement("span");
+      initials.className = "hipoteca-bdt-bank-initials";
+      initials.style.background = brand.color;
+      initials.textContent = brand.short;
+      badge.appendChild(initials);
+    }
+    const bankName = document.createElement("span");
+    bankName.className = "hipoteca-bdt-bank-name";
+    bankName.textContent = brand.displayName;
+    badge.appendChild(bankName);
+    header.appendChild(badge);
+
+    const statusPill = document.createElement("span");
+    statusPill.className = "hipoteca-bdt-status";
+    statusPill.textContent = estado || "Sin estado";
+    header.appendChild(statusPill);
+
+    const title = document.createElement("div");
+    title.className = "hipoteca-bdt-card-title";
+    title.textContent = cliente;
+
+    const meta = document.createElement("div");
+    meta.className = "hipoteca-bdt-card-meta";
+    const metaItems = [];
+    if (oficina) metaItems.push(`Oficina: ${oficina}`);
+    if (inmobiliaria) metaItems.push(`Inmobiliaria: ${inmobiliaria}`);
+    if (fechaEncargo) metaItems.push(`Encargo: ${formatCell("fecha_encargo", fechaEncargo) || String(fechaEncargo)}`);
+    if (fechaFirma) metaItems.push(`Firma: ${formatCell("fecha_firma", fechaFirma) || String(fechaFirma)}`);
+    meta.textContent = metaItems.join(" · ");
+
+    const metrics = document.createElement("div");
+    metrics.className = "hipoteca-bdt-card-metrics";
+    const metricRows = [
+      ["Precio", precio ? formatCell("precio", precio) : ""],
+      ["Hipoteca", importeHipoteca ? formatCell("importe_hipoteca", importeHipoteca) : ""],
+      ["Comisión", comision ? formatCell("comision", comision) : ""],
+    ].filter(([, value]) => String(value || "").trim());
+    metricRows.forEach(([label, value]) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "hipoteca-bdt-metric";
+      const k = document.createElement("span");
+      k.className = "k";
+      k.textContent = label;
+      const v = document.createElement("span");
+      v.className = "v";
+      v.textContent = String(value || "").trim();
+      rowEl.appendChild(k);
+      rowEl.appendChild(v);
+      metrics.appendChild(rowEl);
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "inline-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Abrir ficha";
+    openBtn.addEventListener("click", () => openHipotecaFicha(recordId, { row, columns }));
+
+    const pdfBtn = document.createElement("button");
+    pdfBtn.type = "button";
+    pdfBtn.className = "secondary";
+    pdfBtn.textContent = "PDF";
+    pdfBtn.disabled = !canGeneratePdf;
+    pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
+    pdfBtn.addEventListener("click", () => openHipotecaFichaPrint(recordId));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "danger";
+    deleteBtn.textContent = "Eliminar";
+    deleteBtn.addEventListener("click", async () => {
+      if (!recordId) return;
+      if (!window.confirm("¿Eliminar esta hipoteca? Esta acción no se puede deshacer.")) return;
+      const data = await deleteHipoteca(recordId);
+      if (data?.error) {
+        alert(data.error);
+        return;
+      }
+      if (String(document.getElementById("hipotecaBdtFichaPanel")?.dataset.recordId || "") === String(recordId)) {
+        closeHipotecaFichaPanel();
+      }
+      loadHipotecaBdt(true);
+      loadFinCrm();
+      loadHipotecaDashboard();
+      loadHomeHipotecaStats().then(() => renderCompanyCards());
+    });
+
+    actions.appendChild(openBtn);
+    actions.appendChild(pdfBtn);
+    actions.appendChild(deleteBtn);
+
+    card.appendChild(header);
+    card.appendChild(title);
+    if (meta.textContent) card.appendChild(meta);
+    if (metrics.childElementCount) card.appendChild(metrics);
+    card.appendChild(actions);
+
+    cardGrid.appendChild(card);
+  });
+
+  hipotecaBdtTable.innerHTML = "";
+  hipotecaBdtTable.appendChild(cardGrid);
+};
+
+	const renderHipotecaBdtTable = (data) => {
+	  if (!hipotecaBdtTable) return;
+	  const columns = data?.columns || [];
+	  const rows = data?.rows || [];
+	  const idIndex = columns.indexOf("id");
   if (idIndex < 0) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>No hay identificador para abrir fichas.</p>";
     return;
@@ -63137,16 +63311,30 @@ if (hipotecaTabs) {
   });
 }
 
-if (hipotecaBdtRefresh) {
-  hipotecaBdtRefresh.addEventListener("click", () => {
-    loadHipotecaBdt(true);
-  });
-}
+	if (hipotecaBdtRefresh) {
+	  hipotecaBdtRefresh.addEventListener("click", () => {
+	    loadHipotecaBdt(true);
+	  });
+	}
 
-if (hipotecaBdtExcelFirmadas) {
-  hipotecaBdtExcelFirmadas.addEventListener("click", () => {
-    downloadHipotecasFirmadasExcel();
-  });
+	if (hipotecaBdtViewCards) {
+	  hipotecaBdtViewCards.addEventListener("click", () => {
+	    setHipotecaBdtView("cards");
+	  });
+	}
+
+	if (hipotecaBdtViewTable) {
+	  hipotecaBdtViewTable.addEventListener("click", () => {
+	    setHipotecaBdtView("table");
+	  });
+	}
+
+	syncHipotecaBdtViewToggle();
+
+	if (hipotecaBdtExcelFirmadas) {
+	  hipotecaBdtExcelFirmadas.addEventListener("click", () => {
+	    downloadHipotecasFirmadasExcel();
+	  });
 }
 
 if (hipotecaDashboardRefresh) {
