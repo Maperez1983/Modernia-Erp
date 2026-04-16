@@ -3,7 +3,18 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v175";
+const APP_SW_VERSION = "v176";
+
+const isDebugEnabled = () => {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    if (String(params.get("debug") || "").trim() === "1") return true;
+  } catch {}
+  try {
+    return String(localStorage.getItem("crm.debug") || "").trim() === "1";
+  } catch {}
+  return false;
+};
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -17171,6 +17182,17 @@ const setPage = (page) => {
   // UI unificada: usamos siempre la identidad corporativa (misma base que CRM inmobiliario).
   document.body.classList.add("theme-operativa");
   document.body.classList.toggle("page-empresa", page !== "home");
+  // Diagnóstico: si la URL pide un deep-link pero acabamos en Home, lo mostramos en UI (sin depender de consola).
+  try {
+    if (page === "home" && isDebugEnabled()) {
+      const params = new URLSearchParams(window.location.search || "");
+      const hasDeepLink = ["holding", "crm", "clientes", "cliente", "poliza", "empresa", "agenda", "admin", "portal_token"]
+        .some((key) => params.has(key));
+      if (hasDeepLink) {
+        setUiToast("Routing: volvió a Home", `URL actual: ${window.location.href}`);
+      }
+    }
+  } catch {}
   if (homeSection) {
     homeSection.classList.toggle("hidden", page !== "home");
   }
@@ -54042,6 +54064,16 @@ function handleAuthExpired() {
   // guardamos la URL para poder reabrirla tras el login (evita "vuelve a home" con query perdida).
   try {
     state.postAuthReturnUrl = window.location.href;
+  } catch {}
+  try {
+    if (isDebugEnabled()) {
+      const last = state.lastApiError || {};
+      const detail = [
+        `returnUrl: ${state.postAuthReturnUrl || "-"}`,
+        last?.status ? `lastApi: ${last.status} · ${last.message || ""}` : "",
+      ].filter(Boolean).join("\n");
+      setUiToast("Sesión expirada", detail);
+    }
   } catch {}
   return AuthModule.handleAuthExpired({
     state,
