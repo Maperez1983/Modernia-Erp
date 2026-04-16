@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v171";
+const APP_SW_VERSION = "v172";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -54178,35 +54178,20 @@ if (crmExitBtn) {
 	        return null;
 	      }
 	    })();
-	    const fallbackNavigate = () => {
-	      try {
-	        if (fallbackLink && fallbackLink.href) {
-	          window.location.href = fallbackLink.href;
-	        } else if (fallbackUrl) {
-	          window.location.href = fallbackUrl.toString();
-	        }
-	      } catch {}
-	    };
-	    // Para cards del home que son puramente navegación, forzamos navegación por href.
-	    // Evita que un estado JS incompleto (boot lento / caché vieja) bloquee la entrada.
-	    const isPureNavigationAction =
-	      action === "holding" ||
-	      action === "holding-workspaces" ||
-	      action === "holding-admin" ||
-	      action === "holding-tenant" ||
-	      String(action || "").startsWith("home-workspace:");
-	    if (isPureNavigationAction && fallbackHref) {
-	      if (target.tagName === "A") {
-	        event.preventDefault();
-	      }
-	      fallbackNavigate();
-	      return;
-	    }
-	    const workspaceFromFallback = (() => {
-	      try {
-	        const raw = fallbackUrl?.searchParams?.get("workspace") || "";
-	        return normalizeTenantWorkspaceSlug(String(raw || "").trim(), "");
-	      } catch {
+		    const fallbackNavigate = () => {
+		      try {
+		        if (fallbackLink && fallbackLink.href) {
+		          window.location.href = fallbackLink.href;
+		        } else if (fallbackUrl) {
+		          window.location.href = fallbackUrl.toString();
+		        }
+		      } catch {}
+		    };
+		    const workspaceFromFallback = (() => {
+		      try {
+		        const raw = fallbackUrl?.searchParams?.get("workspace") || "";
+		        return normalizeTenantWorkspaceSlug(String(raw || "").trim(), "");
+		      } catch {
         return "";
       }
     })();

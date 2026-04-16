@@ -258,6 +258,25 @@
         await deps.init();
         deps.state.appInitialized = true;
       }
+      // Si el usuario venía por un deep-link (p.ej. `?holding=1&mode=tenant&workspace=...`),
+      // no lo pisamos con la navegación "por rol" (admin/workspace). Esto evita que al entrar
+      // desde una card del Home, tras re-login se pierda el destino.
+      try {
+        const current = new URLSearchParams(window.location.search || "");
+        const hasDeepLink =
+          current.has("holding") ||
+          current.has("crm") ||
+          current.has("clientes") ||
+          current.has("cliente") ||
+          current.has("poliza") ||
+          current.has("empresa") ||
+          current.has("agenda") ||
+          current.has("admin") ||
+          current.has("portal_token");
+        if (hasDeepLink) {
+          return;
+        }
+      } catch {}
       const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
       const targetRole = String(data?.user?.rol || "").trim().toLowerCase();
       const targetService = String(data?.user?.servicio || "").trim().toLowerCase();
