@@ -9309,6 +9309,24 @@ body.density-compact [id$="Table"] table {
   gap: 8px;
 }
 
+#hipotecaBdtTable .hipoteca-bdt-card.is-clickable {
+  cursor: pointer;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card.is-clickable:hover {
+  border-color: rgba(255, 199, 0, 0.55);
+  box-shadow: 0 12px 24px rgba(22, 27, 43, 0.08);
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card.is-clickable:focus {
+  outline: none;
+}
+
+#hipotecaBdtTable .hipoteca-bdt-card.is-clickable:focus-visible {
+  outline: 2px solid rgba(255, 199, 0, 0.8);
+  outline-offset: 2px;
+}
+
 #hipotecaBdtTable .hipoteca-bdt-card-head {
   display: flex;
   align-items: center;

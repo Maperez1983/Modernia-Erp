@@ -31102,10 +31102,27 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     const comision = getValue(row, "comision");
 
     const brand = resolveHipotecaBankBrand(banco);
-    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
+	    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
 
-    const card = document.createElement("div");
-    card.className = "hipoteca-bdt-card";
+	    const card = document.createElement("div");
+	    card.className = "hipoteca-bdt-card is-clickable";
+	    card.setAttribute("role", "button");
+	    card.setAttribute("tabindex", "0");
+	    card.setAttribute("aria-label", `Abrir ficha hipoteca: ${cliente}`);
+	    const openFicha = () => openHipotecaFicha(recordId, { row, columns });
+	    card.addEventListener("click", (event) => {
+	      const target = event?.target;
+	      if (target && typeof target.closest === "function") {
+	        if (target.closest("button, a, input, select, textarea, label")) return;
+	      }
+	      openFicha();
+	    });
+	    card.addEventListener("keydown", (event) => {
+	      if (event.key === "Enter" || event.key === " ") {
+	        event.preventDefault();
+	        openFicha();
+	      }
+	    });
 
     const header = document.createElement("div");
     header.className = "hipoteca-bdt-card-head";
@@ -31182,18 +31199,12 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
       metrics.appendChild(rowEl);
     });
 
-    const actions = document.createElement("div");
-    actions.className = "inline-actions";
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "secondary";
-    openBtn.textContent = "Abrir ficha";
-    openBtn.addEventListener("click", () => openHipotecaFicha(recordId, { row, columns }));
-
-    const pdfBtn = document.createElement("button");
-    pdfBtn.type = "button";
-    pdfBtn.className = "secondary";
-    pdfBtn.textContent = "PDF";
+	    const actions = document.createElement("div");
+	    actions.className = "inline-actions";
+	    const pdfBtn = document.createElement("button");
+	    pdfBtn.type = "button";
+	    pdfBtn.className = "secondary";
+	    pdfBtn.textContent = "PDF";
     pdfBtn.disabled = !canGeneratePdf;
     pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => openHipotecaFichaPrint(recordId));
@@ -31217,11 +31228,10 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
       loadFinCrm();
       loadHipotecaDashboard();
       loadHomeHipotecaStats().then(() => renderCompanyCards());
-    });
+	    });
 
-    actions.appendChild(openBtn);
-    actions.appendChild(pdfBtn);
-    actions.appendChild(deleteBtn);
+	    actions.appendChild(pdfBtn);
+	    actions.appendChild(deleteBtn);
 
     card.appendChild(header);
     card.appendChild(title);
