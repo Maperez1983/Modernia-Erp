@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v178";
+const APP_SW_VERSION = "v179";
 
 const isDebugEnabled = () => {
   try {
@@ -17229,6 +17229,9 @@ const setPage = (page) => {
   // UI unificada: usamos siempre la identidad corporativa (misma base que CRM inmobiliario).
   document.body.classList.add("theme-operativa");
   document.body.classList.toggle("page-empresa", page !== "home");
+  try {
+    debugLog("setPage()", page);
+  } catch {}
   // Diagnóstico: si la URL pide un deep-link pero acabamos en Home, lo mostramos en UI (sin depender de consola).
   try {
     if (page === "home" && isDebugEnabled()) {
@@ -19607,6 +19610,12 @@ const openHolding = (options = {}) => {
   const user = getAuthScopeUser();
   const mode = options.mode === "tenant" ? "tenant" : "platform";
   const canManageWorkspace = Boolean(user && isPrivilegedUser(user));
+  try {
+    debugLog(
+      "openHolding()",
+      `mode=${mode} workspace=${String(options.workspace || "")} view=${String(options.view || "")}\nuser=${user?.usuario || user?.email || user?.id || "-"} priv=${canManageWorkspace ? "1" : "0"}`
+    );
+  } catch {}
   // En modo plataforma (admin), exigimos permisos globales. En tenant, cualquier usuario autenticado debe poder entrar.
   if (mode === "platform" && !canAccessSharedHomeModules(user)) {
     goHome();
@@ -19996,6 +20005,9 @@ const goHome = () => {
 };
 
 const handleRoute = () => {
+  try {
+    debugLog("handleRoute()", `search=${window.location.search || ""}`);
+  } catch {}
   const deps = {
     state,
     slugify,
@@ -20020,6 +20032,9 @@ const handleRoute = () => {
   };
   if (RoutingModule && typeof RoutingModule.handleRoute === "function") {
     RoutingModule.handleRoute(deps);
+    try {
+      debugLog("handleRoute(): ok", `page=${state.currentPage || "-"} holdingView=${state.currentWorkspaceView || "-"}`);
+    } catch {}
     return;
   }
   // Fallback defensivo: si por caché/red falla el script `app-routing.js`, no nos quedamos en Home
@@ -20047,6 +20062,9 @@ const handleRoute = () => {
       const requestedEngine = (params.get("engine") || "").trim();
       const requestedRrhh = (params.get("rrhh") || "").trim();
       const requestedPersona = (params.get("persona") || "").trim();
+      try {
+        debugLog("route: holding", `mode=${mode} workspace=${params.get("workspace") || ""} view=${requestedView || ""}`);
+      } catch {}
       openHolding({
         mode,
         workspace: params.get("workspace") || "",
@@ -54077,12 +54095,18 @@ const showAuthOverlay = (message = "") => {
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
   setAuthUi(null);
+  try {
+    debugLog("showAuthOverlay()", message || "");
+  } catch {}
 };
 
 const hideAuthOverlay = () => {
   if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.remove("auth-locked");
+  try {
+    debugLog("hideAuthOverlay()");
+  } catch {}
 };
 
 const showActivationOverlay = (introText = "") => {
