@@ -51642,6 +51642,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/inmueble_encargo_pdf":
+            now = datetime.now(timezone.utc).isoformat()
             inmueble_id = params.get("id", [""])[0]
             if not inmueble_id:
                 json_response(self, {"error": "id requerido"}, status=400)
