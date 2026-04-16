@@ -274,6 +274,24 @@
           current.has("admin") ||
           current.has("portal_token");
         if (hasDeepLink) {
+          // Re-aplica el routing con la URL actual (en apps ya inicializadas, no se re-ejecuta `init()`).
+          const query = {};
+          current.forEach((value, key) => {
+            if (value === null || value === undefined) return;
+            const v = String(value);
+            if (!v) return;
+            query[key] = v;
+          });
+          if (Object.keys(query).length && typeof deps.navigate === "function") {
+            try {
+              deps.navigate(query);
+              return;
+            } catch {}
+          }
+          // Fallback: recarga completa al mismo deep-link.
+          try {
+            window.location.assign(window.location.href);
+          } catch {}
           return;
         }
       } catch {}
