@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v176";
+const APP_SW_VERSION = "v177";
 
 const isDebugEnabled = () => {
   try {
@@ -15,6 +15,17 @@ const isDebugEnabled = () => {
   } catch {}
   return false;
 };
+
+// Persist debug flag across navigations (even if URL query is cleared).
+try {
+  const params = new URLSearchParams(window.location.search || "");
+  const debugParam = String(params.get("debug") || "").trim();
+  if (debugParam === "1") {
+    localStorage.setItem("crm.debug", "1");
+  } else if (debugParam === "0") {
+    localStorage.removeItem("crm.debug");
+  }
+} catch {}
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -19903,6 +19914,12 @@ const openAdmin = () => {
 };
 
 const goHome = () => {
+  try {
+    if (isDebugEnabled()) {
+      const stack = String(new Error("goHome()").stack || "").slice(0, 1800);
+      setUiToast("Debug: goHome()", `${window.location.href}\n\n${stack}`);
+    }
+  } catch {}
   setCrmMode("");
   setModule("empresas");
   empresaSelect.value = "";
@@ -54144,15 +54161,20 @@ const logoutAuthSession = async () => {
   });
 };
 
-const init = async () => {
-  state.booting = true;
-  try {
-    // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
-    // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
-    renderCompanyCards();
-    // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
-    // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
-    bindGestoriaRentaCampaignBanner();
+  const init = async () => {
+    state.booting = true;
+    try {
+      // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
+      // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
+      renderCompanyCards();
+      try {
+        if (isDebugEnabled()) {
+          setUiToast("Debug activo", `URL: ${window.location.href}`);
+        }
+      } catch {}
+      // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
+      // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
+      bindGestoriaRentaCampaignBanner();
 
     const results = await Promise.allSettled([
       api("/api/empresas"),
