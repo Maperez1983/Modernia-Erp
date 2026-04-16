@@ -3,95 +3,12 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v184";
+const APP_SW_VERSION = "v185";
 
-const isDebugEnabled = () => {
-  try {
-    const params = new URLSearchParams(window.location.search || "");
-    if (String(params.get("debug") || "").trim() === "1") return true;
-  } catch {}
-  try {
-    return String(localStorage.getItem("crm.debug") || "").trim() === "1";
-  } catch {}
-  return false;
-};
-
-// Persist debug flag across navigations (even if URL query is cleared).
-try {
-  const params = new URLSearchParams(window.location.search || "");
-  const debugParam = String(params.get("debug") || "").trim();
-  if (debugParam === "1") {
-    localStorage.setItem("crm.debug", "1");
-  } else if (debugParam === "0") {
-    localStorage.removeItem("crm.debug");
-  }
-} catch {}
-
-const debugLog = (title, detail = "") => {
-  if (!isDebugEnabled()) return;
-  try {
-    const panelId = "crmDebugPanel";
-    let panel = document.getElementById(panelId);
-    const mount = document.body || document.documentElement;
-    if (!panel && mount) {
-      panel = document.createElement("div");
-      panel.id = panelId;
-      panel.setAttribute("role", "status");
-      panel.style.position = "fixed";
-      panel.style.left = "12px";
-      panel.style.bottom = "12px";
-      panel.style.top = "auto";
-      panel.style.right = "auto";
-      panel.style.maxWidth = "min(720px, calc(100vw - 24px))";
-      panel.style.maxHeight = "min(70vh, 520px)";
-      panel.style.overflow = "auto";
-      panel.style.zIndex = "200000";
-      panel.style.padding = "10px 12px";
-      panel.style.borderRadius = "12px";
-      panel.style.background = "rgba(255,255,255,0.98)";
-      panel.style.border = "1px solid rgba(130, 76, 69, 0.28)";
-      panel.style.boxShadow = "0 20px 60px rgba(43, 43, 43, 0.22)";
-      panel.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-      panel.style.fontSize = "12px";
-      panel.style.lineHeight = "1.35";
-      panel.style.whiteSpace = "pre-wrap";
-      panel.style.color = "#1d241f";
-      panel.textContent = "Debug panel\n";
-      mount.appendChild(panel);
-    }
-    if (!panel) return;
-    const now = new Date().toISOString().slice(11, 19);
-    const lines = [];
-    lines.push(`[${now}] ${String(title || "").trim()}`);
-    if (detail) lines.push(String(detail));
-    lines.push("");
-    const next = `${panel.textContent || ""}${lines.join("\n")}`.slice(-14000);
-    panel.textContent = next;
-    try {
-      window.__crmDebugLines = next;
-    } catch {}
-  } catch {}
-};
-
-// Captura errores globales (solo visible cuando `debug=1` está activo).
-try {
-  window.addEventListener("error", (event) => {
-    try {
-      debugLog(
-        "window.error",
-        `${String(event?.message || "Error")}\n${String(event?.filename || "")}:${Number(event?.lineno || 0)}:${Number(event?.colno || 0)}`
-      );
-    } catch {}
-  });
-  window.addEventListener("unhandledrejection", (event) => {
-    try {
-      const reason = event?.reason;
-      const msg = String(reason?.message || reason || "Promise rejection");
-      const stack = String(reason?.stack || "");
-      debugLog("unhandledrejection", `${msg}${stack ? `\n${stack}` : ""}`);
-    } catch {}
-  });
-} catch {}
+// Debug (panel/trazas) desactivado en producción.
+const isDebugEnabled = () => false;
+const debugLog = () => {};
+try { localStorage.removeItem("crm.debug"); } catch {}
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
