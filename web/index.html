@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-			    <link rel="stylesheet" href="styles.css?v=200" />
+			    <link rel="stylesheet" href="styles.css?v=201" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -7523,17 +7523,67 @@
             </div>
             <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
           </div>
-          <div class="tabs" id="clienteTabs">
-            <button class="tab active" type="button" data-tab="datos">Expediente</button>
-            <button class="tab" type="button" data-tab="relaciones">Relaciones</button>
-            <button class="tab hidden" type="button" data-tab="economicos">Datos económicos</button>
-            <button class="tab hidden" type="button" data-tab="dashboard">Resumen</button>
-            <button class="tab" type="button" data-tab="profesional">Servicios</button>
-            <button class="tab hidden" type="button" data-tab="operativa">Áreas de trabajo</button>
-            <button class="tab hidden" type="button" data-tab="servicios">Servicios</button>
-            <button class="tab" type="button" data-tab="docs">Documentos</button>
-            <button class="tab" type="button" data-tab="facturas">Facturación</button>
-            <button class="tab" type="button" data-tab="trabajos">Historial</button>
+          <div id="clienteTabs" class="tc-modulebar tc-modulebar--micro" role="navigation" aria-label="Cliente">
+            <button class="tab tc-module active" type="button" data-tab="datos" title="Expediente">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h9l3 3v17H6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M15 2v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6M9 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Expediente</span>
+            </button>
+            <button class="tab tc-module" type="button" data-tab="relaciones" title="Relaciones">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 0 1 0-7l.7-.7a5 5 0 0 1 7 7l-.7.7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 11a5 5 0 0 1 0 7l-.7.7a5 5 0 0 1-7-7l.7-.7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Relaciones</span>
+            </button>
+            <button class="tab tc-module hidden" type="button" data-tab="economicos" title="Datos económicos">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 1v22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Econ.</span>
+            </button>
+            <button class="tab tc-module hidden" type="button" data-tab="dashboard" title="Resumen">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M7 9h10M7 13h10M7 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Resumen</span>
+            </button>
+            <button class="tab tc-module" type="button" data-tab="profesional" title="Servicios">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Servicios</span>
+            </button>
+            <button class="tab tc-module hidden" type="button" data-tab="operativa" title="Áreas de trabajo">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" stroke="currentColor" stroke-width="2"/></svg>
+              </span>
+              <span class="tc-mod-label">Áreas</span>
+            </button>
+            <button class="tab tc-module hidden" type="button" data-tab="servicios" title="Servicios">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Servicios</span>
+            </button>
+            <button class="tab tc-module" type="button" data-tab="docs" title="Documentos">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h7l2 2h7v14H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 4v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Docs</span>
+            </button>
+            <button class="tab tc-module" type="button" data-tab="facturas" title="Facturación">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-2-1-2 1-2-1-2 1-2-1-2 1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7h6M9 11h6M9 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Fact.</span>
+            </button>
+            <button class="tab tc-module" type="button" data-tab="trabajos" title="Historial">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Historial</span>
+            </button>
           </div>
           <div id="clienteTabDatos">
             <div class="grid" id="clienteDetailGrid"></div>
@@ -9006,7 +9056,7 @@
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
-		        const TARGET_SW = "/sw.js?v=163";
+		        const TARGET_SW = "/sw.js?v=164";
 	        try {
 	          const params = new URLSearchParams(window.location.search || "");
 	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
