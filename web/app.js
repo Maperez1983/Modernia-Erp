@@ -28880,6 +28880,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     empresa_id: empresa.id,
     q,
     limit: "1000",
+    include_json: "1",
   });
   api(`/api/hipoteca_bdt?${params.toString()}`)
     .then((data) => {
@@ -30589,14 +30590,14 @@ const fetchHipotecaRowById = async (recordId) => {
   if (!id) return null;
   const empresa = resolveCrmFinEmpresa();
   if (!empresa) return null;
-  const params = new URLSearchParams({
-    tabla: "hipotecas",
-    empresa_id: empresa.id,
-    include_id: "1",
-    q: "",
-  });
   try {
-    const data = await api(`/api/tabla?${params.toString()}`);
+    const params = new URLSearchParams({
+      empresa_id: empresa.id,
+      id,
+      include_json: "1",
+      limit: "1",
+    });
+    const data = await api(`/api/hipoteca_bdt?${params.toString()}`);
     const columns = data?.columns || [];
     const rows = data?.rows || [];
     const idIndex = columns.indexOf("id");
@@ -31561,6 +31562,7 @@ const HIPOTECA_BANK_BRANDS = [
     short: "CR Granada",
     logo: "/assets/logos/caja-rural-granada.png",
     color: "#2e7d32",
+    logoOnDark: true,
     aliases: ["caja rural de granada", "cajarural de granada", "rural granada"],
   },
   {
@@ -31646,6 +31648,10 @@ const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
       logo.src = brand.logo;
       logo.alt = brand.displayName;
       logo.loading = "lazy";
+      if (brand.logoOnDark) {
+        logo.style.background = brand.color;
+        logo.style.borderColor = "transparent";
+      }
       logo.addEventListener("error", () => {
         const badge = document.createElement("span");
         badge.className = "hipoteca-bank-badge";

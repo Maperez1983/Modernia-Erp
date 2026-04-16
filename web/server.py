@@ -53048,8 +53048,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipoteca_bdt":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            record_id = (params.get("id", [""])[0] or "").strip()
             q = (params.get("q", [""])[0] or "").strip()
             limit_raw = (params.get("limit", ["1000"])[0] or "1000").strip()
+            include_json = (params.get("include_json", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -53060,31 +53062,33 @@ class Handler(BaseHTTPRequestHandler):
             limit = max(1, min(limit, 5000))
 
             all_columns = sorted([str(c) for c in (table_columns(conn, "hipotecas") or set()) if str(c).strip()])
-            # Campos internos/ruidosos: los *_json son blobs (se editan en la ficha, no en la BDT).
-            hidden = {
-                "empresa_id",
-                "created_at",
-                "updated_at",
-                "cliente_inmueble_json",
-                "hipoteca_detalle_json",
-                "liquidacion_json",
-            }
+            # Campos internos/ruidosos. Los *_json pueden ser voluminosos: solo se incluyen si se piden explícitamente.
+            hidden = {"empresa_id", "created_at", "updated_at"}
+            if not include_json:
+                hidden.update({"cliente_inmueble_json", "hipoteca_detalle_json", "liquidacion_json"})
             columns = [col for col in all_columns if col not in hidden]
             if "id" in columns:
                 columns = ["id"] + [c for c in columns if c != "id"]
             text_columns = [col for col in columns if col != "id"]
 
+            def quote_ident(value: str) -> str:
+                return '"' + str(value or "").replace('"', '""') + '"'
+
             where = ["empresa_id = ?"]
             values: List[object] = [empresa_id]
+            if record_id:
+                where.append("id = ?")
+                values.append(record_id)
             if q and text_columns:
-                likes = " OR ".join([f"{col} LIKE ?" for col in text_columns])
+                # En Postgres, columnas numéricas necesitan CAST para usar LIKE.
+                likes = " OR ".join([f"CAST({quote_ident(col)} AS TEXT) LIKE ?" for col in text_columns])
                 where.append(f"({likes})")
                 values.extend([f"%{q}%"] * len(text_columns))
             elif q and not text_columns:
                 json_response(self, {"columns": columns, "rows": []})
                 return
 
-            select_cols = ", ".join(columns)
+            select_cols = ", ".join([quote_ident(col) for col in columns])
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
