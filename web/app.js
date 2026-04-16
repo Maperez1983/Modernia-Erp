@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v174";
+const APP_SW_VERSION = "v175";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -19919,8 +19919,7 @@ const goHome = () => {
 };
 
 const handleRoute = () => {
-  if (!RoutingModule) return;
-  RoutingModule.handleRoute({
+  const deps = {
     state,
     slugify,
     openAgenda,
@@ -19941,7 +19940,129 @@ const handleRoute = () => {
     openCompany,
     goHome,
     ui: UI,
-  });
+  };
+  if (RoutingModule && typeof RoutingModule.handleRoute === "function") {
+    RoutingModule.handleRoute(deps);
+    return;
+  }
+  // Fallback defensivo: si por caché/red falla el script `app-routing.js`, no nos quedamos en Home
+  // con la query `?holding=...` sin aplicar. Replicamos el routing mínimo.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("portal_token")) {
+      openWorkspacePortalPublic(params.get("portal_token") || "");
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("agenda")) {
+      openAgenda();
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("admin")) {
+      openAdmin();
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("holding")) {
+      const mode = (params.get("mode") || "platform").toLowerCase() === "tenant" ? "tenant" : "platform";
+      const requestedView = (params.get("view") || "").trim();
+      const requestedEngine = (params.get("engine") || "").trim();
+      const requestedRrhh = (params.get("rrhh") || "").trim();
+      const requestedPersona = (params.get("persona") || "").trim();
+      openHolding({
+        mode,
+        workspace: params.get("workspace") || "",
+        view: requestedView || (mode === "tenant" ? "overview" : "overview"),
+        engine: requestedEngine || "",
+        rrhh: requestedRrhh || "",
+        persona: requestedPersona || "",
+      });
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("clientes")) {
+      openClientesModule();
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("crm")) {
+      const crm = params.get("crm");
+      if (crm === "inmo") {
+        openCrmInmobiliario();
+        const inmuebleId = (params.get("inmueble") || "").trim();
+        const captacionId = (params.get("captacion") || "").trim();
+        if (inmuebleId && typeof openInmuebleDetail === "function") {
+          setTimeout(() => {
+            openInmuebleDetail(inmuebleId, "resumen");
+            UI?.refreshContext(state);
+          }, 250);
+          return;
+        }
+        if (captacionId && typeof openInmuebleFromCaptacion === "function") {
+          setTimeout(() => {
+            openInmuebleFromCaptacion(captacionId, "captaciones");
+            UI?.refreshContext(state);
+          }, 250);
+          return;
+        }
+        UI?.refreshContext(state);
+        return;
+      }
+      if (crm === "gestoria") {
+        openGestoriaCrm();
+        UI?.refreshContext(state);
+        return;
+      }
+      if (crm === "seguros") {
+        openSegurosCrm();
+        UI?.refreshContext(state);
+        return;
+      }
+      if (crm === "fin") {
+        openFinCrm();
+        UI?.refreshContext(state);
+        return;
+      }
+    }
+    if (params.has("cliente")) {
+      const id = params.get("cliente");
+      if (params.has("poliza")) {
+        const polizaId = params.get("poliza");
+        openClientesModule();
+        openClienteDetail(id);
+        setTimeout(() => {
+          openSeguroById(polizaId, id);
+          UI?.refreshContext(state);
+        }, 250);
+        return;
+      }
+      openClientesModule();
+      openClienteDetail(id);
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("poliza")) {
+      const polizaId = params.get("poliza");
+      openSegurosCrm();
+      setTimeout(() => {
+        openSeguroById(polizaId);
+        UI?.refreshContext(state);
+      }, 250);
+      return;
+    }
+    const slug = params.get("empresa");
+    if (slug) {
+      const empresa = state.empresas.find((item) => slugify(item.nombre) === slug);
+      if (empresa) {
+        openCompany(empresa.nombre);
+        UI?.refreshContext(state);
+        return;
+      }
+    }
+  } catch {}
+  goHome();
+  UI?.refreshContext(state);
 };
 
 const updateCompanySummary = (empresaName) => {
