@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-			    <link rel="stylesheet" href="styles.css?v=201" />
+			    <link rel="stylesheet" href="styles.css?v=202" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -7549,17 +7549,11 @@
               </span>
               <span class="tc-mod-label">Econ.</span>
             </button>
-            <button class="tab tc-module hidden" type="button" data-tab="dashboard" title="Resumen">
+            <button class="tab tc-module" type="button" data-tab="dashboard" title="Dashboard">
               <span class="tc-mod-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M7 9h10M7 13h10M7 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               </span>
-              <span class="tc-mod-label">Resumen</span>
-            </button>
-            <button class="tab tc-module" type="button" data-tab="profesional" title="Servicios">
-              <span class="tc-mod-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="tc-mod-label">Servicios</span>
+              <span class="tc-mod-label">Dashboard</span>
             </button>
             <button class="tab tc-module hidden" type="button" data-tab="operativa" title="Áreas de trabajo">
               <span class="tc-mod-ico" aria-hidden="true">
@@ -7591,46 +7585,18 @@
               </span>
               <span class="tc-mod-label">Historial</span>
             </button>
+            <button class="tab tc-module" type="button" data-tab="config" title="Configuración">
+              <span class="tc-mod-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="tc-mod-label">Config.</span>
+            </button>
           </div>
           <div id="clienteTabDatos">
             <div class="grid" id="clienteDetailGrid"></div>
             <div class="form-actions">
               <button type="button" id="clienteSaveBtn">Guardar cambios</button>
               <span id="clienteSaveStatus" class="muted"></span>
-            </div>
-            <div class="form-card">
-              <h3>Servicios asignados</h3>
-              <div id="clienteEmpresasList"></div>
-            </div>
-            <div class="form-card">
-              <h3>Asignar nuevo servicio</h3>
-              <p class="muted">Vincula el cliente a un servicio y empresa.</p>
-              <form id="clienteAssignForm" class="form-grid">
-                <label>
-                  Servicio
-                  <select id="clienteAssignServicio" name="servicio" required></select>
-                </label>
-                <label>
-                  Empresa
-                  <select id="clienteAssignEmpresa" name="empresa_id" required></select>
-                </label>
-                <label>
-                  Estado
-                  <input name="estado" placeholder="Activo" />
-                </label>
-                <label>
-                  Fecha inicio
-                  <input name="fecha_inicio" type="date" />
-                </label>
-                <label>
-                  Fecha fin
-                  <input name="fecha_fin" type="date" />
-                </label>
-                <div class="form-actions">
-                  <button type="submit">Añadir servicio</button>
-                  <span id="clienteAssignStatus" class="muted"></span>
-                </div>
-              </form>
             </div>
           </div>
           <div id="clienteTabEconomicos" class="hidden">
@@ -7675,13 +7641,6 @@
                   <h4>Actividad</h4>
                   <div id="clienteChartActividad"></div>
                 </div>
-              </div>
-              <div class="form-card">
-                <h4>Seguros por ramo</h4>
-                <p class="muted">Pulsa un ramo para ver sus pólizas y abrir la ficha de cada una.</p>
-                <div id="clienteRamoKpis" class="cliente-ramo-kpis"></div>
-                <div id="clienteChartRamos"></div>
-                <div id="clienteRamoListado" class="cliente-ramo-listado"></div>
               </div>
             </div>
           </div>
@@ -7743,9 +7702,43 @@
           </div>
           <div id="clienteTabProfesional" class="hidden">
             <div class="form-card">
-              <h3>Servicios y configuración</h3>
-              <p class="muted">Datos maestros, alcance operativo y activación por servicio.</p>
+              <h3>Configuración</h3>
+              <p class="muted">Servicios activos, alcance operativo y configuración por servicio.</p>
               <div id="clienteProfesionalScope"></div>
+            </div>
+            <div class="form-card">
+              <h3>Servicios asignados</h3>
+              <div id="clienteEmpresasList"></div>
+            </div>
+            <div class="form-card">
+              <h3>Asignar nuevo servicio</h3>
+              <p class="muted">Vincula el cliente a un servicio y empresa.</p>
+              <form id="clienteAssignForm" class="form-grid">
+                <label>
+                  Servicio
+                  <select id="clienteAssignServicio" name="servicio" required></select>
+                </label>
+                <label>
+                  Empresa
+                  <select id="clienteAssignEmpresa" name="empresa_id" required></select>
+                </label>
+                <label>
+                  Estado
+                  <input name="estado" placeholder="Activo" />
+                </label>
+                <label>
+                  Fecha inicio
+                  <input name="fecha_inicio" type="date" />
+                </label>
+                <label>
+                  Fecha fin
+                  <input name="fecha_fin" type="date" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Añadir servicio</button>
+                  <span id="clienteAssignStatus" class="muted"></span>
+                </div>
+              </form>
             </div>
             <div class="form-card">
               <h3>Gestoría · Configuración base</h3>
@@ -8568,6 +8561,13 @@
             <div class="form-card" id="clienteServiciosSegurosCard">
               <h3>Seguros</h3>
               <p class="muted">Pólizas, renovaciones y estado del asegurado.</p>
+              <div class="form-card">
+                <h4>Seguros por ramo</h4>
+                <p class="muted">Pulsa un ramo para ver sus pólizas y abrir la ficha de cada una.</p>
+                <div id="clienteRamoKpis" class="cliente-ramo-kpis"></div>
+                <div id="clienteChartRamos"></div>
+                <div id="clienteRamoListado" class="cliente-ramo-listado"></div>
+              </div>
               <div id="clienteSegurosFicha"></div>
             </div>
             <div class="form-card" id="clienteServiciosInmoCard">
@@ -9059,11 +9059,11 @@
 		    <script src="app-auth.js?v=10"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-		    <script src="app.js?v=553"></script>
+		    <script src="app.js?v=554"></script>
 		    <script>
 	      (function () {
 	        if (!("serviceWorker" in navigator)) return;
-		        const TARGET_SW = "/sw.js?v=164";
+		        const TARGET_SW = "/sw.js?v=165";
 	        try {
 	          const params = new URLSearchParams(window.location.search || "");
 	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
