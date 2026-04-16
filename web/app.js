@@ -27926,6 +27926,7 @@ const updateTableVisibility = () => {
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
+  document.body.classList.toggle("crm-context-vertical", isCrmContext || isInmuebleDetailOpen);
   document.body.classList.toggle(
     "crm-context-inmo",
     currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || isInmuebleDetailOpen
