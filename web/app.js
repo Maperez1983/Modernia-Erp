@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v170";
+const APP_SW_VERSION = "v171";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -54157,49 +54157,64 @@ if (crmExitBtn) {
   });
 }
 
-if (coreCards) {
-		  coreCards.addEventListener("click", (event) => {
-		    const target = closestFromEvent(event, "[data-action]");
-		    if (!target || !coreCards.contains(target)) {
-		      return;
+	if (coreCards) {
+			  coreCards.addEventListener("click", (event) => {
+			    const target = closestFromEvent(event, "[data-action]");
+			    if (!target || !coreCards.contains(target)) {
+			      return;
+		    }
+		    const action = target.dataset.action;
+	    const authUser = getAuthScopeUser();
+	    const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
+	    const fallbackHref = (() => {
+	      const raw = fallbackLink?.getAttribute ? fallbackLink.getAttribute("href") : "";
+	      return String(raw || "").trim();
+	    })();
+	    const fallbackUrl = (() => {
+	      try {
+	        if (!fallbackHref) return null;
+	        return new URL(fallbackHref, window.location.origin);
+	      } catch {
+	        return null;
+	      }
+	    })();
+	    const fallbackNavigate = () => {
+	      try {
+	        if (fallbackLink && fallbackLink.href) {
+	          window.location.href = fallbackLink.href;
+	        } else if (fallbackUrl) {
+	          window.location.href = fallbackUrl.toString();
+	        }
+	      } catch {}
+	    };
+	    // Para cards del home que son puramente navegación, forzamos navegación por href.
+	    // Evita que un estado JS incompleto (boot lento / caché vieja) bloquee la entrada.
+	    const isPureNavigationAction =
+	      action === "holding" ||
+	      action === "holding-workspaces" ||
+	      action === "holding-admin" ||
+	      action === "holding-tenant" ||
+	      String(action || "").startsWith("home-workspace:");
+	    if (isPureNavigationAction && fallbackHref) {
+	      if (target.tagName === "A") {
+	        event.preventDefault();
+	      }
+	      fallbackNavigate();
+	      return;
 	    }
-	    const action = target.dataset.action;
-    const authUser = getAuthScopeUser();
-    const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
-    const fallbackHref = (() => {
-      const raw = fallbackLink?.getAttribute ? fallbackLink.getAttribute("href") : "";
-      return String(raw || "").trim();
-    })();
-    const fallbackUrl = (() => {
-      try {
-        if (!fallbackHref) return null;
-        return new URL(fallbackHref, window.location.origin);
-      } catch {
-        return null;
-      }
-    })();
-    const fallbackNavigate = () => {
-      try {
-        if (fallbackLink && fallbackLink.href) {
-          window.location.href = fallbackLink.href;
-        } else if (fallbackUrl) {
-          window.location.href = fallbackUrl.toString();
-        }
-      } catch {}
-    };
-    const workspaceFromFallback = (() => {
-      try {
-        const raw = fallbackUrl?.searchParams?.get("workspace") || "";
-        return normalizeTenantWorkspaceSlug(String(raw || "").trim(), "");
-      } catch {
+	    const workspaceFromFallback = (() => {
+	      try {
+	        const raw = fallbackUrl?.searchParams?.get("workspace") || "";
+	        return normalizeTenantWorkspaceSlug(String(raw || "").trim(), "");
+	      } catch {
         return "";
       }
     })();
-    // Si aún no hay sesión en memoria (boot lento / SW viejo), dejamos que el enlace navegue normal.
-    if (!authUser?.id) {
-      fallbackNavigate();
-      return;
-    }
+	    // Si aún no hay sesión en memoria (boot lento / SW viejo), dejamos que el enlace navegue normal.
+	    if (!authUser?.id) {
+	      fallbackNavigate();
+	      return;
+	    }
     if (target.tagName === "A") {
       event.preventDefault();
     }
