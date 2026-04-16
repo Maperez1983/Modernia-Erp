@@ -49357,8 +49357,20 @@ const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
   gestoriaRentaQuickModal.setAttribute("aria-hidden", "false");
   document.body.classList.add("modal-open");
   state.gestoriaRentaQuickAutoSubmit = true;
+  // Asegura que el desplegable de Responsable esté poblado al abrir el modal.
+  // En algunos contextos (entrando directo en Gestoría), `usersList` aún no está cargado.
   try {
-    populateResponsableSelects();
+    if (!Array.isArray(state.usersList) || !state.usersList.length) {
+      loadUsuarios()
+        .then(() => {
+          try {
+            populateResponsableSelects();
+          } catch {}
+        })
+        .catch(() => {});
+    } else {
+      populateResponsableSelects();
+    }
   } catch {}
   syncGestoriaRentaRemesaToggles();
   if (gestoriaRentaQuickStatus) {
