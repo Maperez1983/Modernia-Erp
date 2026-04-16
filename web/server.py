@@ -53060,7 +53060,15 @@ class Handler(BaseHTTPRequestHandler):
             limit = max(1, min(limit, 5000))
 
             all_columns = sorted([str(c) for c in (table_columns(conn, "hipotecas") or set()) if str(c).strip()])
-            hidden = {"empresa_id", "created_at", "updated_at"}
+            # Campos internos/ruidosos: los *_json son blobs (se editan en la ficha, no en la BDT).
+            hidden = {
+                "empresa_id",
+                "created_at",
+                "updated_at",
+                "cliente_inmueble_json",
+                "hipoteca_detalle_json",
+                "liquidacion_json",
+            }
             columns = [col for col in all_columns if col not in hidden]
             if "id" in columns:
                 columns = ["id"] + [c for c in columns if c != "id"]
@@ -55410,7 +55418,14 @@ class Handler(BaseHTTPRequestHandler):
             if not columns:
                 json_response(self, {"columns": ["empresa"], "rows": []})
                 return
-            hidden = {"empresa_id", "created_at", "updated_at"}
+            hidden = {
+                "empresa_id",
+                "created_at",
+                "updated_at",
+                "cliente_inmueble_json",
+                "hipoteca_detalle_json",
+                "liquidacion_json",
+            }
             visible_columns = [col for col in columns if col not in hidden]
             if not include_id:
                 visible_columns = [col for col in visible_columns if col != "id"]
