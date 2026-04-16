@@ -9396,7 +9396,7 @@ body.density-compact [id$="Table"] table {
 
 #hipotecaBdtTable .hipoteca-bdt-card-metrics {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px 10px;
 }
 

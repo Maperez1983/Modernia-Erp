@@ -31085,44 +31085,82 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     return row?.[idx] ?? "";
   };
 
+  const buildTitularesLabel = (row) => {
+    const clienteInmueble = safeParseJsonObject(getValue(row, "cliente_inmueble_json"));
+    const p1Nombre = String(getNestedValue(clienteInmueble, "prestataria.p1.nombre") || "").trim();
+    const p2Source = normalizePrestatariaSource(getNestedValue(clienteInmueble, "prestataria.p2.source"));
+    const p2Nombre =
+      p2Source && p2Source !== "none"
+        ? String(getNestedValue(clienteInmueble, "prestataria.p2.nombre") || "").trim()
+        : "";
+    const titulares = [p1Nombre, p2Nombre].map((v) => String(v || "").trim()).filter(Boolean);
+    if (titulares.length) return titulares.join(" + ");
+    const c1 = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
+    const c2 = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
+    const fallback = [c1, c2].filter(Boolean);
+    if (fallback.length) return fallback.join(" + ");
+    return getHipotecaDisplayName(row, columns) || String(getValue(row, "cliente") || "").trim() || "Sin titulares";
+  };
+
+  const formatYears = (value) => {
+    const num = toNumber(value);
+    if (num === null) return "";
+    if (!Number.isFinite(num) || num <= 0) return "";
+    const normalized = Math.round(num);
+    return `${normalized} años`;
+  };
+
+  const formatInterest = (value) => {
+    const num = toNumber(value);
+    if (num === null) return "";
+    return formatPercent(num);
+  };
+
+  const formatMoneyMaybe = (value) => {
+    const num = toNumber(value);
+    if (num === null) return "";
+    return formatEurosCompact(num);
+  };
+
   const cardGrid = document.createElement("div");
   cardGrid.className = "hipoteca-bdt-cards";
 
   rows.forEach((row) => {
     const recordId = row[idIndex];
-    const cliente = getHipotecaDisplayName(row, columns) || String(getValue(row, "cliente") || "").trim() || "Sin cliente";
+    const titulares = buildTitularesLabel(row);
     const banco = String(getValue(row, "banco") || "").trim();
-    const estado = String(getValue(row, "estado") || "").trim();
     const oficina = String(getValue(row, "oficina") || "").trim();
-    const inmobiliaria = String(getValue(row, "inmobiliaria_compra") || "").trim();
-    const fechaFirma = getValue(row, "fecha_firma");
-    const fechaEncargo = getValue(row, "fecha_encargo");
     const precio = getValue(row, "precio");
     const importeHipoteca = getValue(row, "importe_hipoteca");
     const comision = getValue(row, "comision");
 
-    const brand = resolveHipotecaBankBrand(banco);
-	    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
+    const hipotecaDetalle = safeParseJsonObject(getValue(row, "hipoteca_detalle_json"));
+    const plazo = getNestedValue(hipotecaDetalle, "preferencias.plazo_anos");
+    const interes = getNestedValue(hipotecaDetalle, "condiciones.interes");
+    const cuota = getNestedValue(hipotecaDetalle, "condiciones.cuota");
 
-	    const card = document.createElement("div");
-	    card.className = "hipoteca-bdt-card is-clickable";
-	    card.setAttribute("role", "button");
-	    card.setAttribute("tabindex", "0");
-	    card.setAttribute("aria-label", `Abrir ficha hipoteca: ${cliente}`);
-	    const openFicha = () => openHipotecaFicha(recordId, { row, columns });
-	    card.addEventListener("click", (event) => {
-	      const target = event?.target;
-	      if (target && typeof target.closest === "function") {
-	        if (target.closest("button, a, input, select, textarea, label")) return;
-	      }
-	      openFicha();
-	    });
-	    card.addEventListener("keydown", (event) => {
-	      if (event.key === "Enter" || event.key === " ") {
-	        event.preventDefault();
-	        openFicha();
-	      }
-	    });
+    const brand = resolveHipotecaBankBrand(banco);
+    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
+
+    const card = document.createElement("div");
+    card.className = "hipoteca-bdt-card is-clickable";
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", `Abrir ficha hipoteca: ${titulares}`);
+    const openFicha = () => openHipotecaFicha(recordId, { row, columns });
+    card.addEventListener("click", (event) => {
+      const target = event?.target;
+      if (target && typeof target.closest === "function") {
+        if (target.closest("button, a, input, select, textarea, label")) return;
+      }
+      openFicha();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openFicha();
+      }
+    });
 
     const header = document.createElement("div");
     header.className = "hipoteca-bdt-card-head";
@@ -31156,34 +31194,29 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     }
     const bankName = document.createElement("span");
     bankName.className = "hipoteca-bdt-bank-name";
-    bankName.textContent = brand.displayName;
+    bankName.textContent = banco || brand.displayName;
     badge.appendChild(bankName);
     header.appendChild(badge);
 
-    const statusPill = document.createElement("span");
-    statusPill.className = "hipoteca-bdt-status";
-    statusPill.textContent = estado || "Sin estado";
-    header.appendChild(statusPill);
-
     const title = document.createElement("div");
     title.className = "hipoteca-bdt-card-title";
-    title.textContent = cliente;
+    title.textContent = titulares;
 
     const meta = document.createElement("div");
     meta.className = "hipoteca-bdt-card-meta";
     const metaItems = [];
     if (oficina) metaItems.push(`Oficina: ${oficina}`);
-    if (inmobiliaria) metaItems.push(`Inmobiliaria: ${inmobiliaria}`);
-    if (fechaEncargo) metaItems.push(`Encargo: ${formatCell("fecha_encargo", fechaEncargo) || String(fechaEncargo)}`);
-    if (fechaFirma) metaItems.push(`Firma: ${formatCell("fecha_firma", fechaFirma) || String(fechaFirma)}`);
     meta.textContent = metaItems.join(" · ");
 
     const metrics = document.createElement("div");
     metrics.className = "hipoteca-bdt-card-metrics";
     const metricRows = [
-      ["Precio", precio ? formatCell("precio", precio) : ""],
-      ["Hipoteca", importeHipoteca ? formatCell("importe_hipoteca", importeHipoteca) : ""],
-      ["Comisión", comision ? formatCell("comision", comision) : ""],
+      ["Precio hipoteca", formatMoneyMaybe(importeHipoteca)],
+      ["Precio compra", formatMoneyMaybe(precio)],
+      ["Plazo", formatYears(plazo)],
+      ["Interés", formatInterest(interes)],
+      ["Cuota", formatMoneyMaybe(cuota)],
+      ["Comisión", formatMoneyMaybe(comision)],
     ].filter(([, value]) => String(value || "").trim());
     metricRows.forEach(([label, value]) => {
       const rowEl = document.createElement("div");
