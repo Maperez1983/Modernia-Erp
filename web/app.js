@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v177";
+const APP_SW_VERSION = "v178";
 
 const isDebugEnabled = () => {
   try {
@@ -26,6 +26,42 @@ try {
     localStorage.removeItem("crm.debug");
   }
 } catch {}
+
+const debugLog = (title, detail = "") => {
+  if (!isDebugEnabled()) return;
+  try {
+    const panelId = "crmDebugPanel";
+    let panel = document.getElementById(panelId);
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = panelId;
+      panel.style.position = "fixed";
+      panel.style.left = "12px";
+      panel.style.top = "12px";
+      panel.style.maxWidth = "min(520px, calc(100vw - 24px))";
+      panel.style.maxHeight = "min(70vh, 520px)";
+      panel.style.overflow = "auto";
+      panel.style.zIndex = "10050";
+      panel.style.padding = "10px 12px";
+      panel.style.borderRadius = "12px";
+      panel.style.background = "rgba(255,255,255,0.96)";
+      panel.style.border = "1px solid rgba(130, 76, 69, 0.28)";
+      panel.style.boxShadow = "0 20px 60px rgba(43, 43, 43, 0.18)";
+      panel.style.fontSize = "12px";
+      panel.style.lineHeight = "1.35";
+      panel.style.whiteSpace = "pre-wrap";
+      panel.style.color = "#1d241f";
+      panel.innerHTML = "<strong>Debug</strong>\n";
+      document.body.appendChild(panel);
+    }
+    const now = new Date().toISOString().slice(11, 19);
+    const lines = [];
+    lines.push(`[${now}] ${String(title || "").trim()}`);
+    if (detail) lines.push(String(detail));
+    lines.push("");
+    panel.textContent = `${panel.textContent || ""}${lines.join("\n")}`.slice(-8000);
+  } catch {}
+};
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -17201,6 +17237,7 @@ const setPage = (page) => {
         .some((key) => params.has(key));
       if (hasDeepLink) {
         setUiToast("Routing: volvió a Home", `URL actual: ${window.location.href}`);
+        debugLog("Routing: volvió a Home", `URL actual: ${window.location.href}`);
       }
     }
   } catch {}
@@ -19918,6 +19955,7 @@ const goHome = () => {
     if (isDebugEnabled()) {
       const stack = String(new Error("goHome()").stack || "").slice(0, 1800);
       setUiToast("Debug: goHome()", `${window.location.href}\n\n${stack}`);
+      debugLog("goHome()", `${window.location.href}\n\n${stack}`);
     }
   } catch {}
   setCrmMode("");
@@ -54090,6 +54128,7 @@ function handleAuthExpired() {
         last?.status ? `lastApi: ${last.status} · ${last.message || ""}` : "",
       ].filter(Boolean).join("\n");
       setUiToast("Sesión expirada", detail);
+      debugLog("Sesión expirada", detail);
     }
   } catch {}
   return AuthModule.handleAuthExpired({
@@ -54161,17 +54200,18 @@ const logoutAuthSession = async () => {
   });
 };
 
-  const init = async () => {
-    state.booting = true;
+const init = async () => {
+  state.booting = true;
+  try {
+    // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
+    // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
+    renderCompanyCards();
     try {
-      // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
-      // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
-      renderCompanyCards();
-      try {
-        if (isDebugEnabled()) {
-          setUiToast("Debug activo", `URL: ${window.location.href}`);
-        }
-      } catch {}
+      if (isDebugEnabled()) {
+        setUiToast("Debug activo", `URL: ${window.location.href}`);
+        debugLog("Debug activo", `URL: ${window.location.href}`);
+      }
+    } catch {}
       // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
       // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
       bindGestoriaRentaCampaignBanner();
