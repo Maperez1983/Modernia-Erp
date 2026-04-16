@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v180";
+const APP_SW_VERSION = "v181";
 
 const isDebugEnabled = () => {
   try {
@@ -54246,9 +54246,22 @@ const init = async () => {
         debugLog("Debug activo", `URL: ${window.location.href}`);
       }
     } catch {}
-      // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
-      // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
-      bindGestoriaRentaCampaignBanner();
+    // Importante: routing temprano para deep-links de Workspaces.
+    // Si esperamos a que carguen /api/empresas/tablas/resumen, el usuario ve "Home" y parece que no entra.
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      if (params.has("holding")) {
+        debugLog("init: early route", `search=${window.location.search || ""}`);
+        handleRoute();
+      }
+    } catch {}
+    // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
+    // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
+    bindGestoriaRentaCampaignBanner();
+
+    try {
+      debugLog("init: api bootstrap", "loading /api/empresas, /api/tablas, /api/resumen, /api/home_time_status");
+    } catch {}
 
     const results = await Promise.allSettled([
       api("/api/empresas"),
@@ -54256,6 +54269,19 @@ const init = async () => {
       api("/api/resumen"),
       api("/api/home_time_status"),
     ]);
+
+    try {
+      debugLog(
+        "init: api bootstrap done",
+        results
+          .map((r, idx) => {
+            if (r.status === "fulfilled") return `${idx}: ok`;
+            const msg = String(r.reason?.message || r.reason || "").slice(0, 160);
+            return `${idx}: err ${msg}`;
+          })
+          .join(" · ")
+      );
+    } catch {}
 
     const empresas = results[0].status === "fulfilled" ? results[0].value : [];
     const tablas = results[1].status === "fulfilled" ? results[1].value : [];
@@ -54277,6 +54303,9 @@ const init = async () => {
     // Pintado y routing básicos primero: evita que el login tarde minutos en Render cuando hay cold start.
     updateTableVisibility();
     initCrmInmoLinkInterceptor();
+    try {
+      debugLog("init: handleRoute()", `search=${window.location.search || ""}`);
+    } catch {}
     handleRoute();
     UI?.boot(state);
     renderCompanyCards();
