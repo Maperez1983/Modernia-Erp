@@ -7543,11 +7543,11 @@
               </span>
               <span class="tc-mod-label">Relaciones</span>
             </button>
-            <button class="tab tc-module hidden" type="button" data-tab="economicos" title="Datos económicos">
+            <button class="tab tc-module" type="button" data-tab="economicos" title="Contabilidad">
               <span class="tc-mod-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M12 1v22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
-              <span class="tc-mod-label">Econ.</span>
+              <span class="tc-mod-label">Contab.</span>
             </button>
             <button class="tab tc-module" type="button" data-tab="dashboard" title="Dashboard">
               <span class="tc-mod-ico" aria-hidden="true">
@@ -7561,7 +7561,7 @@
               </span>
               <span class="tc-mod-label">Áreas</span>
             </button>
-            <button class="tab tc-module hidden" type="button" data-tab="servicios" title="Servicios">
+            <button class="tab tc-module" type="button" data-tab="servicios" title="Servicios">
               <span class="tc-mod-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
               </span>
@@ -7585,7 +7585,7 @@
               </span>
               <span class="tc-mod-label">Historial</span>
             </button>
-            <button class="tab tc-module" type="button" data-tab="config" title="Configuración">
+            <button class="tab tc-module" type="button" data-tab="profesional" title="Configuración">
               <span class="tc-mod-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.96 7.96 0 0 0 .1-1 7.96 7.96 0 0 0-.1-1l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.7-1L15 3h-6l-.4 3.4a7.9 7.9 0 0 0-1.7 1l-2.6-1-2 3.4L4.6 13a7.96 7.96 0 0 0-.1 1c0 .34.03.67.1 1L2.5 16.6l2 3.4 2.6-1a7.9 7.9 0 0 0 1.7 1L9 21h6l.4-3.4a7.9 7.9 0 0 0 1.7-1l2.6 1 2-3.4L19.4 15Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
               </span>
@@ -7603,8 +7603,8 @@
             <div class="form-card">
               <div class="section-head">
                 <div>
-                  <h3>Datos económicos</h3>
-                  <p class="muted">Ficha económica reutilizable para financiaciones y seguimiento hipotecario.</p>
+                  <h3>Contabilidad</h3>
+                  <p class="muted">Cobros y costes de servicio (renta, etc.) vinculados al cliente.</p>
                 </div>
               </div>
               <div id="clienteEconomicosPanel"></div>
@@ -9059,11 +9059,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=574"></script>
-				    <script>
-			      (function () {
-			        if (!("serviceWorker" in navigator)) return;
-			        const TARGET_SW = "/sw.js?v=186";
+		    <script src="app.js?v=574"></script>
+		    <script>
+		      (function () {
+		        if (!("serviceWorker" in navigator)) return;
+		        const TARGET_SW = "/sw.js?v=186";
 	        try {
 	          const params = new URLSearchParams(window.location.search || "");
 	          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

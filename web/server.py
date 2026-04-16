@@ -45937,6 +45937,13 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     ocr_job_id = ""
             audit("renta_quick_attach", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            try:
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
             return
         elif parsed.path == "/api/cliente_relaciones":

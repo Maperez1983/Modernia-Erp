@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v185";
+const APP_SW_VERSION = "v186";
 
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;
@@ -19278,12 +19278,13 @@ const setClienteTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
   const showExpediente = tab === "datos";
-  const showServicios = tab === "profesional";
+  const showConfig = tab === "profesional";
+  const showServicios = tab === "servicios";
   if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", !showExpediente);
   if (clienteTabRelaciones) clienteTabRelaciones.classList.toggle("hidden", tab !== "relaciones");
   if (clienteTabEconomicos) clienteTabEconomicos.classList.toggle("hidden", tab !== "economicos");
   if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", !showExpediente);
-  if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", !showServicios);
+  if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", !showConfig);
   if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", !showServicios);
   if (clienteTabServicios) clienteTabServicios.classList.toggle("hidden", !showServicios);
   if (clienteTabDocs) clienteTabDocs.classList.toggle("hidden", tab !== "docs");
@@ -19295,6 +19296,80 @@ const setClienteTab = (tab) => {
   if (tab === "docs") {
     setClienteDocsTab(state.clienteDocsTab || "seguros");
   }
+  if (tab === "economicos") {
+    renderClienteContabilidadPanel();
+  }
+};
+
+const renderClienteContabilidadPanel = () => {
+  if (!clienteEconomicosPanel) return;
+  const services = Array.isArray(state.currentClienteServices) ? state.currentClienteServices : [];
+  const hasGestoria = services.includes("gestoria") || services.includes("gestoría");
+  const hasHipotecas = services.includes("financiaciones") || services.includes("hipotecas");
+  if (!hasGestoria && hasHipotecas) {
+    renderClienteDatosEconomicos(state.currentClienteData || {}, state.currentClienteEconomicData || {});
+    return;
+  }
+  const gestoria = state.currentClienteGestoriaData || {};
+  const entries = Array.isArray(gestoria.renta_entries) ? gestoria.renta_entries : [];
+  const hasRenta = entries.length > 0;
+  if (!hasRenta) {
+    clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin cobros/costes registrados todavía.</p>";
+    return;
+  }
+  const rows = entries.map((entry) => {
+    const ejercicio = String(entry?.ejercicio || "").trim() || "-";
+    const precio = Number(entry?.precio_servicio || 0) || 0;
+    const cobrada = Number(entry?.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
+    const forma = String(entry?.forma_cobro || "").trim() || "-";
+    const remesa = Number(entry?.remesada || 0) === 1 ? "Sí" : "No";
+    const estado = String(entry?.estado_presentacion || entry?.doc_status || "").trim() || "-";
+    return { ejercicio, estado, precio, cobrada, forma, remesa };
+  });
+  const total = rows.reduce((acc, row) => acc + (Number(row.precio) || 0), 0);
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Ejercicio", "Estado", "Precio", "Cobro", "Forma cobro", "Remesa"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      row.ejercicio,
+      row.estado,
+      euroFormatter.format(Number(row.precio || 0)),
+      row.cobrada,
+      row.forma,
+      row.remesa,
+    ];
+    cells.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  const wrap = document.createElement("div");
+  wrap.className = "form-card";
+  wrap.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h4>Renta</h4>
+        <p class="muted">Coste por ejercicio y estado de cobro.</p>
+      </div>
+      <div class="pill">Total: ${euroFormatter.format(Number(total || 0))}</div>
+    </div>
+  `;
+  wrap.appendChild(table);
+    clienteEconomicosPanel.innerHTML = "";
+    clienteEconomicosPanel.appendChild(wrap);
 };
 
 const setClienteOperativaTab = (tab) => {
@@ -50245,7 +50320,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       state.currentRentaEntryId = entryId;
       state.pendingClienteOpen = {
         id: String(clienteId || "").trim(),
-        clienteTab: "profesional",
+        clienteTab: "servicios",
         operativaTab: "gestoria",
         gestoriaModule: "renta",
         gestoriaRentaEntryId: entryId,
@@ -50828,7 +50903,7 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       if (!clienteId) return;
       state.pendingClienteOpen = {
         id: clienteId,
-        clienteTab: "profesional",
+        clienteTab: "servicios",
         operativaTab: "gestoria",
         gestoriaModule: "renta",
       };
@@ -53779,19 +53854,19 @@ const openClienteDetail = (id) => {
       const serviciosTab = clienteTabs.querySelector('[data-tab="servicios"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (relacionesTab) relacionesTab.classList.toggle("hidden", false);
-      if (economicosTab) economicosTab.classList.toggle("hidden", !hasHipotecas);
+      if (economicosTab) economicosTab.classList.toggle("hidden", !(hasGestoria || hasHipotecas));
       if (expedienteTab) expedienteTab.classList.toggle("hidden", false);
       if (dashboardTab) dashboardTab.classList.toggle("hidden", true);
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
       if (operativaTab) operativaTab.classList.toggle("hidden", true);
-      if (serviciosTab) serviciosTab.classList.toggle("hidden", true);
+      if (serviciosTab) serviciosTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
       if (docsTab) docsTab.classList.toggle("hidden", false);
     }
     if (clienteTabDashboard) {
       clienteTabDashboard.classList.toggle("hidden", true);
     }
     if (clienteTabServicios) {
-      clienteTabServicios.classList.add("hidden");
+      clienteTabServicios.classList.toggle("hidden", true);
     }
     if (clienteTabOperativa) {
       clienteTabOperativa.classList.toggle("hidden", true);
@@ -53920,7 +53995,8 @@ const openClienteDetail = (id) => {
     }
     if (hasHipotecas && clienteHipotecaFicha) {
       loadClienteHipotecasFicha(cliente, empresasActivas);
-      renderClienteDatosEconomicos(cliente, data.datos_economicos || {});
+      state.currentClienteEconomicData = data.datos_economicos || {};
+      renderClienteDatosEconomicos(cliente, state.currentClienteEconomicData);
     } else if (clienteHipotecaFicha) {
       clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
       if (clienteEconomicosPanel) {
@@ -53965,6 +54041,7 @@ const closeClienteDetail = () => {
   state.currentClienteId = "";
   state.currentClienteServices = [];
   state.currentClienteData = null;
+  state.currentClienteEconomicData = null;
   state.currentClienteSegurosRows = [];
   state.currentClienteRamoSelected = "";
   state.currentClienteRelaciones = [];
