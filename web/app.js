@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v98";
+const APP_SW_VERSION = "v99";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -54153,10 +54153,10 @@ if (crmExitBtn) {
 }
 
 if (coreCards) {
-  coreCards.addEventListener("click", (event) => {
-    const target = closestFromEvent(event, "[data-action]");
-    if (!target || !coreCards.contains(target)) {
-      return;
+	  coreCards.addEventListener("click", (event) => {
+	    const target = closestFromEvent(event, "[data-action]");
+	    if (!target || !coreCards.contains(target)) {
+	      return;
     }
     const action = target.dataset.action;
     const authUser = getAuthScopeUser();
@@ -54198,18 +54198,27 @@ if (coreCards) {
     if (target.tagName === "A") {
       event.preventDefault();
     }
-    try {
-      if (action === "holding") {
-        openHolding();
-      } else if (action === "holding-admin") {
-        openHolding({ mode: "platform", view: "overview" });
-      } else if (action === "holding-tenant") {
-        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "overview" });
-      } else if (action === "time-punch") {
-        openHomeTimePunchModal({ persist: true });
-      } else if (action === "time-home") {
-        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "motores", engine: "registro_horario" });
-        window.setTimeout(() => {
+	    try {
+	      if (action === "holding") {
+	        openHolding();
+	      } else if (action === "holding-admin") {
+	        openHolding({ mode: "platform", view: "overview" });
+	      } else if (action === "holding-tenant") {
+	        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "overview" });
+	      } else if (String(action || "").startsWith("home-workspace:")) {
+	        const rawWorkspace = String(action || "").split(":").slice(1).join(":").trim();
+	        const workspace = normalizeTenantWorkspaceSlug(rawWorkspace, "") || workspaceFromFallback || resolveDefaultTenantWorkspaceSlug();
+	        const view = "operations";
+	        // Evita el reload completo cuando el usuario pulsa "Entrar" dentro de la card.
+	        if (fallbackLink && fallbackLink.tagName === "A") {
+	          event.preventDefault();
+	        }
+	        openHolding({ mode: "tenant", workspace, view });
+	      } else if (action === "time-punch") {
+	        openHomeTimePunchModal({ persist: true });
+	      } else if (action === "time-home") {
+	        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "motores", engine: "registro_horario" });
+	        window.setTimeout(() => {
           focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
         }, 250);
       } else if (action === "crm-inmo") {
