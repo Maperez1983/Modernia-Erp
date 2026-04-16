@@ -29254,17 +29254,14 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
     """
     if rl_canvas is None or rl_colors is None:
         return None
-    buffer = BytesIO()
-    first_size = pagesize_list[0] if pagesize_list else (595, 842)
-    c = rl_canvas.Canvas(buffer, pagesize=first_size)
-    form = c.acroForm
-    text_color = rl_colors.black
-    for idx, size in enumerate(pagesize_list):
-        try:
-            c.setPageSize(size)
-        except Exception:
-            pass
-        for field in (fields_by_page or {}).get(idx, []):
+    pagesize_list = pagesize_list or [(595.0, 842.0)]
+
+    def build_one_page(size, fields):
+        buf = BytesIO()
+        c = rl_canvas.Canvas(buf, pagesize=size)
+        form = c.acroForm
+        text_color = rl_colors.black
+        for field in fields or []:
             try:
                 name = str(field.get("name") or "").strip()
                 if not name:
@@ -29299,10 +29296,33 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                 )
             except Exception:
                 continue
-        if idx < len(pagesize_list) - 1:
-            c.showPage()
-    c.save()
-    return buffer.getvalue()
+        # NO showPage(): evita "forward reference to Page2" en algunas versiones de ReportLab.
+        c.save()
+        return buf.getvalue()
+
+    if len(pagesize_list) > 1 and (PdfReader is not None and PdfWriter is not None):
+        writer = PdfWriter()
+        for idx, size in enumerate(pagesize_list):
+            try:
+                page_bytes = build_one_page(size, (fields_by_page or {}).get(idx, []))
+                reader = PdfReader(BytesIO(page_bytes))
+                writer.add_page(reader.pages[0])
+            except Exception:
+                try:
+                    writer.add_blank_page(width=float(size[0]), height=float(size[1]))
+                except Exception:
+                    pass
+        out = BytesIO()
+        try:
+            writer.write(out)
+        except Exception:
+            return None
+        return out.getvalue()
+
+    try:
+        return build_one_page(pagesize_list[0], (fields_by_page or {}).get(0, []))
+    except Exception:
+        return None
 
 
 def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Helvetica", font_size=10, leading=12):
