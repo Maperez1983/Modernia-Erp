@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v100";
+const APP_SW_VERSION = "v101";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -27,8 +27,13 @@ const normalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE
   // o se mezcla RRHH/configuración entre workspaces.
   if (LEGACY_TENANT_WORKSPACE_SLUGS.has(normalized)) {
     try {
-      const rows = (typeof state !== "undefined" && Array.isArray(state?.workspaces)) ? state.workspaces : [];
-      const exists = rows.some((row) => normalizeSlugLike(row?.slug || row?.nombre || "") === normalized);
+      const candidates = [];
+      if (typeof state !== "undefined") {
+        if (Array.isArray(state?.workspaces)) candidates.push(...state.workspaces);
+        // Home puede renderizar cards antes de poblar state.workspaces: usamos el cache del home si existe.
+        if (Array.isArray(state?.homeWorkspacesRows)) candidates.push(...state.homeWorkspacesRows);
+      }
+      const exists = candidates.some((row) => normalizeSlugLike(row?.slug || row?.nombre || row?.name || "") === normalized);
       if (!exists) return fallback;
     } catch {
       return fallback;
