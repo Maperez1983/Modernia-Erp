@@ -31174,6 +31174,9 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
       logo.src = brand.logo;
       logo.alt = brand.displayName;
       logo.loading = "lazy";
+      if (brand.logoOnDark) {
+        logo.style.background = brand.color;
+      }
       logo.addEventListener(
         "error",
         () => {
