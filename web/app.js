@@ -50276,26 +50276,27 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       };
       openClienteDetail(clienteId);
     };
-    card.addEventListener("click", openClienteRenta);
+    // Click en la card: abre ficha completa (tab Datos). CTA separada para ir directo a Renta.
+    card.addEventListener("click", openClienteGeneric);
     card.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        openClienteRenta();
+        openClienteGeneric();
       }
     });
 
     const footer = document.createElement("div");
     footer.className = "gestoria-renta-overview-actions";
 
-    const clienteBtn = document.createElement("button");
-    clienteBtn.type = "button";
-    clienteBtn.className = "secondary";
-    clienteBtn.textContent = "Ver cliente";
-    clienteBtn.addEventListener("click", (event) => {
+    const rentaBtn = document.createElement("button");
+    rentaBtn.type = "button";
+    rentaBtn.className = "secondary";
+    rentaBtn.textContent = "Abrir renta";
+    rentaBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      openClienteGeneric();
+      openClienteRenta();
     });
-    footer.appendChild(clienteBtn);
+    footer.appendChild(rentaBtn);
 
     const previewDoc = row?.preview_doc || {};
     if (previewDoc.doc_key || previewDoc.doc_url) {
