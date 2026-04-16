@@ -53416,6 +53416,26 @@ const closeClienteDetail = () => {
   maybeReturnToCrmCaptacionCreate();
   maybeReturnToCrmClienteCreate();
   maybeReturnToAltaCaptacion();
+  // Refrescar vistas resumen (cards/tablas) para reflejar cambios hechos dentro de la ficha.
+  try {
+    if (String(returnTab || "").startsWith("gestoria-")) {
+      if (returnTab === "gestoria-crm") {
+        loadGestoriaCrm();
+      } else if (returnTab === "gestoria-dash") {
+        loadGestoriaDashboard();
+      } else if (returnTab === "gestoria-docs") {
+        loadGestoriaDocsWorkspace();
+      } else if (returnTab === "gestoria-conta") {
+        loadGestoriaContabilidad();
+        loadGestoriaContaQueue();
+      } else if (returnTab === "gestoria-agenda") {
+        const empresa = resolveCrmGestoriaEmpresa();
+        if (empresa) loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+      } else if (returnTab === "gestoria-fact") {
+        loadGestoriaFact();
+      }
+    }
+  } catch {}
 };
 
 const loadTable = () => {
