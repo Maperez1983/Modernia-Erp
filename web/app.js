@@ -49698,6 +49698,17 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       remesada: quickRemesada,
     };
     const data = await apiPost("/api/renta_quick_attach", payload);
+    const entryId = String(data?.entry_id || "").trim();
+    if (entryId) {
+      state.currentRentaEntryId = entryId;
+      state.pendingClienteOpen = {
+        id: String(clienteId || "").trim(),
+        clienteTab: "profesional",
+        operativaTab: "gestoria",
+        gestoriaModule: "renta",
+        gestoriaRentaEntryId: entryId,
+      };
+    }
     if (gestoriaRentaQuickStatus) {
       gestoriaRentaQuickStatus.textContent = "Documento asignado. Procesando OCR...";
     }
@@ -49714,6 +49725,11 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       } catch {}
     }
     closeGestoriaRentaQuickModal();
+    // Si tenemos entry_id, abrimos directamente la renta (última subida) del cliente.
+    if (entryId) {
+      openClienteDetail(String(clienteId || "").trim());
+      return;
+    }
     openClienteDetail(String(clienteId || "").trim());
   } catch (err) {
     if (gestoriaRentaQuickStatus) {
@@ -52988,6 +53004,16 @@ const openClienteDetail = (id) => {
       }
       return;
     }
+    // Si venimos de una acción que sube renta, fijamos el ejercicio/entry antes de cargar el módulo.
+    try {
+      const pending = state.pendingClienteOpen;
+      const pendingForThis =
+        pending && typeof pending === "object" && String(pending.id || "") === String(id || "");
+      const pendingEntryId = pendingForThis ? String(pending.gestoriaRentaEntryId || "").trim() : "";
+      if (pendingEntryId) {
+        state.currentRentaEntryId = pendingEntryId;
+      }
+    } catch {}
     const cliente = data.cliente || {};
     state.currentClienteData = cliente;
     const prefetchedSeguros = (data.servicios && Array.isArray(data.servicios.seguros))
