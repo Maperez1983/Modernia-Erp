@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v186";
+const APP_SW_VERSION = "v187";
 
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;
@@ -1549,6 +1549,9 @@ const state = {
   prevModule: "empresas",
   prevTab: "operativa",
   pendingClienteOpen: null,
+  clienteContabView: "dashboard",
+  clienteContabServiceTab: "",
+  clienteContabResponsable: "",
   crmWorkspaceView: "resumen",
   clientesShowAll: false,
   columnsPickerContext: null,
@@ -19306,70 +19309,359 @@ const renderClienteContabilidadPanel = () => {
   const services = Array.isArray(state.currentClienteServices) ? state.currentClienteServices : [];
   const hasGestoria = services.includes("gestoria") || services.includes("gestoría");
   const hasHipotecas = services.includes("financiaciones") || services.includes("hipotecas");
-  if (!hasGestoria && hasHipotecas) {
+  const availableTabs = [];
+  if (hasGestoria) availableTabs.push("gestoria");
+  if (hasHipotecas) availableTabs.push("financiaciones");
+  const desiredTab = normalizeSimple(state.clienteContabServiceTab || "");
+  const activeTab =
+    availableTabs.includes(desiredTab)
+      ? desiredTab
+      : (hasGestoria ? "gestoria" : (hasHipotecas ? "financiaciones" : ""));
+  state.clienteContabServiceTab = activeTab;
+
+  const openRentaEntry = (entryId) => {
+    const next = String(entryId || "").trim();
+    if (!next) return;
+    state.currentRentaEntryId = next;
+    setClienteTab("servicios");
+    setClienteOperativaTab("gestoria");
+    setGestoriaClientModuleTab("renta");
+    try {
+      if (gestoriaModuleRenta) {
+        gestoriaModuleRenta.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } catch {}
+  };
+
+  const makeKpiCard = (label, value, onClick) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.cursor = onClick ? "pointer" : "default";
+    card.setAttribute("role", onClick ? "button" : "group");
+    if (onClick) {
+      card.tabIndex = 0;
+      card.addEventListener("click", onClick);
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      });
+    }
+    const l = document.createElement("div");
+    l.className = "kpi-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "kpi-value";
+    v.textContent = value;
+    card.appendChild(l);
+    card.appendChild(v);
+    return card;
+  };
+
+  const renderRentaEntriesTable = (entries = [], options = {}) => {
+    const title = String(options.title || "Listado").trim();
+    const hint = String(options.hint || "").trim();
+    const wrap = document.createElement("div");
+    wrap.className = "form-card";
+    const head = document.createElement("div");
+    head.className = "section-head";
+    const left = document.createElement("div");
+    left.innerHTML = `<h4>${escapeHtml(title)}</h4>${hint ? `<p class="muted">${escapeHtml(hint)}</p>` : ""}`;
+    const right = document.createElement("div");
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "secondary ghost";
+    backBtn.textContent = "Volver a KPIs";
+    backBtn.addEventListener("click", () => {
+      state.clienteContabView = "dashboard";
+      state.clienteContabResponsable = "";
+      renderClienteContabilidadPanel();
+    });
+    right.appendChild(backBtn);
+    head.appendChild(left);
+    head.appendChild(right);
+    wrap.appendChild(head);
+    if (!entries.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = options.emptyText || "Sin resultados.";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Ejercicio", "Estado", "Responsable", "Precio", "Cobro", "Forma", "Remesa", ""].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    entries.forEach((entry) => {
+      const ejercicio = String(entry?.ejercicio || "").trim() || "-";
+      const estado = String(entry?.estado_presentacion || entry?.doc_status || "").trim() || "-";
+      const responsable = String(entry?.responsable || "").trim() || "Sin responsable";
+      const precio = toNumber(entry?.precio_servicio) || 0;
+      const cobrada = Number(entry?.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
+      const forma = String(entry?.forma_cobro || "").trim() || "-";
+      const remesa = Number(entry?.remesada || 0) === 1 ? "Sí" : "No";
+      const tr = document.createElement("tr");
+      const values = [
+        ejercicio,
+        estado,
+        responsable,
+        euroFormatter.format(precio),
+        cobrada,
+        forma,
+        remesa,
+      ];
+      values.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      const openBtn = createIconButton("open", "Abrir renta");
+      openBtn.classList.add("secondary");
+      openBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openRentaEntry(entry?.id);
+      });
+      actionTd.appendChild(openBtn);
+      tr.appendChild(actionTd);
+      tr.addEventListener("click", () => openRentaEntry(entry?.id));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  };
+
+  const renderResponsablesTable = (buckets = []) => {
+    const wrap = document.createElement("div");
+    wrap.className = "form-card";
+    wrap.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h4>Renta por responsable</h4>
+          <p class="muted">Pulsa un responsable para ver el detalle de campañas.</p>
+        </div>
+        <div>
+          <button type="button" class="secondary ghost" id="clienteContabBackBtn">Volver a KPIs</button>
+        </div>
+      </div>
+    `;
+    const backBtn = wrap.querySelector("#clienteContabBackBtn");
+    backBtn?.addEventListener("click", () => {
+      state.clienteContabView = "dashboard";
+      state.clienteContabResponsable = "";
+      renderClienteContabilidadPanel();
+    });
+    if (!buckets.length) {
+      wrap.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Sin responsables." }));
+      return wrap;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Responsable", "Rentas", "Pendientes", "Importe", "Cobrado", "Pendiente"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    buckets.forEach((bucket) => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      const values = [
+        bucket.responsable,
+        numberFormatter.format(bucket.total),
+        numberFormatter.format(bucket.unpaidCount),
+        euroFormatter.format(bucket.totalImporte),
+        euroFormatter.format(bucket.paidImporte),
+        euroFormatter.format(bucket.unpaidImporte),
+      ];
+      values.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tr.addEventListener("click", () => {
+        state.clienteContabView = "responsable";
+        state.clienteContabResponsable = bucket.responsableKey;
+        renderClienteContabilidadPanel();
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  };
+
+  // Si no hay módulos activos, mostramos un placeholder.
+  if (!activeTab) {
+    clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin contabilidad disponible para este cliente.</p>";
+    return;
+  }
+
+  // Switcher de servicio (si aplica).
+  const root = document.createElement("div");
+  if (availableTabs.length > 1) {
+    const tabs = document.createElement("div");
+    tabs.className = "tabs";
+    const mk = (key, label) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `tab ${activeTab === key ? "active" : ""}`.trim();
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        state.clienteContabServiceTab = key;
+        state.clienteContabView = "dashboard";
+        state.clienteContabResponsable = "";
+        renderClienteContabilidadPanel();
+      });
+      return btn;
+    };
+    if (hasGestoria) tabs.appendChild(mk("gestoria", "Gestoría"));
+    if (hasHipotecas) tabs.appendChild(mk("financiaciones", "Financiaciones"));
+    root.appendChild(tabs);
+  }
+
+  if (activeTab === "financiaciones") {
     renderClienteDatosEconomicos(state.currentClienteData || {}, state.currentClienteEconomicData || {});
     return;
   }
+
+  // Gestoría: Dashboard de Renta.
   const gestoria = state.currentClienteGestoriaData || {};
   const entries = Array.isArray(gestoria.renta_entries) ? gestoria.renta_entries : [];
-  const hasRenta = entries.length > 0;
-  if (!hasRenta) {
-    clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin cobros/costes registrados todavía.</p>";
-    return;
+  const priced = entries.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0);
+  const unpaid = priced.filter((e) => Number(e?.cobrada || 0) !== 1);
+  const paid = priced.filter((e) => Number(e?.cobrada || 0) === 1);
+  const totalImporte = priced.reduce((acc, e) => acc + (toNumber(e?.precio_servicio) || 0), 0);
+  const paidImporte = paid.reduce((acc, e) => acc + (toNumber(e?.precio_servicio) || 0), 0);
+  const unpaidImporte = unpaid.reduce((acc, e) => acc + (toNumber(e?.precio_servicio) || 0), 0);
+
+  const bucketMap = new Map();
+  entries.forEach((entry) => {
+    const responsableRaw = String(entry?.responsable || "").trim() || "Sin responsable";
+    const responsableKey = normalizeLookupText(responsableRaw) || "sin-responsable";
+    if (!bucketMap.has(responsableKey)) {
+      bucketMap.set(responsableKey, {
+        responsableKey,
+        responsable: responsableRaw,
+        total: 0,
+        unpaidCount: 0,
+        totalImporte: 0,
+        paidImporte: 0,
+        unpaidImporte: 0,
+        entries: [],
+      });
+    }
+    const bucket = bucketMap.get(responsableKey);
+    bucket.total += 1;
+    const precio = toNumber(entry?.precio_servicio) || 0;
+    if (precio > 0) {
+      bucket.totalImporte += precio;
+      if (Number(entry?.cobrada || 0) === 1) {
+        bucket.paidImporte += precio;
+      } else {
+        bucket.unpaidCount += 1;
+        bucket.unpaidImporte += precio;
+      }
+    }
+    bucket.entries.push(entry);
+  });
+  const buckets = Array.from(bucketMap.values()).sort((a, b) => (b.unpaidImporte - a.unpaidImporte) || (b.total - a.total));
+
+  const view = normalizeSimple(state.clienteContabView || "dashboard") || "dashboard";
+  const responsableFilterKey = normalizeLookupText(state.clienteContabResponsable || "");
+
+  const kpis = document.createElement("div");
+  kpis.className = "cliente-mini-kpis";
+  kpis.appendChild(makeKpiCard("Rentas", numberFormatter.format(entries.length), () => {
+    state.clienteContabView = "all";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  kpis.appendChild(makeKpiCard("Pendientes cobro", numberFormatter.format(unpaid.length), () => {
+    state.clienteContabView = "unpaid";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  kpis.appendChild(makeKpiCard("Importe pendiente", euroFormatter.format(unpaidImporte), () => {
+    state.clienteContabView = "unpaid";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  kpis.appendChild(makeKpiCard("Importe cobrado", euroFormatter.format(paidImporte), () => {
+    state.clienteContabView = "paid";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  kpis.appendChild(makeKpiCard("Importe total", euroFormatter.format(totalImporte), () => {
+    state.clienteContabView = "all";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  kpis.appendChild(makeKpiCard("Responsables", numberFormatter.format(buckets.length), () => {
+    state.clienteContabView = "responsables";
+    state.clienteContabResponsable = "";
+    renderClienteContabilidadPanel();
+  }));
+  root.appendChild(kpis);
+
+  const detail = document.createElement("div");
+  if (view === "dashboard") {
+    // Resumen por responsable (acceso rápido).
+    detail.appendChild(renderResponsablesTable(buckets));
+  } else if (view === "unpaid") {
+    detail.appendChild(
+      renderRentaEntriesTable(unpaid, {
+        title: "Rentas pendientes de cobro",
+        hint: "Campañas con precio asignado y sin marcar como cobradas.",
+        emptyText: "No hay rentas pendientes.",
+      })
+    );
+  } else if (view === "paid") {
+    detail.appendChild(
+      renderRentaEntriesTable(paid, {
+        title: "Rentas cobradas",
+        hint: "Campañas con precio asignado y marcadas como cobradas.",
+        emptyText: "No hay rentas cobradas.",
+      })
+    );
+  } else if (view === "responsables") {
+    detail.appendChild(renderResponsablesTable(buckets));
+  } else if (view === "responsable" && responsableFilterKey) {
+    const bucket = buckets.find((b) => normalizeLookupText(b.responsableKey) === responsableFilterKey);
+    const scoped = bucket ? bucket.entries : [];
+    detail.appendChild(
+      renderRentaEntriesTable(scoped, {
+        title: `Rentas · ${bucket?.responsable || "Responsable"}`,
+        hint: "Listado de campañas asignadas a este responsable (pulsa para abrir la renta).",
+        emptyText: "Sin campañas para este responsable.",
+      })
+    );
+  } else if (view === "all") {
+    detail.appendChild(
+      renderRentaEntriesTable(entries, {
+        title: "Todas las campañas de renta",
+        hint: "Pulsa una fila para abrir la renta y actualizar cobro/precio.",
+        emptyText: "Sin campañas de renta.",
+      })
+    );
+  } else {
+    detail.appendChild(renderResponsablesTable(buckets));
   }
-  const rows = entries.map((entry) => {
-    const ejercicio = String(entry?.ejercicio || "").trim() || "-";
-    const precio = Number(entry?.precio_servicio || 0) || 0;
-    const cobrada = Number(entry?.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
-    const forma = String(entry?.forma_cobro || "").trim() || "-";
-    const remesa = Number(entry?.remesada || 0) === 1 ? "Sí" : "No";
-    const estado = String(entry?.estado_presentacion || entry?.doc_status || "").trim() || "-";
-    return { ejercicio, estado, precio, cobrada, forma, remesa };
-  });
-  const total = rows.reduce((acc, row) => acc + (Number(row.precio) || 0), 0);
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const trHead = document.createElement("tr");
-  ["Ejercicio", "Estado", "Precio", "Cobro", "Forma cobro", "Remesa"].forEach((col) => {
-    const th = document.createElement("th");
-    th.textContent = col;
-    trHead.appendChild(th);
-  });
-  thead.appendChild(trHead);
-  table.appendChild(thead);
-  const tbody = document.createElement("tbody");
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    const cells = [
-      row.ejercicio,
-      row.estado,
-      euroFormatter.format(Number(row.precio || 0)),
-      row.cobrada,
-      row.forma,
-      row.remesa,
-    ];
-    cells.forEach((value) => {
-      const td = document.createElement("td");
-      td.textContent = value;
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  const wrap = document.createElement("div");
-  wrap.className = "form-card";
-  wrap.innerHTML = `
-    <div class="section-head">
-      <div>
-        <h4>Renta</h4>
-        <p class="muted">Coste por ejercicio y estado de cobro.</p>
-      </div>
-      <div class="pill">Total: ${euroFormatter.format(Number(total || 0))}</div>
-    </div>
-  `;
-  wrap.appendChild(table);
-    clienteEconomicosPanel.innerHTML = "";
-    clienteEconomicosPanel.appendChild(wrap);
+  root.appendChild(detail);
+  clienteEconomicosPanel.innerHTML = "";
+  clienteEconomicosPanel.appendChild(root);
 };
 
 const setClienteOperativaTab = (tab) => {
@@ -53633,6 +53925,8 @@ const openClienteDetail = (id) => {
     } catch {}
     const cliente = data.cliente || {};
     state.currentClienteData = cliente;
+    state.clienteContabView = "dashboard";
+    state.clienteContabResponsable = "";
     const prefetchedSeguros = (data.servicios && Array.isArray(data.servicios.seguros))
       ? data.servicios.seguros
       : [];
@@ -54042,6 +54336,9 @@ const closeClienteDetail = () => {
   state.currentClienteServices = [];
   state.currentClienteData = null;
   state.currentClienteEconomicData = null;
+  state.clienteContabView = "dashboard";
+  state.clienteContabServiceTab = "";
+  state.clienteContabResponsable = "";
   state.currentClienteSegurosRows = [];
   state.currentClienteRamoSelected = "";
   state.currentClienteRelaciones = [];
