@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v181";
+const APP_SW_VERSION = "v183";
 
 const isDebugEnabled = () => {
   try {
@@ -72,6 +72,26 @@ const debugLog = (title, detail = "") => {
     } catch {}
   } catch {}
 };
+
+// Captura errores globales (solo visible cuando `debug=1` está activo).
+try {
+  window.addEventListener("error", (event) => {
+    try {
+      debugLog(
+        "window.error",
+        `${String(event?.message || "Error")}\n${String(event?.filename || "")}:${Number(event?.lineno || 0)}:${Number(event?.colno || 0)}`
+      );
+    } catch {}
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    try {
+      const reason = event?.reason;
+      const msg = String(reason?.message || reason || "Promise rejection");
+      const stack = String(reason?.stack || "");
+      debugLog("unhandledrejection", `${msg}${stack ? `\n${stack}` : ""}`);
+    } catch {}
+  });
+} catch {}
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -19672,11 +19692,29 @@ const openHolding = (options = {}) => {
     state.workspaceRrhhEntry = "";
     state.workspaceRrhhJumpPersonaId = "";
   }
+  try {
+    debugLog(
+      "openHolding(): state",
+      `target=${state.currentWorkspaceTarget || "-"} nextView=${requestedView || "-"} engine=${state.currentWorkspaceEngineView || "-"}`
+    );
+  } catch {}
   setModule("empresas");
-  explorerSection.classList.add("hidden");
+  if (explorerSection) {
+    explorerSection.classList.add("hidden");
+  } else {
+    try {
+      debugLog("openHolding(): missing explorerSection", "DOM element #explorerSection no existe.");
+    } catch {}
+  }
+  try {
+    debugLog("openHolding(): setPage", "holding");
+  } catch {}
   setPage("holding");
   const nextView = requestedView || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview");
   updateWorkspaceEntryChrome();
+  try {
+    debugLog("openHolding(): setWorkspaceView", nextView);
+  } catch {}
   setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   loadWorkspaceCentral().catch(() => {});
   syncHoldingUrlParams();
@@ -54293,10 +54331,16 @@ const init = async () => {
     state.resumen = resumen;
     state.homeTimeStatus = homeTimeStatus && homeTimeStatus.ok ? homeTimeStatus : null;
 
-    empresaSelect.appendChild(createOption("", "Todas las empresas"));
-    empresas.forEach((empresa) => {
-      empresaSelect.appendChild(createOption(empresa.id, empresa.nombre));
-    });
+    if (empresaSelect) {
+      empresaSelect.appendChild(createOption("", "Todas las empresas"));
+      empresas.forEach((empresa) => {
+        empresaSelect.appendChild(createOption(empresa.id, empresa.nombre));
+      });
+    } else {
+      try {
+        debugLog("init: missing empresaSelect", "No se puede poblar el selector de empresas (DOM no disponible).");
+      } catch {}
+    }
 
     populateTables();
 
@@ -54361,6 +54405,14 @@ const init = async () => {
         : `<span class="status"><span></span>Con datos parciales</span>`;
     }
   } catch (error) {
+    try {
+      const msg = String(error?.message || error || "Error desconocido");
+      const stack = String(error?.stack || "");
+      debugLog("init: error", `${msg}\n${stack}`.trim());
+      if (isDebugEnabled()) {
+        setUiToast("Error al arrancar", msg);
+      }
+    } catch {}
     if (dbStatus) {
       dbStatus.textContent = "";
     }
