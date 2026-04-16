@@ -28874,7 +28874,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     hipotecaBdtInfo.dataset.baseText = baseText;
     syncHipotecaExportYears(rows, columns);
     populateHipotecaVincularSelect(rows, columns);
-    syncHipotecaBdtViewToggle();
+    if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
     return;
   }
   const params = new URLSearchParams({
@@ -28899,7 +28899,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       hipotecaBdtInfo.dataset.baseText = baseText;
       syncHipotecaExportYears(rows, columns);
       populateHipotecaVincularSelect(rows, columns);
-      syncHipotecaBdtViewToggle();
+      if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
     })
     .catch((error) => {
       const message = error?.data?.error || error?.message || "No se pudo cargar la BDT.";
@@ -28908,7 +28908,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
       syncHipotecaExportYears([], []);
       populateHipotecaVincularSelect([], []);
-      syncHipotecaBdtViewToggle();
+      if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
     });
 };
 
@@ -28978,7 +28978,7 @@ const setHipotecaBdtView = (view) => {
   } catch {
     // ignore
   }
-  syncHipotecaBdtViewToggle();
+  if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
   const cached = state.hipotecaBdtCache?.data || {};
   renderHipotecaBdtList({ columns: cached.columns || [], rows: cached.rows || [] });
 };
@@ -31627,14 +31627,16 @@ const HIPOTECA_BANK_BRANDS = [
 
 const resolveHipotecaBankBrand = (label) => {
   const raw = String(label || "").trim();
-  const normalized = normalizeSimple(raw);
+  // Usamos normalización "lookup" (colapsa separadores/espacios) porque en BDT
+  // el nombre del banco suele venir con dobles espacios, guiones, puntos, etc.
+  const normalized = normalizeLookupText(raw);
   let brand = HIPOTECA_BANK_BRANDS.find((item) =>
-    item.aliases.some((alias) => normalizeSimple(alias) === normalized)
+    item.aliases.some((alias) => normalizeLookupText(alias) === normalized)
   );
   if (!brand && normalized) {
     brand = HIPOTECA_BANK_BRANDS.find((item) =>
       item.aliases.some((alias) => {
-        const aliasNorm = normalizeSimple(alias);
+        const aliasNorm = normalizeLookupText(alias);
         return aliasNorm && (normalized.includes(aliasNorm) || aliasNorm.includes(normalized));
       })
     );
@@ -63422,7 +63424,7 @@ if (hipotecaTabs) {
 	  });
 	}
 
-	syncHipotecaBdtViewToggle();
+	if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
 
 	if (hipotecaBdtExcelFirmadas) {
 	  hipotecaBdtExcelFirmadas.addEventListener("click", () => {
