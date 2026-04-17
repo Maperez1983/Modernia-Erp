@@ -7,6 +7,7 @@ from scripts.import_rentas_2024_to_crm import (
     apply_to_db,
     build_review_queue,
     build_validation_summary,
+    build_record_key,
     classify_pdf,
     finalize_record,
     should_skip_auxiliary_record,
@@ -795,6 +796,18 @@ class RentasImportTests(unittest.TestCase):
             self.assertEqual(dudoso_count, 0)
             self.assertEqual(servicio, "gestoria")
             self.assertIn('"entries"', renta_detalles)
+
+
+class RentaRecordKeyTests(unittest.TestCase):
+    def test_build_record_key_ignores_invalid_nif_and_does_not_merge_by_dataset_root(self):
+        path_a = Path("/data/000RENTAS 2025/1 CLIENTES TERE/1 DATOS FISCALES/ALBA.pdf")
+        path_b = Path("/data/000RENTAS 2025/1 CLIENTES TERE/1 DATOS FISCALES/OTRA.pdf")
+        key_a = build_record_key({"cliente_nif": "NOMBRE"}, path_a)
+        key_b = build_record_key({"cliente_nif": "NOMBRE"}, path_b)
+        self.assertTrue(key_a)
+        self.assertTrue(key_b)
+        self.assertNotEqual(key_a, "NOMBRE")
+        self.assertNotEqual(key_a, key_b)
 
 
 if __name__ == "__main__":
