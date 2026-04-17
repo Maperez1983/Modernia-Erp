@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v190";
+const APP_SW_VERSION = "v191";
 
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;

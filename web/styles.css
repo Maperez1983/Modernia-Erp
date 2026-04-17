@@ -10182,6 +10182,14 @@ body.ui-context-holding-back #holdingSection #holdingBackBtn {
   display: none;
 }
 
+.workspace-module-health-meta {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-module-health-meta span {
+  min-width: 0;
+}
+
 body.theme-operativa section::before {
   content: "";
   position: absolute;
