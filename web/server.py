@@ -104,6 +104,7 @@ OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 NOTARIAS_MALAGA_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "notarias_malaga.txt"
+IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_malaga.min.json"
 ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
@@ -50303,116 +50304,116 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
-            if path == "/api/gestoria_docs":
-                cliente_id = params.get("cliente_id", [""])[0]
-                empresa_id = params.get("empresa_id", [""])[0]
-                service = (params.get("service", [""])[0] or "").strip().lower()
-                limit = params.get("limit", [""])[0]
-                if not cliente_id and not empresa_id:
-                    json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
-                    return
+        if path == "/api/gestoria_docs":
+            cliente_id = params.get("cliente_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            service = (params.get("service", [""])[0] or "").strip().lower()
+            limit = params.get("limit", [""])[0]
+            if not cliente_id and not empresa_id:
+                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+                return
 
-                if cliente_id:
-                    where = ["cliente_id = ?"]
-                    values = [cliente_id]
-                    if service:
-                        if normalize_lookup_text(service) == "GESTORIA":
-                            gestoria_filter = """
-                              (
-                                LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
-                                OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
-                                OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
-                                OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
-                              )
-                            """
-                            # Fallback: incluir documentos de renta referenciados por campañas aunque
-                            # estén mal vinculados (cliente_id NULL o referencia_tipo incompleta).
+            if cliente_id:
+                where = ["cliente_id = ?"]
+                values = [cliente_id]
+                if service:
+                    if normalize_lookup_text(service) == "GESTORIA":
+                        gestoria_filter = """
+                          (
+                            LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
+                            OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
+                            OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
+                            OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+                          )
+                        """
+                        # Fallback: incluir documentos de renta referenciados por campañas aunque
+                        # estén mal vinculados (cliente_id NULL o referencia_tipo incompleta).
+                        doc_ids = []
+                        ref_ids = []
+                        try:
+                            cg_row = conn.execute(
+                                "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                                (cliente_id,),
+                            ).fetchone()
+                            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+                            entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+                            for entry in entries:
+                                entry_id = str(entry.get("id") or "").strip()
+                                ejercicio = str(entry.get("ejercicio") or "").strip()
+                                if entry_id and ejercicio:
+                                    ref_ids.append(f"renta-{ejercicio}-{entry_id}")
+                                for field in ("doc_borrador_id", "doc_presentada_id"):
+                                    doc_id = str(entry.get(field) or "").strip()
+                                    if doc_id:
+                                        doc_ids.append(doc_id)
+                        except Exception:
                             doc_ids = []
                             ref_ids = []
-                            try:
-                                cg_row = conn.execute(
-                                    "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
-                                    (cliente_id,),
-                                ).fetchone()
-                                renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
-                                entries = sanitize_renta_entries(renta_payload.get("entries") or [])
-                                for entry in entries:
-                                    entry_id = str(entry.get("id") or "").strip()
-                                    ejercicio = str(entry.get("ejercicio") or "").strip()
-                                    if entry_id and ejercicio:
-                                        ref_ids.append(f"renta-{ejercicio}-{entry_id}")
-                                    for field in ("doc_borrador_id", "doc_presentada_id"):
-                                        doc_id = str(entry.get(field) or "").strip()
-                                        if doc_id:
-                                            doc_ids.append(doc_id)
-                            except Exception:
-                                doc_ids = []
-                                ref_ids = []
-                            doc_ids = [d for d in dict.fromkeys(doc_ids) if d]
-                            ref_ids = [r for r in dict.fromkeys(ref_ids) if r]
-                            extra_clause = ""
-                            extra_values = []
-                            extra_clause_parts = []
-                            if doc_ids:
-                                extra_clause_parts.append(f"id IN ({','.join(['?'] * len(doc_ids))})")
-                                extra_values.extend(doc_ids)
-                            if ref_ids:
-                                extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(ref_ids))})")
-                                extra_values.extend(ref_ids)
-                            if extra_clause_parts:
-                                extra_clause = " OR ".join(extra_clause_parts)
-                                where_clause = f"((cliente_id = ? AND {gestoria_filter}) OR ({extra_clause}))"
-                                values = [cliente_id, *extra_values]
-                                where = [where_clause]
-                            else:
-                                where.append(gestoria_filter)
+                        doc_ids = [d for d in dict.fromkeys(doc_ids) if d]
+                        ref_ids = [r for r in dict.fromkeys(ref_ids) if r]
+                        extra_clause = ""
+                        extra_values = []
+                        extra_clause_parts = []
+                        if doc_ids:
+                            extra_clause_parts.append(f"id IN ({','.join(['?'] * len(doc_ids))})")
+                            extra_values.extend(doc_ids)
+                        if ref_ids:
+                            extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(ref_ids))})")
+                            extra_values.extend(ref_ids)
+                        if extra_clause_parts:
+                            extra_clause = " OR ".join(extra_clause_parts)
+                            where_clause = f"((cliente_id = ? AND {gestoria_filter}) OR ({extra_clause}))"
+                            values = [cliente_id, *extra_values]
+                            where = [where_clause]
                         else:
-                            where.append(
-                                "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
-                            )
-                            values.extend([service, service])
+                            where.append(gestoria_filter)
+                    else:
+                        where.append(
+                            "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
+                        )
+                        values.extend([service, service])
 
-                    where_clause = " AND ".join(where)
-                    rows = conn.execute(
-                        f"""
-                        SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                               referencia_tipo, referencia_id
-                        FROM gestoria_docs
-                        WHERE {where_clause}
-                        ORDER BY created_at DESC
-                        """,
-                        values,
-                    ).fetchall()
-                    # Deduplicar por id si usamos fallback.
-                    out = []
-                    seen = set()
-                    for r in rows:
-                        rid = str(r["id"] or "").strip()
-                        if rid and rid in seen:
-                            continue
-                        if rid:
-                            seen.add(rid)
-                        out.append(dict(r))
-                    json_response(self, {"rows": out})
-                    return
-
-                limit_clause = "LIMIT 50"
-                if limit.isdigit():
-                    limit_clause = f"LIMIT {int(limit)}"
+                where_clause = " AND ".join(where)
                 rows = conn.execute(
                     f"""
-                    SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
-                           COALESCE(c.nombre, '') AS cliente
-                    FROM gestoria_docs d
-                    LEFT JOIN clientes c ON c.id = d.cliente_id
-                    WHERE d.empresa_id = ?
-                    ORDER BY d.fecha DESC
-                    {limit_clause}
+                    SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                           referencia_tipo, referencia_id
+                    FROM gestoria_docs
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
                     """,
-                    (empresa_id,),
+                    values,
                 ).fetchall()
-                json_response(self, {"rows": [dict(r) for r in rows]})
+                # Deduplicar por id si usamos fallback.
+                out = []
+                seen = set()
+                for r in rows:
+                    rid = str(r["id"] or "").strip()
+                    if rid and rid in seen:
+                        continue
+                    if rid:
+                        seen.add(rid)
+                    out.append(dict(r))
+                json_response(self, {"rows": out})
                 return
+
+            limit_clause = "LIMIT 50"
+            if limit.isdigit():
+                limit_clause = f"LIMIT {int(limit)}"
+            rows = conn.execute(
+                f"""
+                SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
+                       COALESCE(c.nombre, '') AS cliente
+                FROM gestoria_docs d
+                LEFT JOIN clientes c ON c.id = d.cliente_id
+                WHERE d.empresa_id = ?
+                ORDER BY d.fecha DESC
+                {limit_clause}
+                """,
+                (empresa_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
 
         if path == "/api/gestoria_contabilidad":
             try:
