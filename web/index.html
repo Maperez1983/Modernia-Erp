@@ -6958,31 +6958,12 @@
               <button type="button" id="hipotecaBdtVincularBtn" class="secondary">Vincular cliente</button>
               <span id="hipotecaBdtVincularStatus" class="muted"></span>
             </div>
-            <div id="hipotecaBdtTable"></div>
-            <div class="footer" id="hipotecaBdtInfo"></div>
-            <div class="form-card" style="margin-top: 16px;">
-              <div class="section-head">
-                <div>
-                  <h4>Hipotecas registradas</h4>
-                  <p class="muted">Listado de hipotecas firmadas y operaciones ya activadas.</p>
-                </div>
-                <div class="crm-actions">
-                  <div class="quick-search">
-                    <input id="finCrmClienteInput" list="finCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
-                    <input id="finCrmClienteId" type="hidden" />
-                    <datalist id="finCrmClientes"></datalist>
-                  </div>
-                  <button type="button" id="finCrmClienteOpen" class="secondary">Abrir ficha</button>
-                  <input id="finCrmSearch" placeholder="Buscar hipoteca..." />
-                </div>
-              </div>
-              <div id="finCrmTable"></div>
-              <div class="footer" id="finCrmInfo"></div>
-            </div>
-            <h4 style="margin: 20px 0 6px;">Alta manual complementaria</h4>
-            <p class="muted" style="margin-bottom: 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
-            <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
-              <h4 style="margin-bottom: 6px;">Crear cliente</h4>
+	            <div id="hipotecaBdtTable"></div>
+	            <div class="footer" id="hipotecaBdtInfo"></div>
+	            <h4 style="margin: 20px 0 6px;">Alta manual complementaria</h4>
+	            <p class="muted" style="margin-bottom: 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
+	            <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
+	              <h4 style="margin-bottom: 6px;">Crear cliente</h4>
               <p class="muted" style="margin-bottom: 10px;">Alta rápida en Clientes y vínculo automático con Financiaciones.</p>
               <form id="hipotecaClienteForm">
                 <div class="form-grid">
@@ -9068,11 +9049,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=578"></script>
-				    <script>
-				      (function () {
-				        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=191";
+					    <script src="app.js?v=578"></script>
+					    <script>
+					      (function () {
+					        if (!("serviceWorker" in navigator)) return;
+					        const TARGET_SW = "/sw.js?v=192";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
