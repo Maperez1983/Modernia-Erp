@@ -1405,16 +1405,48 @@ def parse_notas_text(text: str) -> dict:
 
 def build_record_key(fields: dict, pdf_path: Path) -> str:
     nif = compact_spaces(fields.get("cliente_nif"))
-    if nif:
-        return nif.upper()
+    if nif and looks_like_nif(nif):
+        return normalize_nif_candidate(nif).upper()
+
+    # Fallback 1: legacy folder layout `RENTAS CLIENTES/<CLIENTE>/<PDF>.pdf`
     folder = pdf_path.parent.name if "RENTAS CLIENTES" in str(pdf_path.parent.parent) else ""
     if folder:
         return slug(folder)
+
+    # Fallback 2: generic folder layout where the parent folder usually matches
+    # the cliente name/phone. Avoid grouping by generic folders like "DATOS
+    # FISCALES" or "HECHAS" to prevent cross-cliente merges.
+    ignored = {
+        "1 CLIENTES TERE",
+        "1 DATOS  FISCALES",
+        "1 DATOS FISCALES",
+        "2 HECHAS",
+        "DNI  RENTAS HECHAS",
+        "DNI RENTAS HECHAS",
+        "EN PROCESO",
+    }
+    for parent in (pdf_path.parent, pdf_path.parent.parent, pdf_path.parent.parent.parent):
+        name = compact_spaces(getattr(parent, "name", ""))
+        if not name or name in ignored:
+            continue
+        if name.startswith("."):
+            continue
+        if re.fullmatch(r"RENTAS\s+20[0-9]{2}", name, re.IGNORECASE):
+            continue
+        return slug(name)
+
     stem = pdf_path.stem
     stem = re.sub(r"\b[0-9A-Z]{5,}\b", " ", stem)
     stem = re.sub(r"\b\d{2}[_/-]?\d{2}[_/-]?\d{4}\b", " ", stem)
     stem = re.sub(r"\b\d{6,8}\b", " ", stem)
-    return slug(stem)
+
+    # Last resort: never merge two unknown-cliente docs just because they share a
+    # similar cleaned stem (common in "DNI.pdf", "Renta.pdf", etc).
+    # Include a small hash suffix to keep keys stable per file.
+    import hashlib
+
+    digest = hashlib.sha1(str(pdf_path).encode("utf-8", "ignore")).hexdigest()[:10]
+    return f\"{slug(stem)}_{digest}\".strip(\"_\")
 
 
 def merge_record(target: dict, source: dict, pdf_path: Path) -> None:
