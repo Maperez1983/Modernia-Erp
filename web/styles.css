@@ -10178,6 +10178,10 @@ body.theme-operativa #holdingBackBtn {
   white-space: nowrap;
 }
 
+body.ui-context-holding-back #holdingSection #holdingBackBtn {
+  display: none;
+}
+
 body.theme-operativa section::before {
   content: "";
   position: absolute;

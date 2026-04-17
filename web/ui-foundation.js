@@ -6,6 +6,7 @@
   let contextTitle = null;
   let contextMeta = null;
   let contextDrafts = null;
+  let contextBackBtn = null;
   let observer = null;
   let refreshTimer = null;
 
@@ -520,6 +521,7 @@
       </div>
       <div class="ui-context-actions">
         <span id="uiContextDrafts" class="pill hidden"></span>
+        <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
         <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
         <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
       </div>
@@ -528,6 +530,7 @@
     contextTitle = contextBar.querySelector("#uiContextTitle");
     contextMeta = contextBar.querySelector("#uiContextMeta");
     contextDrafts = contextBar.querySelector("#uiContextDrafts");
+    contextBackBtn = contextBar.querySelector("#uiContextBackBtn");
     contextBar.addEventListener("click", (event) => {
       const action = event.target.closest("[data-ui-action]")?.dataset.uiAction;
       if (action === "focus-search") {
@@ -542,30 +545,43 @@
         );
         target?.focus();
       }
+      if (action === "holding-back") {
+        const btn = document.getElementById("holdingBackBtn");
+        if (isVisible(btn)) {
+          btn.click();
+        }
+      }
     });
     return contextBar;
   };
 
-	  const syncContextBar = (state) => {
-	    ensureContextBar();
-	    if (!contextBar || !contextTitle || !contextMeta || !contextDrafts) return;
-	    const visibleSection = Array.from(document.querySelectorAll("main > section")).find(isVisible);
-    const title =
-      visibleSection?.querySelector("h2, .section-head h2, .modal-header h3")?.textContent?.trim() ||
-      state?.currentEmpresaName ||
-      "Inicio";
+		  const syncContextBar = (state) => {
+		    ensureContextBar();
+		    if (!contextBar || !contextTitle || !contextMeta || !contextDrafts || !contextBackBtn) return;
+		    const visibleSection = Array.from(document.querySelectorAll("main > section")).find(isVisible);
+	    const title =
+	      visibleSection?.querySelector("h2, .section-head h2, .modal-header h3")?.textContent?.trim() ||
+	      state?.currentEmpresaName ||
+	      "Inicio";
     const activeTab = Array.from(document.querySelectorAll(".tab.active")).find(isVisible)?.textContent?.trim() || "";
     const visibleSearch = Array.from(
       document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
     ).find(isVisible);
-	    contextTitle.textContent = title || "Inicio";
-	    contextMeta.textContent = [state?.currentEmpresaName || "", activeTab, visibleSearch ? "Búsqueda disponible" : ""]
-	      .filter(Boolean)
-	      .join(" · ") || "Atajos: / buscar · Esc cerrar modal";
-	    const visibleDirtyCount = Array.from(dirtyForms).reduce((acc, formId) => {
-	      const form = document.getElementById(formId);
-	      if (!form) return acc;
-	      if (!isVisible(form)) return acc;
+		    contextTitle.textContent = title || "Inicio";
+		    contextMeta.textContent = [state?.currentEmpresaName || "", activeTab, visibleSearch ? "Búsqueda disponible" : ""]
+		      .filter(Boolean)
+		      .join(" · ") || "Atajos: / buscar · Esc cerrar modal";
+
+        const holdingBackBtn = document.getElementById("holdingBackBtn");
+        const showHoldingBack = isVisible(holdingBackBtn);
+        contextBackBtn.textContent = holdingBackBtn?.textContent?.trim() || "Volver al panel";
+        contextBackBtn.classList.toggle("hidden", !showHoldingBack);
+        document.body.classList.toggle("ui-context-holding-back", showHoldingBack);
+
+		    const visibleDirtyCount = Array.from(dirtyForms).reduce((acc, formId) => {
+		      const form = document.getElementById(formId);
+		      if (!form) return acc;
+		      if (!isVisible(form)) return acc;
 	      return acc + 1;
 	    }, 0);
 	    if (visibleDirtyCount) {
