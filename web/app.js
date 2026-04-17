@@ -1863,6 +1863,16 @@ const workspaceAutomationForm = document.getElementById("workspaceAutomationForm
 const workspaceAutomationResetBtn = document.getElementById("workspaceAutomationResetBtn");
 const workspaceAutomationStatus = document.getElementById("workspaceAutomationStatus");
 const workspaceAutomationList = document.getElementById("workspaceAutomationList");
+const iivtnuSimulatorForm = document.getElementById("iivtnuSimulatorForm");
+const iivtnuMunicipioCp = document.getElementById("iivtnuMunicipioCp");
+const iivtnuMunicipioSelect = document.getElementById("iivtnuMunicipioSelect");
+const iivtnuSimulatorStatus = document.getElementById("iivtnuSimulatorStatus");
+const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
+const iivtnuPdfParseForm = document.getElementById("iivtnuPdfParseForm");
+const iivtnuPdfFile = document.getElementById("iivtnuPdfFile");
+const iivtnuPdfStatus = document.getElementById("iivtnuPdfStatus");
+const iivtnuPdfParsed = document.getElementById("iivtnuPdfParsed");
+const iivtnuPdfApplyBtn = document.getElementById("iivtnuPdfApplyBtn");
 const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
@@ -5791,7 +5801,7 @@ const normalizeWorkspaceViewKey = (value = "") => {
 const normalizeWorkspaceEngineKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   // "rrhh" vive como vista propia del workspace (no como motor de configuración).
-  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"].includes(key)) {
+  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "simuladores", "copilot"].includes(key)) {
     return key;
   }
   return "documental";
@@ -5834,6 +5844,168 @@ const setWorkspaceTenantSection = (section = "general", options = {}) => {
   }
 };
 
+let iivtnuMunicipiosCache = null;
+let iivtnuLastParsed = null;
+
+const normalizePostalCode = (value = "") => String(value || "").replace(/[^0-9]/g, "").slice(0, 5);
+
+const ensureIivtnuMunicipios = async () => {
+  if (!iivtnuMunicipioSelect) return [];
+  if (Array.isArray(iivtnuMunicipiosCache) && iivtnuMunicipiosCache.length) return iivtnuMunicipiosCache;
+  iivtnuMunicipioSelect.innerHTML = "<option value=\"\">Cargando...</option>";
+  try {
+    const data = await postJsonWithDbRetry("/api/iivtnu_municipios", {});
+    const items = Array.isArray(data?.items) ? data.items : [];
+    iivtnuMunicipiosCache = items;
+  } catch (err) {
+    iivtnuMunicipiosCache = [];
+  }
+  const options = Array.isArray(iivtnuMunicipiosCache) ? iivtnuMunicipiosCache : [];
+  if (!options.length) {
+    iivtnuMunicipiosCache = [{ ine: "29067", nombre: "Málaga", provincia: "Málaga" }];
+  }
+  iivtnuMunicipioSelect.innerHTML = (iivtnuMunicipiosCache || [])
+    .map((row) => {
+      const ine = String(row?.ine || "").trim();
+      const label = `${row?.nombre || ine || "Municipio"}${row?.provincia ? ` (${row.provincia})` : ""}`;
+      return `<option value="${escapeHtml(ine)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  try {
+    const prev = String(localStorage.getItem("crm.iivtnu.municipio_ine") || "").trim();
+    if (prev && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(prev)}"]`)) {
+      iivtnuMunicipioSelect.value = prev;
+    }
+  } catch {}
+  return iivtnuMunicipiosCache || [];
+};
+
+const inferIivtnuMunicipioByCp = (cp = "", municipios = []) => {
+  const clean = normalizePostalCode(cp);
+  if (!clean || clean.length < 2) return "";
+  const province = clean.slice(0, 2);
+  if (province === "29") {
+    const candidates = municipios.filter((row) => String(row?.provincia || "").toLowerCase() === "málaga");
+    if (candidates.length === 1) return String(candidates[0]?.ine || "");
+    const malagaCapital = candidates.find((row) => String(row?.nombre || "").trim().toLowerCase() === "málaga");
+    if (malagaCapital) return String(malagaCapital.ine || "");
+  }
+  return "";
+};
+
+const renderIivtnuParsed = (parsed = null) => {
+  if (!iivtnuPdfParsed) return;
+  if (!parsed) {
+    iivtnuPdfParsed.innerHTML = "<p class='muted'>Sin datos extraídos todavía.</p>";
+    return;
+  }
+  const fields = [
+    ["Municipio", parsed.municipio || "-"],
+    ["Ref. catastral", parsed.referencia_catastral || "-"],
+    ["Adquisición", parsed.fecha_adquisicion || "-"],
+    ["Transmisión", parsed.fecha_transmision || "-"],
+    ["Valor suelo", parsed.valor_suelo],
+    ["% participación", parsed.participacion_pct],
+    ["Base imponible", parsed.base_imponible],
+    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
+    ["Cuota", parsed.cuota_tributaria],
+    ["Importe total", parsed.importe_total],
+  ];
+  iivtnuPdfParsed.innerHTML = `
+    <div class="ui-table">
+      <table class="data-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th>${escapeHtml(label)}</th>
+                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const renderIivtnuSimulatorResult = (resp = null) => {
+  if (!iivtnuSimulatorResult) return;
+  if (!resp) {
+    iivtnuSimulatorResult.innerHTML = "";
+    return;
+  }
+  const result = resp?.result || {};
+  const params = resp?.params || {};
+  const fields = [
+    ["Años", result.years],
+    ["Coeficiente objetivo", result.coef_objetivo],
+    ["Base imponible", result.base_imponible],
+    ["Tipo gravamen (%)", result.tipo_gravamen_pct],
+    ["Cuota", result.cuota_tributaria],
+    ["Importe total", result.importe_total],
+    ["Fuente parámetros", params.source_label || params.source_url || "—"],
+  ];
+  iivtnuSimulatorResult.innerHTML = `
+    <div class="ui-table">
+      <table class="data-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th>${escapeHtml(label)}</th>
+                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const ensureIivtnuSimulator = async () => {
+  if (!iivtnuSimulatorForm || !iivtnuMunicipioSelect) return;
+  await ensureIivtnuMunicipios();
+  if (iivtnuMunicipioCp) {
+    iivtnuMunicipioCp.addEventListener("change", async () => {
+      const municipios = await ensureIivtnuMunicipios();
+      const inferred = inferIivtnuMunicipioByCp(iivtnuMunicipioCp.value, municipios);
+      if (inferred && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(inferred)}"]`)) {
+        iivtnuMunicipioSelect.value = inferred;
+      }
+    });
+  }
+  iivtnuMunicipioSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem("crm.iivtnu.municipio_ine", String(iivtnuMunicipioSelect.value || ""));
+    } catch {}
+  });
+  if (iivtnuPdfApplyBtn) {
+    iivtnuPdfApplyBtn.addEventListener("click", () => {
+      const parsed = iivtnuLastParsed;
+      if (!parsed) return;
+      if (iivtnuMunicipioSelect && parsed.municipio_ine && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(parsed.municipio_ine)}"]`)) {
+        iivtnuMunicipioSelect.value = parsed.municipio_ine;
+      }
+      const acq = iivtnuSimulatorForm.querySelector('[name="fecha_adquisicion"]');
+      const tx = iivtnuSimulatorForm.querySelector('[name="fecha_transmision"]');
+      const vs = iivtnuSimulatorForm.querySelector('[name="valor_suelo"]');
+      const pct = iivtnuSimulatorForm.querySelector('[name="participacion_pct"]');
+      if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
+      if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
+      if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
+      if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
+      if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Datos aplicados desde PDF.";
+    });
+  }
+  renderIivtnuParsed(null);
+};
+
 const setWorkspaceEngineView = (engine = "documental") => {
   const normalized = normalizeWorkspaceEngineKey(engine);
   state.currentWorkspaceEngineView = normalized;
@@ -5846,6 +6018,9 @@ const setWorkspaceEngineView = (engine = "documental") => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  if (normalized === "simuladores") {
+    void ensureIivtnuSimulator();
+  }
   syncHoldingUrlParams();
 };
 
@@ -17793,6 +17968,11 @@ const positionCrmInsertModal = (anchorEl) => {
   const top = Math.max(16, rect.bottom + 10);
   crmInsertModal.style.setProperty("--crm-insert-left", `${Math.round(left)}px`);
   crmInsertModal.style.setProperty("--crm-insert-top", `${Math.round(top)}px`);
+  if (sidebarRect) {
+    crmInsertModal.style.setProperty("--crm-sidebar-right", `${Math.round(sidebarRect.right)}px`);
+  } else {
+    crmInsertModal.style.removeProperty("--crm-sidebar-right");
+  }
 };
 
 const setCrmQuickNewOpen = (open = false, options = {}) => {
@@ -17832,6 +18012,7 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
 		    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
 		    crmInsertModal.style.removeProperty("--crm-insert-left");
 		    crmInsertModal.style.removeProperty("--crm-insert-top");
+		    crmInsertModal.style.removeProperty("--crm-sidebar-right");
 		  }
 		};
 
@@ -41439,7 +41620,44 @@ const renderCrmAgendaCalendar = (rows = []) => {
     return key.includes("cancel") || key.includes("anulad");
   };
 
-  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
+  const buildPeopleAliasIndex = () => {
+    const index = new Map();
+    const users = Array.isArray(state.usersList) ? state.usersList : [];
+    users.forEach((user) => {
+      const username = String(user?.usuario || "").trim();
+      const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim();
+      const canonical = fullName || username;
+      if (!canonical) return;
+      const canonicalKey = normalizeSimple(canonical);
+      const add = (raw) => {
+        const key = normalizeSimple(String(raw || "").trim());
+        if (!key) return;
+        if (!index.has(key)) index.set(key, { canonical, canonicalKey });
+      };
+      add(username);
+      add(fullName);
+      add(canonical);
+    });
+    return index;
+  };
+
+  const peopleAliasIndex = buildPeopleAliasIndex();
+
+  const resolvePersonCanonicalLabel = (raw) => {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    const key = normalizeSimple(value);
+    const hit = key ? peopleAliasIndex.get(key) : null;
+    return hit?.canonical || value;
+  };
+
+  const normalizePersonKey = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const key = normalizeSimple(raw);
+    const hit = key ? peopleAliasIndex.get(key) : null;
+    return hit?.canonicalKey || normalizeSimple(raw);
+  };
   const SIN_RESPONSABLE_LABEL = "Sin responsable";
   const normalizeResponsibleKey = (row) => {
     const raw = String(row?.responsable || "").trim();
@@ -41450,7 +41668,7 @@ const renderCrmAgendaCalendar = (rows = []) => {
     const used = new Set();
     const out = [];
     const add = (raw) => {
-      const name = String(raw || "").trim();
+      const name = resolvePersonCanonicalLabel(raw);
       if (!name) return;
       const key = normalizePersonKey(name);
       if (!key || used.has(key)) return;
@@ -41590,7 +41808,8 @@ const renderCrmAgendaCalendar = (rows = []) => {
     mineBtn.textContent = "Mi agenda";
     mineBtn.addEventListener("click", () => {
       const me = String(getCurrentUser() || "").trim();
-      state.crmAgendaPeople = me ? [me] : candidates.slice(0, 1);
+      const canonical = me ? resolvePersonCanonicalLabel(me) : "";
+      state.crmAgendaPeople = canonical ? [canonical] : candidates.slice(0, 1);
       persistAgendaUiPrefs();
       renderCrmAgendaWorkspace();
     });
@@ -57187,17 +57406,8 @@ if (actionModalSave) {
       }
     }
     const endpoint = currentActionEdit ? "/api/acciones_update" : "/api/acciones";
-    fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost(endpoint, payload)
       .then((data) => {
-        if (data.error) {
-          if (actionModalStatus) actionModalStatus.textContent = data.error;
-          return;
-        }
         if (actionModalStatus) actionModalStatus.textContent = "Guardado.";
         closeActionEditor();
         loadAgendaGeneral();
@@ -57226,8 +57436,8 @@ if (actionModalSave) {
           loadGestoriaClienteAgenda(state.currentClienteId);
         }
       })
-      .catch(() => {
-        if (actionModalStatus) actionModalStatus.textContent = "Error al guardar.";
+      .catch((err) => {
+        if (actionModalStatus) actionModalStatus.textContent = err?.message || "Error al guardar.";
       });
   });
 }
@@ -58585,6 +58795,61 @@ if (finCrmSearch) {
 if (holdingBackBtn) {
   holdingBackBtn.addEventListener("click", () => {
     goHome();
+  });
+}
+
+if (iivtnuSimulatorForm) {
+  iivtnuSimulatorForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    renderIivtnuSimulatorResult(null);
+    if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Simulando...";
+    try {
+      const formData = new FormData(iivtnuSimulatorForm);
+      const payload = {
+        municipio_ine: String(iivtnuMunicipioSelect?.value || "").trim(),
+        codigo_postal: normalizePostalCode(iivtnuMunicipioCp?.value || ""),
+        fecha_adquisicion: String(formData.get("fecha_adquisicion") || "").trim(),
+        fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
+        valor_suelo: String(formData.get("valor_suelo") || "").trim(),
+        participacion_pct: String(formData.get("participacion_pct") || "").trim(),
+      };
+      const resp = await postJsonWithDbRetry("/api/iivtnu_simulate", payload, { timeoutMs: 30000 });
+      renderIivtnuSimulatorResult(resp);
+      if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "OK.";
+    } catch (err) {
+      if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = err.message || "No se pudo simular.";
+    }
+  });
+}
+
+if (iivtnuPdfParseForm) {
+  iivtnuPdfParseForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    iivtnuLastParsed = null;
+    renderIivtnuParsed(null);
+    if (iivtnuPdfApplyBtn) iivtnuPdfApplyBtn.classList.add("hidden");
+    if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = "Leyendo PDF...";
+    try {
+      const file = iivtnuPdfFile?.files?.[0] || null;
+      if (!file) throw new Error("Selecciona un PDF.");
+      const form = new FormData();
+      form.append("file", file, file.name || "autoliquidacion.pdf");
+      const res = await fetch("/api/iivtnu_pdf_parse", { method: "POST", body: form });
+      const text = await res.text();
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || `HTTP ${res.status}` };
+      }
+      if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
+      iivtnuLastParsed = data?.parsed || null;
+      renderIivtnuParsed(iivtnuLastParsed);
+      if (iivtnuPdfApplyBtn && iivtnuLastParsed) iivtnuPdfApplyBtn.classList.remove("hidden");
+      if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = "OK.";
+    } catch (err) {
+      if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = err.message || "No se pudo leer el PDF.";
+    }
   });
 }
 

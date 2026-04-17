@@ -1622,6 +1622,32 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
   updated_at TEXT NOT NULL
 );
 
+-- Simuladores fiscales (IIVTNU / plusvalía municipal) - parámetros por municipio y vigencia.
+CREATE TABLE IF NOT EXISTS iivtnu_municipios (
+  ine TEXT PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  provincia TEXT,
+  comunidad TEXT,
+  es_capital INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS iivtnu_param_sets (
+  id TEXT PRIMARY KEY,
+  municipio_ine TEXT NOT NULL,
+  vigente_desde TEXT,
+  vigente_hasta TEXT,
+  tipo_gravamen_pct REAL,
+  coeficientes_json TEXT,
+  bonificaciones_json TEXT,
+  source_url TEXT,
+  source_label TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (municipio_ine) REFERENCES iivtnu_municipios(ine)
+);
+
 -- Índices mínimos para rendimiento (CREATE INDEX IF NOT EXISTS es idempotente).
 CREATE INDEX IF NOT EXISTS idx_clientes_empresa_id ON clientes(empresa_id);
 CREATE INDEX IF NOT EXISTS idx_clientes_nif ON clientes(nif);
@@ -1649,3 +1675,6 @@ CREATE INDEX IF NOT EXISTS idx_acciones_cliente_id ON acciones(cliente_id);
 
 CREATE INDEX IF NOT EXISTS idx_gestoria_docs_empresa_cliente ON gestoria_docs(empresa_id, cliente_id);
 CREATE INDEX IF NOT EXISTS idx_geocode_cache_updated_at ON geocode_cache(updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_iivtnu_param_sets_municipio ON iivtnu_param_sets(municipio_ine);
+CREATE INDEX IF NOT EXISTS idx_iivtnu_param_sets_vigencia ON iivtnu_param_sets(municipio_ine, vigente_desde, vigente_hasta);

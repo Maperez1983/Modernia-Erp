@@ -451,15 +451,16 @@
                 <p class="muted">Selecciona un módulo transversal. Cada uno tiene su propia hoja de configuración.</p>
               </div>
             </div>
-            <div id="workspaceEngineTabs" class="workspace-engine-nav">
-              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
-              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos · Facturación</button>
-              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
-              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
-              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
-              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
-              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
-            </div>
+	            <div id="workspaceEngineTabs" class="workspace-engine-nav">
+	              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos · Facturación</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="simuladores">Simuladores</button>
+	              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
+	            </div>
             <div class="form-actions">
               <button type="button" id="workspaceMotoresBackBtn" class="secondary ghost">Volver al workspace</button>
             </div>
@@ -856,15 +857,75 @@
             </div>
           </section>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="copilot">
-          <div class="section-head">
-            <div>
-              <h3>Copilot del grupo</h3>
-              <p class="muted">Entrada común a los copilotos ya disponibles por servicio.</p>
-            </div>
-          </div>
-          <div id="workspaceCopilotHub"></div>
-        </div>
+	        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="copilot">
+	          <div class="section-head">
+	            <div>
+	              <h3>Copilot del grupo</h3>
+	              <p class="muted">Entrada común a los copilotos ya disponibles por servicio.</p>
+	            </div>
+	          </div>
+	          <div id="workspaceCopilotHub"></div>
+	        </div>
+	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="simuladores">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Simuladores</h3>
+	                <p class="muted">Cálculo determinista (sin IA) y validación con autoliquidaciones.</p>
+	              </div>
+	            </div>
+	            <form id="iivtnuSimulatorForm" class="form-grid">
+	              <label class="span-2">
+	                Municipio
+	                <div class="inline-row">
+	                  <input id="iivtnuMunicipioCp" placeholder="CP (autoselección)" inputmode="numeric" autocomplete="postal-code" />
+	                  <select id="iivtnuMunicipioSelect" required></select>
+	                </div>
+	              </label>
+	              <label>
+	                Fecha adquisición
+	                <input name="fecha_adquisicion" type="date" required />
+	              </label>
+	              <label>
+	                Fecha transmisión (devengo)
+	                <input name="fecha_transmision" type="date" required />
+	              </label>
+	              <label>
+	                Valor catastral del suelo
+	                <input name="valor_suelo" inputmode="decimal" placeholder="35447,24" required />
+	              </label>
+	              <label>
+	                % participación transmitida
+	                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+	              </label>
+	              <div class="form-actions span-2">
+	                <button type="submit">Simular IIVTNU (plusvalía)</button>
+	                <span id="iivtnuSimulatorStatus" class="muted"></span>
+	              </div>
+	            </form>
+	            <div id="iivtnuSimulatorResult"></div>
+	          </div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Validar autoliquidación (PDF)</h3>
+	                <p class="muted">Sube la autoliquidación/guía del ayuntamiento para extraer campos y comparar.</p>
+	              </div>
+	            </div>
+	            <form id="iivtnuPdfParseForm" class="form-grid">
+	              <label class="span-2">
+	                PDF de autoliquidación
+	                <input id="iivtnuPdfFile" type="file" accept="application/pdf" required />
+	              </label>
+	              <div class="form-actions span-2">
+	                <button type="submit" class="secondary ghost">Extraer datos</button>
+	                <button type="button" id="iivtnuPdfApplyBtn" class="secondary ghost hidden">Aplicar al simulador</button>
+	                <span id="iivtnuPdfStatus" class="muted"></span>
+	              </div>
+	            </form>
+	            <div id="iivtnuPdfParsed"></div>
+	          </div>
+	        </div>
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>

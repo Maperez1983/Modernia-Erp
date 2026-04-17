@@ -3485,9 +3485,9 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   border: 1px solid rgba(255, 255, 255, 0.22);
   color: rgba(255, 255, 255, 0.98);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.6px;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -4899,14 +4899,15 @@ body.tc-resizing {
   z-index: 70;
   display: block;
   padding: 0;
-  background: rgba(11, 29, 51, 0.28);
-  backdrop-filter: blur(2px);
+  /* En modo anclado (escritorio/iPad), evitamos oscurecer y “transparencias” sobre el CRM. */
+  background: transparent;
+  backdrop-filter: none;
 }
 
 #crmSection .crm-insert-modal--anchored .crm-insert-card {
   position: absolute;
   top: var(--crm-insert-top, 76px);
-  left: var(--crm-insert-left, 16px);
+  left: max(var(--crm-insert-left, 16px), calc(var(--crm-sidebar-right, 110px) + 16px));
   width: min(380px, calc(100vw - 32px));
   max-height: min(78vh, 640px);
   overflow: auto;

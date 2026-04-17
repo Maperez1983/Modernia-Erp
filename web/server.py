@@ -14358,7 +14358,9 @@ INMO_ACTION_RESULT_OPTIONS = {
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
     "cita_gestion_encargo": {"Realizada", "Reprogramar", "No realizada"},
     "cita_general": {"Realizada", "Reprogramar", "No realizada"},
-    "cita_propuesta": {"Se realiza propuesta", "No se realiza"},
+    # Compat: antes se guardaba como "Se realiza propuesta"/"No se realiza".
+    # UI v2 usa estados más naturales para el flujo comercial.
+    "cita_propuesta": {"Aprobada", "En negociación", "Rechazada", "Se realiza propuesta", "No se realiza"},
     "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
     "cita_contraoferta": {"Aceptada", "Rechazada"},
     "cita_notaria": {"Firmada", "Reprogramar", "No realizada"},
@@ -18231,6 +18233,8 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     ).fetchall()
     items = []
     selected_cliente_ids = []
+    renta_doc_id_owner = {}
+    renta_ref_owner = {}
     for row in rows:
         servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
         if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
@@ -18238,10 +18242,23 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         latest = entries[0] if entries else {}
+        cliente_id = row["cliente_id"]
+        for entry in entries:
+            try:
+                entry_id = str(entry.get("id") or "").strip()
+                ejercicio = str(entry.get("ejercicio") or "").strip()
+                if entry_id and ejercicio:
+                    renta_ref_owner[f"renta-{ejercicio}-{entry_id}"] = cliente_id
+                for field in ("doc_borrador_id", "doc_presentada_id"):
+                    doc_id = str(entry.get(field) or "").strip()
+                    if doc_id:
+                        renta_doc_id_owner[doc_id] = cliente_id
+            except Exception:
+                continue
         pending_presentacion = 1 if latest and normalize_renta_presentacion_status(latest.get("estado_presentacion")) == "Borrador" else 0
         items.append(
             {
-                "cliente_id": row["cliente_id"],
+                "cliente_id": cliente_id,
                 "nombre": row["nombre"],
                 "nif": row["nif"],
                 "telefono": row["telefono"],
@@ -18261,7 +18278,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 "preview_doc": {},
             }
         )
-        selected_cliente_ids.append(row["cliente_id"])
+        selected_cliente_ids.append(cliente_id)
         if len(items) >= limit_val:
             break
 
@@ -18269,31 +18286,93 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         return []
 
     placeholders = ",".join(["?"] * len(selected_cliente_ids))
+    selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
+    doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
+    ref_ids = [ref_id for ref_id in renta_ref_owner.keys() if ref_id]
+    doc_id_clause = "0"
+    doc_id_values = []
+    if doc_ids:
+        doc_id_clause = f"id IN ({','.join(['?'] * len(doc_ids))})"
+        doc_id_values = doc_ids
+    ref_id_clause = "0"
+    ref_id_values = []
+    if ref_ids:
+        ref_id_clause = f"referencia_id IN ({','.join(['?'] * len(ref_ids))})"
+        ref_id_values = ref_ids
+    renta_filter = """
+      (
+        LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+        OR LOWER(COALESCE(tipo, '')) = 'renta'
+        OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
+        OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+        OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
+      )
+    """
     docs = conn.execute(
         f"""
         SELECT id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, referencia_tipo, referencia_id, updated_at
         FROM gestoria_docs
-        WHERE cliente_id IN ({placeholders})
-          AND (
-            LOWER(COALESCE(referencia_tipo, '')) = 'renta'
-            OR LOWER(COALESCE(tipo, '')) = 'renta'
-            OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
-            OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+        WHERE (
+          {doc_id_clause}
+          OR (
+            cliente_id IN ({placeholders})
+            AND {renta_filter}
           )
+          OR (
+            {ref_id_clause}
+            AND {renta_filter}
+          )
+        )
         ORDER BY cliente_id ASC,
                  COALESCE(NULLIF(TRIM(COALESCE(fecha, '')), ''), '0001-01-01') DESC,
                  updated_at DESC
         """,
-        tuple(selected_cliente_ids),
+        tuple(doc_id_values + selected_cliente_ids + ref_id_values),
     ).fetchall()
     docs_by_cliente = {}
     for doc in docs:
-        docs_by_cliente.setdefault(doc["cliente_id"], []).append(dict(doc))
+        doc_dict = dict(doc)
+        cid = str(doc_dict.get("cliente_id") or "").strip()
+        if cid not in selected_set:
+            cid = ""
+        if not cid:
+            ref_id = str(doc_dict.get("referencia_id") or "").strip()
+            doc_id = str(doc_dict.get("id") or "").strip()
+            cid = renta_ref_owner.get(ref_id) or renta_doc_id_owner.get(doc_id) or ""
+        if not cid:
+            continue
+        doc_dict["cliente_id"] = cid
+        docs_by_cliente.setdefault(cid, []).append(doc_dict)
     for item in items:
         docs_list = docs_by_cliente.get(item["cliente_id"], []) or []
         item["docs"] = docs_list
-        item["doc_count"] = len(docs_list)
-        item["preview_doc"] = docs_list[0] if docs_list else {}
+        if docs_list:
+            item["doc_count"] = len(docs_list)
+            item["preview_doc"] = docs_list[0]
+            continue
+        latest = item.get("renta_latest") or {}
+        doc_key = str(latest.get("doc_key") or "").strip()
+        doc_url = str(latest.get("doc_url") or "").strip()
+        if doc_key or doc_url:
+            ejercicio = str(latest.get("ejercicio") or "").strip()
+            entry_id = str(latest.get("id") or "").strip()
+            item["doc_count"] = 1
+            item["preview_doc"] = {
+                "id": "",
+                "cliente_id": item["cliente_id"],
+                "nombre": str(latest.get("doc_nombre") or f"Renta {ejercicio}.pdf").strip(),
+                "tipo": "Modelo 100",
+                "fecha": str(latest.get("presentacion_fecha") or "").strip(),
+                "estado": str(latest.get("estado_presentacion") or latest.get("doc_status") or "").strip(),
+                "notas": "",
+                "doc_key": doc_key,
+                "doc_url": doc_url,
+                "referencia_tipo": "renta",
+                "referencia_id": f"renta-{ejercicio}-{entry_id}" if ejercicio and entry_id else "",
+            }
+        else:
+            item["doc_count"] = 0
+            item["preview_doc"] = {}
     return items
 
 
@@ -32208,7 +32287,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_empresa_update",
             "/api/acciones",
             "/api/acciones_update",
-            "/api/acciones_delete",
+	            "/api/acciones_delete",
 	            "/api/cliente_gestoria_update",
 	            "/api/renta_quick_ocr",
 	            "/api/renta_quick_attach",
@@ -45571,7 +45650,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Debes subir un archivo antes de guardar el documento"}, status=400)
                 return
             if doc_id:
-                conn.execute(
+                cur = conn.execute(
                     """
                     UPDATE gestoria_docs
                     SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
@@ -45593,6 +45672,34 @@ class Handler(BaseHTTPRequestHandler):
                         doc_id,
                     ),
                 )
+                if getattr(cur, "rowcount", 0) == 0:
+                    doc_id = uuid.uuid4().hex
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_docs (
+                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            doc_id,
+                            empresa["id"],
+                            cliente_id,
+                            f"renta-{ejercicio}-{entry_id}",
+                            doc_nombre,
+                            doc_tipo,
+                            presentacion_fecha,
+                            estado_presentacion,
+                            doc_notas,
+                            doc_key or None,
+                            doc_url or None,
+                            now,
+                            now,
+                        ),
+                    )
             else:
                 doc_id = uuid.uuid4().hex
                 conn.execute(
@@ -45633,12 +45740,15 @@ class Handler(BaseHTTPRequestHandler):
                     "responsable": payload.get("responsable", current_entry.get("responsable")),
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
                     "forma_cobro": forma_cobro,
-                    "remesada": remesada_val,
-                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
-                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
-                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
-                }
-            )
+	                    "remesada": remesada_val,
+	                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+	                    "doc_key": doc_key or current_entry.get("doc_key") or "",
+	                    "doc_url": doc_url or current_entry.get("doc_url") or "",
+	                    "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
+	                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+	                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+	                }
+	            )
             upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
             trabajo = conn.execute(
                 """
@@ -45941,11 +46051,14 @@ class Handler(BaseHTTPRequestHandler):
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
                     "forma_cobro": forma_cobro,
                     "remesada": remesada_val,
-                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
-                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
-                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
-                }
-            )
+	                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+	                    "doc_key": doc_key or current_entry.get("doc_key") or "",
+	                    "doc_url": doc_url or current_entry.get("doc_url") or "",
+	                    "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
+	                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+	                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+	                }
+	            )
             upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
             ocr_job_id = ""
             if doc_key:
@@ -46130,7 +46243,7 @@ class Handler(BaseHTTPRequestHandler):
                     str(payload.get("documento_tipo") or "").strip() or None,
                     parse_money_value(payload.get("importe_propuesta")) or None,
                     payload.get("notas"),
-                    payload.get("recordatorio_min"),
+                    parse_optional_int(payload.get("recordatorio_min")),
                     payload.get("related_id"),
                     payload.get("related_tipo"),
                     now,
@@ -46253,16 +46366,28 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
+            # Normaliza tipos para evitar "API error" en Postgres por '' -> INTEGER/REAL.
+            if "recordatorio_min" in updates:
+                updates["recordatorio_min"] = parse_optional_int(updates.get("recordatorio_min"))
+            if "importe_propuesta" in updates:
+                updates["importe_propuesta"] = parse_money_value(updates.get("importe_propuesta")) or None
+            for key in ("cliente_id", "inmueble_id", "asesoramiento_id", "related_id", "related_tipo"):
+                if key in updates and (updates.get(key) is None or str(updates.get(key)).strip() == ""):
+                    updates[key] = None
+            for key in ("fecha", "hora", "hora_fin", "asunto", "tipo", "modalidad_contacto", "responsable", "estado", "resultado_cierre", "estado_siguiente", "documento_tipo", "notas", "cliente_nombre"):
+                if key in updates and isinstance(updates.get(key), str) and not updates.get(key).strip():
+                    # Permitimos limpiar campos texto (se guarda NULL en vez de cadena vacía).
+                    updates[key] = None
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
-            tipo_final = str(updates.get("tipo") if "tipo" in updates else current["tipo"] or "").strip()
-            estado_final = str(updates.get("estado") if "estado" in updates else current["estado"] or "").strip()
+            tipo_final = str((updates.get("tipo") if "tipo" in updates else current["tipo"]) or "").strip()
+            estado_final = str((updates.get("estado") if "estado" in updates else current["estado"]) or "").strip()
             resultado_final = str(
-                updates.get("resultado_cierre") if "resultado_cierre" in updates else current["resultado_cierre"] or ""
+                (updates.get("resultado_cierre") if "resultado_cierre" in updates else current["resultado_cierre"]) or ""
             ).strip()
             estado_siguiente_final = str(
-                updates.get("estado_siguiente") if "estado_siguiente" in updates else current["estado_siguiente"] or ""
+                (updates.get("estado_siguiente") if "estado_siguiente" in updates else current["estado_siguiente"]) or ""
             ).strip()
             servicio_final = str(current["servicio"] or "").strip()
             if normalize_lookup_text(servicio_final) == "financiaciones":
@@ -46468,7 +46593,10 @@ class Handler(BaseHTTPRequestHandler):
                 if normalize_lookup_text(resultado_final).lower() == "aceptada":
                     sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
             elif tipo_norm == "cita_propuesta" and inmueble_id and estado_final.lower() != "pendiente":
-                if normalize_lookup_text(resultado_final).lower() == "se realiza propuesta":
+                resultado_norm = normalize_lookup_text(resultado_final).lower()
+                # Compat: aceptamos tanto el valor antiguo como los valores de la UI.
+                proposal_ok = resultado_norm in {"se realiza propuesta", "aprobada", "en negociacion", "en negociación"}
+                if proposal_ok:
                     documento_tipo = str(
                         updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
                     ).strip() or "Propuesta de compra"
@@ -50175,63 +50303,116 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
-        if path == "/api/gestoria_docs":
-            cliente_id = params.get("cliente_id", [""])[0]
-            empresa_id = params.get("empresa_id", [""])[0]
-            service = (params.get("service", [""])[0] or "").strip().lower()
-            limit = params.get("limit", [""])[0]
-            if not cliente_id and not empresa_id:
-                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
-                return
-            if cliente_id:
-                where = ["cliente_id = ?"]
-                values = [cliente_id]
-                if service:
-                    if normalize_lookup_text(service) == "gestoria":
-                        where.append(
+            if path == "/api/gestoria_docs":
+                cliente_id = params.get("cliente_id", [""])[0]
+                empresa_id = params.get("empresa_id", [""])[0]
+                service = (params.get("service", [""])[0] or "").strip().lower()
+                limit = params.get("limit", [""])[0]
+                if not cliente_id and not empresa_id:
+                    json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+                    return
+
+                if cliente_id:
+                    where = ["cliente_id = ?"]
+                    values = [cliente_id]
+                    if service:
+                        if normalize_lookup_text(service) == "GESTORIA":
+                            gestoria_filter = """
+                              (
+                                LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
+                                OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
+                                OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
+                                OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+                              )
                             """
-                            (
-                              LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
-                              OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
-                              OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+                            # Fallback: incluir documentos de renta referenciados por campañas aunque
+                            # estén mal vinculados (cliente_id NULL o referencia_tipo incompleta).
+                            doc_ids = []
+                            ref_ids = []
+                            try:
+                                cg_row = conn.execute(
+                                    "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                                    (cliente_id,),
+                                ).fetchone()
+                                renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+                                entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+                                for entry in entries:
+                                    entry_id = str(entry.get("id") or "").strip()
+                                    ejercicio = str(entry.get("ejercicio") or "").strip()
+                                    if entry_id and ejercicio:
+                                        ref_ids.append(f"renta-{ejercicio}-{entry_id}")
+                                    for field in ("doc_borrador_id", "doc_presentada_id"):
+                                        doc_id = str(entry.get(field) or "").strip()
+                                        if doc_id:
+                                            doc_ids.append(doc_id)
+                            except Exception:
+                                doc_ids = []
+                                ref_ids = []
+                            doc_ids = [d for d in dict.fromkeys(doc_ids) if d]
+                            ref_ids = [r for r in dict.fromkeys(ref_ids) if r]
+                            extra_clause = ""
+                            extra_values = []
+                            extra_clause_parts = []
+                            if doc_ids:
+                                extra_clause_parts.append(f"id IN ({','.join(['?'] * len(doc_ids))})")
+                                extra_values.extend(doc_ids)
+                            if ref_ids:
+                                extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(ref_ids))})")
+                                extra_values.extend(ref_ids)
+                            if extra_clause_parts:
+                                extra_clause = " OR ".join(extra_clause_parts)
+                                where_clause = f"((cliente_id = ? AND {gestoria_filter}) OR ({extra_clause}))"
+                                values = [cliente_id, *extra_values]
+                                where = [where_clause]
+                            else:
+                                where.append(gestoria_filter)
+                        else:
+                            where.append(
+                                "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
                             )
-                            """
-                        )
-                    else:
-                        where.append(
-                            "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
-                        )
-                        values.extend([service, service])
-                where_clause = " AND ".join(where)
+                            values.extend([service, service])
+
+                    where_clause = " AND ".join(where)
+                    rows = conn.execute(
+                        f"""
+                        SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                               referencia_tipo, referencia_id
+                        FROM gestoria_docs
+                        WHERE {where_clause}
+                        ORDER BY created_at DESC
+                        """,
+                        values,
+                    ).fetchall()
+                    # Deduplicar por id si usamos fallback.
+                    out = []
+                    seen = set()
+                    for r in rows:
+                        rid = str(r["id"] or "").strip()
+                        if rid and rid in seen:
+                            continue
+                        if rid:
+                            seen.add(rid)
+                        out.append(dict(r))
+                    json_response(self, {"rows": out})
+                    return
+
+                limit_clause = "LIMIT 50"
+                if limit.isdigit():
+                    limit_clause = f"LIMIT {int(limit)}"
                 rows = conn.execute(
                     f"""
-                    SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                           referencia_tipo, referencia_id
-                    FROM gestoria_docs
-                    WHERE {where_clause}
-                    ORDER BY created_at DESC
+                    SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
+                           COALESCE(c.nombre, '') AS cliente
+                    FROM gestoria_docs d
+                    LEFT JOIN clientes c ON c.id = d.cliente_id
+                    WHERE d.empresa_id = ?
+                    ORDER BY d.fecha DESC
+                    {limit_clause}
                     """,
-                    values,
+                    (empresa_id,),
                 ).fetchall()
                 json_response(self, {"rows": [dict(r) for r in rows]})
                 return
-            limit_clause = "LIMIT 50"
-            if limit.isdigit():
-                limit_clause = f"LIMIT {int(limit)}"
-            rows = conn.execute(
-                f"""
-                SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
-                       COALESCE(c.nombre, '') AS cliente
-                FROM gestoria_docs d
-                LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE d.empresa_id = ?
-                ORDER BY d.fecha DESC
-                {limit_clause}
-                """,
-                (empresa_id,),
-            ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
-            return
 
         if path == "/api/gestoria_contabilidad":
             try:
