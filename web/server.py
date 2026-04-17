@@ -45848,7 +45848,7 @@ class Handler(BaseHTTPRequestHandler):
             if "REMESA" not in normalize_lookup_text(forma_cobro):
                 remesada_val = 0
             if doc_id:
-                conn.execute(
+                cur = conn.execute(
                     """
                     UPDATE gestoria_docs
                     SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
@@ -45870,6 +45870,36 @@ class Handler(BaseHTTPRequestHandler):
                         doc_id,
                     ),
                 )
+                # Si el doc_id viene informado pero no existe fila (0 updates), creamos el documento.
+                # Esto evita campañas con `doc_*_id` apuntando a un id huérfano.
+                if getattr(cur, "rowcount", 0) == 0:
+                    doc_id = uuid.uuid4().hex
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_docs (
+                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            doc_id,
+                            empresa["id"],
+                            cliente_id,
+                            f"renta-{ejercicio}-{entry_id}",
+                            doc_nombre,
+                            doc_tipo,
+                            presentacion_fecha,
+                            estado_presentacion,
+                            doc_notas,
+                            doc_key or None,
+                            doc_url or None,
+                            now,
+                            now,
+                        ),
+                    )
             else:
                 doc_id = uuid.uuid4().hex
                 conn.execute(

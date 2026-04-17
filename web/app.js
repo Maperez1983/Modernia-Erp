@@ -50948,6 +50948,10 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
       remesada: quickRemesada,
     };
     const data = await apiPost("/api/renta_quick_attach", payload);
+    try {
+      // Invalida cache de cards "Cliente Renta" para que aparezca el PDF recién asignado.
+      state.gestoriaRentaCardsCache = null;
+    } catch {}
     const entryId = String(data?.entry_id || "").trim();
     if (entryId) {
       state.currentRentaEntryId = entryId;
