@@ -1431,7 +1431,16 @@ def build_record_key(fields: dict, pdf_path: Path) -> str:
             continue
         if name.startswith("."):
             continue
+        upper_name = name.upper()
         if re.fullmatch(r"RENTAS\s+20[0-9]{2}", name, re.IGNORECASE):
+            continue
+        # Ignore dataset roots like "000RENTAS 2025" to avoid cross-cliente merges.
+        if "RENTAS" in upper_name and re.search(r"\b20[0-9]{2}\b", upper_name):
+            continue
+        # Heuristic: accept only folder names that look like a person/company label.
+        tokens = re.findall(r"[A-Z0-9ÁÉÍÓÚÜÑ]+", upper_name)
+        has_alpha = any(any(ch.isalpha() for ch in t) and len(t) >= 3 for t in tokens)
+        if len(tokens) < 2 or not has_alpha:
             continue
         return slug(name)
 
@@ -1446,7 +1455,7 @@ def build_record_key(fields: dict, pdf_path: Path) -> str:
     import hashlib
 
     digest = hashlib.sha1(str(pdf_path).encode("utf-8", "ignore")).hexdigest()[:10]
-    return f\"{slug(stem)}_{digest}\".strip(\"_\")
+    return f"{slug(stem)}_{digest}".strip("_")
 
 
 def merge_record(target: dict, source: dict, pdf_path: Path) -> None:
