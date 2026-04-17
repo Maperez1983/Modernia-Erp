@@ -10158,6 +10158,26 @@ body.theme-operativa #holdingSection {
   overflow: visible;
 }
 
+body.theme-operativa #holdingSection > .section-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 12px;
+}
+
+@media (max-width: 760px) {
+  body.theme-operativa #holdingSection > .section-head {
+    grid-template-columns: 1fr;
+  }
+}
+
+body.theme-operativa #holdingBackBtn {
+  justify-self: end;
+  align-self: start;
+  white-space: nowrap;
+}
+
 body.theme-operativa section::before {
   content: "";
   position: absolute;

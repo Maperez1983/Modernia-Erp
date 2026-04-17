@@ -1542,6 +1542,7 @@ const state = {
   currentUserServiceLabel: "",
   currentClienteId: "",
   currentClienteServices: [],
+  currentClienteEmpresasActivas: [],
   lastCreatedClientId: "",
   currentPage: "home",
   prevPage: "home",
@@ -1552,6 +1553,9 @@ const state = {
   clienteContabView: "dashboard",
   clienteContabServiceTab: "",
   clienteContabResponsable: "",
+  clienteLedgerCobroFilter: "priced",
+  clienteLedgerEjercicio: "",
+  clienteLedgerResponsable: "",
   crmWorkspaceView: "resumen",
   clientesShowAll: false,
   columnsPickerContext: null,
@@ -2100,6 +2104,8 @@ const clienteTabDatos = document.getElementById("clienteTabDatos");
 const clienteTabRelaciones = document.getElementById("clienteTabRelaciones");
 const clienteTabEconomicos = document.getElementById("clienteTabEconomicos");
 const clienteTabDashboard = document.getElementById("clienteTabDashboard");
+const clienteDashboardRentaPanel = document.getElementById("clienteDashboardRentaPanel");
+const clienteDashboardRentaContent = document.getElementById("clienteDashboardRentaContent");
 const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabOperativa = document.getElementById("clienteTabOperativa");
 const clienteOperativaTabs = document.getElementById("clienteOperativaTabs");
@@ -19286,7 +19292,7 @@ const setClienteTab = (tab) => {
   if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", !showExpediente);
   if (clienteTabRelaciones) clienteTabRelaciones.classList.toggle("hidden", tab !== "relaciones");
   if (clienteTabEconomicos) clienteTabEconomicos.classList.toggle("hidden", tab !== "economicos");
-  if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", !showExpediente);
+  if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", tab !== "dashboard");
   if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", !showConfig);
   if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", !showServicios);
   if (clienteTabServicios) clienteTabServicios.classList.toggle("hidden", !showServicios);
@@ -19301,6 +19307,9 @@ const setClienteTab = (tab) => {
   }
   if (tab === "economicos") {
     renderClienteContabilidadPanel();
+  }
+  if (tab === "dashboard") {
+    renderClienteRentaDashboardPanel();
   }
 };
 
@@ -19318,6 +19327,208 @@ const renderClienteContabilidadPanel = () => {
       ? desiredTab
       : (hasGestoria ? "gestoria" : (hasHipotecas ? "financiaciones" : ""));
   state.clienteContabServiceTab = activeTab;
+
+  if (!activeTab) {
+    clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin contabilidad disponible para este cliente.</p>";
+    return;
+  }
+
+  const root = document.createElement("div");
+  if (availableTabs.length > 1) {
+    const tabs = document.createElement("div");
+    tabs.className = "tabs";
+    const mk = (key, label) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `tab ${activeTab === key ? "active" : ""}`.trim();
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        state.clienteContabServiceTab = key;
+        renderClienteContabilidadPanel();
+      });
+      return btn;
+    };
+    if (hasGestoria) tabs.appendChild(mk("gestoria", "Gestoría"));
+    if (hasHipotecas) tabs.appendChild(mk("financiaciones", "Financiaciones"));
+    root.appendChild(tabs);
+  }
+
+  if (activeTab === "financiaciones") {
+    renderClienteDatosEconomicos(state.currentClienteData || {}, state.currentClienteEconomicData || {});
+    return;
+  }
+
+  const openRentaEntry = (entryId) => {
+    const next = String(entryId || "").trim();
+    if (!next) return;
+    state.currentRentaEntryId = next;
+    setClienteTab("servicios");
+    setClienteOperativaTab("gestoria");
+    setGestoriaClientModuleTab("renta");
+    try {
+      if (gestoriaModuleRenta) {
+        gestoriaModuleRenta.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } catch {}
+  };
+
+  const gestoria = state.currentClienteGestoriaData || {};
+  const entries = Array.isArray(gestoria.renta_entries) ? gestoria.renta_entries : [];
+  if (!entries.length) {
+    root.appendChild(
+      Object.assign(document.createElement("p"), {
+        className: "muted",
+        textContent: "Sin campañas de renta registradas para este cliente.",
+      })
+    );
+    clienteEconomicosPanel.innerHTML = "";
+    clienteEconomicosPanel.appendChild(root);
+    return;
+  }
+
+  const ejercicios = Array.from(
+    new Set(entries.map((e) => String(e?.ejercicio || "").trim()).filter(Boolean))
+  ).sort((a, b) => String(b).localeCompare(String(a)));
+
+  const responsables = Array.from(
+    new Set(entries.map((e) => String(e?.responsable || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, "es"));
+
+  const filterBar = document.createElement("div");
+  filterBar.className = "form-grid";
+  filterBar.innerHTML = `
+    <label>
+      Mostrar
+      <select id="clienteLedgerCobroFilter">
+        <option value="all">Todas</option>
+        <option value="priced">Con precio</option>
+        <option value="unpaid">Pendientes</option>
+        <option value="paid">Cobradas</option>
+      </select>
+    </label>
+    <label>
+      Ejercicio
+      <select id="clienteLedgerEjercicio">
+        <option value="">Todos</option>
+      </select>
+    </label>
+    <label>
+      Responsable
+      <select id="clienteLedgerResponsable">
+        <option value="">Todos</option>
+      </select>
+    </label>
+    <div class="form-actions" style="justify-content:flex-end; align-items:flex-end;">
+      <button type="button" class="secondary ghost" id="clienteLedgerOpenRenta">Abrir módulo renta</button>
+    </div>
+  `;
+
+  const cobroSelect = filterBar.querySelector("#clienteLedgerCobroFilter");
+  const ejercicioSelect = filterBar.querySelector("#clienteLedgerEjercicio");
+  const responsableSelect = filterBar.querySelector("#clienteLedgerResponsable");
+  const openRentaBtn = filterBar.querySelector("#clienteLedgerOpenRenta");
+
+  ejercicios.forEach((val) => ejercicioSelect?.appendChild(createOption(val, val)));
+  responsables.forEach((val) => responsableSelect?.appendChild(createOption(val, val)));
+
+  if (cobroSelect) cobroSelect.value = state.clienteLedgerCobroFilter || "priced";
+  if (ejercicioSelect) ejercicioSelect.value = state.clienteLedgerEjercicio || "";
+  if (responsableSelect) responsableSelect.value = state.clienteLedgerResponsable || "";
+
+  openRentaBtn?.addEventListener("click", () => {
+    setClienteTab("servicios");
+    setClienteOperativaTab("gestoria");
+    setGestoriaClientModuleTab("renta");
+  });
+
+  const tableWrap = document.createElement("div");
+  const renderTable = () => {
+    const cobroFilter = String(cobroSelect?.value || state.clienteLedgerCobroFilter || "priced");
+    const ejercicio = String(ejercicioSelect?.value || "").trim();
+    const responsable = String(responsableSelect?.value || "").trim();
+    state.clienteLedgerCobroFilter = cobroFilter;
+    state.clienteLedgerEjercicio = ejercicio;
+    state.clienteLedgerResponsable = responsable;
+
+    let filtered = [...entries];
+    if (ejercicio) filtered = filtered.filter((e) => String(e?.ejercicio || "").trim() === ejercicio);
+    if (responsable) filtered = filtered.filter((e) => String(e?.responsable || "").trim() === responsable);
+    if (cobroFilter === "priced") {
+      filtered = filtered.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0);
+    } else if (cobroFilter === "unpaid") {
+      filtered = filtered.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0 && Number(e?.cobrada || 0) !== 1);
+    } else if (cobroFilter === "paid") {
+      filtered = filtered.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0 && Number(e?.cobrada || 0) === 1);
+    }
+
+    tableWrap.innerHTML = "";
+    if (!filtered.length) {
+      tableWrap.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Sin resultados." }));
+      return;
+    }
+
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Ejercicio", "Estado", "Responsable", "Precio", "Cobro", "Forma", "Remesa", ""].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    filtered.forEach((entry) => {
+      const ejercicioCell = String(entry?.ejercicio || "").trim() || "-";
+      const estadoCell = String(entry?.estado_presentacion || entry?.doc_status || "").trim() || "-";
+      const responsableCell = String(entry?.responsable || "").trim() || "Sin responsable";
+      const precio = toNumber(entry?.precio_servicio) || 0;
+      const cobrada = Number(entry?.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
+      const forma = String(entry?.forma_cobro || "").trim() || "-";
+      const remesa = Number(entry?.remesada || 0) === 1 ? "Sí" : "No";
+      const tr = document.createElement("tr");
+      [ejercicioCell, estadoCell, responsableCell, euroFormatter.format(precio), cobrada, forma, remesa].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      const openBtn = createIconButton("open", "Abrir renta");
+      openBtn.classList.add("secondary");
+      openBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openRentaEntry(entry?.id);
+      });
+      actionTd.appendChild(openBtn);
+      tr.appendChild(actionTd);
+      tr.addEventListener("click", () => openRentaEntry(entry?.id));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+  };
+
+  cobroSelect?.addEventListener("change", renderTable);
+  ejercicioSelect?.addEventListener("change", renderTable);
+  responsableSelect?.addEventListener("change", renderTable);
+
+  root.appendChild(filterBar);
+  root.appendChild(tableWrap);
+  renderTable();
+
+  clienteEconomicosPanel.innerHTML = "";
+  clienteEconomicosPanel.appendChild(root);
+};
+
+const renderClienteRentaDashboardPanel = () => {
+  if (!clienteDashboardRentaContent) return;
+  const services = Array.isArray(state.currentClienteServices) ? state.currentClienteServices : [];
+  const hasGestoria = services.includes("gestoria") || services.includes("gestoría");
+  if (clienteDashboardRentaPanel) clienteDashboardRentaPanel.classList.toggle("hidden", !hasGestoria);
+  if (!hasGestoria) {
+    clienteDashboardRentaContent.innerHTML = "";
+    return;
+  }
 
   const openRentaEntry = (entryId) => {
     const next = String(entryId || "").trim();
@@ -19376,7 +19587,7 @@ const renderClienteContabilidadPanel = () => {
     backBtn.addEventListener("click", () => {
       state.clienteContabView = "dashboard";
       state.clienteContabResponsable = "";
-      renderClienteContabilidadPanel();
+      renderClienteRentaDashboardPanel();
     });
     right.appendChild(backBtn);
     head.appendChild(left);
@@ -19409,15 +19620,7 @@ const renderClienteContabilidadPanel = () => {
       const forma = String(entry?.forma_cobro || "").trim() || "-";
       const remesa = Number(entry?.remesada || 0) === 1 ? "Sí" : "No";
       const tr = document.createElement("tr");
-      const values = [
-        ejercicio,
-        estado,
-        responsable,
-        euroFormatter.format(precio),
-        cobrada,
-        forma,
-        remesa,
-      ];
+      const values = [ejercicio, estado, responsable, euroFormatter.format(precio), cobrada, forma, remesa];
       values.forEach((value) => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -19450,15 +19653,15 @@ const renderClienteContabilidadPanel = () => {
           <p class="muted">Pulsa un responsable para ver el detalle de campañas.</p>
         </div>
         <div>
-          <button type="button" class="secondary ghost" id="clienteContabBackBtn">Volver a KPIs</button>
+          <button type="button" class="secondary ghost" id="clienteRentaDashBackBtn">Volver a KPIs</button>
         </div>
       </div>
     `;
-    const backBtn = wrap.querySelector("#clienteContabBackBtn");
+    const backBtn = wrap.querySelector("#clienteRentaDashBackBtn");
     backBtn?.addEventListener("click", () => {
       state.clienteContabView = "dashboard";
       state.clienteContabResponsable = "";
-      renderClienteContabilidadPanel();
+      renderClienteRentaDashboardPanel();
     });
     if (!buckets.length) {
       wrap.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Sin responsables." }));
@@ -19494,7 +19697,7 @@ const renderClienteContabilidadPanel = () => {
       tr.addEventListener("click", () => {
         state.clienteContabView = "responsable";
         state.clienteContabResponsable = bucket.responsableKey;
-        renderClienteContabilidadPanel();
+        renderClienteRentaDashboardPanel();
       });
       tbody.appendChild(tr);
     });
@@ -19503,41 +19706,6 @@ const renderClienteContabilidadPanel = () => {
     return wrap;
   };
 
-  // Si no hay módulos activos, mostramos un placeholder.
-  if (!activeTab) {
-    clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin contabilidad disponible para este cliente.</p>";
-    return;
-  }
-
-  // Switcher de servicio (si aplica).
-  const root = document.createElement("div");
-  if (availableTabs.length > 1) {
-    const tabs = document.createElement("div");
-    tabs.className = "tabs";
-    const mk = (key, label) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = `tab ${activeTab === key ? "active" : ""}`.trim();
-      btn.textContent = label;
-      btn.addEventListener("click", () => {
-        state.clienteContabServiceTab = key;
-        state.clienteContabView = "dashboard";
-        state.clienteContabResponsable = "";
-        renderClienteContabilidadPanel();
-      });
-      return btn;
-    };
-    if (hasGestoria) tabs.appendChild(mk("gestoria", "Gestoría"));
-    if (hasHipotecas) tabs.appendChild(mk("financiaciones", "Financiaciones"));
-    root.appendChild(tabs);
-  }
-
-  if (activeTab === "financiaciones") {
-    renderClienteDatosEconomicos(state.currentClienteData || {}, state.currentClienteEconomicData || {});
-    return;
-  }
-
-  // Gestoría: Dashboard de Renta.
   const gestoria = state.currentClienteGestoriaData || {};
   const entries = Array.isArray(gestoria.renta_entries) ? gestoria.renta_entries : [];
   const priced = entries.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0);
@@ -19577,48 +19745,50 @@ const renderClienteContabilidadPanel = () => {
     }
     bucket.entries.push(entry);
   });
-  const buckets = Array.from(bucketMap.values()).sort((a, b) => (b.unpaidImporte - a.unpaidImporte) || (b.total - a.total));
+  const buckets = Array.from(bucketMap.values()).sort(
+    (a, b) => (b.unpaidImporte - a.unpaidImporte) || (b.total - a.total)
+  );
 
   const view = normalizeSimple(state.clienteContabView || "dashboard") || "dashboard";
   const responsableFilterKey = normalizeLookupText(state.clienteContabResponsable || "");
 
+  const root = document.createElement("div");
   const kpis = document.createElement("div");
   kpis.className = "cliente-mini-kpis";
   kpis.appendChild(makeKpiCard("Rentas", numberFormatter.format(entries.length), () => {
     state.clienteContabView = "all";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   kpis.appendChild(makeKpiCard("Pendientes cobro", numberFormatter.format(unpaid.length), () => {
     state.clienteContabView = "unpaid";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   kpis.appendChild(makeKpiCard("Importe pendiente", euroFormatter.format(unpaidImporte), () => {
     state.clienteContabView = "unpaid";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   kpis.appendChild(makeKpiCard("Importe cobrado", euroFormatter.format(paidImporte), () => {
     state.clienteContabView = "paid";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   kpis.appendChild(makeKpiCard("Importe total", euroFormatter.format(totalImporte), () => {
     state.clienteContabView = "all";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   kpis.appendChild(makeKpiCard("Responsables", numberFormatter.format(buckets.length), () => {
     state.clienteContabView = "responsables";
     state.clienteContabResponsable = "";
-    renderClienteContabilidadPanel();
+    renderClienteRentaDashboardPanel();
   }));
   root.appendChild(kpis);
 
   const detail = document.createElement("div");
   if (view === "dashboard") {
-    // Resumen por responsable (acceso rápido).
     detail.appendChild(renderResponsablesTable(buckets));
   } else if (view === "unpaid") {
     detail.appendChild(
@@ -19660,8 +19830,9 @@ const renderClienteContabilidadPanel = () => {
     detail.appendChild(renderResponsablesTable(buckets));
   }
   root.appendChild(detail);
-  clienteEconomicosPanel.innerHTML = "";
-  clienteEconomicosPanel.appendChild(root);
+
+  clienteDashboardRentaContent.innerHTML = "";
+  clienteDashboardRentaContent.appendChild(root);
 };
 
 const setClienteOperativaTab = (tab) => {
@@ -51402,6 +51573,11 @@ const loadClienteGestoria = (clienteId) => {
       gestoriaRentaInfo.textContent = `Mostrando ${row.renta_entries.length} campañas de renta.`;
     }
     updateGestoriaModuleTabsFromForm();
+    try {
+      const active = clienteTabs?.querySelector(".tab.active")?.dataset?.tab || "";
+      if (active === "economicos") renderClienteContabilidadPanel();
+      if (active === "dashboard") renderClienteRentaDashboardPanel();
+    } catch {}
   });
 };
 
@@ -54049,6 +54225,9 @@ const openClienteDetail = (id) => {
     state.currentClienteData = cliente;
     state.clienteContabView = "dashboard";
     state.clienteContabResponsable = "";
+    state.clienteLedgerCobroFilter = "priced";
+    state.clienteLedgerEjercicio = "";
+    state.clienteLedgerResponsable = "";
     const prefetchedSeguros = (data.servicios && Array.isArray(data.servicios.seguros))
       ? data.servicios.seguros
       : [];
@@ -54218,6 +54397,7 @@ const openClienteDetail = (id) => {
       const estado = normalizeSimple(row?.estado || "activo");
       return !["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado);
     });
+    state.currentClienteEmpresasActivas = empresasActivas;
     loadClienteMiniDashboard(id, empresasActivas, dashboardData);
     renderClienteProfesionalScope(empresasActivas);
     if (clienteAssignServicio) {
@@ -54429,6 +54609,9 @@ const openClienteDetail = (id) => {
             ? "inmobiliaria"
             : "seguros";
     setClienteDocsTab(docsDefault);
+    if (clienteDashboardRentaPanel) {
+      clienteDashboardRentaPanel.classList.toggle("hidden", !hasGestoria);
+    }
     clientesDetail.classList.remove("hidden");
     let defaultTab = "datos";
     const pending = state.pendingClienteOpen;
@@ -54456,11 +54639,15 @@ const openClienteDetail = (id) => {
 const closeClienteDetail = () => {
   state.currentClienteId = "";
   state.currentClienteServices = [];
+  state.currentClienteEmpresasActivas = [];
   state.currentClienteData = null;
   state.currentClienteEconomicData = null;
   state.clienteContabView = "dashboard";
   state.clienteContabServiceTab = "";
   state.clienteContabResponsable = "";
+  state.clienteLedgerCobroFilter = "priced";
+  state.clienteLedgerEjercicio = "";
+  state.clienteLedgerResponsable = "";
   state.currentClienteSegurosRows = [];
   state.currentClienteRamoSelected = "";
   state.currentClienteRelaciones = [];
