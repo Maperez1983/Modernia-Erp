@@ -5234,6 +5234,513 @@ def load_postal_catalog(conn):
         except UnicodeDecodeError:
             continue
 
+
+# --- Simuladores fiscales (IIVTNU / plusvalía municipal) ---
+
+_IIVTNU_POSTAL_CACHE_LOCK = threading.Lock()
+_IIVTNU_POSTAL_CACHE = None  # {"cp_to": {cp: ine}, "ine_to": {ine: name}, "prov_to": {ine: provincia}}
+_IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_malaga.min.json`
+
+
+def _iivtnu_norm_text(value):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    raw = unicodedata.normalize("NFD", raw)
+    raw = "".join(ch for ch in raw if unicodedata.category(ch) != "Mn")
+    raw = raw.replace("’", "").replace("'", "")
+    raw = re.sub(r"\s+", " ", raw)
+    return raw.strip()
+
+
+def _iivtnu_postal_variants(nombre):
+    raw = str(nombre or "").strip()
+    if not raw:
+        return []
+    out = [raw]
+    if "," in raw:
+        base, art = [p.strip() for p in raw.split(",", 1)]
+        if _iivtnu_norm_text(art) in {"el", "la", "los", "las"}:
+            out.append(f"{art} {base}".strip())
+            out.append(f"{base} ({art})".strip())
+    return out
+
+
+def _iivtnu_load_postal_cache():
+    global _IIVTNU_POSTAL_CACHE
+    if _IIVTNU_POSTAL_CACHE is not None:
+        return _IIVTNU_POSTAL_CACHE
+    with _IIVTNU_POSTAL_CACHE_LOCK:
+        if _IIVTNU_POSTAL_CACHE is not None:
+            return _IIVTNU_POSTAL_CACHE
+        cache = {"cp_to": {}, "ine_to": {}, "prov_to": {}}
+        if POSTAL_CATALOG_PATH.exists():
+            encodings = ("utf-8-sig", "utf-8", "latin-1")
+            for encoding in encodings:
+                try:
+                    with POSTAL_CATALOG_PATH.open("r", encoding=encoding, newline="") as handle:
+                        reader = csv.DictReader(handle)
+                        if not reader.fieldnames:
+                            break
+                        headers = {normalize_header(name): name for name in reader.fieldnames}
+                        cp_key = next(
+                            (headers[k] for k in headers if k in ("codigopostal", "codigo_postal", "postalcode", "cp", "codigo")),
+                            None,
+                        )
+                        ine_key = next(
+                            (headers[k] for k in headers if k in ("municipioid", "municipio_id", "ine", "ineid", "idmunicipio")),
+                            None,
+                        )
+                        nombre_key = next(
+                            (
+                                headers[k]
+                                for k in headers
+                                if k in ("municipionombre", "municipio_nombre", "municipio", "poblacion", "localidad", "ciudad", "nombre")
+                            ),
+                            None,
+                        )
+                        if not cp_key or not ine_key:
+                            break
+                        for row in reader:
+                            cp = normalize_postal_code(row.get(cp_key, ""))
+                            ine = str(row.get(ine_key, "") or "").strip()
+                            if not cp or not ine:
+                                continue
+                            ine = ine.zfill(5)
+                            cache["cp_to"][cp] = ine
+                            nombre = str(row.get(nombre_key, "") if nombre_key else "").strip()
+                            if nombre and ine not in cache["ine_to"]:
+                                cache["ine_to"][ine] = nombre
+                                cache["prov_to"][ine] = POSTAL_PROVINCES.get(cp[:2], "")
+                    break
+                except UnicodeDecodeError:
+                    continue
+        _IIVTNU_POSTAL_CACHE = cache
+        return _IIVTNU_POSTAL_CACHE
+
+
+def _iivtnu_load_tipo_gravamen_malaga():
+    global _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE
+    if _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE is not None:
+        return _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE
+    try:
+        if not IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH.exists():
+            _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = {}
+            return _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE
+        data = json.loads(IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = data
+    return _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE
+
+
+IIVTNU_MAX_COEFS_RDL_8_2023_2024 = {
+    "lt1": 0.15,
+    "1": 0.15,
+    "2": 0.14,
+    "3": 0.14,
+    "4": 0.16,
+    "5": 0.18,
+    "6": 0.19,
+    "7": 0.20,
+    "8": 0.19,
+    "9": 0.15,
+    "10": 0.12,
+    "11": 0.10,
+    "12": 0.09,
+    "13": 0.09,
+    "14": 0.09,
+    "15": 0.09,
+    "16": 0.10,
+    "17": 0.13,
+    "18": 0.17,
+    "19": 0.23,
+    "20+": 0.40,
+}
+
+# RDL 16/2025 (BOE 24/12/2025) - vigente del 01/01/2026 al 27/01/2026; derogado desde 28/01/2026.
+IIVTNU_MAX_COEFS_RDL_16_2025_TEMP_2026 = {
+    "lt1": 0.16,
+    "1": 0.15,
+    "2": 0.15,
+    "3": 0.15,
+    "4": 0.16,
+    "5": 0.18,
+    "6": 0.20,
+    "7": 0.22,
+    "8": 0.23,
+    "9": 0.21,
+    "10": 0.16,
+    "11": 0.13,
+    "12": 0.11,
+    "13": 0.10,
+    "14": 0.10,
+    "15": 0.10,
+    "16": 0.10,
+    "17": 0.12,
+    "18": 0.16,
+    "19": 0.22,
+    "20+": 0.35,
+}
+
+
+def _iivtnu_max_coefs_for_devengo(devengo_date):
+    if isinstance(devengo_date, date) and date(2026, 1, 1) <= devengo_date <= date(2026, 1, 27):
+        return IIVTNU_MAX_COEFS_RDL_16_2025_TEMP_2026, {
+            "source_label": "RDL 16/2025 (coeficientes máximos 01/01/2026–27/01/2026; derogado desde 28/01/2026)",
+            "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2025-26458",
+        }
+    return IIVTNU_MAX_COEFS_RDL_8_2023_2024, {
+        "source_label": "RDL 8/2023 (coeficientes máximos desde 01/01/2024)",
+        "source_url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2023-26452",
+    }
+
+
+def _iivtnu_full_years(acq, devengo):
+    if not isinstance(acq, date) or not isinstance(devengo, date):
+        return 0
+    years = devengo.year - acq.year
+    if (devengo.month, devengo.day) < (acq.month, acq.day):
+        years -= 1
+    return max(0, years)
+
+
+def _iivtnu_full_months(acq, devengo):
+    if not isinstance(acq, date) or not isinstance(devengo, date):
+        return 0
+    months = (devengo.year - acq.year) * 12 + (devengo.month - acq.month)
+    if devengo.day < acq.day:
+        months -= 1
+    return max(0, months)
+
+
+def _iivtnu_objective_coef(acq, devengo, coef_table):
+    months = _iivtnu_full_months(acq, devengo)
+    if months < 12:
+        base_coef = float((coef_table or {}).get("lt1") or 0.0)
+        if months <= 0 and devengo > acq:
+            months = 1
+        coef = base_coef * (months / 12.0 if months > 0 else 0.0)
+        return {"years": 0, "months": months, "coef_objetivo": coef}
+    years = _iivtnu_full_years(acq, devengo)
+    years = min(20, max(1, years))
+    key = str(years)
+    coef = float((coef_table or {}).get(key) or ((coef_table or {}).get("20+") if years >= 20 else 0.0) or 0.0)
+    return {"years": years, "months": months, "coef_objetivo": coef}
+
+
+def _iivtnu_seed_malaga(conn, now_iso=None):
+    if not conn:
+        return
+    now_iso = str(now_iso or datetime.now(timezone.utc).isoformat())
+    # Si no existe la tabla aún (DB legacy sin schema), aborta.
+    try:
+        conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
+    except Exception:
+        return
+    try:
+        existing = conn.execute("SELECT 1 FROM iivtnu_municipios WHERE provincia = 'Málaga' LIMIT 1").fetchone()
+    except Exception:
+        existing = None
+    if existing:
+        return
+
+    postal = _iivtnu_load_postal_cache()
+    ine_to = postal.get("ine_to") or {}
+    prov_to = postal.get("prov_to") or {}
+    for ine, nombre in sorted(ine_to.items()):
+        if not str(ine).startswith("29") or (prov_to.get(ine) or "") != "Málaga":
+            continue
+        try:
+            conn.execute(
+                """
+                INSERT INTO iivtnu_municipios (ine, nombre, provincia, comunidad, es_capital, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(ine),
+                    str(nombre),
+                    "Málaga",
+                    "Andalucía",
+                    1 if str(ine) == "29067" else 0,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+        except Exception:
+            pass
+
+    tipo_data = _iivtnu_load_tipo_gravamen_malaga()
+    years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+    source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+    for year in ("2024", "2025"):
+        year_map = years_map.get(year) if isinstance(years_map, dict) else None
+        if not isinstance(year_map, dict):
+            year_map = {}
+        src = source_map.get(year) if isinstance(source_map, dict) else None
+        source_label = str(src.get("label") or "").strip() if isinstance(src, dict) else ""
+        source_url = str(src.get("url") or "").strip() if isinstance(src, dict) else ""
+        vigente_desde = f"{year}-01-01"
+        vigente_hasta = f"{year}-12-31"
+        coef_table, coef_source = _iivtnu_max_coefs_for_devengo(parse_iso_date(vigente_desde))
+        coef_json = json.dumps(
+            {"schema": "iivtnu_max_coef", "coeficientes": coef_table, "coef_source": coef_source},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        for ine, tipo_pct in sorted(year_map.items()):
+            if not str(ine).startswith("29"):
+                continue
+            try:
+                tipo_val = float(tipo_pct)
+            except Exception:
+                continue
+            # En algunos municipios el XLSX devuelve 0 (sin dato). No sembrar tipos inválidos.
+            if tipo_val <= 0:
+                continue
+            try:
+                exists = conn.execute(
+                    """
+                    SELECT 1 FROM iivtnu_param_sets
+                    WHERE municipio_ine = ? AND COALESCE(vigente_desde, '') = ? AND COALESCE(vigente_hasta, '') = ?
+                    LIMIT 1
+                    """,
+                    (str(ine), vigente_desde, vigente_hasta),
+                ).fetchone()
+            except Exception:
+                exists = None
+            if exists:
+                continue
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO iivtnu_param_sets (
+                      id, municipio_ine, vigente_desde, vigente_hasta,
+                      tipo_gravamen_pct, coeficientes_json, bonificaciones_json,
+                      source_url, source_label, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        str(ine),
+                        vigente_desde,
+                        vigente_hasta,
+                        float(tipo_val),
+                        coef_json,
+                        None,
+                        source_url,
+                        source_label,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            except Exception:
+                pass
+
+
+def _iivtnu_parse_uploaded_pdf(body, content_type=""):
+    ctype = str(content_type or "").strip()
+    if "multipart/form-data" not in ctype.lower():
+        raise ValueError("Content-Type debe ser multipart/form-data")
+    import email.policy  # lazy import: `email.policy` no existe hasta importar
+
+    envelope = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8", "ignore") + (body or b"")
+    msg = email.message_from_bytes(envelope, policy=email.policy.default)
+    file_bytes = None
+    filename = ""
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        cd = str(part.get("Content-Disposition") or "")
+        if "form-data" not in cd.lower():
+            continue
+        if "name=\"file\"" not in cd and "name=file" not in cd:
+            continue
+        filename = str(part.get_filename() or "").strip()
+        file_bytes = part.get_payload(decode=True)
+        break
+    if not file_bytes:
+        raise ValueError("No se encontró el campo file")
+    return _iivtnu_extract_from_pdf(file_bytes, filename=filename)
+
+
+def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
+    if not pdf_bytes:
+        return {}
+    if PdfReader is None:
+        raise RuntimeError("pypdf no disponible")
+    reader = PdfReader(BytesIO(pdf_bytes))
+    pages = list(reader.pages or [])
+    texts = []
+    max_pages = min(12, len(pages))
+    for idx in range(max_pages):
+        try:
+            texts.append(pages[idx].extract_text() or "")
+        except Exception:
+            texts.append("")
+    raw_text = "\n".join(texts)
+    clean = re.sub(r"[ \t]+", " ", raw_text or "")
+    clean = re.sub(r"\n{2,}", "\n", clean).strip()
+    upper = clean.upper()
+
+    def pick_first(patterns, text):
+        for pat in patterns:
+            m = re.search(pat, text, flags=re.IGNORECASE | re.MULTILINE)
+            if m:
+                return str(m.group(1) or "").strip()
+        return ""
+
+    def pick_number(patterns, text):
+        raw = pick_first(patterns, text)
+        if not raw:
+            return None
+        return parse_optional_float(raw)
+
+    municipio = pick_first([r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})"], upper)
+    municipio = municipio.title().strip() if municipio else ""
+    cp_norm = ""
+    try:
+        cp_candidates = re.findall(r"\b([0-9]{5})\b", clean or "")
+    except Exception:
+        cp_candidates = []
+    if cp_candidates:
+        try:
+            postal = _iivtnu_load_postal_cache()
+            known = set((postal.get("cp_to") or {}).keys())
+            valid = [c for c in cp_candidates if c in known]
+            prefer = [c for c in valid if str(c).startswith("29")]
+            cp_norm = prefer[0] if prefer else (valid[0] if valid else cp_candidates[0])
+        except Exception:
+            cp_norm = cp_candidates[0]
+    cp_norm = normalize_postal_code(cp_norm)
+    refcat = pick_first(
+        [
+            r"REFERENCIA\s+CAT(?:ASTRAL)?\s*[:\-]?\s*([0-9A-Z]{14,20})",
+            r"\b([0-9A-Z]{14,20})\b",
+        ],
+        upper,
+    )
+    refcat = refcat.strip().upper()
+
+    fecha_adq_raw = pick_first(
+        [
+            r"FECHA\s+ADQUISIC(?:IÓ|IO)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"ADQUISIC(?:IÓ|IO)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ANTERIOR",
+        ],
+        upper,
+    )
+    fecha_tx_raw = pick_first(
+        [
+            r"FECHA\s+TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"DEVENGO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ACTUAL",
+        ],
+        upper,
+    )
+    fecha_adq_dt = parse_iso_date(fecha_adq_raw)
+    fecha_tx_dt = parse_iso_date(fecha_tx_raw)
+    fecha_adq = fecha_adq_dt.isoformat() if fecha_adq_dt else ""
+    fecha_tx = fecha_tx_dt.isoformat() if fecha_tx_dt else ""
+
+    valor_suelo = pick_number(
+        [
+            r"VALOR\s+CAT(?:ASTRAL)?\s+DEL\s+SUELO\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*C\.?\s*SUELO\s*[:\-]?\s*([0-9\.,]+)",
+            r"VALOR\s+SUELO\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}VALOR\s+SUELO",
+        ],
+        upper,
+    )
+    participacion_pct = pick_number(
+        [
+            # Muy común en PDFs: valor encima del label "%PARTICIPACIÓN".
+            r"([0-9\.,]+)\s*%+\s*%PARTICIPACI(?:Ó|O)N",
+            # Label antes del valor (menos frecuente en simulaciones de Gestrisam).
+            r"%\s*PARTICIPACI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
+            r"PARTICIPACI(?:Ó|O)N\s*%\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    base_imponible = pick_number(
+        [
+            r"([0-9\.,]+)\s{0,40}BASE\s+IMPONIBLE",
+            r"BASE\s+IMPONIBLE\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    tipo_gravamen_pct = pick_number(
+        [
+            r"TIPO\s+DE\s+GRAVAMEN\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"TIPO\s+IMPOSITIVO\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}TIPO\s+DE\s+GRAVAMEN",
+        ],
+        upper,
+    )
+    cuota = pick_number(
+        [
+            r"CUOTA\s+(?:TRIBUTARIA|I[NÍ]NTEGRA)\s*[:\-]?\s*([0-9\.,]+)",
+            r"CUOTA\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}CUOTA\s+TRIBUTARIA",
+        ],
+        upper,
+    )
+    total = pick_number(
+        [
+            r"IMPORTE\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
+            r"TOTAL\s+A\s+INGRESAR\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}IMPORTE\s+TOTAL",
+        ],
+        upper,
+    )
+
+    municipio_ine = ""
+    provincia = ""
+    try:
+        postal = _iivtnu_load_postal_cache()
+        municipio_ine = str((postal.get("cp_to") or {}).get(cp_norm) or "").strip()
+        if municipio_ine:
+            provincia = str((postal.get("prov_to") or {}).get(municipio_ine) or "").strip()
+    except Exception:
+        municipio_ine = ""
+        provincia = ""
+    if not municipio_ine and municipio:
+        try:
+            postal = _iivtnu_load_postal_cache()
+            target = _iivtnu_norm_text(municipio)
+            for ine, nombre in (postal.get("ine_to") or {}).items():
+                for cand in _iivtnu_postal_variants(nombre):
+                    if _iivtnu_norm_text(cand) == target:
+                        municipio_ine = str(ine)
+                        provincia = str((postal.get("prov_to") or {}).get(ine) or "").strip()
+                        break
+                if municipio_ine:
+                    break
+        except Exception:
+            pass
+
+    out = {
+        "filename": str(filename or "").strip(),
+        "municipio": municipio or "",
+        "municipio_ine": municipio_ine or "",
+        "provincia": provincia or "",
+        "codigo_postal": cp_norm or "",
+        "referencia_catastral": refcat or "",
+        "fecha_adquisicion": fecha_adq,
+        "fecha_transmision": fecha_tx,
+        "valor_suelo": valor_suelo,
+        "participacion_pct": participacion_pct,
+        "base_imponible": base_imponible,
+        "tipo_gravamen_pct": tipo_gravamen_pct,
+        "cuota_tributaria": cuota,
+        "importe_total": total,
+    }
+    out["_text_hint"] = clean[:1200]
+    return out
+
 def hash_password(password):
     return runtime_hash_password(password)
 
@@ -32272,10 +32779,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/legal_radar_import",
             "/api/legal_radar_digest",
-            "/api/copilot_web_fetch",
-            "/api/copilot_web_ask",
-            "/api/s3_presign",
-            "/api/s3_multipart_start",
+	            "/api/copilot_web_fetch",
+	            "/api/copilot_web_ask",
+	            "/api/iivtnu_municipios",
+	            "/api/iivtnu_simulate",
+	            "/api/iivtnu_pdf_parse",
+	            "/api/s3_presign",
+	            "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
@@ -32394,6 +32904,22 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         body = self.rfile.read(content_length or 0)
+        # Multipart endpoints (p.ej. subida de PDF) no usan JSON.
+        if parsed.path == "/api/iivtnu_pdf_parse":
+            if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
+                return
+            if not self._enforce_service_access(parsed.path, payload={}):
+                return
+            try:
+                parsed_payload = _iivtnu_parse_uploaded_pdf(body, content_type=self.headers.get("Content-Type", ""))
+                json_response(self, {"ok": True, "parsed": parsed_payload})
+            except Exception as exc:
+                json_response(
+                    self,
+                    {"error": "No se pudo leer el PDF", "detail": Handler._safe_exc_detail(exc)},
+                    status=400,
+                )
+            return
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
@@ -32647,6 +33173,7 @@ class Handler(BaseHTTPRequestHandler):
             path_value.startswith("/api/workspace_")
             or path_value.startswith("/api/legal_")
             or path_value.startswith("/api/copilot_web_")
+            or path_value.startswith("/api/iivtnu_")
             or path_value
             in {
                 "/api/convenios_catalog",
@@ -32928,6 +33455,227 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+        if parsed.path == "/api/iivtnu_municipios":
+            try:
+                _iivtnu_seed_malaga(conn)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            rows = []
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT ine, nombre, provincia, comunidad, COALESCE(es_capital, 0) AS es_capital
+                    FROM iivtnu_municipios
+                    WHERE provincia = 'Málaga'
+                    ORDER BY LOWER(COALESCE(nombre, '')) ASC
+                    """
+                ).fetchall()
+            except Exception:
+                rows = []
+            items = []
+            if rows:
+                for row in rows:
+                    try:
+                        d = dict(row)
+                    except Exception:
+                        d = {"ine": row[0], "nombre": row[1], "provincia": row[2], "comunidad": row[3], "es_capital": row[4]}
+                    items.append(
+                        {
+                            "ine": str(d.get("ine") or "").strip(),
+                            "nombre": str(d.get("nombre") or "").strip(),
+                            "provincia": str(d.get("provincia") or "").strip(),
+                            "comunidad": str(d.get("comunidad") or "").strip(),
+                            "es_capital": 1 if int(d.get("es_capital") or 0) else 0,
+                        }
+                    )
+            else:
+                # Fallback: si no hay seed en DB (o falla la tabla), devolvemos del catálogo postal.
+                postal = _iivtnu_load_postal_cache()
+                ine_to = postal.get("ine_to") or {}
+                prov_to = postal.get("prov_to") or {}
+                for ine, nombre in sorted(ine_to.items(), key=lambda kv: _iivtnu_norm_text(kv[1])):
+                    if not str(ine).startswith("29") or (prov_to.get(ine) or "") != "Málaga":
+                        continue
+                    items.append({"ine": str(ine), "nombre": str(nombre), "provincia": "Málaga", "comunidad": "Andalucía", "es_capital": 1 if str(ine) == "29067" else 0})
+            json_response(self, {"ok": True, "items": items})
+            return
+
+        if parsed.path == "/api/iivtnu_simulate":
+            municipio_ine = str(payload.get("municipio_ine") or "").strip()
+            cp = normalize_postal_code(payload.get("codigo_postal") or "")
+            if not municipio_ine and cp:
+                try:
+                    postal = _iivtnu_load_postal_cache()
+                    municipio_ine = str((postal.get("cp_to") or {}).get(cp) or "").strip()
+                except Exception:
+                    municipio_ine = ""
+            if not municipio_ine:
+                json_response(self, {"error": "municipio requerido"}, status=400)
+                return
+
+            acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
+            devengo = parse_iso_date(payload.get("fecha_transmision") or "")
+            if not acq or not devengo:
+                json_response(self, {"error": "Fechas inválidas"}, status=400)
+                return
+            if devengo <= acq:
+                json_response(self, {"error": "La fecha de transmisión debe ser posterior a la de adquisición"}, status=400)
+                return
+
+            valor_suelo = float(parse_money_value(payload.get("valor_suelo") or 0) or 0.0)
+            if not valor_suelo or valor_suelo <= 0:
+                json_response(self, {"error": "valor_suelo inválido"}, status=400)
+                return
+
+            participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
+            if participacion_pct is None:
+                participacion_pct = 100.0
+            try:
+                participacion_pct = float(participacion_pct)
+            except Exception:
+                participacion_pct = 100.0
+            participacion_pct = max(0.0, min(100.0, participacion_pct))
+
+            try:
+                _iivtnu_seed_malaga(conn)
+            except Exception:
+                pass
+
+            devengo_iso = devengo.isoformat()
+            params_row = None
+            try:
+                params_row = conn.execute(
+                    """
+                    SELECT
+                      tipo_gravamen_pct,
+                      coeficientes_json,
+                      source_url,
+                      source_label
+                    FROM iivtnu_param_sets
+                    WHERE municipio_ine = ?
+                      AND (vigente_desde IS NULL OR vigente_desde <= ?)
+                      AND (vigente_hasta IS NULL OR vigente_hasta >= ?)
+                    ORDER BY COALESCE(vigente_desde, '') DESC
+                    LIMIT 1
+                    """,
+                    (municipio_ine, devengo_iso, devengo_iso),
+                ).fetchone()
+            except Exception:
+                params_row = None
+
+            tipo_gravamen_pct = None
+            source_label = ""
+            source_url = ""
+            coef_table = None
+            coef_source = None
+            if params_row:
+                try:
+                    tipo_gravamen_pct = float(params_row["tipo_gravamen_pct"])
+                except Exception:
+                    try:
+                        tipo_gravamen_pct = float(params_row[0])
+                    except Exception:
+                        tipo_gravamen_pct = None
+                try:
+                    if tipo_gravamen_pct is not None and float(tipo_gravamen_pct) <= 0:
+                        tipo_gravamen_pct = None
+                except Exception:
+                    tipo_gravamen_pct = None
+                try:
+                    coef_raw = params_row["coeficientes_json"]
+                except Exception:
+                    coef_raw = params_row[1] if len(params_row) > 1 else ""
+                try:
+                    coef_obj = json.loads(coef_raw) if coef_raw else {}
+                except Exception:
+                    coef_obj = {}
+                if isinstance(coef_obj, dict):
+                    coef_table = coef_obj.get("coeficientes") if isinstance(coef_obj.get("coeficientes"), dict) else None
+                    coef_source = coef_obj.get("coef_source") if isinstance(coef_obj.get("coef_source"), dict) else None
+                try:
+                    source_url = str(params_row["source_url"] or "").strip()
+                    source_label = str(params_row["source_label"] or "").strip()
+                except Exception:
+                    source_url = str(params_row[2] or "").strip() if len(params_row) > 2 else ""
+                    source_label = str(params_row[3] or "").strip() if len(params_row) > 3 else ""
+
+            tipo_is_estimated = False
+            if tipo_gravamen_pct is None:
+                tipo_data = _iivtnu_load_tipo_gravamen_malaga()
+                years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                year_key = str(devengo.year)
+                year_map = years_map.get(year_key) if isinstance(years_map, dict) else None
+                if not isinstance(year_map, dict):
+                    for candidate in ("2025", "2024"):
+                        year_map = years_map.get(candidate)
+                        if isinstance(year_map, dict):
+                            break
+                try:
+                    tipo_gravamen_pct = float((year_map or {}).get(str(municipio_ine)) or 0.0)
+                except Exception:
+                    tipo_gravamen_pct = 0.0
+                if not tipo_gravamen_pct or tipo_gravamen_pct <= 0:
+                    tipo_gravamen_pct = 30.0
+                    tipo_is_estimated = True
+                source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+                src = source_map.get(year_key) if isinstance(source_map, dict) else None
+                if not isinstance(src, dict):
+                    src = source_map.get("2025") if isinstance(source_map, dict) else None
+                if isinstance(src, dict):
+                    source_label = str(src.get("label") or "").strip()
+                    source_url = str(src.get("url") or "").strip()
+
+            if not coef_table:
+                coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo)
+
+            coef_info = _iivtnu_objective_coef(acq, devengo, coef_table or {})
+            coef_objetivo = float(coef_info.get("coef_objetivo") or 0.0)
+            factor = participacion_pct / 100.0
+            base_imponible = round(valor_suelo * coef_objetivo * factor + 1e-9, 2)
+            cuota = round(base_imponible * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+            importe_total = cuota
+
+            muni_nombre = ""
+            try:
+                muni_row = conn.execute(
+                    "SELECT nombre FROM iivtnu_municipios WHERE ine = ? LIMIT 1",
+                    (municipio_ine,),
+                ).fetchone()
+                if muni_row:
+                    muni_nombre = str(muni_row["nombre"] if isinstance(muni_row, dict) else muni_row[0] or "").strip()
+            except Exception:
+                muni_nombre = ""
+
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "params": {
+                        "municipio_ine": municipio_ine,
+                        "municipio": muni_nombre,
+                        "tipo_gravamen_pct": tipo_gravamen_pct,
+                        "tipo_is_estimated": tipo_is_estimated,
+                        "source_label": source_label,
+                        "source_url": source_url,
+                        "coef_source_label": (coef_source or {}).get("source_label") if isinstance(coef_source, dict) else "",
+                        "coef_source_url": (coef_source or {}).get("source_url") if isinstance(coef_source, dict) else "",
+                    },
+                    "result": {
+                        "years": coef_info.get("years") or 0,
+                        "months": coef_info.get("months") or 0,
+                        "coef_objetivo": round(coef_objetivo, 6),
+                        "base_imponible": base_imponible,
+                        "tipo_gravamen_pct": tipo_gravamen_pct,
+                        "cuota_tributaria": cuota,
+                        "importe_total": importe_total,
+                    },
+                },
+            )
+            return
         if parsed.path == "/api/s3_presign":
             filename = payload.get("filename") or "archivo.pdf"
             content_type = payload.get("content_type") or "application/pdf"
