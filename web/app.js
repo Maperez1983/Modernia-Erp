@@ -32401,6 +32401,8 @@ const HIPOTECA_BANK_BRANDS = [
     short: "Santander",
     logo: "/assets/logos/santander.svg",
     color: "#e30613",
+    // El SVG incluido es blanco (negativo), así que necesita fondo rojo para verse.
+    logoOnDark: true,
     aliases: [
       "santander",
       "banco santander",
