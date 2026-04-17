@@ -28212,6 +28212,10 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
       btn.classList.toggle("active", btn.dataset.gestoriaTab === tabName);
     });
   }
+  if (gestoriaCrmSearch) {
+    const isRenta = tabName === "renta";
+    gestoriaCrmSearch.placeholder = isRenta ? "Buscar por nombre o DNI/NIF..." : "Buscar cliente...";
+  }
   if (gestoriaCrmUploadRentaBtn) {
     gestoriaCrmUploadRentaBtn.classList.toggle("hidden", tabName !== "renta");
   }
@@ -44859,15 +44863,47 @@ const loadGestoriaCrm = async () => {
     params.set("limit", limit);
   }
   if (state.gestoriaCrmTab === "renta") {
+    const cacheAgeMs = Date.now() - Number(state.gestoriaRentaCardsCache?.ts || 0);
+    const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
+    if (
+      state.gestoriaRentaCardsCache &&
+      state.gestoriaRentaCardsCache.empresaId === empresa.id &&
+      String(state.gestoriaRentaCardsCache.estado || "") === String(estado || "") &&
+      isFreshCache
+    ) {
+      const cachedRows = state.gestoriaRentaCardsCache.rows || [];
+      renderGestoriaRentaCrmCards(cachedRows, { query: q, totalHint: state.gestoriaRentaCardsCache.totalHint });
+      if (gestoriaCrmTable) {
+        gestoriaCrmTable.innerHTML = "";
+        gestoriaCrmTable.classList.add("hidden");
+      }
+      if (gestoriaCrmSummary) {
+        gestoriaCrmSummary.classList.remove("hidden");
+      }
+      if (gestoriaCrmInfo) gestoriaCrmInfo.textContent = "";
+      if (gestoriaCrmToggleView) {
+        gestoriaCrmToggleView.classList.add("hidden");
+      }
+      loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+      return;
+    }
     const rentaParams = new URLSearchParams({
       empresa_id: empresa.id,
-      q,
+      q: "",
       estado,
-      limit: limit || "50",
+      limit: String(Math.max(200, Number(limit || 0) || 50)),
     });
     const rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
     if (!rentaData) return;
-    renderGestoriaRentaCrmCards(rentaData.rows || []);
+    const rentaRows = rentaData.rows || [];
+    state.gestoriaRentaCardsCache = {
+      empresaId: empresa.id,
+      estado: String(estado || ""),
+      rows: rentaRows,
+      totalHint: Array.isArray(rentaData.rows) ? rentaData.rows.length : 0,
+      ts: Date.now(),
+    };
+    renderGestoriaRentaCrmCards(rentaRows, { query: q, totalHint: state.gestoriaRentaCardsCache.totalHint });
     if (gestoriaCrmTable) {
       gestoriaCrmTable.innerHTML = "";
       gestoriaCrmTable.classList.add("hidden");
@@ -44876,10 +44912,9 @@ const loadGestoriaCrm = async () => {
       gestoriaCrmSummary.classList.remove("hidden");
     }
     if (gestoriaCrmInfo) {
-      const total = Array.isArray(rentaData.rows) ? rentaData.rows.length : 0;
-      gestoriaCrmInfo.textContent = total
-        ? `Mostrando ${total} clientes de renta con ficha resumida.`
-        : "Sin clientes de renta con esos filtros.";
+      // El mensaje final lo gestiona `renderGestoriaRentaCrmCards` para reflejar
+      // "últimas 5" vs resultados.
+      gestoriaCrmInfo.textContent = "";
     }
     if (gestoriaCrmToggleView) {
       gestoriaCrmToggleView.classList.add("hidden");
@@ -51398,20 +51433,100 @@ const renderGestoriaRentaCards = (row = {}) => {
   fillGestoriaRentaDetailsForm(row);
 };
 
-const renderGestoriaRentaCrmCards = (rows = []) => {
-  if (!gestoriaCrmSummary) return;
-  if (!Array.isArray(rows) || !rows.length) {
-    gestoriaCrmSummary.innerHTML = "<p class='muted'>Sin clientes de renta con esos filtros.</p>";
-    return;
+const getGestoriaRentaLatestTimestamp = (row = {}) => {
+  const entry = row?.renta_latest || {};
+  const ts =
+    parseDateToTimestamp(entry.presentacion_fecha || "") ||
+    parseDateToTimestamp(entry.fecha_presentacion || "") ||
+    parseDateToTimestamp(entry.updated_at || "") ||
+    parseDateToTimestamp(entry.created_at || "");
+  if (ts) return ts;
+  const ejercicio = Number(entry.ejercicio || 0);
+  return Number.isFinite(ejercicio) && ejercicio > 1900 ? Date.UTC(ejercicio, 0, 1) : 0;
+};
+
+const buildGestoriaRentaSearchHaystack = (row = {}) => {
+  const entry = row?.renta_latest || {};
+  const rawText = [
+    row.nombre,
+    row.nif,
+    row.telefono,
+    row.email,
+    row.poblacion,
+    row.provincia,
+    entry.responsable,
+    entry.referencia_hacienda,
+    entry.estado_presentacion,
+    entry.doc_status,
+  ]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const normalizedText = normalizeLookupText(rawText);
+  const docTokens = [normalizeDocumento(row.nif || ""), normalizeDocumento(entry.nif || entry.dni || "")]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+  return { normalizedText, docTokens };
+};
+
+const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
+  const q = String(queryRaw || "").trim();
+  const normalizedQuery = normalizeLookupText(q);
+  const docQuery = normalizeDocumento(q);
+  const sortedAll = (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => getGestoriaRentaLatestTimestamp(b) - getGestoriaRentaLatestTimestamp(a));
+
+  if (!normalizedQuery && !docQuery) {
+    return {
+      mode: "latest",
+      total: sortedAll.length,
+      filtered: sortedAll.slice(0, 5),
+      matchCount: sortedAll.length,
+    };
   }
-  const board = document.createElement("div");
-  board.className = "gestoria-renta-board";
-  rows.forEach((row) => {
-    const entry = row?.renta_latest || {};
-    const cobroBadge = (() => {
-      const cobrada = Number(entry.cobrada || 0) === 1;
-      return cobrada ? "Cobrada" : "Pendiente cobro";
-    })();
+
+  const filtered = sortedAll.filter((row) => {
+    const hay = buildGestoriaRentaSearchHaystack(row);
+    if (normalizedQuery && hay.normalizedText.includes(normalizedQuery)) return true;
+    if (docQuery && docQuery.length >= 5) {
+      if (hay.docTokens.some((token) => token.includes(docQuery) || docQuery.includes(token))) return true;
+    }
+    return false;
+  });
+
+  return {
+    mode: "search",
+    total: sortedAll.length,
+    filtered: filtered.slice(0, 200),
+    matchCount: filtered.length,
+  };
+};
+
+	const renderGestoriaRentaCrmCards = (rows = [], options = {}) => {
+	  if (!gestoriaCrmSummary) return;
+	  const query = typeof options?.query === "string" ? options.query : "";
+	  const totalHint = options?.totalHint;
+	  const result = filterGestoriaRentaOverviewRows(rows, query);
+	  const filteredRows = result.filtered || [];
+	  const datasetTotal = totalHint ?? result.total;
+
+	  if (!Array.isArray(filteredRows) || !filteredRows.length) {
+	    gestoriaCrmSummary.innerHTML = "<p class='muted'>Sin clientes de renta con esos filtros.</p>";
+	    if (gestoriaCrmInfo) {
+	      gestoriaCrmInfo.textContent = result.mode === "latest" ? "Sin rentas recientes." : "Sin resultados con ese texto.";
+	    }
+	    return;
+	  }
+
+	  const board = document.createElement("div");
+	  board.className = "gestoria-renta-board";
+	  filteredRows.forEach((row) => {
+	    const entry = row?.renta_latest || {};
+	    const cobroBadge = (() => {
+	      const cobrada = Number(entry.cobrada || 0) === 1;
+	      return cobrada ? "Cobrada" : "Pendiente cobro";
+	    })();
     const dniMeta = getRentaDniMeta(entry);
     const result = formatRentaResult(entry.resultado_declaracion);
     const casilla505 =
@@ -51529,12 +51644,19 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       footer.appendChild(pdfBtn);
     }
 
-    card.appendChild(footer);
-    board.appendChild(card);
-  });
-  gestoriaCrmSummary.innerHTML = "";
-  gestoriaCrmSummary.appendChild(board);
-};
+	    card.appendChild(footer);
+	    board.appendChild(card);
+	  });
+	  gestoriaCrmSummary.innerHTML = "";
+	  gestoriaCrmSummary.appendChild(board);
+	  if (gestoriaCrmInfo) {
+	    if (result.mode === "latest") {
+	      gestoriaCrmInfo.textContent = `Mostrando últimas ${filteredRows.length} rentas · dataset ${datasetTotal}.`;
+	    } else {
+	      gestoriaCrmInfo.textContent = `Resultados ${filteredRows.length} de ${result.matchCount} · dataset ${datasetTotal}.`;
+	    }
+	  }
+	};
 
 const loadClienteGestoria = (clienteId) => {
   if (!clienteGestoriaForm) return;
