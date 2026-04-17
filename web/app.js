@@ -23152,7 +23152,6 @@ const POSTAL_PROVINCES = {
   "52": { provincia: "Melilla", poblacion: "Melilla" },
 };
 
-const normalizePostalCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 5);
 const normalizeNifValue = (value) =>
   String(value || "")
     .toUpperCase()
