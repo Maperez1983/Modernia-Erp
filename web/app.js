@@ -2208,6 +2208,8 @@ const gestoriaCrmViews = document.getElementById("gestoriaCrmViews");
 const gestoriaCrmViewCrm = document.getElementById("gestoriaCrmViewCrm");
 const gestoriaCrmViewBdt = document.getElementById("gestoriaCrmViewBdt");
 const gestoriaCrmViewAlta = document.getElementById("gestoriaCrmViewAlta");
+const gestoriaCrmOpsSplit = document.getElementById("gestoriaCrmOpsSplit");
+const gestoriaCrmPipelineCard = document.getElementById("gestoriaCrmPipelineCard");
 const gestoriaBdtTable = document.getElementById("gestoriaBdtTable");
 const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 const gestoriaAltaForm = document.getElementById("gestoriaAltaForm");
@@ -28219,6 +28221,12 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
   if (gestoriaCrmUploadRentaBtn) {
     gestoriaCrmUploadRentaBtn.classList.toggle("hidden", tabName !== "renta");
   }
+  if (gestoriaCrmOpsSplit) {
+    gestoriaCrmOpsSplit.classList.toggle("hidden", tabName === "renta");
+  }
+  if (gestoriaCrmPipelineCard) {
+    gestoriaCrmPipelineCard.classList.toggle("hidden", tabName === "renta");
+  }
   if (!gestoriaCrmTipo || !gestoriaCrmSubtipo) return;
   if (tabName === "all") {
     gestoriaCrmTipo.value = "";
@@ -44825,9 +44833,12 @@ const loadGestoriaCrm = async () => {
   if (!gestoriaCrmTable || !gestoriaCrmInfo) {
     return;
   }
-  loadGestoriaTrabajosOverview();
-  loadGestoriaModelosOverview();
-  loadGestoriaPipeline();
+  const isRentaTab = state.gestoriaCrmTab === "renta";
+  if (!isRentaTab) {
+    loadGestoriaTrabajosOverview();
+    loadGestoriaModelosOverview();
+    loadGestoriaPipeline();
+  }
   loadGestoriaDocsRecent();
   loadGestoriaAuditoria();
   const empresa = resolveCrmGestoriaEmpresa();

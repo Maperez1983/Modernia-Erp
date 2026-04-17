@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=207" />
+				    <link rel="stylesheet" href="styles.css?v=208" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -4049,9 +4049,9 @@
             <div id="gestoriaCrmTable"></div>
             <div class="footer" id="gestoriaCrmInfo"></div>
           </div>
-          <div class="crm-split">
-            <div class="form-card">
-              <h3>Gestiones activas</h3>
+	          <div class="crm-split" id="gestoriaCrmOpsSplit">
+	            <div class="form-card">
+	              <h3>Gestiones activas</h3>
               <p class="muted">Trabajos en curso y seguimiento operativo.</p>
               <div class="toolbar">
                 <select id="gestoriaTrabajosTipoFilter">
@@ -4139,17 +4139,17 @@
               <div id="gestoriaTrabajosTable"></div>
               <div class="footer" id="gestoriaTrabajosInfo"></div>
             </div>
-            <div class="form-card">
-              <h3>Modelos fiscales próximos</h3>
-              <p class="muted">Vencimientos próximos y seguimiento.</p>
-              <div id="gestoriaModelosOverviewTable"></div>
-              <div class="footer" id="gestoriaModelosOverviewInfo"></div>
-            </div>
-          </div>
-          <div class="form-card">
-              <div class="section-head">
-                <div>
-                  <h3>Pipeline de servicios</h3>
+	            <div class="form-card">
+	              <h3>Modelos fiscales próximos</h3>
+	              <p class="muted">Vencimientos próximos y seguimiento.</p>
+	              <div id="gestoriaModelosOverviewTable"></div>
+	              <div class="footer" id="gestoriaModelosOverviewInfo"></div>
+	            </div>
+	          </div>
+	          <div class="form-card" id="gestoriaCrmPipelineCard">
+	              <div class="section-head">
+	                <div>
+	                  <h3>Pipeline de servicios</h3>
                   <p class="muted">Organiza las gestiones por estado y servicio.</p>
                 </div>
                 <div class="toolbar">
@@ -9049,11 +9049,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=578"></script>
-					    <script>
-					      (function () {
-					        if (!("serviceWorker" in navigator)) return;
-					        const TARGET_SW = "/sw.js?v=192";
+			    <script src="app.js?v=579"></script>
+			    <script>
+			      (function () {
+			        if (!("serviceWorker" in navigator)) return;
+			        const TARGET_SW = "/sw.js?v=192";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
