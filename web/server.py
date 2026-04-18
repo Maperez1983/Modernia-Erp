@@ -33941,6 +33941,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "municipio requerido"}, status=400)
                 return
 
+            tipo_transmision = str(payload.get("tipo_transmision") or "").strip().lower()
+            situacion_especial = str(payload.get("situacion_especial") or "").strip().lower()
+            situacion_motivo = str(payload.get("situacion_motivo") or "").strip()
+
             acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
             devengo = parse_iso_date(payload.get("fecha_transmision") or "")
             if not acq or not devengo:
@@ -33954,6 +33958,97 @@ class Handler(BaseHTTPRequestHandler):
             if not valor_suelo or valor_suelo <= 0:
                 json_response(self, {"error": "valor_suelo inválido"}, status=400)
                 return
+
+            def _bool(key: str) -> bool:
+                v = payload.get(key)
+                if isinstance(v, bool):
+                    return bool(v)
+                s = str(v or "").strip().lower()
+                return s in ("1", "true", "t", "si", "sí", "yes", "y", "on")
+
+            valor_suelo_reducido = float(parse_money_value(payload.get("valor_suelo_reducido") or 0) or 0.0)
+            coef_reduccion = parse_optional_float(payload.get("coef_reduccion") or None)
+            if coef_reduccion is not None:
+                try:
+                    coef_reduccion = float(coef_reduccion)
+                except Exception:
+                    coef_reduccion = None
+            if coef_reduccion is not None:
+                if coef_reduccion > 1.5:
+                    coef_reduccion = coef_reduccion / 100.0
+                coef_reduccion = max(0.0, min(1.0, coef_reduccion))
+
+            valor_suelo_usado = valor_suelo
+            if valor_suelo_reducido and valor_suelo_reducido > 0:
+                valor_suelo_usado = valor_suelo_reducido
+            elif coef_reduccion is not None and coef_reduccion > 0:
+                valor_suelo_usado = valor_suelo * coef_reduccion
+
+            derecho_tipo = str(payload.get("derecho_tipo") or "pleno_dominio").strip().lower()
+            derecho_factor_pct = parse_optional_float(payload.get("derecho_factor_pct_manual") or payload.get("derecho_factor_pct") or None)
+            derecho_factor_motivo = "Manual" if derecho_factor_pct is not None else ""
+            if derecho_factor_pct is not None:
+                try:
+                    derecho_factor_pct = float(derecho_factor_pct)
+                except Exception:
+                    derecho_factor_pct = None
+            if derecho_factor_pct is not None:
+                derecho_factor_pct = max(0.0, min(100.0, float(derecho_factor_pct)))
+            else:
+                # Ordenanza Málaga (Art. 11) / regla estándar: calcular factor del derecho cuando aplica.
+                if derecho_tipo in ("", "pleno", "pleno_dominio", "dominio"):
+                    derecho_factor_pct = 100.0
+                    derecho_factor_motivo = "Pleno dominio"
+                else:
+                    dur = parse_optional_float(payload.get("usufructo_duracion_anios") or None)
+                    edad = parse_optional_float(payload.get("usufructuario_edad") or None)
+                    try:
+                        dur = float(dur) if dur is not None else None
+                    except Exception:
+                        dur = None
+                    try:
+                        edad = float(edad) if edad is not None else None
+                    except Exception:
+                        edad = None
+
+                    def _usufructo_vitalicio_pct(edad_val: float) -> float:
+                        if edad_val < 0:
+                            edad_val = 0
+                        pct = 70.0 - max(0.0, edad_val - 20.0)
+                        return max(10.0, min(70.0, pct))
+
+                    if derecho_tipo in ("usufructo_temporal", "usuf_temp"):
+                        if dur is None or dur <= 0:
+                            json_response(self, {"error": "Duración del usufructo requerida"}, status=400)
+                            return
+                        derecho_factor_pct = min(70.0, max(0.0, 2.0 * dur))
+                        derecho_factor_motivo = "Usufructo temporal (2%/año; máx. 70%)"
+                    elif derecho_tipo in ("usufructo_vitalicio", "usuf_vitalicio", "usuf_vital"):
+                        if edad is None or edad <= 0:
+                            json_response(self, {"error": "Edad del usufructuario/a requerida"}, status=400)
+                            return
+                        derecho_factor_pct = _usufructo_vitalicio_pct(edad)
+                        derecho_factor_motivo = "Usufructo vitalicio (70% - 1% por año >20; mín. 10%)"
+                    elif derecho_tipo in ("nuda_propiedad", "nuda"):
+                        if edad is None or edad <= 0:
+                            json_response(self, {"error": "Edad del usufructuario/a requerida (para nuda propiedad)"}, status=400)
+                            return
+                        usuf_pct = _usufructo_vitalicio_pct(edad)
+                        derecho_factor_pct = max(0.0, 100.0 - usuf_pct)
+                        derecho_factor_motivo = "Nuda propiedad (100% - usufructo vitalicio)"
+                    elif derecho_tipo in ("uso_habitacion", "uso", "habitacion"):
+                        if edad is None or edad <= 0:
+                            json_response(self, {"error": "Edad del usufructuario/a requerida (uso/habitación)"}, status=400)
+                            return
+                        usuf_pct = _usufructo_vitalicio_pct(edad)
+                        derecho_factor_pct = max(0.0, min(100.0, 0.75 * usuf_pct))
+                        derecho_factor_motivo = "Uso/habitación (75% del usufructo)"
+                    elif derecho_tipo in ("manual",):
+                        json_response(self, {"error": "Factor derecho (%) requerido (modo manual)"}, status=400)
+                        return
+                    else:
+                        derecho_factor_pct = 100.0
+                        derecho_factor_motivo = "Pleno dominio (asumido)"
 
             participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
             if participacion_pct is None:
@@ -34126,11 +34221,67 @@ class Handler(BaseHTTPRequestHandler):
             coef_info = _iivtnu_objective_coef(acq, devengo, coef_table or {})
             coef_objetivo = float(coef_info.get("coef_objetivo") or 0.0)
             factor = participacion_pct / 100.0
-            base_objetiva = round(valor_suelo * coef_objetivo * factor + 1e-9, 2)
+            derecho_factor = float(derecho_factor_pct or 0.0) / 100.0
+            base_objetiva = round(valor_suelo_usado * derecho_factor * coef_objetivo * factor + 1e-9, 2)
             cuota_objetiva_bruta = round(base_objetiva * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
 
+            bonif_mode = str(payload.get("bonificacion_mode") or payload.get("bonif_mode") or "manual").strip().lower()
             bonif_manual = parse_optional_float(payload.get("bonificacion_pct") or payload.get("bonificacion_pct_manual") or None)
             bonif_pct = bonif_manual if bonif_manual is not None else bonif_pct_from_params
+            bonif_modo = "manual" if bonif_manual is not None else ("ordenanza" if bonif_pct_from_params is not None else "")
+            bonif_motivo = "Manual" if bonif_manual is not None else ("Param set" if bonif_pct_from_params is not None else "")
+
+            # Bonificación Málaga (Art. 6) - mortis causa vivienda habitual del causante.
+            if bonif_manual is None and bonif_mode == "malaga_mortis_causa_auto" and str(municipio_ine).zfill(5) == "29067":
+                vc_total = float(parse_money_value(payload.get("valor_catastral_total") or 0) or 0.0)
+                if not vc_total or vc_total <= 0:
+                    json_response(self, {"error": "Para bonificación Málaga (auto) se requiere valor_catastral_total"}, status=400)
+                    return
+                if tipo_transmision and tipo_transmision not in ("mortis_causa", "herencia"):
+                    bonif_pct = 0.0
+                    bonif_modo = "malaga_art6"
+                    bonif_motivo = "No aplica (no es mortis causa)"
+                elif not _bool("vivienda_habitual_causante"):
+                    bonif_pct = 0.0
+                    bonif_modo = "malaga_art6"
+                    bonif_motivo = "No aplica (no vivienda habitual del causante)"
+                elif not _bool("convivencia_2_anios"):
+                    bonif_pct = 0.0
+                    bonif_modo = "malaga_art6"
+                    bonif_motivo = "No aplica (sin convivencia 2 años)"
+                else:
+                    # Tramos por valor catastral.
+                    tramo = ""
+                    if vc_total < 100000.0:
+                        bonif_pct = 95.0
+                        tramo = "<100k"
+                    elif vc_total <= 150000.0:
+                        bonif_pct = 80.0
+                        tramo = "100k–150k"
+                    elif vc_total <= 200000.0:
+                        bonif_pct = 70.0
+                        tramo = "150k–200k"
+                    elif vc_total <= 250000.0:
+                        bonif_pct = 50.0
+                        tramo = "200k–250k"
+                    else:
+                        bonif_pct = 25.0
+                        tramo = ">250k"
+
+                    # Especial 95% por condición + renta <= IPREM*1.7.
+                    cond = str(payload.get("condicion_beneficiario") or "").strip().lower()
+                    cond_ok = cond in ("pensionista", "desempleado", "menor_30", "discapacidad", "violencia_genero")
+                    ingresos = float(parse_money_value(payload.get("ingresos_unidad") or 0) or 0.0)
+                    iprem_14 = float(parse_money_value(payload.get("iprem_14_anual") or 0) or 0.0)
+                    limit_ok = bool(iprem_14 and iprem_14 > 0 and ingresos >= 0 and ingresos <= (iprem_14 * 1.7 + 1e-9))
+                    if cond_ok and limit_ok:
+                        bonif_pct = 95.0
+                        bonif_motivo = f"Málaga Art. 6 (95% especial: {cond})"
+                    else:
+                        bonif_motivo = f"Málaga Art. 6 (tramo {tramo})"
+                    bonif_modo = "malaga_art6"
+                if not _bool("mantener_2_anios") and bonif_pct and bonif_pct > 0:
+                    bonif_motivo = f"{bonif_motivo} (pendiente confirmar mantenimiento 2 años)"
             if bonif_pct is not None:
                 try:
                     bonif_pct = float(bonif_pct)
@@ -34166,11 +34317,12 @@ class Handler(BaseHTTPRequestHandler):
                 ganancia_total = (valor_transmision - gastos_transmision) - (valor_adquisicion + gastos_adquisicion)
                 ratio_suelo = None
                 if valor_catastral_total and valor_catastral_total > 0:
-                    ratio_suelo = valor_suelo / valor_catastral_total
+                    ratio_suelo = valor_suelo_usado / valor_catastral_total
                 elif porcentaje_suelo is not None and porcentaje_suelo > 0:
                     ratio_suelo = porcentaje_suelo / 100.0
                 if ratio_suelo is not None:
                     ratio_suelo = max(0.0, min(1.0, float(ratio_suelo)))
+                    ratio_suelo = max(0.0, min(1.0, ratio_suelo * derecho_factor))
                     ganancia_suelo = ganancia_total * ratio_suelo * factor
                     base_real = round(max(0.0, ganancia_suelo) + 1e-9, 2)
                     cuota_real_bruta = round(base_real * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
@@ -34202,6 +34354,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif cuota_real >= 0 and cuota_real < cuota_recomendada:
                     cuota_recomendada = cuota_real
                     metodo_recomendado = "real"
+
+            if situacion_especial in ("no_sujeto", "exento"):
+                cuota_recomendada = 0.0
+                metodo_recomendado = "no_sujecion" if situacion_especial == "no_sujeto" else "exencion"
 
             muni_nombre = ""
             muni_provincia = ""
@@ -34246,13 +34402,19 @@ class Handler(BaseHTTPRequestHandler):
                         "coef_source_url": (coef_source or {}).get("source_url") if isinstance(coef_source, dict) else "",
                     },
                     "result": {
+                        "situacion_especial": situacion_especial,
+                        "situacion_motivo": situacion_motivo,
                         "years": coef_info.get("years") or 0,
                         "months": coef_info.get("months") or 0,
                         "coef_objetivo": round(coef_objetivo, 6),
+                        "valor_suelo_usado": round(valor_suelo_usado + 1e-9, 2),
+                        "derecho_factor_pct": round(float(derecho_factor_pct or 0.0) + 1e-9, 4),
                         # Legacy (objetivo).
                         "base_imponible": base_objetiva,
                         "tipo_gravamen_pct": tipo_gravamen_pct,
                         "bonificacion_pct": bonif_pct,
+                        "bonificacion_modo": bonif_modo,
+                        "bonificacion_motivo": bonif_motivo,
                         "cuota_tributaria_bruta": cuota_objetiva_bruta,
                         "bonificacion_importe": bonif_importe_obj,
                         "cuota_tributaria": cuota_objetiva,
@@ -43626,6 +43788,11 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble["empresa_id"], inmueble_id, tipo_operacion),
             ).fetchone()
+            if operacion:
+                try:
+                    operacion = dict(operacion)
+                except Exception:
+                    pass
 
             def suggested_defaults():
                 today = datetime.now(timezone.utc).date().isoformat()

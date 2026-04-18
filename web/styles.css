@@ -4191,17 +4191,16 @@ body.tc-resizing {
   top: auto;
   z-index: auto;
   min-width: 0;
+  max-width: 100%;
+  width: 100%;
   padding: 0;
   border-radius: 0;
   border: none;
   background: transparent;
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  overflow: visible;
   gap: 10px;
 }
 

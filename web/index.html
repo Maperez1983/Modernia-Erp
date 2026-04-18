@@ -883,6 +883,28 @@
 		                </div>
 		              </label>
 		              <label>
+		                Tipo de transmisión
+		                <select name="tipo_transmision">
+		                  <option value="onerosa" selected>Onerosa (venta/compraventa)</option>
+		                  <option value="mortis_causa">Mortis causa (herencia)</option>
+		                  <option value="donacion">Donación</option>
+		                  <option value="expropiacion">Expropiación</option>
+		                  <option value="otros">Otros</option>
+		                </select>
+		              </label>
+		              <label>
+		                Situación especial
+		                <select name="situacion_especial">
+		                  <option value="" selected>—</option>
+		                  <option value="no_sujeto">No sujeción</option>
+		                  <option value="exento">Exención</option>
+		                </select>
+		              </label>
+		              <label class="span-2">
+		                Motivo (opcional)
+		                <input name="situacion_motivo" placeholder="p.ej. extinción condominio, dación en pago..." />
+		              </label>
+		              <label>
 		                Fecha adquisición
 		                <input name="fecha_adquisicion" type="date" required />
 		              </label>
@@ -895,12 +917,77 @@
 		                <input name="valor_suelo" inputmode="decimal" placeholder="35447,24" required />
 		              </label>
 		              <label>
+		                Valor reducido (opcional)
+		                <input name="valor_suelo_reducido" inputmode="decimal" placeholder="(A) valor suelo reducido" />
+		              </label>
+		              <label>
+		                Coef. reducción (opcional)
+		                <input name="coef_reduccion" inputmode="decimal" placeholder="1 (sin reducción) / 0,6" />
+		              </label>
+		              <label>
+		                Derecho transmitido
+		                <select name="derecho_tipo">
+		                  <option value="pleno_dominio" selected>Pleno dominio</option>
+		                  <option value="usufructo_temporal">Usufructo temporal</option>
+		                  <option value="usufructo_vitalicio">Usufructo vitalicio</option>
+		                  <option value="nuda_propiedad">Nuda propiedad</option>
+		                  <option value="uso_habitacion">Uso / habitación</option>
+		                  <option value="manual">Manual (%)</option>
+		                </select>
+		              </label>
+		              <label>
+		                Duración usufructo (años, opcional)
+		                <input name="usufructo_duracion_anios" inputmode="numeric" placeholder="p.ej. 10" />
+		              </label>
+		              <label>
+		                Edad usufructuario/a (opcional)
+		                <input name="usufructuario_edad" inputmode="numeric" placeholder="p.ej. 72" />
+		              </label>
+		              <label>
+		                Factor derecho (%) (opcional)
+		                <input name="derecho_factor_pct_manual" inputmode="decimal" placeholder="p.ej. 70" />
+		              </label>
+		              <label>
 		                % participación transmitida
 		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
 		              </label>
 		              <label>
-		                Bonificación (%) (opcional)
+		                Bonificación (modo)
+		                <select name="bonificacion_mode">
+		                  <option value="manual" selected>Manual</option>
+		                  <option value="malaga_mortis_causa_auto">Auto Málaga (Art. 6, mortis causa)</option>
+		                </select>
+		              </label>
+		              <label>
+		                Bonificación (%) (si manual)
 		                <input name="bonificacion_pct" inputmode="decimal" placeholder="0" />
+		              </label>
+		              <label class="span-2">
+		                Auto Málaga (si aplica)
+		                <div class="inline-row">
+		                  <label class="ui-check"><input type="checkbox" name="vivienda_habitual_causante" /> Vivienda habitual causante</label>
+		                  <label class="ui-check"><input type="checkbox" name="convivencia_2_anios" /> Convivencia 2 años</label>
+		                  <label class="ui-check"><input type="checkbox" name="mantener_2_anios" /> Mantiene 2 años</label>
+		                </div>
+		              </label>
+		              <label>
+		                Condición beneficiario (opcional)
+		                <select name="condicion_beneficiario">
+		                  <option value="" selected>—</option>
+		                  <option value="pensionista">Pensionista</option>
+		                  <option value="desempleado">Desempleado/a</option>
+		                  <option value="menor_30">Menor 30</option>
+		                  <option value="discapacidad">Discapacidad</option>
+		                  <option value="violencia_genero">Violencia género</option>
+		                </select>
+		              </label>
+		              <label>
+		                Ingresos unidad (excl. fallecido) (opcional)
+		                <input name="ingresos_unidad" inputmode="decimal" placeholder="p.ej. 12000,00" />
+		              </label>
+		              <label>
+		                IPREM anual 14 pagas (opcional)
+		                <input name="iprem_14_anual" inputmode="decimal" placeholder="p.ej. 8400,00" />
 		              </label>
 		              <label>
 		                Tipo gravamen (%) (opcional)
