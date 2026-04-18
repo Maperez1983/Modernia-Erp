@@ -5907,11 +5907,22 @@ const renderIivtnuParsed = (parsed = null) => {
     iivtnuPdfParsed.innerHTML = "<p class='muted'>Sin datos extraídos todavía.</p>";
     return;
   }
-	  const fields = [
-	    ["Tipo documento", parsed.doc_type || "-"],
-	    ["Municipio", parsed.municipio || "-"],
-	    ["CP", parsed.codigo_postal || "-"],
-	    ["Ref. catastral", parsed.referencia_catastral || "-"],
+  const docType = String(parsed.doc_type || "").trim().toLowerCase();
+  let note = "";
+  if (docType === "carta_pago") {
+    note =
+      "Carta de pago: normalmente no incluye los datos del inmueble/fechas necesarios para simular. Úsala para conciliar NRC/importe o validar.";
+  } else if (docType === "guia_autoliquidacion") {
+    note =
+      "Guía/autoliquidación: puede traer parte de los campos (CP, ref. catastral, etc.). Si faltan fechas/valor suelo, tendrás que completarlos a mano.";
+  } else if (docType === "autoliquidacion" || docType === "simulacion_ayuda") {
+    note = "Este PDF suele incluir campos suficientes para autocompletar el simulador.";
+  }
+		  const fields = [
+		    ["Tipo documento", parsed.doc_type || "-"],
+		    ["Municipio", parsed.municipio || "-"],
+		    ["CP", parsed.codigo_postal || "-"],
+		    ["Ref. catastral", parsed.referencia_catastral || "-"],
 	    ["Adquisición", parsed.fecha_adquisicion || "-"],
 	    ["Transmisión", parsed.fecha_transmision || "-"],
 	    ["Valor suelo", parsed.valor_suelo],
@@ -5927,13 +5938,14 @@ const renderIivtnuParsed = (parsed = null) => {
 	    ["NRC", parsed.nrc || "-"],
 	    ["Modelo", parsed.modelo || "-"],
 	    ["Ejercicio", parsed.ejercicio || "-"],
-	    ["Fecha pago", parsed.fecha_pago || "-"],
-	  ];
+		    ["Fecha pago", parsed.fecha_pago || "-"],
+		  ];
   iivtnuPdfParsed.innerHTML = `
-    <div class="ui-table">
-      <table class="data-table">
-        <tbody>
-          ${fields
+    ${note ? `<p class="muted" style="margin: 0 0 10px 0;">${escapeHtml(note)}</p>` : ""}
+	    <div class="ui-table">
+	      <table class="data-table">
+	        <tbody>
+	          ${fields
             .map(
               ([label, value]) => `
                 <tr>
@@ -5945,8 +5957,8 @@ const renderIivtnuParsed = (parsed = null) => {
             .join("")}
         </tbody>
       </table>
-    </div>
-  `;
+	    </div>
+	  `;
 };
 
 const renderIivtnuSimulatorResult = (resp = null) => {
@@ -59060,7 +59072,20 @@ if (iivtnuPdfParseForm) {
       if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
       iivtnuLastParsed = data?.parsed || null;
       renderIivtnuParsed(iivtnuLastParsed);
-      if (iivtnuPdfApplyBtn && iivtnuLastParsed) iivtnuPdfApplyBtn.classList.remove("hidden");
+      if (iivtnuPdfApplyBtn && iivtnuLastParsed) {
+        const p = iivtnuLastParsed || {};
+        const canApply = Boolean(
+          p.municipio_ine ||
+            p.codigo_postal ||
+            p.fecha_adquisicion ||
+            p.fecha_transmision ||
+            p.valor_suelo != null ||
+            p.participacion_pct != null ||
+            p.bonificacion_pct != null ||
+            p.tipo_gravamen_pct != null
+        );
+        if (canApply) iivtnuPdfApplyBtn.classList.remove("hidden");
+      }
       if (
         iivtnuPdfSaveTipoBtn &&
         iivtnuLastParsed &&
