@@ -5497,9 +5497,11 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
     postal = _iivtnu_load_postal_cache()
     ine_to = postal.get("ine_to") or {}
     prov_to = postal.get("prov_to") or {}
+    malaga_ines = []
     for ine, nombre in sorted(ine_to.items()):
         if not str(ine).startswith("29") or (prov_to.get(ine) or "") != "Málaga":
             continue
+        malaga_ines.append(str(ine))
         try:
             conn.execute(
                 """
@@ -5525,12 +5527,11 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
     malaga_ordenanza_label = "Ayto Málaga · Ordenanza Nº 5 IIVTNU (DocumentoNormativa688)"
     malaga_ordenanza_url = "https://www.malaga.eu/visorcontenido/NRMDocumentDisplayer/688/DocumentoNormativa688"
     for year in ("2024", "2025"):
-        year_map = years_map.get(year) if isinstance(years_map, dict) else None
-        if not isinstance(year_map, dict):
-            year_map = {}
-        src = source_map.get(year) if isinstance(source_map, dict) else None
-        source_label = str(src.get("label") or "").strip() if isinstance(src, dict) else ""
-        source_url = str(src.get("url") or "").strip() if isinstance(src, dict) else ""
+        fallback_years = [year]
+        if year == "2025":
+            fallback_years.append("2024")
+        elif year == "2024":
+            fallback_years.append("2025")
         vigente_desde = f"{year}-01-01"
         vigente_hasta = f"{year}-12-31"
         coef_table, coef_source = _iivtnu_max_coefs_for_devengo(parse_iso_date(vigente_desde))
@@ -5539,20 +5540,36 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        for ine, tipo_pct in sorted(year_map.items()):
-            if not str(ine).startswith("29"):
+        for ine in sorted(set(malaga_ines)):
+            tipo_val = None
+            used_year = None
+            for cand_year in fallback_years:
+                cand_map = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                if not isinstance(cand_map, dict):
+                    continue
+                raw = cand_map.get(str(ine).zfill(5))
+                if raw is None:
+                    raw = cand_map.get(str(int(str(ine)))) if str(ine).isdigit() else None
+                if raw is None:
+                    continue
+                try:
+                    v = float(raw)
+                except Exception:
+                    continue
+                if v > 0:
+                    tipo_val = v
+                    used_year = str(cand_year)
+                    break
+            if tipo_val is None:
                 continue
-            try:
-                tipo_val = float(tipo_pct)
-            except Exception:
-                continue
-            # En algunos municipios el XLSX devuelve 0 (sin dato). No sembrar tipos inválidos.
-            if tipo_val <= 0:
-                continue
-            row_source_label = source_label
-            row_source_url = source_url
+
+            src = source_map.get(used_year) if isinstance(source_map, dict) else None
+            row_source_label = str(src.get("label") or "").strip() if isinstance(src, dict) else ""
+            row_source_url = str(src.get("url") or "").strip() if isinstance(src, dict) else ""
+            if used_year != year:
+                row_source_label = f"{row_source_label} (proxy para {year}; sin dato {year})".strip()
             if str(ine) == "29067":
-                # Para Málaga capital priorizamos fuente oficial municipal cuando el tipo coincide.
+                # Málaga capital: priorizamos fuente municipal.
                 row_source_label = malaga_ordenanza_label
                 row_source_url = malaga_ordenanza_url
             try:
@@ -34048,26 +34065,55 @@ class Handler(BaseHTTPRequestHandler):
                     tipo_data = _iivtnu_load_tipo_gravamen_malaga()
                     years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
                     year_key = str(devengo.year)
-                    year_map = years_map.get(year_key) if isinstance(years_map, dict) else None
-                    if not isinstance(year_map, dict):
-                        for candidate in ("2025", "2024"):
-                            year_map = years_map.get(candidate)
-                            if isinstance(year_map, dict):
-                                break
+                    available_years = []
                     try:
-                        tipo_gravamen_pct = float((year_map or {}).get(str(municipio_ine)) or 0.0)
+                        available_years = sorted([str(y) for y in (years_map.keys() if isinstance(years_map, dict) else [])], reverse=True)
                     except Exception:
-                        tipo_gravamen_pct = 0.0
-                    if not tipo_gravamen_pct or tipo_gravamen_pct <= 0:
+                        available_years = []
+                    candidates = [year_key] + [y for y in available_years if y != year_key]
+                    used_year = None
+                    tipo_found = None
+                    for cand_year in candidates:
+                        ymap = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                        if not isinstance(ymap, dict):
+                            continue
+                        raw = ymap.get(str(municipio_ine).zfill(5))
+                        if raw is None:
+                            try:
+                                raw = ymap.get(str(int(str(municipio_ine))))
+                            except Exception:
+                                raw = None
+                        if raw is None:
+                            continue
+                        try:
+                            v = float(raw)
+                        except Exception:
+                            continue
+                        if v > 0:
+                            tipo_found = v
+                            used_year = str(cand_year)
+                            break
+                    if tipo_found is not None and tipo_found > 0:
+                        tipo_gravamen_pct = float(tipo_found)
+                        if used_year != year_key:
+                            tipo_is_estimated = True
+                    else:
                         tipo_gravamen_pct = 30.0
                         tipo_is_estimated = True
+
                     source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
-                    src = source_map.get(year_key) if isinstance(source_map, dict) else None
-                    if not isinstance(src, dict):
-                        src = source_map.get("2025") if isinstance(source_map, dict) else None
+                    src = source_map.get(used_year or year_key) if isinstance(source_map, dict) else None
+                    if not isinstance(src, dict) and isinstance(source_map, dict):
+                        # fallback razonable (último año publicado)
+                        try:
+                            src = source_map.get(available_years[0]) if available_years else None
+                        except Exception:
+                            src = None
                     if isinstance(src, dict):
                         source_label = str(src.get("label") or "").strip()
                         source_url = str(src.get("url") or "").strip()
+                        if used_year and used_year != year_key:
+                            source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
                 else:
                     tipo_gravamen_pct = 30.0
                     tipo_is_estimated = True
