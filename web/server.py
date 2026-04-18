@@ -53635,18 +53635,20 @@ class Handler(BaseHTTPRequestHandler):
                 tipo_operacion = "alquiler"
             if tipo_operacion not in {"venta", "alquiler"}:
                 tipo_operacion = "venta"
-            inmueble = conn.execute(
+            inmueble_row = conn.execute(
                 "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
                 (inmueble_id,),
             ).fetchone()
-            if not inmueble:
+            if not inmueble_row:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
-            empresa = conn.execute(
+            inmueble = dict(inmueble_row)
+            empresa_row = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
-                (inmueble["empresa_id"],),
+                (inmueble.get("empresa_id"),),
             ).fetchone()
-            captacion = conn.execute(
+            empresa = dict(empresa_row) if empresa_row else {}
+            captacion_row = conn.execute(
                 """
                 SELECT *
                 FROM captaciones
@@ -53656,10 +53658,11 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchone()
-            if not captacion:
+            if not captacion_row:
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
-            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            captacion = dict(captacion_row)
+            status = str(captacion.get("situacion_comercial") or inmueble.get("estado") or "").strip().lower()
             if status not in {"encargo", "noticia"}:
                 json_response(
                     self,
@@ -53670,7 +53673,7 @@ class Handler(BaseHTTPRequestHandler):
             owners = get_inmueble_propietarios(conn, inmueble_id)
 
             # Defaults desde la última operación si existe.
-            operacion = conn.execute(
+            operacion_row = conn.execute(
                 """
                 SELECT *
                 FROM operaciones_inmobiliarias
@@ -53680,8 +53683,9 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY updated_at DESC, created_at DESC
                 LIMIT 1
                 """,
-                (inmueble["empresa_id"], inmueble_id, tipo_operacion),
+                (inmueble.get("empresa_id"), inmueble_id, tipo_operacion),
             ).fetchone()
+            operacion = dict(operacion_row) if operacion_row else None
             extra = {
                 "tipo_operacion": tipo_operacion,
                 "precio_venta": params.get("precio_venta", [""])[0],
@@ -53759,34 +53763,34 @@ class Handler(BaseHTTPRequestHandler):
             builder = build_inmueble_nota_encargo_pdf_final if is_final else build_inmueble_nota_encargo_pdf_editable
             try:
                 pdf_bytes = builder(
-                    dict(empresa) if empresa else {},
-                    dict(inmueble),
-                    dict(captacion),
+                    empresa,
+                    inmueble,
+                    captacion,
                     owners,
                     extra=extra,
                 )
             except Exception:
                 # No bloqueamos la generación si la plantilla editable falla por dependencias/formato.
                 pdf_bytes = build_inmueble_nota_encargo_pdf(
-                    dict(empresa) if empresa else {},
-                    dict(inmueble),
-                    dict(captacion),
+                    empresa,
+                    inmueble,
+                    captacion,
                     owners,
                     extra=extra,
                 )
-            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            safe_ref = slugify_text(inmueble.get("direccion") or inmueble.get("referencia") or inmueble_id)[:50] or inmueble_id
             filename = f"{'nota_encargo_final' if is_final else 'nota_encargo'}_{safe_ref}.pdf"
             try:
                 persist_generated_inmueble_pdf(
                     conn,
                     inmueble_id,
                     "Nota de encargo (PDF final)" if is_final else "Nota de encargo (PDF editable)",
-                    f"{'Nota de encargo (final)' if is_final else 'Nota de encargo (editable)'} · {inmueble['direccion'] or safe_ref}",
+                    f"{'Nota de encargo (final)' if is_final else 'Nota de encargo (editable)'} · {inmueble.get('direccion') or safe_ref}",
                     pdf_bytes,
                     filename.replace(".pdf", ""),
                     now,
                     replace_existing=False,
-                    empresa_id=inmueble["empresa_id"],
+                    empresa_id=inmueble.get("empresa_id"),
                     plantilla_clave="nota_encargo_final" if is_final else "nota_encargo",
                     origen_tipo="inmueble_encargo_pdf_final" if is_final else "inmueble_encargo_pdf",
                     origen_id=inmueble_id,
