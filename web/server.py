@@ -5484,11 +5484,14 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
         conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
     except Exception:
         return
+    # Si ya hay parámetros para Málaga (provincia 29) en volumen razonable,
+    # no re-seedear en cada request (evita reinsertar + excepciones).
     try:
-        existing = conn.execute("SELECT 1 FROM iivtnu_municipios WHERE provincia = 'Málaga' LIMIT 1").fetchone()
+        row = conn.execute("SELECT COUNT(1) FROM iivtnu_param_sets WHERE municipio_ine LIKE '29%'").fetchone()
+        seeded_count = int((row[0] if row else 0) or 0)
     except Exception:
-        existing = None
-    if existing:
+        seeded_count = 0
+    if seeded_count >= 50:
         return
 
     postal = _iivtnu_load_postal_cache()
@@ -5519,6 +5522,8 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
     tipo_data = _iivtnu_load_tipo_gravamen_malaga()
     years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
     source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+    malaga_ordenanza_label = "Ayto Málaga · Ordenanza Nº 5 IIVTNU (DocumentoNormativa688)"
+    malaga_ordenanza_url = "https://www.malaga.eu/visorcontenido/NRMDocumentDisplayer/688/DocumentoNormativa688"
     for year in ("2024", "2025"):
         year_map = years_map.get(year) if isinstance(years_map, dict) else None
         if not isinstance(year_map, dict):
@@ -5544,6 +5549,12 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
             # En algunos municipios el XLSX devuelve 0 (sin dato). No sembrar tipos inválidos.
             if tipo_val <= 0:
                 continue
+            row_source_label = source_label
+            row_source_url = source_url
+            if str(ine) == "29067":
+                # Para Málaga capital priorizamos fuente oficial municipal cuando el tipo coincide.
+                row_source_label = malaga_ordenanza_label
+                row_source_url = malaga_ordenanza_url
             try:
                 exists = conn.execute(
                     """
@@ -5574,8 +5585,8 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
                         float(tipo_val),
                         coef_json,
                         None,
-                        source_url,
-                        source_label,
+                        row_source_url,
+                        row_source_label,
                         now_iso,
                         now_iso,
                     ),
@@ -33851,6 +33862,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ensure_iivtnu_schema(conn)
                 _iivtnu_seed_andalucia(conn)
+                _iivtnu_seed_malaga(conn)
                 try:
                     conn.commit()
                 except Exception:
@@ -33938,6 +33950,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ensure_iivtnu_schema(conn)
                 _iivtnu_seed_andalucia(conn)
+                _iivtnu_seed_malaga(conn)
             except Exception:
                 pass
 
