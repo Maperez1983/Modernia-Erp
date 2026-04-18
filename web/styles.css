@@ -9177,13 +9177,15 @@ tbody tr:hover {
 }
 
 #tableContainer,
-[id$="Table"] {
+#explorerSection [id$="Table"],
+#crmSection [id$="Table"] {
   max-width: 100%;
   overflow-x: auto;
 }
 
 #tableContainer table,
-[id$="Table"] table {
+#explorerSection [id$="Table"] table,
+#crmSection [id$="Table"] table {
   min-width: 920px;
 }
 
@@ -9221,7 +9223,8 @@ body.density-compact td {
 }
 
 body.density-compact #tableContainer table,
-body.density-compact [id$="Table"] table {
+body.density-compact #explorerSection [id$="Table"] table,
+body.density-compact #crmSection [id$="Table"] table {
   min-width: 980px;
 }
 
@@ -10155,7 +10158,8 @@ body.theme-operativa section {
 
 /* En la zona de workspaces (holdingSection) hay módulos con listas largas (RRHH, etc). */
 body.theme-operativa #holdingSection {
-  overflow: visible;
+  overflow-y: visible;
+  overflow-x: hidden;
 }
 
 body.theme-operativa #holdingSection > .section-head {
