@@ -31671,6 +31671,221 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
     )
 
 
+def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action, extra=None):
+    """
+    PDF editable (AcroForm) para reconocimiento de honorarios vinculado a una propuesta/negociación.
+
+    Nota: En Safari/iOS la edición de formularios PDF puede ser limitada; el estándar AcroForm
+    funciona correctamente en lectores PDF compatibles (Adobe, Preview macOS).
+    """
+    extra = extra or {}
+    company_name = str(company.get("nombre") or "Verifika²").strip() or "Verifika²"
+    inmueble_dir = str(inmueble.get("direccion") or "").strip() or "Pendiente"
+    buyer_name = str(buyer.get("nombre") or "").strip() or "Pendiente"
+    buyer_nif = str(buyer.get("nif") or "").strip() or ""
+    buyer_tel = str(buyer.get("telefono") or "").strip() or ""
+    buyer_email = str(buyer.get("email") or "").strip() or ""
+    propuesta = action.get("importe_propuesta")
+    try:
+        propuesta = float(propuesta) if propuesta not in (None, "") else None
+    except Exception:
+        propuesta = None
+    documento_tipo = str(action.get("documento_tipo") or "Propuesta").strip() or "Propuesta"
+    fecha = str(action.get("fecha") or datetime.now(timezone.utc).date().isoformat()).strip() or datetime.now(timezone.utc).date().isoformat()
+    try:
+        fecha_display = fmt_ddmmyyyy(fecha)
+    except Exception:
+        fecha_display = fecha
+
+    honorarios_importe = extra.get("honorarios_importe")
+    if honorarios_importe in (None, ""):
+        honorarios_importe = ""
+    iva_pct = extra.get("iva_pct")
+    if iva_pct in (None, ""):
+        iva_pct = "21"
+    lugar = str(extra.get("lugar_firma") or "").strip()
+
+    if rl_canvas is None or rl_colors is None:
+        # Fallback no editable.
+        sections = [
+            ("Inmueble", [("Dirección", inmueble_dir)]),
+            ("Propuesta", [("Documento", documento_tipo), ("Importe propuesta", format_eur(propuesta or 0) if propuesta is not None else "Pendiente"), ("Fecha", fecha_display)]),
+            ("Interesado", [("Nombre", buyer_name), ("NIF", buyer_nif or "Pendiente"), ("Teléfono", buyer_tel or "Pendiente"), ("Email", buyer_email or "Pendiente")]),
+            ("Honorarios", ["Documento de reconocimiento de honorarios pendiente de revisión."]),
+        ]
+        return build_branded_document_pdf("RECONOCIMIENTO DE HONORARIOS", f"{company_name} · {inmueble_dir}", sections, [])
+
+    # A4
+    w, h = (595.27, 841.89)
+    buf = BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=(w, h))
+    form = c.acroForm
+    try:
+        primary = rl_colors.HexColor("#0B1D33")
+        accent = rl_colors.HexColor("#C8A24A")
+        ink = rl_colors.HexColor("#121826")
+        muted = rl_colors.HexColor("#6B7280")
+        line = rl_colors.HexColor("#D7DCE3")
+        bg = rl_colors.HexColor("#FBFBFC")
+    except Exception:
+        primary = rl_colors.black
+        accent = rl_colors.black
+        ink = rl_colors.black
+        muted = rl_colors.black
+        line = rl_colors.black
+        bg = rl_colors.white
+
+    margin = 44
+    top = h - margin
+
+    # Header band
+    c.setFillColor(primary)
+    c.rect(0, h - 120, w, 120, stroke=0, fill=1)
+    c.setFillColor(rl_colors.white)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(margin, h - 55, "RECONOCIMIENTO DE HONORARIOS")
+    c.setFont("Helvetica", 10)
+    c.drawString(margin, h - 78, f"{company_name} · {inmueble_dir}")
+    c.setFillColor(accent)
+    c.rect(margin, h - 112, 160, 6, stroke=0, fill=1)
+
+    # Helper for labeled fields
+    def label(x, y, text):
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(x, y, text.upper())
+
+    def field(name, x, y, width, height, value="", multiline=False, font_size=10):
+        flags = 4096 if multiline else 0
+        try:
+            form.textfield(
+                name=name,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                value=_pdf_form_value(value),
+                forceBorder=True,
+                borderWidth=1,
+                borderColor=line,
+                fillColor=bg,
+                textColor=ink,
+                fontName="Helvetica",
+                fontSize=font_size,
+                fieldFlags=flags,
+            )
+        except Exception:
+            # Best-effort
+            pass
+
+    # Content
+    y = h - 170
+    c.setFillColor(ink)
+    c.setFont("Helvetica", 10)
+    intro = (
+        "Por medio del presente documento, la persona interesada en el inmueble reconoce haber sido informada "
+        "de los honorarios de intermediación y acepta su devengo en los términos acordados con la agencia."
+    )
+    lines = _pdf_wrap_lines(intro, width=92)
+    text = c.beginText(margin, y)
+    text.setFont("Helvetica", 10)
+    text.setFillColor(ink)
+    for line_text in lines:
+        text.textLine(line_text)
+    c.drawText(text)
+    y -= 18 * len(lines) + 18
+
+    # Boxes
+    box_h = 98
+    box_gap = 18
+    col_gap = 18
+    col_w = (w - margin * 2 - col_gap) / 2
+
+    # Inmueble / Propuesta
+    c.setFillColor(bg)
+    c.roundRect(margin, y - box_h, col_w, box_h, 12, stroke=1, fill=1)
+    c.roundRect(margin + col_w + col_gap, y - box_h, col_w, box_h, 12, stroke=1, fill=1)
+    label(margin + 14, y - 18, "Inmueble")
+    field("inmueble_direccion", margin + 14, y - 74, col_w - 28, 44, inmueble_dir, multiline=True, font_size=9)
+    label(margin + col_w + col_gap + 14, y - 18, "Propuesta")
+    field("propuesta_tipo", margin + col_w + col_gap + 14, y - 44, col_w - 28, 18, documento_tipo, font_size=9)
+    propuesta_value = format_eur(propuesta) if propuesta is not None else ""
+    field("propuesta_importe", margin + col_w + col_gap + 14, y - 74, (col_w - 36) * 0.6, 18, propuesta_value, font_size=9)
+    field("propuesta_fecha", margin + col_w + col_gap + 22 + (col_w - 36) * 0.6, y - 74, (col_w - 36) * 0.4, 18, fecha_display, font_size=9)
+    c.setFillColor(muted)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin + col_w + col_gap + 14, y - 86, "Importe (EUR) / Fecha")
+
+    y -= box_h + box_gap
+
+    # Interesado / Honorarios
+    c.setFillColor(bg)
+    c.roundRect(margin, y - 140, col_w, 140, 12, stroke=1, fill=1)
+    c.roundRect(margin + col_w + col_gap, y - 140, col_w, 140, 12, stroke=1, fill=1)
+    label(margin + 14, y - 18, "Interesado")
+    field("comprador_nombre", margin + 14, y - 44, col_w - 28, 18, buyer_name, font_size=9)
+    field("comprador_nif", margin + 14, y - 72, (col_w - 36) * 0.45, 18, buyer_nif, font_size=9)
+    field("comprador_telefono", margin + 22 + (col_w - 36) * 0.45, y - 72, (col_w - 36) * 0.55, 18, buyer_tel, font_size=9)
+    field("comprador_email", margin + 14, y - 100, col_w - 28, 18, buyer_email, font_size=9)
+    c.setFillColor(muted)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin + 14, y - 114, "NIF / Teléfono")
+
+    label(margin + col_w + col_gap + 14, y - 18, "Honorarios")
+    field("honorarios_importe", margin + col_w + col_gap + 14, y - 44, (col_w - 36) * 0.5, 18, honorarios_importe, font_size=9)
+    field("iva_pct", margin + col_w + col_gap + 22 + (col_w - 36) * 0.5, y - 44, (col_w - 36) * 0.2, 18, iva_pct, font_size=9)
+    field("honorarios_total", margin + col_w + col_gap + 30 + (col_w - 36) * 0.7, y - 44, (col_w - 36) * 0.3, 18, "", font_size=9)
+    c.setFillColor(muted)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin + col_w + col_gap + 14, y - 58, "Base (EUR) / IVA % / Total (rellenar si procede)")
+    field(
+        "honorarios_condiciones",
+        margin + col_w + col_gap + 14,
+        y - 120,
+        col_w - 28,
+        54,
+        str(extra.get("condiciones") or "Devengo a la firma del contrato privado o escritura, según corresponda."),
+        multiline=True,
+        font_size=9,
+    )
+
+    y -= 140 + box_gap
+
+    # Firmas
+    c.setFillColor(bg)
+    c.roundRect(margin, y - 140, w - margin * 2, 140, 12, stroke=1, fill=1)
+    label(margin + 14, y - 18, "Firma y aceptación")
+    c.setFillColor(ink)
+    c.setFont("Helvetica", 9)
+    footer = (
+        "Declaro haber sido informado/a de los honorarios de intermediación y acepto su devengo conforme a lo indicado. "
+        "Este documento se vincula a la propuesta indicada y forma parte del expediente del inmueble."
+    )
+    footer_lines = _pdf_wrap_lines(footer, width=102)
+    text = c.beginText(margin + 14, y - 38)
+    text.setFont("Helvetica", 9)
+    text.setFillColor(ink)
+    for line_text in footer_lines:
+        text.textLine(line_text)
+    c.drawText(text)
+    # Place / date
+    label(margin + 14, y - 94, "Lugar")
+    field("lugar_firma", margin + 14, y - 120, 180, 18, lugar, font_size=9)
+    label(margin + 210, y - 94, "Fecha")
+    field("fecha_firma", margin + 210, y - 120, 110, 18, fecha_display, font_size=9)
+    # Signature text fields (for typed names)
+    label(margin + 340, y - 94, "Firma interesado")
+    field("firma_interesado", margin + 340, y - 120, w - margin * 2 - 340 - 14, 18, buyer_name, font_size=9)
+
+    # Footer line
+    c.setFillColor(muted)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin, 22, "Documento generado por Verifika² · Revisar antes de firma · No constituye asesoramiento jurídico.")
+
+    c.save()
+    return buf.getvalue()
+
+
 def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
     locality = " · ".join(
         [part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if str(part or "").strip()]
@@ -53963,6 +54178,80 @@ class Handler(BaseHTTPRequestHandler):
                 payload_json={"accion_id": action_id, "documento_tipo": action["documento_tipo"]},
             )
             conn.commit()
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/inmueble_honorarios_pdf":
+            action_id = params.get("action_id", [""])[0].strip()
+            if not action_id:
+                json_response(self, {"error": "action_id requerido"}, status=400)
+                return
+            mode = (params.get("mode", [""])[0] or "").strip().lower()
+            is_final = mode in {"final", "flat", "noedit", "no_edit", "noneditable", "non-editable"}
+            action = conn.execute(
+                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
+                (action_id,),
+            ).fetchone()
+            if not action:
+                json_response(self, {"error": "Acción no encontrada"}, status=404)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (action["inmueble_id"],),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            buyer = None
+            if action["cliente_id"]:
+                buyer = conn.execute(
+                    "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                    (action["cliente_id"],),
+                ).fetchone()
+            if not buyer:
+                json_response(self, {"error": "Cliente (interesado) no encontrado en la acción"}, status=404)
+                return
+            extra = {
+                "honorarios_importe": params.get("honorarios_importe", [""])[0],
+                "iva_pct": params.get("iva_pct", [""])[0],
+                "lugar_firma": params.get("lugar_firma", [""])[0],
+                "condiciones": params.get("condiciones", [""])[0],
+            }
+            pdf_bytes = build_inmueble_honorarios_ack_pdf_editable(
+                dict(empresa) if empresa else {},
+                dict(inmueble),
+                dict(buyer),
+                dict(action),
+                extra=extra,
+            )
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or action_id)[:50] or action_id
+            filename = f"honorarios_{safe_ref}.pdf"
+            try:
+                persist_generated_inmueble_pdf(
+                    conn,
+                    str(inmueble["id"]),
+                    "Reconocimiento de honorarios" if not is_final else "Reconocimiento de honorarios (final)",
+                    f"Reconocimiento de honorarios · {str(buyer['nombre'] or '').strip() or 'interesado'} · {inmueble['direccion'] or safe_ref}",
+                    pdf_bytes,
+                    filename.replace(".pdf", ""),
+                    now,
+                    replace_existing=False,
+                    empresa_id=inmueble["empresa_id"],
+                    plantilla_clave="reconocimiento_honorarios" if not is_final else "reconocimiento_honorarios_final",
+                    origen_tipo="accion",
+                    origen_id=action_id,
+                    payload_json={"action_id": action_id, **extra},
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

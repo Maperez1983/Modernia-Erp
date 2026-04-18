@@ -3627,6 +3627,7 @@ const ICONS = {
   trash: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10 11v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 7l1 14h10l1-14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V4h6v3" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   doc: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l3 3v15H7V3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  euro: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 7.5a6.5 6.5 0 0 0-6-3.5c-3 0-5.6 1.9-6.4 4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 12h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 15h8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 16.5A6.5 6.5 0 0 1 13 20c-3 0-5.6-1.9-6.4-4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
   timeline: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4v16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 16h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 8v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
   open: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3h7v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M21 3 10 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10 7H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   close: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
@@ -44693,6 +44694,12 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
           window.open(`/api/inmueble_negociacion_pdf?action_id=${encodeURIComponent(row.id)}`, "_blank", "noopener");
         });
         actionsWrap.appendChild(docBtn);
+
+        const honorBtn = createIconButton("euro", "Reconocimiento de honorarios (PDF)");
+        honorBtn.addEventListener("click", () => {
+          window.open(`/api/inmueble_honorarios_pdf?action_id=${encodeURIComponent(row.id)}`, "_blank", "noopener");
+        });
+        actionsWrap.appendChild(honorBtn);
       }
       actionsTd.appendChild(actionsWrap);
       tr.appendChild(actionsTd);
