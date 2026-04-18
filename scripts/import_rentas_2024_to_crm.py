@@ -230,7 +230,31 @@ def clean_ocr_text_value(value: object) -> str:
 
 def normalize_nif_candidate(value: object) -> str:
     text = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
-    return text
+    if not text:
+        return ""
+    # Si el OCR devuelve una palabra (sin dígitos), no intentamos corregir "O/I/L/S/B" a números:
+    # evita falsos positivos como "DECLARANTE" -> "DEC1ARANTE".
+    if not any(ch.isdigit() for ch in text):
+        return text
+
+    # Correcciones típicas de OCR: sólo en posiciones que deberían ser dígitos.
+    digit_fix = {"O": "0", "I": "1", "L": "1", "S": "5", "B": "8"}
+
+    # CIF/NIE: prefijo alfabético, cuerpo numérico.
+    if text[0].isalpha() and len(text) >= 3:
+        chars = list(text)
+        # En CIF: 1º letra, luego 7 dígitos (pos 1..7). En NIE: 1º letra, luego dígitos.
+        for idx in range(1, len(chars) - 1):
+            if not chars[idx].isdigit() and chars[idx] in digit_fix:
+                chars[idx] = digit_fix[chars[idx]]
+        return "".join(chars)
+
+    # DNI: todo numérico excepto posible letra final.
+    chars = list(text)
+    for idx in range(0, max(0, len(chars) - 1)):
+        if not chars[idx].isdigit() and chars[idx] in digit_fix:
+            chars[idx] = digit_fix[chars[idx]]
+    return "".join(chars)
 
 
 def looks_like_nif(value: object) -> bool:
@@ -248,6 +272,8 @@ def parse_money(raw: object) -> float | None:
     text = compact_spaces(raw)
     if not text:
         return None
+    # Correcciones típicas de OCR: O->0, I/L->1, S->5, B->8
+    text = text.upper().translate(str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8"}))
     text = text.replace("€", "").replace("%", "").replace(" ", "")
     if "," in text and "." in text:
         text = text.replace(".", "").replace(",", ".")
@@ -425,6 +451,7 @@ def parse_date_ddmmyyyy(raw: object) -> str:
     text = compact_spaces(raw)
     if not text:
         return ""
+    text = text.upper().translate(str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5"}))
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d%m%Y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()

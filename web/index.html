@@ -874,35 +874,63 @@
 	                <p class="muted">Cálculo determinista (sin IA) y validación con autoliquidaciones.</p>
 	              </div>
 	            </div>
-	            <form id="iivtnuSimulatorForm" class="form-grid">
-	              <label class="span-2">
-	                Municipio
-	                <div class="inline-row">
-	                  <input id="iivtnuMunicipioCp" placeholder="CP (autoselección)" inputmode="numeric" autocomplete="postal-code" />
-	                  <select id="iivtnuMunicipioSelect" required></select>
-	                </div>
-	              </label>
-	              <label>
-	                Fecha adquisición
-	                <input name="fecha_adquisicion" type="date" required />
-	              </label>
-	              <label>
-	                Fecha transmisión (devengo)
-	                <input name="fecha_transmision" type="date" required />
-	              </label>
-	              <label>
-	                Valor catastral del suelo
-	                <input name="valor_suelo" inputmode="decimal" placeholder="35447,24" required />
-	              </label>
-	              <label>
-	                % participación transmitida
-	                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
-	              </label>
-	              <div class="form-actions span-2">
-	                <button type="submit">Simular IIVTNU (plusvalía)</button>
-	                <span id="iivtnuSimulatorStatus" class="muted"></span>
-	              </div>
-	            </form>
+		            <form id="iivtnuSimulatorForm" class="form-grid">
+		              <label class="span-2">
+		                Municipio
+		                <div class="inline-row">
+		                  <input id="iivtnuMunicipioCp" placeholder="CP (autoselección)" inputmode="numeric" autocomplete="postal-code" />
+		                  <select id="iivtnuMunicipioSelect" required></select>
+		                </div>
+		              </label>
+		              <label>
+		                Fecha adquisición
+		                <input name="fecha_adquisicion" type="date" required />
+		              </label>
+		              <label>
+		                Fecha transmisión (devengo)
+		                <input name="fecha_transmision" type="date" required />
+		              </label>
+		              <label>
+		                Valor catastral del suelo
+		                <input name="valor_suelo" inputmode="decimal" placeholder="35447,24" required />
+		              </label>
+		              <label>
+		                % participación transmitida
+		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+		              </label>
+		              <label>
+		                Tipo gravamen (%) (opcional)
+		                <input name="tipo_gravamen_pct_manual" inputmode="decimal" placeholder="29" />
+		              </label>
+		              <label>
+		                Valor catastral total (opcional, método real)
+		                <input name="valor_catastral_total" inputmode="decimal" placeholder="120000,00" />
+		              </label>
+		              <label>
+		                % suelo (opcional, si no hay total)
+		                <input name="porcentaje_suelo" inputmode="decimal" placeholder="25" />
+		              </label>
+		              <label>
+		                Valor adquisición (opcional, método real)
+		                <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" />
+		              </label>
+		              <label>
+		                Gastos adquisición (opcional)
+		                <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Valor transmisión (opcional, método real)
+		                <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" />
+		              </label>
+		              <label>
+		                Gastos transmisión (opcional)
+		                <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <div class="form-actions span-2">
+		                <button type="submit">Simular IIVTNU (plusvalía)</button>
+		                <span id="iivtnuSimulatorStatus" class="muted"></span>
+		              </div>
+		            </form>
 	            <div id="iivtnuSimulatorResult"></div>
 	          </div>
 	          <div class="form-card">

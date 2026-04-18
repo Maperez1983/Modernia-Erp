@@ -5540,6 +5540,63 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
                 pass
 
 
+_IIVTNU_ANDALUCIA_PROVINCES = (
+    "Almería",
+    "Cádiz",
+    "Córdoba",
+    "Granada",
+    "Huelva",
+    "Jaén",
+    "Málaga",
+    "Sevilla",
+)
+
+_IIVTNU_ANDALUCIA_PROVINCES_NORM = {_iivtnu_norm_text(p) for p in _IIVTNU_ANDALUCIA_PROVINCES}
+
+
+def _iivtnu_is_andalucia_province(value: object) -> bool:
+    prov = _iivtnu_norm_text(value)
+    if not prov:
+        return False
+    return prov in _IIVTNU_ANDALUCIA_PROVINCES_NORM
+
+
+def _iivtnu_seed_andalucia(conn, now_iso=None):
+    if not conn:
+        return
+    now_iso = str(now_iso or datetime.now(timezone.utc).isoformat())
+    # Si no existe la tabla aún (DB legacy sin schema), aborta.
+    try:
+        conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
+    except Exception:
+        return
+    try:
+        existing = conn.execute("SELECT 1 FROM iivtnu_municipios WHERE comunidad = 'Andalucía' LIMIT 1").fetchone()
+    except Exception:
+        existing = None
+    if existing:
+        return
+
+    postal = _iivtnu_load_postal_cache()
+    ine_to = postal.get("ine_to") or {}
+    prov_to = postal.get("prov_to") or {}
+    for ine, nombre in sorted(ine_to.items()):
+        provincia = prov_to.get(ine) or ""
+        if not _iivtnu_is_andalucia_province(provincia):
+            continue
+        es_capital = 1 if _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
+        try:
+            conn.execute(
+                """
+                INSERT INTO iivtnu_municipios (ine, nombre, provincia, comunidad, es_capital, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(ine), str(nombre), str(provincia), "Andalucía", es_capital, now_iso, now_iso),
+            )
+        except Exception:
+            pass
+
+
 def _iivtnu_parse_uploaded_pdf(body, content_type=""):
     ctype = str(content_type or "").strip()
     if "multipart/form-data" not in ctype.lower():
@@ -5566,40 +5623,87 @@ def _iivtnu_parse_uploaded_pdf(body, content_type=""):
     return _iivtnu_extract_from_pdf(file_bytes, filename=filename)
 
 
-def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
-    if not pdf_bytes:
-        return {}
-    if PdfReader is None:
-        raise RuntimeError("pypdf no disponible")
-    reader = PdfReader(BytesIO(pdf_bytes))
-    pages = list(reader.pages or [])
-    texts = []
-    max_pages = min(12, len(pages))
-    for idx in range(max_pages):
-        try:
-            texts.append(pages[idx].extract_text() or "")
-        except Exception:
-            texts.append("")
-    raw_text = "\n".join(texts)
-    clean = re.sub(r"[ \t]+", " ", raw_text or "")
+def _iivtnu_detect_doc_type(text_upper: str) -> str:
+    upper = str(text_upper or "").upper()
+    if "PROGRAMA DE AYUDA AL CÁLCULO" in upper or "PROGRAMA DE AYUDA AL CALCULO" in upper:
+        return "simulacion_ayuda"
+    if "GUÍA DE AUTOLIQUIDACIÓN" in upper or "GUIA DE AUTOLIQUIDACION" in upper:
+        return "guia_autoliquidacion"
+    if "SOLICITUD ESPECIFICA" in upper and ("INEXISTENCIA" in upper or "INCREMENTO" in upper):
+        return "solicitud_inexistencia_incremento"
+    if "AUTOLIQUIDACI" in upper:
+        return "autoliquidacion"
+    return ""
+
+
+def _iivtnu_is_refcat_like(value: object) -> bool:
+    v = str(value or "").strip().upper()
+    if len(v) < 14 or len(v) > 20:
+        return False
+    if v.isalpha():
+        return False
+    digits = sum(1 for ch in v if ch.isdigit())
+    if digits < 6:
+        return False
+    return True
+
+
+def _iivtnu_pick_refcat(text_upper: str) -> str:
+    upper = str(text_upper or "").upper()
+    # Preferir siempre el campo etiquetado.
+    m = re.search(
+        r"REFERENCIA\s+CAT(?:ASTRAL)?\s*[:\-]?\s*([0-9A-Z]{14,20})",
+        upper,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if m:
+        cand = str(m.group(1) or "").strip().upper()
+        if _iivtnu_is_refcat_like(cand):
+            return cand
+
+    try:
+        candidates = re.findall(r"\b[0-9A-Z]{14,20}\b", upper, flags=re.IGNORECASE | re.MULTILINE)
+    except Exception:
+        candidates = []
+    best = ""
+    best_score = -1
+    for cand in candidates:
+        c = str(cand or "").strip().upper()
+        if not _iivtnu_is_refcat_like(c):
+            continue
+        score = 0
+        score += 2 * sum(1 for ch in c if ch.isdigit())
+        score += 1 * sum(1 for ch in c if ch.isalpha())
+        if any(ch.isalpha() for ch in c[4:12]):
+            score += 10
+        if score > best_score:
+            best_score = score
+            best = c
+    return best
+
+
+def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
+    clean = re.sub(r"[ \t]+", " ", text or "")
     clean = re.sub(r"\n{2,}", "\n", clean).strip()
     upper = clean.upper()
 
-    def pick_first(patterns, text):
+    def pick_first(patterns, text_in):
         for pat in patterns:
-            m = re.search(pat, text, flags=re.IGNORECASE | re.MULTILINE)
+            m = re.search(pat, text_in, flags=re.IGNORECASE | re.MULTILINE)
             if m:
                 return str(m.group(1) or "").strip()
         return ""
 
-    def pick_number(patterns, text):
-        raw = pick_first(patterns, text)
+    def pick_number(patterns, text_in):
+        raw = pick_first(patterns, text_in)
         if not raw:
             return None
         return parse_optional_float(raw)
 
+    doc_type = _iivtnu_detect_doc_type(upper)
     municipio = pick_first([r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})"], upper)
     municipio = municipio.title().strip() if municipio else ""
+
     cp_norm = ""
     try:
         cp_candidates = re.findall(r"\b([0-9]{5})\b", clean or "")
@@ -5615,14 +5719,8 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
         except Exception:
             cp_norm = cp_candidates[0]
     cp_norm = normalize_postal_code(cp_norm)
-    refcat = pick_first(
-        [
-            r"REFERENCIA\s+CAT(?:ASTRAL)?\s*[:\-]?\s*([0-9A-Z]{14,20})",
-            r"\b([0-9A-Z]{14,20})\b",
-        ],
-        upper,
-    )
-    refcat = refcat.strip().upper()
+
+    refcat = _iivtnu_pick_refcat(upper)
 
     fecha_adq_raw = pick_first(
         [
@@ -5657,9 +5755,7 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
     )
     participacion_pct = pick_number(
         [
-            # Muy común en PDFs: valor encima del label "%PARTICIPACIÓN".
             r"([0-9\.,]+)\s*%+\s*%PARTICIPACI(?:Ó|O)N",
-            # Label antes del valor (menos frecuente en simulaciones de Gestrisam).
             r"%\s*PARTICIPACI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
             r"PARTICIPACI(?:Ó|O)N\s*%\s*[:\-]?\s*([0-9\.,]+)",
         ],
@@ -5724,6 +5820,7 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
 
     out = {
         "filename": str(filename or "").strip(),
+        "doc_type": doc_type,
         "municipio": municipio or "",
         "municipio_ine": municipio_ine or "",
         "provincia": provincia or "",
@@ -5740,6 +5837,24 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
     }
     out["_text_hint"] = clean[:1200]
     return out
+
+
+def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
+    if not pdf_bytes:
+        return {}
+    if PdfReader is None:
+        raise RuntimeError("pypdf no disponible")
+    reader = PdfReader(BytesIO(pdf_bytes))
+    pages = list(reader.pages or [])
+    texts = []
+    max_pages = min(12, len(pages))
+    for idx in range(max_pages):
+        try:
+            texts.append(pages[idx].extract_text() or "")
+        except Exception:
+            texts.append("")
+    raw_text = "\n".join(texts)
+    return _iivtnu_extract_from_text(raw_text, filename=filename)
 
 def hash_password(password):
     return runtime_hash_password(password)
@@ -33457,7 +33572,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         if parsed.path == "/api/iivtnu_municipios":
             try:
-                _iivtnu_seed_malaga(conn)
+                _iivtnu_seed_andalucia(conn)
                 try:
                     conn.commit()
                 except Exception:
@@ -33470,7 +33585,7 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     SELECT ine, nombre, provincia, comunidad, COALESCE(es_capital, 0) AS es_capital
                     FROM iivtnu_municipios
-                    WHERE provincia = 'Málaga'
+                    WHERE comunidad = 'Andalucía'
                     ORDER BY LOWER(COALESCE(nombre, '')) ASC
                     """
                 ).fetchall()
@@ -33498,9 +33613,11 @@ class Handler(BaseHTTPRequestHandler):
                 ine_to = postal.get("ine_to") or {}
                 prov_to = postal.get("prov_to") or {}
                 for ine, nombre in sorted(ine_to.items(), key=lambda kv: _iivtnu_norm_text(kv[1])):
-                    if not str(ine).startswith("29") or (prov_to.get(ine) or "") != "Málaga":
+                    provincia = prov_to.get(ine) or ""
+                    if not _iivtnu_is_andalucia_province(provincia):
                         continue
-                    items.append({"ine": str(ine), "nombre": str(nombre), "provincia": "Málaga", "comunidad": "Andalucía", "es_capital": 1 if str(ine) == "29067" else 0})
+                    es_capital = 1 if _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
+                    items.append({"ine": str(ine), "nombre": str(nombre), "provincia": str(provincia), "comunidad": "Andalucía", "es_capital": es_capital})
             json_response(self, {"ok": True, "items": items})
             return
 
@@ -33541,7 +33658,7 @@ class Handler(BaseHTTPRequestHandler):
             participacion_pct = max(0.0, min(100.0, participacion_pct))
 
             try:
-                _iivtnu_seed_malaga(conn)
+                _iivtnu_seed_andalucia(conn)
             except Exception:
                 pass
 
@@ -33568,6 +33685,7 @@ class Handler(BaseHTTPRequestHandler):
                 params_row = None
 
             tipo_gravamen_pct = None
+            tipo_is_manual = False
             source_label = ""
             source_url = ""
             coef_table = None
@@ -33604,30 +33722,53 @@ class Handler(BaseHTTPRequestHandler):
                     source_label = str(params_row[3] or "").strip() if len(params_row) > 3 else ""
 
             tipo_is_estimated = False
-            if tipo_gravamen_pct is None:
-                tipo_data = _iivtnu_load_tipo_gravamen_malaga()
-                years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
-                year_key = str(devengo.year)
-                year_map = years_map.get(year_key) if isinstance(years_map, dict) else None
-                if not isinstance(year_map, dict):
-                    for candidate in ("2025", "2024"):
-                        year_map = years_map.get(candidate)
-                        if isinstance(year_map, dict):
-                            break
+            manual_tipo = parse_optional_float(
+                payload.get("tipo_gravamen_pct_manual")
+                or payload.get("tipo_gravamen_pct_override")
+                or payload.get("tipo_gravamen_pct")
+                or None
+            )
+            if manual_tipo is not None:
                 try:
-                    tipo_gravamen_pct = float((year_map or {}).get(str(municipio_ine)) or 0.0)
+                    manual_tipo = float(manual_tipo)
                 except Exception:
-                    tipo_gravamen_pct = 0.0
-                if not tipo_gravamen_pct or tipo_gravamen_pct <= 0:
+                    manual_tipo = None
+            if manual_tipo is not None and manual_tipo > 0:
+                tipo_gravamen_pct = float(manual_tipo)
+                tipo_is_manual = True
+                tipo_is_estimated = False
+                source_label = "Manual"
+                source_url = ""
+            if tipo_gravamen_pct is None:
+                if str(municipio_ine).startswith("29"):
+                    tipo_data = _iivtnu_load_tipo_gravamen_malaga()
+                    years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                    year_key = str(devengo.year)
+                    year_map = years_map.get(year_key) if isinstance(years_map, dict) else None
+                    if not isinstance(year_map, dict):
+                        for candidate in ("2025", "2024"):
+                            year_map = years_map.get(candidate)
+                            if isinstance(year_map, dict):
+                                break
+                    try:
+                        tipo_gravamen_pct = float((year_map or {}).get(str(municipio_ine)) or 0.0)
+                    except Exception:
+                        tipo_gravamen_pct = 0.0
+                    if not tipo_gravamen_pct or tipo_gravamen_pct <= 0:
+                        tipo_gravamen_pct = 30.0
+                        tipo_is_estimated = True
+                    source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+                    src = source_map.get(year_key) if isinstance(source_map, dict) else None
+                    if not isinstance(src, dict):
+                        src = source_map.get("2025") if isinstance(source_map, dict) else None
+                    if isinstance(src, dict):
+                        source_label = str(src.get("label") or "").strip()
+                        source_url = str(src.get("url") or "").strip()
+                else:
                     tipo_gravamen_pct = 30.0
                     tipo_is_estimated = True
-                source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
-                src = source_map.get(year_key) if isinstance(source_map, dict) else None
-                if not isinstance(src, dict):
-                    src = source_map.get("2025") if isinstance(source_map, dict) else None
-                if isinstance(src, dict):
-                    source_label = str(src.get("label") or "").strip()
-                    source_url = str(src.get("url") or "").strip()
+                    source_label = "Tipo no disponible (usa manual)"
+                    source_url = ""
 
             if not coef_table:
                 coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo)
@@ -33635,20 +33776,87 @@ class Handler(BaseHTTPRequestHandler):
             coef_info = _iivtnu_objective_coef(acq, devengo, coef_table or {})
             coef_objetivo = float(coef_info.get("coef_objetivo") or 0.0)
             factor = participacion_pct / 100.0
-            base_imponible = round(valor_suelo * coef_objetivo * factor + 1e-9, 2)
-            cuota = round(base_imponible * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
-            importe_total = cuota
+            base_objetiva = round(valor_suelo * coef_objetivo * factor + 1e-9, 2)
+            cuota_objetiva = round(base_objetiva * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+            importe_objetivo = cuota_objetiva
+
+            def _money(key: str) -> float:
+                try:
+                    return float(parse_money_value(payload.get(key) or 0) or 0.0)
+                except Exception:
+                    return 0.0
+
+            valor_adquisicion = _money("valor_adquisicion")
+            valor_transmision = _money("valor_transmision")
+            gastos_adquisicion = _money("gastos_adquisicion")
+            gastos_transmision = _money("gastos_transmision")
+            valor_catastral_total = _money("valor_catastral_total")
+            porcentaje_suelo = parse_optional_float(payload.get("porcentaje_suelo") or None)
+            if porcentaje_suelo is not None:
+                try:
+                    porcentaje_suelo = float(porcentaje_suelo)
+                except Exception:
+                    porcentaje_suelo = None
+
+            real = None
+            if valor_adquisicion > 0 and valor_transmision > 0:
+                ganancia_total = (valor_transmision - gastos_transmision) - (valor_adquisicion + gastos_adquisicion)
+                ratio_suelo = None
+                if valor_catastral_total and valor_catastral_total > 0:
+                    ratio_suelo = valor_suelo / valor_catastral_total
+                elif porcentaje_suelo is not None and porcentaje_suelo > 0:
+                    ratio_suelo = porcentaje_suelo / 100.0
+                if ratio_suelo is not None:
+                    ratio_suelo = max(0.0, min(1.0, float(ratio_suelo)))
+                    ganancia_suelo = ganancia_total * ratio_suelo * factor
+                    base_real = round(max(0.0, ganancia_suelo) + 1e-9, 2)
+                    cuota_real = round(base_real * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+                    real = {
+                        "ganancia_total": round(ganancia_total + 1e-9, 2),
+                        "ratio_suelo": round(ratio_suelo + 1e-12, 6),
+                        "ganancia_suelo": round(ganancia_suelo + 1e-9, 2),
+                        "base_imponible": base_real,
+                        "cuota_tributaria": cuota_real,
+                        "importe_total": cuota_real,
+                        "no_incremento": 1 if ganancia_total <= 0 else 0,
+                    }
+
+            metodo_recomendado = "objetivo"
+            cuota_recomendada = cuota_objetiva
+            if isinstance(real, dict):
+                try:
+                    cuota_real = float(real.get("cuota_tributaria") or 0.0)
+                except Exception:
+                    cuota_real = 0.0
+                if cuota_real >= 0 and cuota_real < cuota_recomendada:
+                    cuota_recomendada = cuota_real
+                    metodo_recomendado = "real"
 
             muni_nombre = ""
+            muni_provincia = ""
             try:
                 muni_row = conn.execute(
-                    "SELECT nombre FROM iivtnu_municipios WHERE ine = ? LIMIT 1",
+                    "SELECT nombre, provincia FROM iivtnu_municipios WHERE ine = ? LIMIT 1",
                     (municipio_ine,),
                 ).fetchone()
                 if muni_row:
-                    muni_nombre = str(muni_row["nombre"] if isinstance(muni_row, dict) else muni_row[0] or "").strip()
+                    if isinstance(muni_row, dict):
+                        muni_nombre = str(muni_row.get("nombre") or "").strip()
+                        muni_provincia = str(muni_row.get("provincia") or "").strip()
+                    else:
+                        muni_nombre = str(muni_row[0] or "").strip()
+                        muni_provincia = str(muni_row[1] or "").strip() if len(muni_row) > 1 else ""
             except Exception:
                 muni_nombre = ""
+                muni_provincia = ""
+            if not muni_nombre:
+                try:
+                    postal = _iivtnu_load_postal_cache()
+                    muni_nombre = str((postal.get("ine_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+                    muni_provincia = str((postal.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+                except Exception:
+                    muni_nombre = ""
+                    muni_provincia = ""
 
             json_response(
                 self,
@@ -33657,8 +33865,10 @@ class Handler(BaseHTTPRequestHandler):
                     "params": {
                         "municipio_ine": municipio_ine,
                         "municipio": muni_nombre,
+                        "provincia": muni_provincia,
                         "tipo_gravamen_pct": tipo_gravamen_pct,
                         "tipo_is_estimated": tipo_is_estimated,
+                        "tipo_is_manual": 1 if tipo_is_manual else 0,
                         "source_label": source_label,
                         "source_url": source_url,
                         "coef_source_label": (coef_source or {}).get("source_label") if isinstance(coef_source, dict) else "",
@@ -33668,10 +33878,20 @@ class Handler(BaseHTTPRequestHandler):
                         "years": coef_info.get("years") or 0,
                         "months": coef_info.get("months") or 0,
                         "coef_objetivo": round(coef_objetivo, 6),
-                        "base_imponible": base_imponible,
+                        # Legacy (objetivo).
+                        "base_imponible": base_objetiva,
                         "tipo_gravamen_pct": tipo_gravamen_pct,
-                        "cuota_tributaria": cuota,
-                        "importe_total": importe_total,
+                        "cuota_tributaria": cuota_objetiva,
+                        "importe_total": importe_objetivo,
+                        # Desglose.
+                        "objetivo": {
+                            "base_imponible": base_objetiva,
+                            "cuota_tributaria": cuota_objetiva,
+                            "importe_total": importe_objetivo,
+                        },
+                        "real": real,
+                        "metodo_recomendado": metodo_recomendado,
+                        "cuota_recomendada": round(cuota_recomendada + 1e-9, 2),
                     },
                 },
             )

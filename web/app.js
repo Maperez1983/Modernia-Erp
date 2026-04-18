@@ -5900,7 +5900,9 @@ const renderIivtnuParsed = (parsed = null) => {
     return;
   }
   const fields = [
+    ["Tipo documento", parsed.doc_type || "-"],
     ["Municipio", parsed.municipio || "-"],
+    ["CP", parsed.codigo_postal || "-"],
     ["Ref. catastral", parsed.referencia_catastral || "-"],
     ["Adquisición", parsed.fecha_adquisicion || "-"],
     ["Transmisión", parsed.fecha_transmision || "-"],
@@ -5939,15 +5941,30 @@ const renderIivtnuSimulatorResult = (resp = null) => {
   }
   const result = resp?.result || {};
   const params = resp?.params || {};
+  const objetivo = result?.objetivo || {};
+  const real = result?.real || null;
+  const tipoInfo = params?.tipo_is_manual ? "Manual" : params?.tipo_is_estimated ? "Estimado" : "Ordenanza/tabla";
   const fields = [
+    ["Método recomendado", result.metodo_recomendado || "objetivo"],
+    ["Cuota recomendada", result.cuota_recomendada ?? result.cuota_tributaria],
     ["Años", result.years],
+    ["Meses", result.months],
     ["Coeficiente objetivo", result.coef_objetivo],
-    ["Base imponible", result.base_imponible],
+    ["Base (objetivo)", objetivo.base_imponible ?? result.base_imponible],
+    ["Cuota (objetivo)", objetivo.cuota_tributaria ?? result.cuota_tributaria],
     ["Tipo gravamen (%)", result.tipo_gravamen_pct],
-    ["Cuota", result.cuota_tributaria],
-    ["Importe total", result.importe_total],
-    ["Fuente parámetros", params.source_label || params.source_url || "—"],
+    ["Tipo (origen)", tipoInfo],
+    ["Fuente tipo", params.source_label || params.source_url || "—"],
+    ["Fuente coeficientes", params.coef_source_label || params.coef_source_url || "—"],
   ];
+  if (real && typeof real === "object") {
+    fields.push(["Ganancia total", real.ganancia_total]);
+    fields.push(["Ratio suelo", real.ratio_suelo]);
+    fields.push(["Ganancia suelo", real.ganancia_suelo]);
+    fields.push(["Base (real)", real.base_imponible]);
+    fields.push(["Cuota (real)", real.cuota_tributaria]);
+    fields.push(["No incremento", real.no_incremento ? "Sí" : "No"]);
+  }
   iivtnuSimulatorResult.innerHTML = `
     <div class="ui-table">
       <table class="data-table">
@@ -5996,10 +6013,12 @@ const ensureIivtnuSimulator = async () => {
       const tx = iivtnuSimulatorForm.querySelector('[name="fecha_transmision"]');
       const vs = iivtnuSimulatorForm.querySelector('[name="valor_suelo"]');
       const pct = iivtnuSimulatorForm.querySelector('[name="participacion_pct"]');
+      const tipo = iivtnuSimulatorForm.querySelector('[name="tipo_gravamen_pct_manual"]');
       if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
       if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
       if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
       if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
+      if (tipo && parsed.tipo_gravamen_pct != null) tipo.value = String(parsed.tipo_gravamen_pct);
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Datos aplicados desde PDF.";
     });
   }
@@ -58811,6 +58830,13 @@ if (iivtnuSimulatorForm) {
         fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
         valor_suelo: String(formData.get("valor_suelo") || "").trim(),
         participacion_pct: String(formData.get("participacion_pct") || "").trim(),
+        tipo_gravamen_pct_manual: String(formData.get("tipo_gravamen_pct_manual") || "").trim(),
+        valor_catastral_total: String(formData.get("valor_catastral_total") || "").trim(),
+        porcentaje_suelo: String(formData.get("porcentaje_suelo") || "").trim(),
+        valor_adquisicion: String(formData.get("valor_adquisicion") || "").trim(),
+        gastos_adquisicion: String(formData.get("gastos_adquisicion") || "").trim(),
+        valor_transmision: String(formData.get("valor_transmision") || "").trim(),
+        gastos_transmision: String(formData.get("gastos_transmision") || "").trim(),
       };
       const resp = await postJsonWithDbRetry("/api/iivtnu_simulate", payload, { timeoutMs: 30000 });
       renderIivtnuSimulatorResult(resp);
