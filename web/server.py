@@ -5629,6 +5629,8 @@ def _iivtnu_detect_doc_type(text_upper: str) -> str:
         return "simulacion_ayuda"
     if "GUÍA DE AUTOLIQUIDACIÓN" in upper or "GUIA DE AUTOLIQUIDACION" in upper:
         return "guia_autoliquidacion"
+    if "CARTA DE PAGO" in upper or "NRC" in upper:
+        return "carta_pago"
     if "SOLICITUD ESPECIFICA" in upper and ("INEXISTENCIA" in upper or "INCREMENTO" in upper):
         return "solicitud_inexistencia_incremento"
     if "AUTOLIQUIDACI" in upper:
@@ -5793,6 +5795,16 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         upper,
     )
 
+    nrc = pick_first([r"\bNRC\b\s*[:\-]?\s*([0-9A-Z]{16,24})"], upper).strip().upper()
+    modelo = pick_first([r"\bMODELO\b\s*[:\-]?\s*([0-9]{3})"], upper)
+    ejercicio = pick_first([r"\bEJERCICIO\b\s*[:\-]?\s*([0-9]{4})"], upper)
+    fecha_pago_raw = pick_first(
+        [r"\bFECHA\s+DE\s+PAGO\b\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})"],
+        upper,
+    )
+    fecha_pago_dt = parse_iso_date(fecha_pago_raw)
+    fecha_pago = fecha_pago_dt.isoformat() if fecha_pago_dt else ""
+
     municipio_ine = ""
     provincia = ""
     try:
@@ -5834,6 +5846,10 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "tipo_gravamen_pct": tipo_gravamen_pct,
         "cuota_tributaria": cuota,
         "importe_total": total,
+        "nrc": nrc or "",
+        "modelo": modelo or "",
+        "ejercicio": ejercicio or "",
+        "fecha_pago": fecha_pago or "",
     }
     out["_text_hint"] = clean[:1200]
     return out
@@ -5855,6 +5871,101 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
             texts.append("")
     raw_text = "\n".join(texts)
     return _iivtnu_extract_from_text(raw_text, filename=filename)
+
+
+# --- Simuladores fiscales (IRPF: ganancia patrimonial y alquileres) ---
+
+IRPF_BASE_AHORRO_SCALE = {
+    # Ejercicio 2024: 19 / 21 / 23 / 27 / 28 (hasta 300k)
+    2024: [
+        (0.0, 6000.0, 0.19),
+        (6000.0, 50000.0, 0.21),
+        (50000.0, 200000.0, 0.23),
+        (200000.0, 300000.0, 0.27),
+        (300000.0, None, 0.28),
+    ],
+    # Ejercicio 2025+: último tramo 30%
+    2025: [
+        (0.0, 6000.0, 0.19),
+        (6000.0, 50000.0, 0.21),
+        (50000.0, 200000.0, 0.23),
+        (200000.0, 300000.0, 0.27),
+        (300000.0, None, 0.30),
+    ],
+}
+
+
+def _irpf_savings_scale_for_year(year):
+    y = int(year or 0)
+    if y in IRPF_BASE_AHORRO_SCALE:
+        return y, IRPF_BASE_AHORRO_SCALE[y], False
+    last = max(IRPF_BASE_AHORRO_SCALE.keys())
+    return last, IRPF_BASE_AHORRO_SCALE[last], True
+
+
+def _irpf_tax_progressive(base, brackets):
+    try:
+        base_val = float(base or 0.0)
+    except Exception:
+        base_val = 0.0
+    base_val = max(0.0, base_val)
+    cuota = 0.0
+    for lo, hi, rate in brackets:
+        if base_val <= lo:
+            break
+        upper = hi if hi is not None else base_val
+        tramo = min(base_val, upper) - lo
+        if tramo > 0:
+            cuota += tramo * float(rate)
+        if hi is None or base_val <= upper:
+            break
+    return round(cuota + 1e-9, 2)
+
+
+def _irpf_rental_reduction_pct(payload, ejercicio):
+    manual = parse_optional_float(payload.get("reduccion_pct_manual") or None)
+    if manual is not None:
+        try:
+            manual = float(manual)
+        except Exception:
+            manual = None
+    if manual is not None and manual >= 0:
+        return max(0.0, min(100.0, manual)), "Manual"
+
+    contrato = parse_iso_date(payload.get("fecha_contrato") or "")
+    if not contrato:
+        return 0.0, "Sin contrato"
+
+    cutoff = date(2023, 5, 26)
+    if contrato < cutoff:
+        return 60.0, "Contrato < 26/05/2023 (DT)"
+
+    if int(ejercicio or 0) < 2024:
+        return 60.0, "Ejercicio < 2024"
+
+    zona_tensionada = bool(payload.get("zona_tensionada") or False)
+    rebaja_pct = parse_optional_float(payload.get("rebaja_renta_pct") or None)
+    if rebaja_pct is not None:
+        try:
+            rebaja_pct = float(rebaja_pct)
+        except Exception:
+            rebaja_pct = None
+    joven_18_35 = bool(payload.get("inquilino_joven_18_35") or False)
+    primera_vez = bool(payload.get("primera_vez_alquila_en_zona") or False)
+    vivienda_asequible = bool(payload.get("vivienda_asequible_incentivada") or False)
+    alquilada_admin = bool(payload.get("arrendada_a_admin_o_tercer_sector") or False)
+    rehabilitacion = bool(payload.get("rehabilitacion_ult_2_anios") or False)
+
+    if zona_tensionada and rebaja_pct is not None and rebaja_pct >= 5.0:
+        return 90.0, "Zona tensionada + rebaja >=5%"
+
+    if zona_tensionada and (vivienda_asequible or alquilada_admin or (primera_vez and joven_18_35)):
+        return 70.0, "Zona tensionada + 70%"
+
+    if rehabilitacion:
+        return 60.0, "Rehabilitación 2 años"
+
+    return 50.0, "General"
 
 def hash_password(password):
     return runtime_hash_password(password)
@@ -33289,6 +33400,7 @@ class Handler(BaseHTTPRequestHandler):
             or path_value.startswith("/api/legal_")
             or path_value.startswith("/api/copilot_web_")
             or path_value.startswith("/api/iivtnu_")
+            or path_value.startswith("/api/irpf_")
             or path_value
             in {
                 "/api/convenios_catalog",
@@ -33896,6 +34008,195 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/api/irpf_ganancia_simulate":
+            acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
+            devengo = parse_iso_date(payload.get("fecha_transmision") or "")
+            if not acq or not devengo:
+                json_response(self, {"error": "Fechas inválidas"}, status=400)
+                return
+            if devengo <= acq:
+                json_response(self, {"error": "La fecha de transmisión debe ser posterior a la de adquisición"}, status=400)
+                return
+
+            def _money(key: str) -> float:
+                try:
+                    return float(parse_money_value(payload.get(key) or 0) or 0.0)
+                except Exception:
+                    return 0.0
+
+            participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
+            if participacion_pct is None:
+                participacion_pct = 100.0
+            try:
+                participacion_pct = float(participacion_pct)
+            except Exception:
+                participacion_pct = 100.0
+            participacion_pct = max(0.0, min(100.0, participacion_pct))
+            factor = participacion_pct / 100.0
+
+            valor_adq = _money("valor_adquisicion")
+            gastos_adq = _money("gastos_adquisicion")
+            mejoras = _money("inversiones_mejoras")
+            amort = _money("amortizacion_deducida")
+            valor_tx = _money("valor_transmision")
+            gastos_tx = _money("gastos_transmision")
+            plusvalia = _money("plusvalia_municipal")
+
+            valor_adquisicion_calc = max(0.0, (valor_adq + gastos_adq + mejoras - amort) * factor)
+            valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
+            ganancia = round(valor_transmision_calc - valor_adquisicion_calc + 1e-9, 2)
+
+            vivienda_habitual = bool(payload.get("vivienda_habitual") or False)
+            exencion_mayor_65 = bool(payload.get("exencion_mayor_65") or False)
+            reinversion = parse_optional_float(payload.get("importe_reinvertido") or None)
+            if reinversion is not None:
+                try:
+                    reinversion = float(reinversion)
+                except Exception:
+                    reinversion = None
+            prestamo_pendiente = _money("prestamo_pendiente")
+
+            exento = 0.0
+            exencion_motivo = ""
+            if exencion_mayor_65 and vivienda_habitual and ganancia > 0:
+                exento = ganancia
+                exencion_motivo = "Exención >65 vivienda habitual (marcado)"
+            elif vivienda_habitual and reinversion is not None and reinversion > 0 and ganancia > 0:
+                importe_obtenido = max(0.0, (valor_tx - gastos_tx - prestamo_pendiente) * factor)
+                ratio = 0.0
+                if importe_obtenido > 0:
+                    ratio = max(0.0, min(1.0, reinversion / importe_obtenido))
+                exento = round(ganancia * ratio + 1e-9, 2)
+                exencion_motivo = "Exención reinversión (proporcional)"
+
+            base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
+            year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
+            scale_year, brackets, assumed = _irpf_savings_scale_for_year(year)
+            cuota = _irpf_tax_progressive(base_ahorro, brackets)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "params": {
+                        "ejercicio": year,
+                        "escala_ejercicio": scale_year,
+                        "escala_asumida": 1 if assumed else 0,
+                    },
+                    "result": {
+                        "participacion_factor": round(factor + 1e-12, 6),
+                        "valor_adquisicion_calc": round(valor_adquisicion_calc + 1e-9, 2),
+                        "valor_transmision_calc": round(valor_transmision_calc + 1e-9, 2),
+                        "ganancia_patrimonial": ganancia,
+                        "exento": round(exento + 1e-9, 2),
+                        "exencion_motivo": exencion_motivo,
+                        "base_ahorro_sujeta": base_ahorro,
+                        "cuota_ahorro_estimada": cuota,
+                    },
+                },
+            )
+            return
+
+        if parsed.path == "/api/irpf_alquiler_simulate":
+            ejercicio = int(payload.get("ejercicio") or 0)
+            if ejercicio <= 0:
+                json_response(self, {"error": "ejercicio requerido"}, status=400)
+                return
+            mode = str(payload.get("modo") or "arrendado").strip().lower()
+
+            def _money(key: str) -> float:
+                try:
+                    return float(parse_money_value(payload.get(key) or 0) or 0.0)
+                except Exception:
+                    return 0.0
+
+            participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
+            if participacion_pct is None:
+                participacion_pct = 100.0
+            try:
+                participacion_pct = float(participacion_pct)
+            except Exception:
+                participacion_pct = 100.0
+            participacion_pct = max(0.0, min(100.0, participacion_pct))
+            factor = participacion_pct / 100.0
+
+            if mode == "imputacion":
+                valor_catastral = _money("valor_catastral")
+                revisado = bool(payload.get("valor_catastral_revisado") or False)
+                dias = int(parse_optional_float(payload.get("dias") or 365) or 365)
+                dias = max(0, min(365, dias))
+                pct = 0.011 if revisado else 0.02
+                imputacion = round(valor_catastral * pct * (dias / 365.0) * factor + 1e-9, 2)
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "params": {"ejercicio": ejercicio, "modo": "imputacion"},
+                        "result": {
+                            "participacion_factor": round(factor + 1e-12, 6),
+                            "dias": dias,
+                            "porcentaje_imputacion": 1.1 if revisado else 2.0,
+                            "base_imputada": imputacion,
+                        },
+                    },
+                )
+                return
+
+            ingresos = _money("ingresos")
+            gastos = {
+                "ibi": _money("gasto_ibi"),
+                "comunidad": _money("gasto_comunidad"),
+                "seguros": _money("gasto_seguros"),
+                "reparaciones": _money("gasto_reparaciones"),
+                "intereses": _money("gasto_intereses"),
+                "suministros": _money("gasto_suministros"),
+                "amortizacion": _money("gasto_amortizacion"),
+                "otros": _money("gasto_otros"),
+            }
+            total_gastos = round(sum(gastos.values()) * factor + 1e-9, 2)
+            ingresos_calc = round(ingresos * factor + 1e-9, 2)
+            rendimiento_neto = round(ingresos_calc - total_gastos + 1e-9, 2)
+
+            vivienda = bool(payload.get("destinado_vivienda") or False)
+            reduccion_pct = 0.0
+            reduccion_motivo = "No aplica"
+            if vivienda and rendimiento_neto > 0:
+                reduccion_pct, reduccion_motivo = _irpf_rental_reduction_pct(payload, ejercicio)
+            reduccion_importe = round(max(0.0, rendimiento_neto) * (reduccion_pct / 100.0) + 1e-9, 2)
+            base_general = round(rendimiento_neto - reduccion_importe + 1e-9, 2)
+            tipo_marginal = parse_optional_float(payload.get("tipo_marginal_pct") or None)
+            if tipo_marginal is not None:
+                try:
+                    tipo_marginal = float(tipo_marginal)
+                except Exception:
+                    tipo_marginal = None
+            cuota_est = None
+            if tipo_marginal is not None and tipo_marginal >= 0:
+                cuota_est = round(max(0.0, base_general) * (tipo_marginal / 100.0) + 1e-9, 2)
+
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "params": {
+                        "ejercicio": ejercicio,
+                        "modo": "arrendado",
+                        "participacion_factor": round(factor + 1e-12, 6),
+                        "reduccion_pct": reduccion_pct,
+                        "reduccion_motivo": reduccion_motivo,
+                    },
+                    "result": {
+                        "ingresos": ingresos_calc,
+                        "gastos_total": total_gastos,
+                        "rendimiento_neto": rendimiento_neto,
+                        "reduccion_importe": reduccion_importe,
+                        "base_general_sujeta": base_general,
+                        "tipo_marginal_pct": tipo_marginal,
+                        "cuota_estimada": cuota_est,
+                    },
+                },
+            )
+            return
+
         if parsed.path == "/api/s3_presign":
             filename = payload.get("filename") or "archivo.pdf"
             content_type = payload.get("content_type") or "application/pdf"

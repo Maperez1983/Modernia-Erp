@@ -866,8 +866,8 @@
 	          </div>
 	          <div id="workspaceCopilotHub"></div>
 	        </div>
-	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="simuladores">
-	          <div class="form-card">
+		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="simuladores">
+		          <div class="form-card">
 	            <div class="section-head">
 	              <div>
 	                <h3>Simuladores</h3>
@@ -931,9 +931,9 @@
 		                <span id="iivtnuSimulatorStatus" class="muted"></span>
 		              </div>
 		            </form>
-	            <div id="iivtnuSimulatorResult"></div>
-	          </div>
-	          <div class="form-card">
+		            <div id="iivtnuSimulatorResult"></div>
+		          </div>
+		          <div class="form-card">
 	            <div class="section-head">
 	              <div>
 	                <h3>Validar autoliquidación (PDF)</h3>
@@ -951,9 +951,190 @@
 	                <span id="iivtnuPdfStatus" class="muted"></span>
 	              </div>
 	            </form>
-	            <div id="iivtnuPdfParsed"></div>
-	          </div>
-	        </div>
+		            <div id="iivtnuPdfParsed"></div>
+		          </div>
+		          <div class="form-card">
+		            <div class="section-head">
+		              <div>
+		                <h3>Ganancia patrimonial (IRPF)</h3>
+		                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
+		              </div>
+		            </div>
+		            <form id="irpfGainForm" class="form-grid">
+		              <label>
+		                Ejercicio (opcional)
+		                <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+		              </label>
+		              <label>
+		                % participación transmitida
+		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+		              </label>
+		              <label>
+		                Fecha adquisición
+		                <input name="fecha_adquisicion" type="date" required />
+		              </label>
+		              <label>
+		                Fecha transmisión (devengo)
+		                <input name="fecha_transmision" type="date" required />
+		              </label>
+		              <label>
+		                Valor adquisición
+		                <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
+		              </label>
+		              <label>
+		                Gastos adquisición
+		                <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Mejoras / inversiones
+		                <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Amortización deducida (si alquilado)
+		                <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Valor transmisión
+		                <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
+		              </label>
+		              <label>
+		                Gastos transmisión
+		                <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Plusvalía municipal pagada (opcional)
+		                <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="span-2">
+		                <div class="inline-row">
+		                  <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
+		                  <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención >65 (si aplica)</label>
+		                </div>
+		              </label>
+		              <label>
+		                Importe reinvertido (opcional)
+		                <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Préstamo pendiente (opcional)
+		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <div class="form-actions span-2">
+		                <button type="submit">Simular ganancia IRPF</button>
+		                <span id="irpfGainStatus" class="muted"></span>
+		              </div>
+		            </form>
+		            <div id="irpfGainResult"></div>
+		          </div>
+		          <div class="form-card">
+		            <div class="section-head">
+		              <div>
+		                <h3>Alquileres / imputación (IRPF)</h3>
+		                <p class="muted">Rendimiento neto, reducción (si aplica) e imputación por vivienda no alquilada.</p>
+		              </div>
+		            </div>
+		            <form id="irpfRentalForm" class="form-grid">
+		              <label>
+		                Ejercicio
+		                <input name="ejercicio" inputmode="numeric" placeholder="2025" required />
+		              </label>
+		              <label>
+		                Modo
+		                <select name="modo">
+		                  <option value="arrendado" selected>Arrendado</option>
+		                  <option value="imputacion">Imputación</option>
+		                </select>
+		              </label>
+		              <label>
+		                % titularidad
+		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Fecha contrato (opcional)
+		                <input name="fecha_contrato" type="date" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Ingresos alquiler
+		                <input name="ingresos" inputmode="decimal" placeholder="12000,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                IBI
+		                <input name="gasto_ibi" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Comunidad
+		                <input name="gasto_comunidad" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Seguros
+		                <input name="gasto_seguros" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Reparaciones
+		                <input name="gasto_reparaciones" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Intereses
+		                <input name="gasto_intereses" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Suministros
+		                <input name="gasto_suministros" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Amortización
+		                <input name="gasto_amortizacion" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Otros gastos
+		                <input name="gasto_otros" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label class="span-2 irpf-rental-arrendado">
+		                <div class="inline-row">
+		                  <label class="ui-check"><input type="checkbox" name="destinado_vivienda" /> Destinado a vivienda</label>
+		                  <label class="ui-check"><input type="checkbox" name="zona_tensionada" /> Zona tensionada</label>
+		                  <label class="ui-check"><input type="checkbox" name="rehabilitacion_ult_2_anios" /> Rehabilitación (2 años)</label>
+		                </div>
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Rebaja renta (%) (si aplica)
+		                <input name="rebaja_renta_pct" inputmode="decimal" placeholder="5" />
+		              </label>
+		              <label class="span-2 irpf-rental-arrendado">
+		                <div class="inline-row">
+		                  <label class="ui-check"><input type="checkbox" name="primera_vez_alquila_en_zona" /> Primera vez en zona</label>
+		                  <label class="ui-check"><input type="checkbox" name="inquilino_joven_18_35" /> Inquilino 18–35</label>
+		                  <label class="ui-check"><input type="checkbox" name="vivienda_asequible_incentivada" /> Vivienda asequible</label>
+		                  <label class="ui-check"><input type="checkbox" name="arrendada_a_admin_o_tercer_sector" /> A admin/tercer sector</label>
+		                </div>
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Reducción % manual (opcional)
+		                <input name="reduccion_pct_manual" inputmode="decimal" placeholder="60" />
+		              </label>
+		              <label class="irpf-rental-arrendado">
+		                Tipo marginal % (opcional)
+		                <input name="tipo_marginal_pct" inputmode="decimal" placeholder="30" />
+		              </label>
+		              <label class="irpf-rental-imputacion">
+		                Valor catastral
+		                <input name="valor_catastral" inputmode="decimal" placeholder="120000,00" />
+		              </label>
+		              <label class="irpf-rental-imputacion">
+		                Días (0–365)
+		                <input name="dias" inputmode="numeric" placeholder="365" value="365" />
+		              </label>
+		              <label class="span-2 irpf-rental-imputacion">
+		                <label class="ui-check"><input type="checkbox" name="valor_catastral_revisado" /> Valor catastral revisado (últimos 10 años)</label>
+		              </label>
+		              <div class="form-actions span-2">
+		                <button type="submit">Simular alquileres</button>
+		                <span id="irpfRentalStatus" class="muted"></span>
+		              </div>
+		            </form>
+		            <div id="irpfRentalResult"></div>
+		          </div>
+		        </div>
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>

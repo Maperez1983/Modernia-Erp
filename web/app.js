@@ -1868,12 +1868,18 @@ const iivtnuMunicipioCp = document.getElementById("iivtnuMunicipioCp");
 const iivtnuMunicipioSelect = document.getElementById("iivtnuMunicipioSelect");
 const iivtnuSimulatorStatus = document.getElementById("iivtnuSimulatorStatus");
 const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
-const iivtnuPdfParseForm = document.getElementById("iivtnuPdfParseForm");
-const iivtnuPdfFile = document.getElementById("iivtnuPdfFile");
-const iivtnuPdfStatus = document.getElementById("iivtnuPdfStatus");
-const iivtnuPdfParsed = document.getElementById("iivtnuPdfParsed");
-const iivtnuPdfApplyBtn = document.getElementById("iivtnuPdfApplyBtn");
-const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
+	const iivtnuPdfParseForm = document.getElementById("iivtnuPdfParseForm");
+	const iivtnuPdfFile = document.getElementById("iivtnuPdfFile");
+	const iivtnuPdfStatus = document.getElementById("iivtnuPdfStatus");
+	const iivtnuPdfParsed = document.getElementById("iivtnuPdfParsed");
+	const iivtnuPdfApplyBtn = document.getElementById("iivtnuPdfApplyBtn");
+	const irpfGainForm = document.getElementById("irpfGainForm");
+	const irpfGainStatus = document.getElementById("irpfGainStatus");
+	const irpfGainResult = document.getElementById("irpfGainResult");
+	const irpfRentalForm = document.getElementById("irpfRentalForm");
+	const irpfRentalStatus = document.getElementById("irpfRentalStatus");
+	const irpfRentalResult = document.getElementById("irpfRentalResult");
+	const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -5899,20 +5905,24 @@ const renderIivtnuParsed = (parsed = null) => {
     iivtnuPdfParsed.innerHTML = "<p class='muted'>Sin datos extraídos todavía.</p>";
     return;
   }
-  const fields = [
-    ["Tipo documento", parsed.doc_type || "-"],
-    ["Municipio", parsed.municipio || "-"],
-    ["CP", parsed.codigo_postal || "-"],
-    ["Ref. catastral", parsed.referencia_catastral || "-"],
-    ["Adquisición", parsed.fecha_adquisicion || "-"],
-    ["Transmisión", parsed.fecha_transmision || "-"],
-    ["Valor suelo", parsed.valor_suelo],
-    ["% participación", parsed.participacion_pct],
-    ["Base imponible", parsed.base_imponible],
-    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
-    ["Cuota", parsed.cuota_tributaria],
-    ["Importe total", parsed.importe_total],
-  ];
+	  const fields = [
+	    ["Tipo documento", parsed.doc_type || "-"],
+	    ["Municipio", parsed.municipio || "-"],
+	    ["CP", parsed.codigo_postal || "-"],
+	    ["Ref. catastral", parsed.referencia_catastral || "-"],
+	    ["Adquisición", parsed.fecha_adquisicion || "-"],
+	    ["Transmisión", parsed.fecha_transmision || "-"],
+	    ["Valor suelo", parsed.valor_suelo],
+	    ["% participación", parsed.participacion_pct],
+	    ["Base imponible", parsed.base_imponible],
+	    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
+	    ["Cuota", parsed.cuota_tributaria],
+	    ["Importe total", parsed.importe_total],
+	    ["NRC", parsed.nrc || "-"],
+	    ["Modelo", parsed.modelo || "-"],
+	    ["Ejercicio", parsed.ejercicio || "-"],
+	    ["Fecha pago", parsed.fecha_pago || "-"],
+	  ];
   iivtnuPdfParsed.innerHTML = `
     <div class="ui-table">
       <table class="data-table">
@@ -6022,7 +6032,126 @@ const ensureIivtnuSimulator = async () => {
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Datos aplicados desde PDF.";
     });
   }
-  renderIivtnuParsed(null);
+	renderIivtnuParsed(null);
+};
+
+const renderIrpfGainResult = (resp = null) => {
+  if (!irpfGainResult) return;
+  if (!resp) {
+    irpfGainResult.innerHTML = "";
+    return;
+  }
+  const params = resp?.params || {};
+  const result = resp?.result || {};
+  const fields = [
+    ["Ejercicio", params.ejercicio ?? ""],
+    ["Escala usada", params.escala_ejercicio ?? ""],
+    ["Escala asumida", params.escala_asumida ? "Sí" : "No"],
+    ["Participación", result.participacion_factor],
+    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+    ["Valor transmisión (calc.)", result.valor_transmision_calc],
+    ["Ganancia patrimonial", result.ganancia_patrimonial],
+    ["Exento", result.exento],
+    ["Motivo exención", result.exencion_motivo || "—"],
+    ["Base ahorro sujeta", result.base_ahorro_sujeta],
+    ["Cuota ahorro estimada", result.cuota_ahorro_estimada],
+  ];
+  irpfGainResult.innerHTML = `
+    <div class="ui-table">
+      <table class="data-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th>${escapeHtml(label)}</th>
+                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const renderIrpfRentalResult = (resp = null) => {
+  if (!irpfRentalResult) return;
+  if (!resp) {
+    irpfRentalResult.innerHTML = "";
+    return;
+  }
+  const params = resp?.params || {};
+  const result = resp?.result || {};
+  const fields = [
+    ["Ejercicio", params.ejercicio ?? ""],
+    ["Modo", params.modo ?? ""],
+    ["Participación", params.participacion_factor ?? result.participacion_factor],
+  ];
+  if (String(params.modo || "").toLowerCase() === "imputacion") {
+    fields.push(["Días", result.dias]);
+    fields.push(["% imputación", result.porcentaje_imputacion]);
+    fields.push(["Base imputada", result.base_imputada]);
+  } else {
+    fields.push(["Ingresos", result.ingresos]);
+    fields.push(["Gastos total", result.gastos_total]);
+    fields.push(["Rendimiento neto", result.rendimiento_neto]);
+    fields.push(["Reducción %", params.reduccion_pct]);
+    fields.push(["Motivo reducción", params.reduccion_motivo || "—"]);
+    fields.push(["Reducción importe", result.reduccion_importe]);
+    fields.push(["Base general sujeta", result.base_general_sujeta]);
+    if (result.tipo_marginal_pct != null && result.cuota_estimada != null) {
+      fields.push(["Tipo marginal %", result.tipo_marginal_pct]);
+      fields.push(["Cuota estimada", result.cuota_estimada]);
+    }
+  }
+  irpfRentalResult.innerHTML = `
+    <div class="ui-table">
+      <table class="data-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th>${escapeHtml(label)}</th>
+                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const syncIrpfRentalMode = () => {
+  if (!irpfRentalForm) return;
+  const mode = String(new FormData(irpfRentalForm).get("modo") || "arrendado").toLowerCase();
+  const arrFields = irpfRentalForm.querySelectorAll(".irpf-rental-arrendado");
+  const impFields = irpfRentalForm.querySelectorAll(".irpf-rental-imputacion");
+  const showArr = mode !== "imputacion";
+  arrFields.forEach((el) => {
+    el.classList.toggle("hidden", !showArr);
+    el.hidden = !showArr;
+  });
+  impFields.forEach((el) => {
+    el.classList.toggle("hidden", showArr);
+    el.hidden = showArr;
+  });
+};
+
+const ensureIrpfSimulators = () => {
+  if (irpfGainStatus) irpfGainStatus.textContent = "";
+  if (irpfRentalStatus) irpfRentalStatus.textContent = "";
+  renderIrpfGainResult(null);
+  renderIrpfRentalResult(null);
+  if (irpfRentalForm) {
+    const modeSel = irpfRentalForm.querySelector('select[name="modo"]');
+    if (modeSel) modeSel.addEventListener("change", syncIrpfRentalMode);
+    syncIrpfRentalMode();
+  }
 };
 
 const setWorkspaceEngineView = (engine = "documental") => {
@@ -6039,6 +6168,7 @@ const setWorkspaceEngineView = (engine = "documental") => {
   });
   if (normalized === "simuladores") {
     void ensureIivtnuSimulator();
+    ensureIrpfSimulators();
   }
   syncHoldingUrlParams();
 };
@@ -58874,6 +59004,40 @@ if (iivtnuPdfParseForm) {
       if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = "OK.";
     } catch (err) {
       if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = err.message || "No se pudo leer el PDF.";
+    }
+  });
+}
+
+if (irpfGainForm) {
+  irpfGainForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    renderIrpfGainResult(null);
+    if (irpfGainStatus) irpfGainStatus.textContent = "Simulando...";
+    try {
+      const formData = new FormData(irpfGainForm);
+      const payload = Object.fromEntries(formData.entries());
+      const resp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", payload, { timeoutMs: 30000 });
+      renderIrpfGainResult(resp);
+      if (irpfGainStatus) irpfGainStatus.textContent = "OK.";
+    } catch (err) {
+      if (irpfGainStatus) irpfGainStatus.textContent = err.message || "No se pudo simular.";
+    }
+  });
+}
+
+if (irpfRentalForm) {
+  irpfRentalForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    renderIrpfRentalResult(null);
+    if (irpfRentalStatus) irpfRentalStatus.textContent = "Simulando...";
+    try {
+      const formData = new FormData(irpfRentalForm);
+      const payload = Object.fromEntries(formData.entries());
+      const resp = await postJsonWithDbRetry("/api/irpf_alquiler_simulate", payload, { timeoutMs: 30000 });
+      renderIrpfRentalResult(resp);
+      if (irpfRentalStatus) irpfRentalStatus.textContent = "OK.";
+    } catch (err) {
+      if (irpfRentalStatus) irpfRentalStatus.textContent = err.message || "No se pudo simular.";
     }
   });
 }
