@@ -54,3 +54,21 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertEqual(out.get("doc_type"), "solicitud_inexistencia_incremento")
         self.assertEqual(out.get("referencia_catastral") or "", "")
 
+    def test_extracts_carta_pago_fields(self):
+        text = """
+        CARTA DE PAGO
+        NRC: 1234ABCD5678EFGH9012
+        MODELO: 004
+        EJERCICIO: 2025
+        FECHA DE PAGO: 01/03/2025
+        BONIFICACIÓN (%) 50
+        IMPORTE TOTAL: 123,45
+        """
+        out = _iivtnu_extract_from_text(text, filename="carta_pago.pdf")
+        self.assertEqual(out.get("doc_type"), "carta_pago")
+        self.assertEqual(out.get("modelo"), "004")
+        self.assertEqual(out.get("ejercicio"), "2025")
+        self.assertEqual(out.get("fecha_pago"), "2025-03-01")
+        self.assertEqual(out.get("nrc"), "1234ABCD5678EFGH9012")
+        self.assertAlmostEqual(float(out.get("bonificacion_pct") or 0), 50.0, places=2)
+        self.assertAlmostEqual(float(out.get("importe_total") or 0), 123.45, places=2)

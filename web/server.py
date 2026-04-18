@@ -5242,6 +5242,46 @@ _IIVTNU_POSTAL_CACHE = None  # {"cp_to": {cp: ine}, "ine_to": {ine: name}, "prov
 _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_malaga.min.json`
 
 
+def ensure_iivtnu_schema(conn):
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iivtnu_municipios (
+          ine TEXT PRIMARY KEY,
+          nombre TEXT NOT NULL,
+          provincia TEXT,
+          comunidad TEXT,
+          es_capital INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iivtnu_param_sets (
+          id TEXT PRIMARY KEY,
+          municipio_ine TEXT NOT NULL,
+          vigente_desde TEXT,
+          vigente_hasta TEXT,
+          tipo_gravamen_pct REAL,
+          coeficientes_json TEXT,
+          bonificaciones_json TEXT,
+          source_url TEXT,
+          source_label TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (municipio_ine) REFERENCES iivtnu_municipios(ine)
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_iivtnu_param_sets_municipio ON iivtnu_param_sets(municipio_ine);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_iivtnu_param_sets_vigencia ON iivtnu_param_sets(municipio_ine, vigente_desde, vigente_hasta);"
+    )
+
+
 def _iivtnu_norm_text(value):
     raw = str(value or "").strip().lower()
     if not raw:
@@ -5435,6 +5475,10 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
     if not conn:
         return
     now_iso = str(now_iso or datetime.now(timezone.utc).isoformat())
+    try:
+        ensure_iivtnu_schema(conn)
+    except Exception:
+        return
     # Si no existe la tabla aún (DB legacy sin schema), aborta.
     try:
         conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
@@ -5565,6 +5609,10 @@ def _iivtnu_seed_andalucia(conn, now_iso=None):
     if not conn:
         return
     now_iso = str(now_iso or datetime.now(timezone.utc).isoformat())
+    try:
+        ensure_iivtnu_schema(conn)
+    except Exception:
+        return
     # Si no existe la tabla aún (DB legacy sin schema), aborta.
     try:
         conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
@@ -5786,6 +5834,34 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         ],
         upper,
     )
+    bonificacion_pct = pick_number(
+        [
+            r"BONIFICACI(?:Ó|O)N\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}BONIFICACI(?:Ó|O)N\s*\(?%\)?",
+        ],
+        upper,
+    )
+    bonificacion_importe = pick_number(
+        [
+            r"BONIFICACI(?:Ó|O)N\s*\(?IMPORTE\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"IMPORTE\s+BONIFICACI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    recargo_importe = pick_number(
+        [
+            r"RECARGO\s*[:\-]?\s*([0-9\.,]+)",
+            r"IMPORTE\s+RECARGO\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    intereses_importe = pick_number(
+        [
+            r"INTERESES\s+(?:DE\s+DEMORA)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"IMPORTE\s+INTERESES\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
     total = pick_number(
         [
             r"IMPORTE\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
@@ -5845,6 +5921,10 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "base_imponible": base_imponible,
         "tipo_gravamen_pct": tipo_gravamen_pct,
         "cuota_tributaria": cuota,
+        "bonificacion_pct": bonificacion_pct,
+        "bonificacion_importe": bonificacion_importe,
+        "recargo_importe": recargo_importe,
+        "intereses_importe": intereses_importe,
         "importe_total": total,
         "nrc": nrc or "",
         "modelo": modelo or "",
@@ -5871,6 +5951,91 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
             texts.append("")
     raw_text = "\n".join(texts)
     return _iivtnu_extract_from_text(raw_text, filename=filename)
+
+
+def _iivtnu_upsert_param_set(
+    conn,
+    municipio_ine,
+    devengo_dt,
+    tipo_gravamen_pct,
+    bonificaciones_json=None,
+    source_label: str = "",
+    source_url: str = "",
+):
+    if not conn:
+        raise ValueError("conn requerido")
+    ensure_iivtnu_schema(conn)
+    ine = str(municipio_ine or "").strip().zfill(5)
+    if not ine:
+        raise ValueError("municipio_ine requerido")
+    if not isinstance(devengo_dt, date):
+        raise ValueError("devengo inválido")
+    try:
+        tipo = float(tipo_gravamen_pct)
+    except Exception:
+        tipo = 0.0
+    if tipo <= 0:
+        raise ValueError("tipo_gravamen_pct inválido")
+    year = int(devengo_dt.year)
+    vigente_desde = f"{year}-01-01"
+    vigente_hasta = f"{year}-12-31"
+    coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo_dt)
+    coef_json = json.dumps(
+        {"schema": "iivtnu_max_coef", "coeficientes": coef_table, "coef_source": coef_source},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    row = conn.execute(
+        """
+        SELECT id FROM iivtnu_param_sets
+        WHERE municipio_ine = ? AND COALESCE(vigente_desde,'') = ? AND COALESCE(vigente_hasta,'') = ?
+        LIMIT 1
+        """,
+        (ine, vigente_desde, vigente_hasta),
+    ).fetchone()
+    if row:
+        pid = row["id"] if isinstance(row, dict) else row[0]
+        conn.execute(
+            """
+            UPDATE iivtnu_param_sets
+            SET tipo_gravamen_pct = ?,
+                coeficientes_json = ?,
+                bonificaciones_json = ?,
+                source_url = ?,
+                source_label = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (float(tipo), coef_json, bonificaciones_json, str(source_url or ""), str(source_label or ""), now_iso, str(pid)),
+        )
+        return {"action": "updated", "id": str(pid), "vigente_desde": vigente_desde, "vigente_hasta": vigente_hasta}
+
+    pid = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO iivtnu_param_sets (
+          id, municipio_ine, vigente_desde, vigente_hasta,
+          tipo_gravamen_pct, coeficientes_json, bonificaciones_json,
+          source_url, source_label, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pid,
+            ine,
+            vigente_desde,
+            vigente_hasta,
+            float(tipo),
+            coef_json,
+            bonificaciones_json,
+            str(source_url or ""),
+            str(source_label or ""),
+            now_iso,
+            now_iso,
+        ),
+    )
+    return {"action": "inserted", "id": pid, "vigente_desde": vigente_desde, "vigente_hasta": vigente_hasta}
 
 
 # --- Simuladores fiscales (IRPF: ganancia patrimonial y alquileres) ---
@@ -33684,6 +33849,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         if parsed.path == "/api/iivtnu_municipios":
             try:
+                ensure_iivtnu_schema(conn)
                 _iivtnu_seed_andalucia(conn)
                 try:
                     conn.commit()
@@ -33770,6 +33936,7 @@ class Handler(BaseHTTPRequestHandler):
             participacion_pct = max(0.0, min(100.0, participacion_pct))
 
             try:
+                ensure_iivtnu_schema(conn)
                 _iivtnu_seed_andalucia(conn)
             except Exception:
                 pass
@@ -33782,6 +33949,7 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT
                       tipo_gravamen_pct,
                       coeficientes_json,
+                      bonificaciones_json,
                       source_url,
                       source_label
                     FROM iivtnu_param_sets
@@ -33802,6 +33970,7 @@ class Handler(BaseHTTPRequestHandler):
             source_url = ""
             coef_table = None
             coef_source = None
+            bonif_pct_from_params = None
             if params_row:
                 try:
                     tipo_gravamen_pct = float(params_row["tipo_gravamen_pct"])
@@ -33827,11 +33996,21 @@ class Handler(BaseHTTPRequestHandler):
                     coef_table = coef_obj.get("coeficientes") if isinstance(coef_obj.get("coeficientes"), dict) else None
                     coef_source = coef_obj.get("coef_source") if isinstance(coef_obj.get("coef_source"), dict) else None
                 try:
+                    bonif_raw = params_row["bonificaciones_json"]
+                except Exception:
+                    bonif_raw = params_row[2] if len(params_row) > 2 else ""
+                try:
+                    bonif_obj = json.loads(bonif_raw) if bonif_raw else {}
+                except Exception:
+                    bonif_obj = {}
+                if isinstance(bonif_obj, dict):
+                    bonif_pct_from_params = parse_optional_float(bonif_obj.get("bonificacion_pct") or bonif_obj.get("bonificacion_pct_default") or None)
+                try:
                     source_url = str(params_row["source_url"] or "").strip()
                     source_label = str(params_row["source_label"] or "").strip()
                 except Exception:
-                    source_url = str(params_row[2] or "").strip() if len(params_row) > 2 else ""
-                    source_label = str(params_row[3] or "").strip() if len(params_row) > 3 else ""
+                    source_url = str(params_row[3] or "").strip() if len(params_row) > 3 else ""
+                    source_label = str(params_row[4] or "").strip() if len(params_row) > 4 else ""
 
             tipo_is_estimated = False
             manual_tipo = parse_optional_float(
@@ -33889,7 +34068,20 @@ class Handler(BaseHTTPRequestHandler):
             coef_objetivo = float(coef_info.get("coef_objetivo") or 0.0)
             factor = participacion_pct / 100.0
             base_objetiva = round(valor_suelo * coef_objetivo * factor + 1e-9, 2)
-            cuota_objetiva = round(base_objetiva * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+            cuota_objetiva_bruta = round(base_objetiva * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+
+            bonif_manual = parse_optional_float(payload.get("bonificacion_pct") or payload.get("bonificacion_pct_manual") or None)
+            bonif_pct = bonif_manual if bonif_manual is not None else bonif_pct_from_params
+            if bonif_pct is not None:
+                try:
+                    bonif_pct = float(bonif_pct)
+                except Exception:
+                    bonif_pct = None
+            if bonif_pct is None:
+                bonif_pct = 0.0
+            bonif_pct = max(0.0, min(100.0, bonif_pct))
+            bonif_importe_obj = round(max(0.0, cuota_objetiva_bruta) * (bonif_pct / 100.0) + 1e-9, 2)
+            cuota_objetiva = round(max(0.0, cuota_objetiva_bruta - bonif_importe_obj) + 1e-9, 2)
             importe_objetivo = cuota_objetiva
 
             def _money(key: str) -> float:
@@ -33922,12 +34114,17 @@ class Handler(BaseHTTPRequestHandler):
                     ratio_suelo = max(0.0, min(1.0, float(ratio_suelo)))
                     ganancia_suelo = ganancia_total * ratio_suelo * factor
                     base_real = round(max(0.0, ganancia_suelo) + 1e-9, 2)
-                    cuota_real = round(base_real * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+                    cuota_real_bruta = round(base_real * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+                    bonif_importe_real = round(max(0.0, cuota_real_bruta) * (bonif_pct / 100.0) + 1e-9, 2)
+                    cuota_real = round(max(0.0, cuota_real_bruta - bonif_importe_real) + 1e-9, 2)
                     real = {
                         "ganancia_total": round(ganancia_total + 1e-9, 2),
                         "ratio_suelo": round(ratio_suelo + 1e-12, 6),
                         "ganancia_suelo": round(ganancia_suelo + 1e-9, 2),
                         "base_imponible": base_real,
+                        "cuota_tributaria_bruta": cuota_real_bruta,
+                        "bonificacion_pct": bonif_pct,
+                        "bonificacion_importe": bonif_importe_real,
                         "cuota_tributaria": cuota_real,
                         "importe_total": cuota_real,
                         "no_incremento": 1 if ganancia_total <= 0 else 0,
@@ -33940,7 +34137,10 @@ class Handler(BaseHTTPRequestHandler):
                     cuota_real = float(real.get("cuota_tributaria") or 0.0)
                 except Exception:
                     cuota_real = 0.0
-                if cuota_real >= 0 and cuota_real < cuota_recomendada:
+                if int(real.get("no_incremento") or 0):
+                    cuota_recomendada = 0.0
+                    metodo_recomendado = "no_sujecion"
+                elif cuota_real >= 0 and cuota_real < cuota_recomendada:
                     cuota_recomendada = cuota_real
                     metodo_recomendado = "real"
 
@@ -33993,11 +34193,17 @@ class Handler(BaseHTTPRequestHandler):
                         # Legacy (objetivo).
                         "base_imponible": base_objetiva,
                         "tipo_gravamen_pct": tipo_gravamen_pct,
+                        "bonificacion_pct": bonif_pct,
+                        "cuota_tributaria_bruta": cuota_objetiva_bruta,
+                        "bonificacion_importe": bonif_importe_obj,
                         "cuota_tributaria": cuota_objetiva,
                         "importe_total": importe_objetivo,
                         # Desglose.
                         "objetivo": {
                             "base_imponible": base_objetiva,
+                            "bonificacion_pct": bonif_pct,
+                            "cuota_tributaria_bruta": cuota_objetiva_bruta,
+                            "bonificacion_importe": bonif_importe_obj,
                             "cuota_tributaria": cuota_objetiva,
                             "importe_total": importe_objetivo,
                         },
@@ -34007,6 +34213,63 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+            return
+
+        if parsed.path == "/api/iivtnu_param_upsert":
+            try:
+                ensure_iivtnu_schema(conn)
+            except Exception:
+                json_response(self, {"error": "No se pudo preparar el schema IIVTNU"}, status=500)
+                return
+            municipio_ine = str(payload.get("municipio_ine") or "").strip().zfill(5)
+            devengo = parse_iso_date(payload.get("devengo") or payload.get("fecha_transmision") or payload.get("fecha_devengo") or "")
+            year = int(parse_optional_float(payload.get("ejercicio") or payload.get("year") or 0) or 0)
+            if not devengo and year > 0:
+                devengo = date(year, 1, 1)
+            if not municipio_ine or not devengo:
+                json_response(self, {"error": "municipio_ine y devengo/ejercicio requeridos"}, status=400)
+                return
+            tipo = parse_optional_float(
+                payload.get("tipo_gravamen_pct")
+                or payload.get("tipo_gravamen_pct_manual")
+                or payload.get("tipo_gravamen_pct_override")
+                or None
+            )
+            if tipo is None:
+                json_response(self, {"error": "tipo_gravamen_pct requerido"}, status=400)
+                return
+            bonif_pct = parse_optional_float(payload.get("bonificacion_pct") or payload.get("bonificacion_pct_default") or None)
+            bonif_json = None
+            if bonif_pct is not None:
+                try:
+                    bonif_pct = float(bonif_pct)
+                except Exception:
+                    bonif_pct = None
+            if bonif_pct is not None and bonif_pct >= 0:
+                bonif_json = json.dumps({"bonificacion_pct": float(bonif_pct)}, ensure_ascii=False, separators=(",", ":"))
+
+            source_label = str(payload.get("source_label") or "").strip()
+            source_url = str(payload.get("source_url") or "").strip()
+
+            try:
+                _iivtnu_seed_andalucia(conn)
+            except Exception:
+                pass
+            try:
+                res = _iivtnu_upsert_param_set(
+                    conn,
+                    municipio_ine=municipio_ine,
+                    devengo_dt=devengo,
+                    tipo_gravamen_pct=float(tipo),
+                    bonificaciones_json=bonif_json,
+                    source_label=source_label,
+                    source_url=source_url,
+                )
+                conn.commit()
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(self, {"ok": True, "result": res})
             return
         if parsed.path == "/api/irpf_ganancia_simulate":
             acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
@@ -44773,6 +45036,10 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id or not etapa:
                 json_response(self, {"error": "id y etapa requeridos"}, status=400)
                 return
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+            except Exception:
+                session = None
             try:
                 prev = conn.execute(
                     "SELECT etapa, situacion_comercial, inmueble_id, responsable, asesor FROM captaciones WHERE id = ? LIMIT 1",

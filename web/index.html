@@ -899,6 +899,10 @@
 		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
 		              </label>
 		              <label>
+		                Bonificación (%) (opcional)
+		                <input name="bonificacion_pct" inputmode="decimal" placeholder="0" />
+		              </label>
+		              <label>
 		                Tipo gravamen (%) (opcional)
 		                <input name="tipo_gravamen_pct_manual" inputmode="decimal" placeholder="29" />
 		              </label>
@@ -945,11 +949,13 @@
 	                PDF de autoliquidación
 	                <input id="iivtnuPdfFile" type="file" accept="application/pdf" required />
 	              </label>
-	              <div class="form-actions span-2">
-	                <button type="submit" class="secondary ghost">Extraer datos</button>
-	                <button type="button" id="iivtnuPdfApplyBtn" class="secondary ghost hidden">Aplicar al simulador</button>
-	                <span id="iivtnuPdfStatus" class="muted"></span>
-	              </div>
+		              <div class="form-actions span-2">
+		                <button type="submit" class="secondary ghost">Extraer datos</button>
+		                <button type="button" id="iivtnuPdfApplyBtn" class="secondary ghost hidden">Aplicar al simulador</button>
+		                <button type="button" id="iivtnuPdfSaveTipoBtn" class="secondary ghost hidden">Guardar tipo (municipio/año)</button>
+		                <span id="iivtnuPdfStatus" class="muted"></span>
+		                <span id="iivtnuPdfSaveTipoStatus" class="muted"></span>
+		              </div>
 	            </form>
 		            <div id="iivtnuPdfParsed"></div>
 		          </div>

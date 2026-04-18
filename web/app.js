@@ -1873,6 +1873,8 @@ const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
 	const iivtnuPdfStatus = document.getElementById("iivtnuPdfStatus");
 	const iivtnuPdfParsed = document.getElementById("iivtnuPdfParsed");
 	const iivtnuPdfApplyBtn = document.getElementById("iivtnuPdfApplyBtn");
+	const iivtnuPdfSaveTipoBtn = document.getElementById("iivtnuPdfSaveTipoBtn");
+	const iivtnuPdfSaveTipoStatus = document.getElementById("iivtnuPdfSaveTipoStatus");
 	const irpfGainForm = document.getElementById("irpfGainForm");
 	const irpfGainStatus = document.getElementById("irpfGainStatus");
 	const irpfGainResult = document.getElementById("irpfGainResult");
@@ -5917,6 +5919,10 @@ const renderIivtnuParsed = (parsed = null) => {
 	    ["Base imponible", parsed.base_imponible],
 	    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
 	    ["Cuota", parsed.cuota_tributaria],
+	    ["Bonificación (%)", parsed.bonificacion_pct],
+	    ["Bonificación importe", parsed.bonificacion_importe],
+	    ["Recargo", parsed.recargo_importe],
+	    ["Intereses", parsed.intereses_importe],
 	    ["Importe total", parsed.importe_total],
 	    ["NRC", parsed.nrc || "-"],
 	    ["Modelo", parsed.modelo || "-"],
@@ -5961,8 +5967,11 @@ const renderIivtnuSimulatorResult = (resp = null) => {
     ["Meses", result.months],
     ["Coeficiente objetivo", result.coef_objetivo],
     ["Base (objetivo)", objetivo.base_imponible ?? result.base_imponible],
-    ["Cuota (objetivo)", objetivo.cuota_tributaria ?? result.cuota_tributaria],
     ["Tipo gravamen (%)", result.tipo_gravamen_pct],
+    ["Bonificación (%)", result.bonificacion_pct],
+    ["Cuota bruta (objetivo)", objetivo.cuota_tributaria_bruta ?? result.cuota_tributaria_bruta],
+    ["Bonificación importe (objetivo)", objetivo.bonificacion_importe ?? result.bonificacion_importe],
+    ["Cuota neta (objetivo)", objetivo.cuota_tributaria ?? result.cuota_tributaria],
     ["Tipo (origen)", tipoInfo],
     ["Fuente tipo", params.source_label || params.source_url || "—"],
     ["Fuente coeficientes", params.coef_source_label || params.coef_source_url || "—"],
@@ -5972,6 +5981,8 @@ const renderIivtnuSimulatorResult = (resp = null) => {
     fields.push(["Ratio suelo", real.ratio_suelo]);
     fields.push(["Ganancia suelo", real.ganancia_suelo]);
     fields.push(["Base (real)", real.base_imponible]);
+    fields.push(["Cuota bruta (real)", real.cuota_tributaria_bruta]);
+    fields.push(["Bonificación importe (real)", real.bonificacion_importe]);
     fields.push(["Cuota (real)", real.cuota_tributaria]);
     fields.push(["No incremento", real.no_incremento ? "Sí" : "No"]);
   }
@@ -6023,16 +6034,40 @@ const ensureIivtnuSimulator = async () => {
       const tx = iivtnuSimulatorForm.querySelector('[name="fecha_transmision"]');
       const vs = iivtnuSimulatorForm.querySelector('[name="valor_suelo"]');
       const pct = iivtnuSimulatorForm.querySelector('[name="participacion_pct"]');
+      const bonif = iivtnuSimulatorForm.querySelector('[name="bonificacion_pct"]');
       const tipo = iivtnuSimulatorForm.querySelector('[name="tipo_gravamen_pct_manual"]');
       if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
       if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
       if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
       if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
+      if (bonif && parsed.bonificacion_pct != null) bonif.value = String(parsed.bonificacion_pct);
       if (tipo && parsed.tipo_gravamen_pct != null) tipo.value = String(parsed.tipo_gravamen_pct);
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Datos aplicados desde PDF.";
     });
   }
-	renderIivtnuParsed(null);
+  if (iivtnuPdfSaveTipoBtn) {
+    iivtnuPdfSaveTipoBtn.addEventListener("click", async () => {
+      const parsed = iivtnuLastParsed;
+      if (!parsed) return;
+      if (!parsed.municipio_ine || !parsed.fecha_transmision || parsed.tipo_gravamen_pct == null) return;
+      if (iivtnuPdfSaveTipoStatus) iivtnuPdfSaveTipoStatus.textContent = "Guardando tipo...";
+      try {
+        const payload = {
+          municipio_ine: String(parsed.municipio_ine || "").trim(),
+          devengo: String(parsed.fecha_transmision || "").trim(),
+          tipo_gravamen_pct: parsed.tipo_gravamen_pct,
+          bonificacion_pct: parsed.bonificacion_pct,
+          source_label: `PDF ${parsed.filename || ""}`.trim(),
+          source_url: "",
+        };
+        await postJsonWithDbRetry("/api/iivtnu_param_upsert", payload, { timeoutMs: 30000 });
+        if (iivtnuPdfSaveTipoStatus) iivtnuPdfSaveTipoStatus.textContent = "Tipo guardado.";
+      } catch (err) {
+        if (iivtnuPdfSaveTipoStatus) iivtnuPdfSaveTipoStatus.textContent = err.message || "No se pudo guardar.";
+      }
+    });
+  }
+  renderIivtnuParsed(null);
 };
 
 const renderIrpfGainResult = (resp = null) => {
@@ -58953,17 +58988,18 @@ if (iivtnuSimulatorForm) {
     if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Simulando...";
     try {
       const formData = new FormData(iivtnuSimulatorForm);
-      const payload = {
-        municipio_ine: String(iivtnuMunicipioSelect?.value || "").trim(),
-        codigo_postal: normalizePostalCode(iivtnuMunicipioCp?.value || ""),
-        fecha_adquisicion: String(formData.get("fecha_adquisicion") || "").trim(),
-        fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
-        valor_suelo: String(formData.get("valor_suelo") || "").trim(),
-        participacion_pct: String(formData.get("participacion_pct") || "").trim(),
-        tipo_gravamen_pct_manual: String(formData.get("tipo_gravamen_pct_manual") || "").trim(),
-        valor_catastral_total: String(formData.get("valor_catastral_total") || "").trim(),
-        porcentaje_suelo: String(formData.get("porcentaje_suelo") || "").trim(),
-        valor_adquisicion: String(formData.get("valor_adquisicion") || "").trim(),
+	      const payload = {
+	        municipio_ine: String(iivtnuMunicipioSelect?.value || "").trim(),
+	        codigo_postal: normalizePostalCode(iivtnuMunicipioCp?.value || ""),
+	        fecha_adquisicion: String(formData.get("fecha_adquisicion") || "").trim(),
+	        fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
+	        valor_suelo: String(formData.get("valor_suelo") || "").trim(),
+	        participacion_pct: String(formData.get("participacion_pct") || "").trim(),
+	        bonificacion_pct: String(formData.get("bonificacion_pct") || "").trim(),
+	        tipo_gravamen_pct_manual: String(formData.get("tipo_gravamen_pct_manual") || "").trim(),
+	        valor_catastral_total: String(formData.get("valor_catastral_total") || "").trim(),
+	        porcentaje_suelo: String(formData.get("porcentaje_suelo") || "").trim(),
+	        valor_adquisicion: String(formData.get("valor_adquisicion") || "").trim(),
         gastos_adquisicion: String(formData.get("gastos_adquisicion") || "").trim(),
         valor_transmision: String(formData.get("valor_transmision") || "").trim(),
         gastos_transmision: String(formData.get("gastos_transmision") || "").trim(),
@@ -58983,6 +59019,8 @@ if (iivtnuPdfParseForm) {
     iivtnuLastParsed = null;
     renderIivtnuParsed(null);
     if (iivtnuPdfApplyBtn) iivtnuPdfApplyBtn.classList.add("hidden");
+    if (iivtnuPdfSaveTipoBtn) iivtnuPdfSaveTipoBtn.classList.add("hidden");
+    if (iivtnuPdfSaveTipoStatus) iivtnuPdfSaveTipoStatus.textContent = "";
     if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = "Leyendo PDF...";
     try {
       const file = iivtnuPdfFile?.files?.[0] || null;
@@ -59001,6 +59039,15 @@ if (iivtnuPdfParseForm) {
       iivtnuLastParsed = data?.parsed || null;
       renderIivtnuParsed(iivtnuLastParsed);
       if (iivtnuPdfApplyBtn && iivtnuLastParsed) iivtnuPdfApplyBtn.classList.remove("hidden");
+      if (
+        iivtnuPdfSaveTipoBtn &&
+        iivtnuLastParsed &&
+        iivtnuLastParsed.municipio_ine &&
+        iivtnuLastParsed.fecha_transmision &&
+        iivtnuLastParsed.tipo_gravamen_pct != null
+      ) {
+        iivtnuPdfSaveTipoBtn.classList.remove("hidden");
+      }
       if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = "OK.";
     } catch (err) {
       if (iivtnuPdfStatus) iivtnuPdfStatus.textContent = err.message || "No se pudo leer el PDF.";
