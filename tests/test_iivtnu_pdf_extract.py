@@ -12,6 +12,9 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         FECHA ADQUISICIÓN 17/02/2010
         FECHA TRANSMISIÓN 10/03/2020
         VALOR SUELO 35.447,24
+        VALOR CATASTRAL TOTAL 120.000,00
+        COEF. REDUCCIÓN 0,60
+        VALOR REDUCIDO (A) 21.268,34
         100 % %PARTICIPACIÓN
         BASE IMPONIBLE 12.406,53
         TIPO DE GRAVAMEN (%) 29
@@ -25,6 +28,9 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertEqual(out.get("fecha_adquisicion"), "2010-02-17")
         self.assertEqual(out.get("fecha_transmision"), "2020-03-10")
         self.assertAlmostEqual(float(out.get("valor_suelo") or 0), 35447.24, places=2)
+        self.assertAlmostEqual(float(out.get("valor_catastral_total") or 0), 120000.00, places=2)
+        self.assertAlmostEqual(float(out.get("coef_reduccion") or 0), 0.60, places=2)
+        self.assertAlmostEqual(float(out.get("valor_suelo_reducido") or 0), 21268.34, places=2)
         self.assertAlmostEqual(float(out.get("participacion_pct") or 0), 100.0, places=2)
         self.assertAlmostEqual(float(out.get("base_imponible") or 0), 12406.53, places=2)
         self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 29.0, places=2)

@@ -5831,6 +5831,30 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         ],
         upper,
     )
+    valor_suelo_reducido = pick_number(
+        [
+            r"VALOR\s+REDUCIDO\s*\(?A\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"VALOR\s+REDUCIDO\s*[:\-]?\s*([0-9\.,]+)",
+            r"\(A\)\s*[:\-]?\s*([0-9\.,]+)\s{0,40}VALOR\s+REDUCIDO",
+        ],
+        upper,
+    )
+    coef_reduccion = pick_number(
+        [
+            r"COEF(?:ICIENTE)?\s*(?:DE\s*)?REDUCCI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
+            r"COEF\.?\s*REDUCCI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
+            r"([0-9\.,]+)\s{0,40}COEF(?:ICIENTE)?\s+REDUCCI(?:Ó|O)N",
+        ],
+        upper,
+    )
+    valor_catastral_total = pick_number(
+        [
+            r"VALOR\s+CAT(?:ASTRAL)?\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*C\.?\s*TOTAL\s*[:\-]?\s*([0-9\.,]+)",
+            r"VALOR\s+CAT(?:ASTRAL)?\s*(?!DEL\s+SUELO)(?!DEL\s+SOLAR)\s*\(TOTAL\)\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
     participacion_pct = pick_number(
         [
             r"([0-9\.,]+)\s*%+\s*%PARTICIPACI(?:Ó|O)N",
@@ -5945,6 +5969,9 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "fecha_adquisicion": fecha_adq,
         "fecha_transmision": fecha_tx,
         "valor_suelo": valor_suelo,
+        "valor_suelo_reducido": valor_suelo_reducido,
+        "coef_reduccion": coef_reduccion,
+        "valor_catastral_total": valor_catastral_total,
         "participacion_pct": participacion_pct,
         "base_imponible": base_imponible,
         "tipo_gravamen_pct": tipo_gravamen_pct,

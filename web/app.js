@@ -5923,14 +5923,17 @@ const renderIivtnuParsed = (parsed = null) => {
 		    ["Municipio", parsed.municipio || "-"],
 		    ["CP", parsed.codigo_postal || "-"],
 		    ["Ref. catastral", parsed.referencia_catastral || "-"],
-	    ["Adquisición", parsed.fecha_adquisicion || "-"],
-	    ["Transmisión", parsed.fecha_transmision || "-"],
-	    ["Valor suelo", parsed.valor_suelo],
-	    ["% participación", parsed.participacion_pct],
-	    ["Base imponible", parsed.base_imponible],
-	    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
-	    ["Cuota", parsed.cuota_tributaria],
-	    ["Bonificación (%)", parsed.bonificacion_pct],
+		    ["Adquisición", parsed.fecha_adquisicion || "-"],
+		    ["Transmisión", parsed.fecha_transmision || "-"],
+		    ["Valor suelo", parsed.valor_suelo],
+		    ["Valor suelo reducido", parsed.valor_suelo_reducido],
+		    ["Coef. reducción", parsed.coef_reduccion],
+		    ["Valor catastral total", parsed.valor_catastral_total],
+		    ["% participación", parsed.participacion_pct],
+		    ["Base imponible", parsed.base_imponible],
+		    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
+		    ["Cuota", parsed.cuota_tributaria],
+		    ["Bonificación (%)", parsed.bonificacion_pct],
 	    ["Bonificación importe", parsed.bonificacion_importe],
 	    ["Recargo", parsed.recargo_importe],
 	    ["Intereses", parsed.intereses_importe],
@@ -6054,9 +6057,15 @@ const ensureIivtnuSimulator = async () => {
       const pct = iivtnuSimulatorForm.querySelector('[name="participacion_pct"]');
       const bonif = iivtnuSimulatorForm.querySelector('[name="bonificacion_pct"]');
       const tipo = iivtnuSimulatorForm.querySelector('[name="tipo_gravamen_pct_manual"]');
+      const vcTotal = iivtnuSimulatorForm.querySelector('[name="valor_catastral_total"]');
+      const vsReducido = iivtnuSimulatorForm.querySelector('[name="valor_suelo_reducido"]');
+      const coefRed = iivtnuSimulatorForm.querySelector('[name="coef_reduccion"]');
       if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
       if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
       if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
+      if (vsReducido && parsed.valor_suelo_reducido != null) vsReducido.value = String(parsed.valor_suelo_reducido);
+      if (coefRed && parsed.coef_reduccion != null) coefRed.value = String(parsed.coef_reduccion);
+      if (vcTotal && parsed.valor_catastral_total != null) vcTotal.value = String(parsed.valor_catastral_total);
       if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
       if (bonif && parsed.bonificacion_pct != null) bonif.value = String(parsed.bonificacion_pct);
       if (tipo && parsed.tipo_gravamen_pct != null) tipo.value = String(parsed.tipo_gravamen_pct);
