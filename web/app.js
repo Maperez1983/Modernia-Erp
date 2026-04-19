@@ -5924,24 +5924,32 @@ const renderIivtnuParsed = (parsed = null) => {
 		    ["Municipio", parsed.municipio || "-"],
 		    ["CP", parsed.codigo_postal || "-"],
 		    ["Ref. catastral", parsed.referencia_catastral || "-"],
+		    ["Nº liquidación", parsed.numero_liquidacion || "-"],
+		    ["UTM", parsed.utm || "-"],
 		    ["Adquisición", parsed.fecha_adquisicion || "-"],
 		    ["Transmisión", parsed.fecha_transmision || "-"],
 		    ["Valor suelo", parsed.valor_suelo],
 		    ["Valor suelo reducido", parsed.valor_suelo_reducido],
 		    ["Coef. reducción", parsed.coef_reduccion],
 		    ["Valor catastral total", parsed.valor_catastral_total],
+		    ["Valor transmisión", parsed.valor_transmision],
+		    ["Valor adquisición", parsed.valor_adquisicion],
 		    ["% participación", parsed.participacion_pct],
 		    ["Base imponible", parsed.base_imponible],
 		    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
 		    ["Cuota", parsed.cuota_tributaria],
+		    ["Clase transmisión", parsed.clase_transmision || "-"],
+		    ["Derecho transmitido", parsed.derecho_transmitido || "-"],
+		    ["Subdivisión (%)", parsed.subdivision_pct],
 		    ["Bonificación (%)", parsed.bonificacion_pct],
-	    ["Bonificación importe", parsed.bonificacion_importe],
-	    ["Recargo", parsed.recargo_importe],
-	    ["Intereses", parsed.intereses_importe],
-	    ["Importe total", parsed.importe_total],
-	    ["NRC", parsed.nrc || "-"],
-	    ["Modelo", parsed.modelo || "-"],
-	    ["Ejercicio", parsed.ejercicio || "-"],
+		    ["Bonificación importe", parsed.bonificacion_importe],
+		    ["Recargo", parsed.recargo_importe],
+		    ["Intereses", parsed.intereses_importe],
+		    ["Importe total", parsed.importe_total],
+		    ["NRC", parsed.nrc || "-"],
+		    ["Referencia A.E.B.", parsed.referencia_aeb || "-"],
+		    ["Modelo", parsed.modelo || "-"],
+		    ["Ejercicio", parsed.ejercicio || "-"],
 		    ["Fecha pago", parsed.fecha_pago || "-"],
 		  ];
   iivtnuPdfParsed.innerHTML = `
@@ -6061,15 +6069,34 @@ const ensureIivtnuSimulator = async () => {
       const vcTotal = iivtnuSimulatorForm.querySelector('[name="valor_catastral_total"]');
       const vsReducido = iivtnuSimulatorForm.querySelector('[name="valor_suelo_reducido"]');
       const coefRed = iivtnuSimulatorForm.querySelector('[name="coef_reduccion"]');
+      const vAdq = iivtnuSimulatorForm.querySelector('[name="valor_adquisicion"]');
+      const vTx = iivtnuSimulatorForm.querySelector('[name="valor_transmision"]');
+      const tipoTrans = iivtnuSimulatorForm.querySelector('[name="tipo_transmision"]');
+      const derecho = iivtnuSimulatorForm.querySelector('[name="derecho_tipo"]');
       if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
       if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
       if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
       if (vsReducido && parsed.valor_suelo_reducido != null) vsReducido.value = String(parsed.valor_suelo_reducido);
       if (coefRed && parsed.coef_reduccion != null) coefRed.value = String(parsed.coef_reduccion);
       if (vcTotal && parsed.valor_catastral_total != null) vcTotal.value = String(parsed.valor_catastral_total);
+      if (vAdq && parsed.valor_adquisicion != null) vAdq.value = String(parsed.valor_adquisicion);
+      if (vTx && parsed.valor_transmision != null) vTx.value = String(parsed.valor_transmision);
       if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
       if (bonif && parsed.bonificacion_pct != null) bonif.value = String(parsed.bonificacion_pct);
       if (tipo && parsed.tipo_gravamen_pct != null) tipo.value = String(parsed.tipo_gravamen_pct);
+      if (tipoTrans && parsed.clase_transmision) {
+        const raw = String(parsed.clase_transmision || "").trim().toLowerCase();
+        if (raw.includes("compra") || raw.includes("venta")) tipoTrans.value = "onerosa";
+        if (raw.includes("don")) tipoTrans.value = "donacion";
+        if (raw.includes("heren")) tipoTrans.value = "mortis_causa";
+      }
+      if (derecho && parsed.derecho_transmitido) {
+        const raw = String(parsed.derecho_transmitido || "").trim().toLowerCase();
+        if (raw.includes("pleno")) derecho.value = "pleno_dominio";
+        if (raw.includes("nuda")) derecho.value = "nuda_propiedad";
+        if (raw.includes("usuf")) derecho.value = "usufructo_vitalicio";
+        if (raw.includes("uso") || raw.includes("habit")) derecho.value = "uso_habitacion";
+      }
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Datos aplicados desde PDF.";
     });
   }

@@ -5707,6 +5707,13 @@ def _iivtnu_detect_doc_type(text_upper: str) -> str:
         return "guia_autoliquidacion"
     if "CARTA DE PAGO" in upper or "NRC" in upper:
         return "carta_pago"
+    if "DOCUMENTO DE PAGO" in upper and (
+        "Nº DE LIQUIDACIÓN" in upper
+        or "Nº DE LIQUIDACION" in upper
+        or "REFERENCIA A.E.B." in upper
+        or "CONCEPTO TRIBUTARIO" in upper
+    ):
+        return "carta_pago"
     if "SOLICITUD ESPECIFICA" in upper and ("INEXISTENCIA" in upper or "INCREMENTO" in upper):
         return "solicitud_inexistencia_incremento"
     if "AUTOLIQUIDACI" in upper:
@@ -5765,6 +5772,8 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
     clean = re.sub(r"\n{2,}", "\n", clean).strip()
     upper = clean.upper()
 
+    MONEY_RE = r"([0-9]+(?:\.[0-9]{3})*,[0-9]{1,2})"
+
     def pick_first(patterns, text_in):
         for pat in patterns:
             m = re.search(pat, text_in, flags=re.IGNORECASE | re.MULTILINE)
@@ -5778,8 +5787,54 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             return None
         return parse_optional_float(raw)
 
+    def pick_date_near(patterns, text_in, window=160):
+        for pat in patterns:
+            m = re.search(pat, text_in, flags=re.IGNORECASE | re.MULTILINE)
+            if not m:
+                continue
+            chunk = text_in[m.end() : m.end() + window]
+            dm = re.search(r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})", chunk, flags=re.IGNORECASE | re.MULTILINE)
+            if dm:
+                return str(dm.group(1) or "").strip()
+        return ""
+
+    def pick_value_after_label(label_regex, min_value=0.0, max_hits=6, window=360):
+        try:
+            hits = list(re.finditer(label_regex, upper, flags=re.IGNORECASE | re.MULTILINE))
+        except Exception:
+            hits = []
+        candidates = []
+        for m in hits[:max_hits]:
+            chunk = upper[m.end() : m.end() + window]
+            nm = re.search(MONEY_RE, chunk, flags=re.IGNORECASE | re.MULTILINE)
+            if not nm:
+                continue
+            val = parse_optional_float(nm.group(1) or "")
+            if val is None:
+                continue
+            try:
+                fv = float(val)
+            except Exception:
+                continue
+            if fv >= float(min_value or 0.0):
+                candidates.append(fv)
+        if not candidates:
+            return None
+        try:
+            from collections import Counter
+
+            return float(Counter(round(v, 2) for v in candidates).most_common(1)[0][0])
+        except Exception:
+            return float(max(candidates))
+
     doc_type = _iivtnu_detect_doc_type(upper)
-    municipio = pick_first([r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})"], upper)
+    municipio = pick_first(
+        [
+            r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40}?)(?:\s+(?:DISPONE|ORGANISMO|GESTI|SERVICIO|NIF|CIF|AREA|ÁREA)\b|$)",
+            r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})",
+        ],
+        upper,
+    )
     municipio = municipio.title().strip() if municipio else ""
 
     cp_norm = ""
@@ -5813,12 +5868,46 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"FECHA\s+TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"DEVENGO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"FECHA\s+TRANSMISI(?:Ó|O)N\s+EFECTIVA\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"FECHA\s+DOCUMENTO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ACTUAL",
         ],
         upper,
     )
+    if not fecha_adq_raw:
+        fecha_adq_raw = pick_first(
+            [
+                r"F\.\s*ADQUIS\.\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+                r"FECHA\s+ADQ\.\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            ],
+            upper,
+        )
+    # OCR: la etiqueta puede existir pero la fecha va en otra celda (líneas posteriores).
+    if not fecha_tx_raw:
+        fecha_tx_raw = pick_date_near(
+            [r"FECHA\s+DOCUMENTO", r"FECHA\s+REGISTRO", r"FECHA\s+TRANSMISI(?:Ó|O)N", r"DEVENGO"],
+            upper,
+        )
+    if not fecha_adq_raw:
+        fecha_adq_raw = pick_date_near([r"FECHA\s+ADQUISIC(?:IÓ|IO)N", r"ADQUISIC(?:IÓ|IO)N"], upper)
     fecha_adq_dt = parse_iso_date(fecha_adq_raw)
     fecha_tx_dt = parse_iso_date(fecha_tx_raw)
+    # Heurística: si no se detecta adquisición, suele aparecer en una tabla sin etiqueta clara.
+    # Elegimos la fecha más antigua < devengo.
+    if not fecha_adq_dt and fecha_tx_dt:
+        try:
+            candidates = re.findall(r"\b([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\b", clean or "")
+        except Exception:
+            candidates = []
+        dt_candidates = []
+        for raw in candidates:
+            d = parse_iso_date(raw)
+            if not d:
+                continue
+            if d < fecha_tx_dt:
+                dt_candidates.append(d)
+        if dt_candidates:
+            fecha_adq_dt = min(dt_candidates)
     fecha_adq = fecha_adq_dt.isoformat() if fecha_adq_dt else ""
     fecha_tx = fecha_tx_dt.isoformat() if fecha_tx_dt else ""
 
@@ -5826,11 +5915,16 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         [
             r"VALOR\s+CAT(?:ASTRAL)?\s+DEL\s+SUELO\s*[:\-]?\s*([0-9\.,]+)",
             r"V\.?\s*C\.?\s*SUELO\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*SUEL[OA]\s*[:\-]?\s*([0-9\.,]+)",
+            # Preferir importes con coma decimal (evita capturar FINCA REGISTRAL / IDs).
+            rf"VALOR\s+SUELO\s*[:\-]?\s*{MONEY_RE}",
+            rf"{MONEY_RE}[ \t]{{0,40}}VALOR\s+SUELO\b",
             r"VALOR\s+SUELO\s*[:\-]?\s*([0-9\.,]+)",
-            r"([0-9\.,]+)\s{0,40}VALOR\s+SUELO",
         ],
         upper,
     )
+    # OCR/tabla: escoger el primer importe tras "VALOR SUELO" (evita % e IDs). Si existe VC total, filtra.
+    vc_for_filter = None
     valor_suelo_reducido = pick_number(
         [
             r"VALOR\s+REDUCIDO\s*\(?A\)?\s*[:\-]?\s*([0-9\.,]+)",
@@ -5839,6 +5933,14 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         ],
         upper,
     )
+    # OCR: evitar confundir IDs (p.ej. finca registral) con un valor monetario reducido.
+    if valor_suelo_reducido is not None:
+        try:
+            v = float(valor_suelo_reducido)
+        except Exception:
+            v = None
+        if v is not None and v >= 10000 and abs(v - int(v)) < 1e-9:
+            valor_suelo_reducido = None
     coef_reduccion = pick_number(
         [
             r"COEF(?:ICIENTE)?\s*(?:DE\s*)?REDUCCI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
@@ -5852,37 +5954,101 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"VALOR\s+CAT(?:ASTRAL)?\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
             r"V\.?\s*C\.?\s*TOTAL\s*[:\-]?\s*([0-9\.,]+)",
             r"VALOR\s+CAT(?:ASTRAL)?\s*(?!DEL\s+SUELO)(?!DEL\s+SOLAR)\s*\(TOTAL\)\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*CAT(?:ASTRAL)?\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
+    vc_hint = pick_value_after_label(r"VALOR\s+CATASTRAL\b", min_value=100.0, max_hits=8, window=420)
+    if vc_hint is not None:
+        if valor_catastral_total is None:
+            valor_catastral_total = vc_hint
+        else:
+            try:
+                current = float(valor_catastral_total or 0.0)
+            except Exception:
+                current = 0.0
+            if vc_hint >= 1000 and (current <= 0 or abs(vc_hint - current) > max(1.0, current * 0.15)):
+                valor_catastral_total = vc_hint
+    if valor_catastral_total is not None:
+        try:
+            vc_for_filter = float(valor_catastral_total)
+        except Exception:
+            vc_for_filter = None
+
+    suelo_hint = pick_value_after_label(
+        r"VALOR\s+SUELO\b(?!\s+(?:REDUCIDO|SOBRE))",
+        min_value=100.0,
+        max_hits=10,
+        window=420,
+    )
+    if suelo_hint is not None and vc_for_filter:
+        if suelo_hint > vc_for_filter * 1.05:
+            suelo_hint = None
+    if suelo_hint is not None:
+        if valor_suelo is None:
+            valor_suelo = suelo_hint
+        else:
+            try:
+                current = float(valor_suelo or 0.0)
+            except Exception:
+                current = 0.0
+            if suelo_hint >= 1000 and (current <= 0 or abs(suelo_hint - current) > max(1.0, current * 0.15)):
+                valor_suelo = suelo_hint
+    # Si no hay coeficiente y el valor reducido es idéntico al suelo, no lo consideramos "reducido".
+    if coef_reduccion is None and valor_suelo is not None and valor_suelo_reducido is not None:
+        try:
+            vs = float(valor_suelo or 0.0)
+            vr = float(valor_suelo_reducido or 0.0)
+        except Exception:
+            vs = None
+            vr = None
+        if vs is not None and vr is not None and vs > 0:
+            if abs(vs - vr) <= max(0.01, vs * 0.0001):
+                valor_suelo_reducido = None
     participacion_pct = pick_number(
         [
             r"([0-9\.,]+)\s*%+\s*%PARTICIPACI(?:Ó|O)N",
             r"%\s*PARTICIPACI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
             r"PARTICIPACI(?:Ó|O)N\s*%\s*[:\-]?\s*([0-9\.,]+)",
+            r"PROP\.?\s*%+\s*[:\-]?\s*([0-9\.,]+)",
+            r"PROPIEDAD\s*%+\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
     base_imponible = pick_number(
         [
-            r"([0-9\.,]+)\s{0,40}BASE\s+IMPONIBLE",
             r"BASE\s+IMPONIBLE\s*[:\-]?\s*([0-9\.,]+)",
+            r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\s*[:\-]?\s*([0-9\.,]+)",
+            r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\.\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
+    if base_imponible is not None:
+        try:
+            bi_val = float(base_imponible)
+        except Exception:
+            bi_val = None
+        if bi_val is not None and bi_val < 10:
+            bi_hint = pick_value_after_label(r"BASE\s+IMPONIBLE\b", min_value=10.0, max_hits=10, window=420)
+            if bi_hint is not None and bi_hint > bi_val * 2:
+                base_imponible = bi_hint
     tipo_gravamen_pct = pick_number(
         [
             r"TIPO\s+DE\s+GRAVAMEN\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
             r"TIPO\s+IMPOSITIVO\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
             r"([0-9\.,]+)\s{0,40}TIPO\s+DE\s+GRAVAMEN",
+            r"TIPO\s*%+\s*[:\-]?\s*([0-9\.,]+)",
+            r"TIPO\s+GRAVAMEN\s*[:\-]?\s*([0-9\.,]+)",
+            r"TIPO\s+GRAVAMEN\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
     cuota = pick_number(
         [
-            r"CUOTA\s+(?:TRIBUTARIA|I[NÍ]NTEGRA)\s*[:\-]?\s*([0-9\.,]+)",
+            r"CUOTA\s+(?:TRIBUTARIA|(?:I|Í)NTEGRA)\s*[:\-]?\s*([0-9\.,]+)",
             r"CUOTA\s*[:\-]?\s*([0-9\.,]+)",
-            r"([0-9\.,]+)\s{0,40}CUOTA\s+TRIBUTARIA",
+            r"([0-9\.,]+)[ \t]{0,40}CUOTA\s+TRIBUTARIA",
+            r"CUOTA\s+(?:I|Í)NTEGRA\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
@@ -5890,6 +6056,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         [
             r"BONIFICACI(?:Ó|O)N\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
             r"([0-9\.,]+)\s{0,40}BONIFICACI(?:Ó|O)N\s*\(?%\)?",
+            r"\bBON\.\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
@@ -5918,7 +6085,85 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         [
             r"IMPORTE\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
             r"TOTAL\s+A\s+INGRESAR\s*[:\-]?\s*([0-9\.,]+)",
-            r"([0-9\.,]+)\s{0,40}IMPORTE\s+TOTAL",
+            r"([0-9\.,]+)[ \t]{0,40}IMPORTE\s+TOTAL",
+        ],
+        upper,
+    )
+    # "Programa de ayuda" (Málaga) suele venir en formato tabla con cabeceras y una fila de importes.
+    if doc_type == "simulacion_ayuda" and (
+        base_imponible is None
+        or tipo_gravamen_pct is None
+        or cuota is None
+        or total is None
+        or (base_imponible is not None and total is not None and abs(float(base_imponible) - float(total)) < 1e-6)
+    ):
+        try:
+            lines = [ln for ln in (clean or "").splitlines() if str(ln or "").strip()]
+        except Exception:
+            lines = []
+        for idx, line in enumerate(lines):
+            u = str(line or "").upper()
+            if "BASE IMPONIBLE" not in u or "CUOTA" not in u or "IMPORTE TOTAL" not in u:
+                continue
+            if "TIPO" not in u:
+                continue
+            for j in range(idx + 1, min(idx + 6, len(lines))):
+                cand = str(lines[j] or "").strip()
+                if not cand:
+                    continue
+                nums = re.findall(MONEY_RE, cand.upper(), flags=re.IGNORECASE | re.MULTILINE)
+                if len(nums) < 3:
+                    continue
+                vals = []
+                for raw in nums[:4]:
+                    v = parse_optional_float(raw)
+                    if v is None:
+                        continue
+                    try:
+                        vals.append(float(v))
+                    except Exception:
+                        continue
+                if len(vals) < 3:
+                    continue
+                # Esperado: base, tipo, cuota, total
+                if vals[0] <= 0:
+                    continue
+                base_imponible = vals[0]
+                tipo_gravamen_pct = vals[1]
+                cuota = vals[2]
+                if len(vals) >= 4:
+                    total = vals[3]
+                else:
+                    total = vals[2]
+                break
+            if tipo_gravamen_pct is not None and cuota is not None:
+                break
+
+    valor_transmision = pick_number(
+        [
+            r"V\.?\s*TRANSMIS(?:IÓ|IO)N\.?\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*TRANSMIS\.?\s*[:\-]?\s*([0-9\.,]+)",
+            r"VALOR\s+TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    valor_adquisicion = pick_number(
+        [
+            r"V\.?\s*ADQUIS(?:ICIÓ|ICIO)N\.?\s*[:\-]?\s*([0-9\.,]+)",
+            r"V\.?\s*ADQUIS\.?\s*[:\-]?\s*([0-9\.,]+)",
+            r"VALOR\s+ADQUISIC(?:IÓ|IO)N\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    derecho_transmitido = pick_first([r"DCHO\.?\s*TRANSM\.?\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ\s\-]{3,20})"], upper)
+    clase_trans = pick_first([r"CLASE\s+TRANS\.?\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ\-]+)"], upper)
+    subdivision_pct = pick_number([r"SUBDIV\.?\s*[:\-]?\s*([0-9\.,]+)"], upper)
+    utm = pick_first([r"\bU\.?T\.?M\.?\s*[:\-]?\s*([0-9]{6,8}/[0-9A-Z]{5,8})"], upper)
+    ref_aeb = pick_first([r"REFERENCIA\s+A\.?E\.?B\.?\s*[:\-]?\s*([0-9]{10,80})"], upper)
+    num_liquidacion = pick_first(
+        [
+            r"N[ºO]\s+DE\s+LIQUIDACI(?:Ó|O)N\s*/\s*AUTOLIQUIDACI(?:Ó|O)N\s*[:\-]?\s*([0-9]{6,})",
+            r"N[ºO]\s+DE\s+LIQUIDACI(?:Ó|O)N\s*/\s*AUTOLIQUIDACI(?:Ó|O)N\s*\n\s*([0-9]{6,})",
         ],
         upper,
     )
@@ -5972,6 +6217,8 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "valor_suelo_reducido": valor_suelo_reducido,
         "coef_reduccion": coef_reduccion,
         "valor_catastral_total": valor_catastral_total,
+        "valor_transmision": valor_transmision,
+        "valor_adquisicion": valor_adquisicion,
         "participacion_pct": participacion_pct,
         "base_imponible": base_imponible,
         "tipo_gravamen_pct": tipo_gravamen_pct,
@@ -5985,7 +6232,33 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "modelo": modelo or "",
         "ejercicio": ejercicio or "",
         "fecha_pago": fecha_pago or "",
+        "utm": utm or "",
+        "referencia_aeb": ref_aeb or "",
+        "numero_liquidacion": num_liquidacion or "",
+        "clase_transmision": str(clase_trans or "").strip(),
+        "derecho_transmitido": str(derecho_transmitido or "").strip(),
+        "subdivision_pct": subdivision_pct,
     }
+    if out.get("importe_total") is None and out.get("cuota_tributaria") is not None:
+        try:
+            cuota_val = float(out.get("cuota_tributaria") or 0.0)
+        except Exception:
+            cuota_val = 0.0
+        try:
+            bonif_val = float(out.get("bonificacion_importe") or 0.0)
+        except Exception:
+            bonif_val = 0.0
+        try:
+            recargo_val = float(out.get("recargo_importe") or 0.0)
+        except Exception:
+            recargo_val = 0.0
+        try:
+            intereses_val = float(out.get("intereses_importe") or 0.0)
+        except Exception:
+            intereses_val = 0.0
+        calc_total = cuota_val - max(0.0, bonif_val) + max(0.0, recargo_val) + max(0.0, intereses_val)
+        if calc_total > 0:
+            out["importe_total"] = round(calc_total + 1e-9, 2)
     out["_text_hint"] = clean[:1200]
     return out
 
@@ -5993,19 +6266,98 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
 def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
     if not pdf_bytes:
         return {}
-    if PdfReader is None:
-        raise RuntimeError("pypdf no disponible")
-    reader = PdfReader(BytesIO(pdf_bytes))
-    pages = list(reader.pages or [])
-    texts = []
-    max_pages = min(12, len(pages))
-    for idx in range(max_pages):
+    raw_text = ""
+
+    def score_extract(out: dict) -> float:
+        if not isinstance(out, dict):
+            return 0.0
+        keys = (
+            "doc_type",
+            "municipio",
+            "codigo_postal",
+            "referencia_catastral",
+            "fecha_adquisicion",
+            "fecha_transmision",
+            "valor_suelo",
+            "valor_catastral_total",
+            "base_imponible",
+            "tipo_gravamen_pct",
+            "cuota_tributaria",
+            "importe_total",
+            "nrc",
+            "modelo",
+            "ejercicio",
+        )
+        present = 0
+        for k in keys:
+            v = out.get(k)
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+            if isinstance(v, (int, float)) and float(v) == 0.0 and k not in ("bonificacion_pct",):
+                continue
+            present += 1
+        bonus = 0.0
+        if str(out.get("doc_type") or "").strip():
+            bonus += 0.5
+        # Penalización: incoherencia base/tipo/cuota cuando parecen estar presentes.
         try:
-            texts.append(pages[idx].extract_text() or "")
+            base = float(out.get("base_imponible") or 0.0)
+            tipo = float(out.get("tipo_gravamen_pct") or 0.0)
+            cuota = float(out.get("cuota_tributaria") or 0.0)
+            if base > 0 and tipo > 0 and cuota > 0:
+                implied = base * (tipo / 100.0)
+                if abs(implied - cuota) > max(2.0, cuota * 0.25):
+                    bonus -= 2.0
         except Exception:
-            texts.append("")
-    raw_text = "\n".join(texts)
-    return _iivtnu_extract_from_text(raw_text, filename=filename)
+            pass
+        return float(present) + bonus
+
+    best = {}
+    best_score = -1e9
+
+    # 1) Intento rápido sin binarios externos (pypdf).
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            pages = list(reader.pages or [])
+            texts = []
+            max_pages = min(12, len(pages))
+            for idx in range(max_pages):
+                try:
+                    texts.append(pages[idx].extract_text() or "")
+                except Exception:
+                    texts.append("")
+            raw_text = "\n".join(texts).strip()
+        except Exception:
+            raw_text = ""
+    if raw_text and len(raw_text.strip()) >= 30:
+        out = _iivtnu_extract_from_text(raw_text, filename=filename)
+        s = score_extract(out)
+        if s > best_score:
+            best = out
+            best_score = s
+
+    # 2) Fallback: pdftotext / OCR (tesseract) para PDFs escaneados o cuando pypdf no extrae bien tablas/columnas.
+    need_fallback = (not raw_text or len(raw_text.strip()) < 150) or (best_score < 11.0)
+    if need_fallback:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, "iivtnu.pdf")
+                with open(path, "wb") as handle:
+                    handle.write(pdf_bytes)
+                text2, _err, _method = extract_pdf_text(path)
+                if text2 and len(text2.strip()) >= 30:
+                    out2 = _iivtnu_extract_from_text(text2, filename=filename)
+                    s2 = score_extract(out2)
+                    if s2 > best_score:
+                        best = out2
+                        best_score = s2
+        except Exception:
+            pass
+
+    return best or _iivtnu_extract_from_text(raw_text or "", filename=filename)
 
 
 def _iivtnu_upsert_param_set(
