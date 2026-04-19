@@ -49022,6 +49022,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_api(self, parsed):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
+        now = datetime.now(timezone.utc).isoformat()
         allowed_services = self._auth_allowed_services()
         if allowed_services is not None and path in {
             "/api/clientes",
