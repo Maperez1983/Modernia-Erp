@@ -5763,6 +5763,8 @@ def _iivtnu_detect_doc_type(text_upper: str) -> str:
     upper = str(text_upper or "").upper()
     if "PROGRAMA DE AYUDA AL CÁLCULO" in upper or "PROGRAMA DE AYUDA AL CALCULO" in upper:
         return "simulacion_ayuda"
+    if "ESTIMACIÓN DEL IMPORTE A PAGAR" in upper or "ESTIMACION DEL IMPORTE A PAGAR" in upper:
+        return "simulacion_ayuda"
     if "GUÍA DE AUTOLIQUIDACIÓN" in upper or "GUIA DE AUTOLIQUIDACION" in upper:
         return "guia_autoliquidacion"
     if "CARTA DE PAGO" in upper or "NRC" in upper:
@@ -5858,7 +5860,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
                 return str(dm.group(1) or "").strip()
         return ""
 
-    def pick_value_after_label(label_regex, min_value=0.0, max_hits=6, window=360):
+    def pick_value_after_label(label_regex, min_value=0.0, max_hits=6, window=360, strategy="mode"):
         try:
             hits = list(re.finditer(label_regex, upper, flags=re.IGNORECASE | re.MULTILINE))
         except Exception:
@@ -5866,26 +5868,52 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         candidates = []
         for m in hits[:max_hits]:
             chunk = upper[m.end() : m.end() + window]
-            nm = re.search(MONEY_RE, chunk, flags=re.IGNORECASE | re.MULTILINE)
-            if not nm:
-                continue
-            val = parse_optional_float(nm.group(1) or "")
-            if val is None:
-                continue
             try:
-                fv = float(val)
+                nums = re.findall(MONEY_RE, chunk, flags=re.IGNORECASE | re.MULTILINE)
             except Exception:
-                continue
-            if fv >= float(min_value or 0.0):
-                candidates.append(fv)
+                nums = []
+            for raw in nums[:12]:
+                val = parse_optional_float(raw or "")
+                if val is None:
+                    continue
+                try:
+                    fv = float(val)
+                except Exception:
+                    continue
+                if fv >= float(min_value or 0.0):
+                    candidates.append(fv)
         if not candidates:
             return None
+        strat = str(strategy or "mode").strip().lower()
+        if strat in ("first", "first_above_min", "first_match"):
+            try:
+                return float(candidates[0])
+            except Exception:
+                return None
+        if strat in ("last", "last_match"):
+            try:
+                return float(candidates[-1])
+            except Exception:
+                return None
+        if strat in ("max", "largest", "highest"):
+            try:
+                return float(max(candidates))
+            except Exception:
+                return None
+        if strat in ("min", "smallest", "lowest"):
+            try:
+                return float(min(candidates))
+            except Exception:
+                return None
         try:
             from collections import Counter
 
             return float(Counter(round(v, 2) for v in candidates).most_common(1)[0][0])
         except Exception:
-            return float(max(candidates))
+            try:
+                return float(max(candidates))
+            except Exception:
+                return None
 
     doc_type = _iivtnu_detect_doc_type(upper)
     municipio = pick_first(
@@ -5929,6 +5957,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"TRANSMISI(?:Ó|O)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"DEVENGO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"FECHA\s+TRANSMISI(?:Ó|O)N\s+EFECTIVA\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+            r"TRANSMISI(?:Ó|O)N\s+ACTUAL[\s\S]{0,240}?\b(?:COMPRAVENTA|COMPRA[\-\s]*VENTA|DONACI(?:Ó|O)N|HERENCIA|EXPROPIACI(?:Ó|O)N|PERMUTA|AUTO|ADJUDICACI(?:Ó|O)N)\b\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"FECHA\s+DOCUMENTO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ACTUAL",
         ],
@@ -6018,7 +6047,13 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         ],
         upper,
     )
-    vc_hint = pick_value_after_label(r"VALOR\s+CATASTRAL\b", min_value=100.0, max_hits=8, window=420)
+    vc_hint = pick_value_after_label(
+        r"(?:^|\n)\s*(?:A\s*\|\s*)?VALOR\s+CATASTRAL\b",
+        min_value=500.0,
+        max_hits=6,
+        window=420,
+        strategy="first",
+    )
     if vc_hint is not None:
         if valor_catastral_total is None:
             valor_catastral_total = vc_hint
@@ -6036,11 +6071,19 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             vc_for_filter = None
 
     suelo_hint = pick_value_after_label(
-        r"VALOR\s+SUELO\b(?!\s+(?:REDUCIDO|SOBRE))",
-        min_value=100.0,
-        max_hits=10,
+        r"(?:^|\n)\s*(?:B\s*\|\s*)?VALOR\s+SUELO\b",
+        min_value=500.0,
+        max_hits=8,
         window=420,
+        strategy="first",
     )
+    if suelo_hint is None:
+        suelo_hint = pick_value_after_label(
+            r"VALOR\s+SUELO\b(?!\s+(?:REDUCIDO|SOBRE))",
+            min_value=500.0,
+            max_hits=10,
+            window=420,
+        )
     if suelo_hint is not None and vc_for_filter:
         if suelo_hint > vc_for_filter * 1.05:
             suelo_hint = None
@@ -6070,6 +6113,13 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"([0-9\.,]+)\s*%+\s*%PARTICIPACI(?:Ó|O)N",
             r"%\s*PARTICIPACI(?:Ó|O)N\s*[:\-]?\s*([0-9\.,]+)",
             r"PARTICIPACI(?:Ó|O)N\s*%\s*[:\-]?\s*([0-9\.,]+)",
+        ],
+        upper,
+    )
+    porcentaje_suelo = pick_number(
+        [
+            r"%\s*VALOR\s+SUELO\s+SOBRE\s+VALOR\s+CATASTRAL\s*\(B/A\)\s*[:\-]?\s*([0-9\.,]+)",
+            r"\(B/A\)\s*[:\-]?\s*([0-9\.,]+)\s*$",
             r"PROP\.?\s*%+\s*[:\-]?\s*([0-9\.,]+)",
             r"PROPIEDAD\s*%+\s*[:\-]?\s*([0-9\.,]+)",
         ],
@@ -6077,6 +6127,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
     )
     base_imponible = pick_number(
         [
+            rf"BASE\s+IMPONIBLE\s*[:\-]?\s*{MONEY_RE}",
             r"BASE\s+IMPONIBLE\s*[:\-]?\s*([0-9\.,]+)",
             r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\s*[:\-]?\s*([0-9\.,]+)",
             r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\.\s*[:\-]?\s*([0-9\.,]+)",
@@ -6089,7 +6140,13 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         except Exception:
             bi_val = None
         if bi_val is not None and bi_val < 10:
-            bi_hint = pick_value_after_label(r"BASE\s+IMPONIBLE\b", min_value=10.0, max_hits=10, window=420)
+            bi_hint = pick_value_after_label(
+                r"(?:^|\n)\s*BASE\s+IMPONIBLE\b",
+                min_value=10.0,
+                max_hits=10,
+                window=420,
+                strategy="first",
+            )
             if bi_hint is not None and bi_hint > bi_val * 2:
                 base_imponible = bi_hint
     tipo_gravamen_pct = pick_number(
@@ -6280,6 +6337,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         "valor_transmision": valor_transmision,
         "valor_adquisicion": valor_adquisicion,
         "participacion_pct": participacion_pct,
+        "porcentaje_suelo": porcentaje_suelo,
         "base_imponible": base_imponible,
         "tipo_gravamen_pct": tipo_gravamen_pct,
         "cuota_tributaria": cuota,

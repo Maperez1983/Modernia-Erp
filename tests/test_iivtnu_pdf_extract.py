@@ -97,7 +97,8 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertEqual(out.get("fecha_transmision"), "2025-06-20")
         self.assertAlmostEqual(float(out.get("valor_catastral_total") or 0), 26878.89, places=2)
         self.assertAlmostEqual(float(out.get("valor_suelo") or 0), 17901.36, places=2)
-        self.assertAlmostEqual(float(out.get("participacion_pct") or 0), 66.60, places=2)
+        self.assertAlmostEqual(float(out.get("porcentaje_suelo") or 0), 66.60, places=2)
+        self.assertAlmostEqual(float(out.get("subdivision_pct") or 0), 50.0, places=2)
         self.assertAlmostEqual(float(out.get("valor_transmision") or 0), 65000.0, places=2)
         self.assertAlmostEqual(float(out.get("valor_adquisicion") or 0), 45000.0, places=2)
         self.assertAlmostEqual(float(out.get("base_imponible") or 0), 1521.62, places=2)
@@ -138,3 +139,44 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 29.0, places=2)
         self.assertAlmostEqual(float(out.get("cuota_tributaria") or 0), 1400.93, places=2)
         self.assertAlmostEqual(float(out.get("importe_total") or 0), 1400.93, places=2)
+
+    def test_extracts_estimacion_importe_pagar_fields(self):
+        text = """
+        IMPUESTO SOBRE EL INCREMENTO DE VALOR DE
+        LOS TERRENOS DE NATURALEZA URBANA.
+        ESTIMACIÓN DEL IMPORTE A PAGAR
+        OBJETO TRIBUTARIO CL MARCONI 7 06 29004
+
+        TRANSMISIÓN ACTUAL FECHA FIN PLAZO PRESENTACION/PAGO
+        Tipo Fecha Fecha fallecimiento
+        COMPRAVENTA 09/04/2025 26/05/2025
+
+        1 BIEN TRANSMITIDO (OBJETO TRIBUTARIO) FECHA ADQUISICIÓN
+        REF. CATASTRAL 0123104UF7602S0006IB
+        VALOR CATASTRAL
+        A TIPO EDAD % (D) t1 23/02/2007 100,00
+        26.878,89
+        VALOR SUELO Usufructo
+        B 17.901,36 t2
+        Nuda prop. 100,00% t3
+
+        % VALOR SUELO SOBRE VALOR CATASTRAL (B/A) 66,60
+
+        SUMA = BASE IMPONIBLE MÉTODO OBJETIVO 3.043,23
+        BASE IMPONIBLE 3.043,23
+        Tipo gravamen 29,0
+        CUOTA TRIBUTARIA 882,54
+        IMPORTE TOTAL 882,54
+        """
+        out = _iivtnu_extract_from_text(text, filename="simulacionPlusvalia año 2025.pdf")
+        self.assertEqual(out.get("doc_type"), "simulacion_ayuda")
+        self.assertEqual(out.get("codigo_postal"), "29004")
+        self.assertEqual(out.get("fecha_transmision"), "2025-04-09")
+        self.assertEqual(out.get("fecha_adquisicion"), "2007-02-23")
+        self.assertAlmostEqual(float(out.get("valor_catastral_total") or 0), 26878.89, places=2)
+        self.assertAlmostEqual(float(out.get("valor_suelo") or 0), 17901.36, places=2)
+        self.assertAlmostEqual(float(out.get("porcentaje_suelo") or 0), 66.60, places=2)
+        self.assertAlmostEqual(float(out.get("base_imponible") or 0), 3043.23, places=2)
+        self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 29.0, places=2)
+        self.assertAlmostEqual(float(out.get("cuota_tributaria") or 0), 882.54, places=2)
+        self.assertAlmostEqual(float(out.get("importe_total") or 0), 882.54, places=2)

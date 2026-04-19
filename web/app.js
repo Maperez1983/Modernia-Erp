@@ -5935,6 +5935,7 @@ const renderIivtnuParsed = (parsed = null) => {
 		    ["Valor transmisión", parsed.valor_transmision],
 		    ["Valor adquisición", parsed.valor_adquisicion],
 		    ["% participación", parsed.participacion_pct],
+		    ["% suelo (B/A)", parsed.porcentaje_suelo],
 		    ["Base imponible", parsed.base_imponible],
 		    ["Tipo gravamen (%)", parsed.tipo_gravamen_pct],
 		    ["Cuota", parsed.cuota_tributaria],
@@ -6073,6 +6074,7 @@ const ensureIivtnuSimulator = async () => {
       const vTx = iivtnuSimulatorForm.querySelector('[name="valor_transmision"]');
       const tipoTrans = iivtnuSimulatorForm.querySelector('[name="tipo_transmision"]');
       const derecho = iivtnuSimulatorForm.querySelector('[name="derecho_tipo"]');
+      const pctSuelo = iivtnuSimulatorForm.querySelector('[name="porcentaje_suelo"]');
       if (acq && parsed.fecha_adquisicion) acq.value = parsed.fecha_adquisicion;
       if (tx && parsed.fecha_transmision) tx.value = parsed.fecha_transmision;
       if (vs && parsed.valor_suelo != null) vs.value = String(parsed.valor_suelo);
@@ -6082,6 +6084,8 @@ const ensureIivtnuSimulator = async () => {
       if (vAdq && parsed.valor_adquisicion != null) vAdq.value = String(parsed.valor_adquisicion);
       if (vTx && parsed.valor_transmision != null) vTx.value = String(parsed.valor_transmision);
       if (pct && parsed.participacion_pct != null) pct.value = String(parsed.participacion_pct);
+      if (pct && parsed.subdivision_pct != null && (!pct.value || pct.value === "100")) pct.value = String(parsed.subdivision_pct);
+      if (pctSuelo && parsed.porcentaje_suelo != null && (!pctSuelo.value || pctSuelo.value === "0")) pctSuelo.value = String(parsed.porcentaje_suelo);
       if (bonif && parsed.bonificacion_pct != null) bonif.value = String(parsed.bonificacion_pct);
       if (tipo && parsed.tipo_gravamen_pct != null) tipo.value = String(parsed.tipo_gravamen_pct);
       if (tipoTrans && parsed.clase_transmision) {
