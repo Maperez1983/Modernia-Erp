@@ -5400,6 +5400,56 @@ IIVTNU_MAX_COEFS_RDL_8_2023_2024 = {
     "20+": 0.40,
 }
 
+# RDL 26/2021 (BOE 09/11/2021): coeficientes máximos tras reforma (vigentes 2021-11-10 a 2022-12-31, salvo actualización anual).
+IIVTNU_MAX_COEFS_RDL_26_2021_2022 = {
+    "lt1": 0.14,
+    "1": 0.13,
+    "2": 0.15,
+    "3": 0.16,
+    "4": 0.17,
+    "5": 0.17,
+    "6": 0.16,
+    "7": 0.12,
+    "8": 0.10,
+    "9": 0.09,
+    "10": 0.08,
+    "11": 0.08,
+    "12": 0.08,
+    "13": 0.08,
+    "14": 0.10,
+    "15": 0.12,
+    "16": 0.16,
+    "17": 0.20,
+    "18": 0.26,
+    "19": 0.36,
+    "20+": 0.45,
+}
+
+# Ley 31/2022 (BOE 24/12/2022, PGE 2023) - vigente desde 01/01/2023 hasta 31/12/2023 (actualizado por RDL 8/2023 desde 01/01/2024).
+IIVTNU_MAX_COEFS_L_31_2022_2023 = {
+    "lt1": 0.15,
+    "1": 0.15,
+    "2": 0.14,
+    "3": 0.15,
+    "4": 0.17,
+    "5": 0.18,
+    "6": 0.19,
+    "7": 0.18,
+    "8": 0.15,
+    "9": 0.12,
+    "10": 0.10,
+    "11": 0.09,
+    "12": 0.09,
+    "13": 0.09,
+    "14": 0.09,
+    "15": 0.10,
+    "16": 0.13,
+    "17": 0.17,
+    "18": 0.23,
+    "19": 0.29,
+    "20+": 0.45,
+}
+
 # RDL 16/2025 (BOE 24/12/2025) - vigente del 01/01/2026 al 27/01/2026; derogado desde 28/01/2026.
 IIVTNU_MAX_COEFS_RDL_16_2025_TEMP_2026 = {
     "lt1": 0.16,
@@ -5432,9 +5482,19 @@ def _iivtnu_max_coefs_for_devengo(devengo_date):
             "source_label": "RDL 16/2025 (coeficientes máximos 01/01/2026–27/01/2026; derogado desde 28/01/2026)",
             "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2025-26458",
         }
-    return IIVTNU_MAX_COEFS_RDL_8_2023_2024, {
-        "source_label": "RDL 8/2023 (coeficientes máximos desde 01/01/2024)",
-        "source_url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2023-26452",
+    if isinstance(devengo_date, date) and devengo_date >= date(2024, 1, 1):
+        return IIVTNU_MAX_COEFS_RDL_8_2023_2024, {
+            "source_label": "RDL 8/2023 (coeficientes máximos desde 01/01/2024)",
+            "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2023-26452",
+        }
+    if isinstance(devengo_date, date) and devengo_date >= date(2023, 1, 1):
+        return IIVTNU_MAX_COEFS_L_31_2022_2023, {
+            "source_label": "Ley 31/2022 (PGE 2023) (coeficientes máximos desde 01/01/2023)",
+            "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2022-22128",
+        }
+    return IIVTNU_MAX_COEFS_RDL_26_2021_2022, {
+        "source_label": "RDL 26/2021 (coeficientes máximos tras reforma; vigente 2021-11-10–2022-12-31)",
+        "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2021-18276",
     }
 
 
