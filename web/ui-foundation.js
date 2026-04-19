@@ -572,11 +572,10 @@
 		      .filter(Boolean)
 		      .join(" · ") || "Atajos: / buscar · Esc cerrar modal";
 
-        const holdingBackBtn = document.getElementById("holdingBackBtn");
-        const showHoldingBack = isVisible(holdingBackBtn);
-        contextBackBtn.textContent = holdingBackBtn?.textContent?.trim() || "Volver al panel";
-        contextBackBtn.classList.toggle("hidden", !showHoldingBack);
-        document.body.classList.toggle("ui-context-holding-back", showHoldingBack);
+        // Evita parpadeos: el botón "Volver" se mantiene dentro de la vista (holdingSection)
+        // y no se mueve dinámicamente a la barra de contexto.
+        contextBackBtn.classList.add("hidden");
+        document.body.classList.remove("ui-context-holding-back");
 
 		    const visibleDirtyCount = Array.from(dirtyForms).reduce((acc, formId) => {
 		      const form = document.getElementById(formId);
