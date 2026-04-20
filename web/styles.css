@@ -4869,7 +4869,8 @@ body.tc-resizing {
 #crmSection .crm-insert-modal {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  /* Debe quedar por encima del explorador legacy (sticky headers, etc.). */
+  z-index: 9000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4895,7 +4896,7 @@ body.tc-resizing {
 #crmSection .crm-insert-modal--anchored {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 9010;
   display: block;
   padding: 0;
   /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
