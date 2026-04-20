@@ -4377,6 +4377,7 @@ const openActionEditor = (ev, context = null) => {
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
+  syncCrmModalOpenState();
 };
 
 const openActionCreator = (dateValue, timeValue, serviceValue, context = null) => {
@@ -4424,6 +4425,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
+  syncCrmModalOpenState();
 };
 
 const closeActionEditor = () => {
@@ -4432,6 +4434,7 @@ const closeActionEditor = () => {
   state.actionModalContext = null;
   if (actionModalServicioSelect) actionModalServicioSelect.disabled = false;
   if (actionModalEstado) actionModalEstado.disabled = false;
+  syncCrmModalOpenState();
 };
 
 const agendaStates = new Map();
@@ -18387,6 +18390,17 @@ const positionCrmInsertModal = (anchorEl) => {
   }
 };
 
+const syncCrmModalOpenState = () => {
+  try {
+    const open =
+      (crmInsertModal && !crmInsertModal.classList.contains("hidden") && !crmInsertModal.classList.contains("crm-insert-modal--dropdown")) ||
+      (crmClienteModal && !crmClienteModal.classList.contains("hidden")) ||
+      (crmCaptacionModal && !crmCaptacionModal.classList.contains("hidden")) ||
+      (actionModal && !actionModal.classList.contains("hidden"));
+    document.body.classList.toggle("modal-open", Boolean(open));
+  } catch {}
+};
+
 const setCrmQuickNewOpen = (open = false, options = {}) => {
   if (!crmInsertModal) return;
   const next = Boolean(open);
@@ -18418,15 +18432,16 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
     filterCrmInsertList();
-		  } else {
-		    crmInsertAnchorEl = null;
-		    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-		    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
-		    crmInsertModal.style.removeProperty("--crm-insert-left");
-		    crmInsertModal.style.removeProperty("--crm-insert-top");
-		    crmInsertModal.style.removeProperty("--crm-sidebar-right");
-		  }
-		};
+			  } else {
+			    crmInsertAnchorEl = null;
+			    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+			    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+			    crmInsertModal.style.removeProperty("--crm-insert-left");
+			    crmInsertModal.style.removeProperty("--crm-insert-top");
+			    crmInsertModal.style.removeProperty("--crm-sidebar-right");
+			  }
+			  syncCrmModalOpenState();
+			};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -18565,18 +18580,19 @@ const setCrmClienteModalOpen = (open = false) => {
         crmClienteCreateForm?.reset?.();
       } catch {}
     }
-    setTimeout(() => {
-      const input = crmClienteCreateForm?.querySelector?.('input[name="nombre"]');
-      if (input && input.focus) input.focus();
-    }, 0);
-  }
-};
+	    setTimeout(() => {
+	      const input = crmClienteCreateForm?.querySelector?.('input[name="nombre"]');
+	      if (input && input.focus) input.focus();
+	    }, 0);
+	  }
+  syncCrmModalOpenState();
+	};
 
-const setCrmCaptacionModalOpen = (open = false) => {
-  if (!crmCaptacionModal) return;
-  const next = Boolean(open);
-  crmCaptacionModal.classList.toggle("hidden", !next);
-  if (next) {
+	const setCrmCaptacionModalOpen = (open = false) => {
+	  if (!crmCaptacionModal) return;
+	  const next = Boolean(open);
+	  crmCaptacionModal.classList.toggle("hidden", !next);
+	  if (next) {
     setCrmQuickNewOpen(false);
     setCrmRecentOpen(false);
     if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "";
@@ -18598,11 +18614,12 @@ const setCrmCaptacionModalOpen = (open = false) => {
       const input = crmCaptacionCreateForm?.querySelector?.('input[name="direccion"]');
       if (input && input.focus) input.focus();
     }, 0);
-    try {
-      bindPostalLookup(crmCaptacionCreateForm);
-    } catch {}
-  }
-};
+	    try {
+	      bindPostalLookup(crmCaptacionCreateForm);
+	    } catch {}
+	  }
+	  syncCrmModalOpenState();
+	};
 
 const createCrmClienteQuick = async (payload = {}, opts = {}) => {
   const empresa = resolveCrmInmoEmpresa();
@@ -56439,6 +56456,22 @@ if (crmClienteCloseBtn) {
   crmClienteCloseBtn.addEventListener("click", () => setCrmClienteModalOpen(false));
 }
 
+if (crmClienteModal) {
+  crmClienteModal.addEventListener("click", (event) => {
+    if (event.target === crmClienteModal) {
+      setCrmClienteModalOpen(false);
+    }
+  });
+}
+
+if (crmCaptacionModal) {
+  crmCaptacionModal.addEventListener("click", (event) => {
+    if (event.target === crmCaptacionModal) {
+      setCrmCaptacionModalOpen(false);
+    }
+  });
+}
+
 if (crmClienteCreateForm) {
   crmClienteCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -57885,6 +57918,14 @@ if (gestoriaCrmViews) {
 if (actionModalClose) {
   actionModalClose.addEventListener("click", () => {
     closeActionEditor();
+  });
+}
+
+if (actionModal) {
+  actionModal.addEventListener("click", (event) => {
+    if (event.target === actionModal) {
+      closeActionEditor();
+    }
   });
 }
 
