@@ -9091,14 +9091,15 @@
             Notas
             <textarea id="actionModalNotas" rows="2"></textarea>
           </label>
-        </div>
-        <div class="modal-actions">
-          <button type="button" id="actionModalOpenCliente" class="secondary">Abrir cliente</button>
-          <button type="button" id="actionModalSave">Guardar cambios</button>
-          <span id="actionModalStatus" class="muted"></span>
-        </div>
-		      </div>
-		    </div>
+	        </div>
+	        <div class="modal-actions">
+	          <button type="button" id="actionModalOpenCliente" class="secondary">Abrir cliente</button>
+	          <button type="button" id="actionModalCreateCliente" class="secondary ghost">Nuevo cliente</button>
+	          <button type="button" id="actionModalSave">Guardar cambios</button>
+	          <span id="actionModalStatus" class="muted"></span>
+	        </div>
+			      </div>
+			    </div>
 
 		    <div id="gestoriaRentaQuickModal" class="modal hidden" aria-hidden="true">
 		      <div class="modal-content">
@@ -9415,11 +9416,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=585"></script>
+				    <script src="app.js?v=586"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=198";
+				        const TARGET_SW = "/sw.js?v=199";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

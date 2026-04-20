@@ -2733,6 +2733,7 @@ const actionModalRecordatorio = document.getElementById("actionModalRecordatorio
 const actionModalSave = document.getElementById("actionModalSave");
 const actionModalStatus = document.getElementById("actionModalStatus");
 const actionModalOpenCliente = document.getElementById("actionModalOpenCliente");
+const actionModalCreateCliente = document.getElementById("actionModalCreateCliente");
 const finAgendaTable = document.getElementById("finAgendaTable");
 const finAgendaInfo = document.getElementById("finAgendaInfo");
 const finSimOpenFromAgenda = document.getElementById("finSimOpenFromAgenda");
@@ -4287,9 +4288,30 @@ const ensureModalDataLoaded = async () => {
   }
 };
 
+const ensureActionModalClientesReady = async () => {
+  try {
+    if (!state.clientesList || !state.clientesList.length) {
+      await loadClientesList().catch(() => null);
+    }
+    populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
+  } catch {}
+};
+
+const syncActionModalClienteButtons = () => {
+  const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
+  if (actionModalOpenCliente) {
+    actionModalOpenCliente.disabled = !clienteData.cliente_id;
+  }
+  if (actionModalCreateCliente) {
+    const nombre = String(clienteData.cliente_nombre || "").trim();
+    actionModalCreateCliente.disabled = !nombre || Boolean(clienteData.cliente_id);
+  }
+};
+
 const openActionEditor = (ev, context = null) => {
   if (!actionModal) return;
   ensureModalDataLoaded();
+  void ensureActionModalClientesReady();
   currentActionEdit = ev;
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalServicioSelect) {
@@ -4334,12 +4356,14 @@ const openActionEditor = (ev, context = null) => {
     if (ctxClienteNombre && actionModalClienteInput) actionModalClienteInput.value = ctxClienteNombre;
     if (ctxClienteId && actionModalClienteId) actionModalClienteId.value = ctxClienteId;
   }
+  syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
 };
 
 const openActionCreator = (dateValue, timeValue, serviceValue, context = null) => {
   if (!actionModal) return;
   ensureModalDataLoaded();
+  void ensureActionModalClientesReady();
   currentActionEdit = null;
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalStatus) actionModalStatus.textContent = "";
@@ -4371,6 +4395,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
       actionModalServicioSelect.value = String(ctx.servicio || ctx.service || "").trim();
     }
   }
+  syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
 };
 
@@ -26961,8 +26986,14 @@ const populateAgendaClientes = (listEl, inputEl, hiddenEl) => {
       );
       hiddenEl.value = match ? match.id : "";
     };
-    inputEl.addEventListener("input", handler);
-    inputEl.addEventListener("change", handler);
+    if (hiddenEl) {
+      if (inputEl.dataset.agendaBoundBase !== "1") {
+        inputEl.dataset.agendaBoundBase = "1";
+        inputEl.addEventListener("input", handler);
+        inputEl.addEventListener("change", handler);
+      }
+      handler();
+    }
   }
 };
 
@@ -57702,6 +57733,13 @@ if (actionModalClose) {
   });
 }
 
+if (actionModalClienteInput) {
+  const sync = () => syncActionModalClienteButtons();
+  actionModalClienteInput.addEventListener("input", sync);
+  actionModalClienteInput.addEventListener("change", sync);
+  actionModalClienteInput.addEventListener("blur", sync);
+}
+
 if (actionModalServicioSelect) {
   actionModalServicioSelect.addEventListener("change", () => {
     populateActionModalResponsables(actionModalServicioSelect.value || "");
@@ -57812,11 +57850,49 @@ if (actionModalSave) {
   });
 }
 
+if (actionModalCreateCliente) {
+  actionModalCreateCliente.addEventListener("click", async () => {
+    const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
+    const nombre = String(clienteData.cliente_nombre || "").trim();
+    if (!nombre) {
+      actionModalClienteInput?.focus?.();
+      return;
+    }
+    if (clienteData.cliente_id) {
+      syncActionModalClienteButtons();
+      return;
+    }
+    const ok = window.confirm(`Crear nuevo cliente “${nombre}”?`);
+    if (!ok) return;
+    if (actionModalStatus) actionModalStatus.textContent = "Creando cliente...";
+    actionModalCreateCliente.disabled = true;
+    try {
+      const clienteId = await createCrmClienteQuick({ nombre }, { preferExisting: true });
+      await loadClientesList().catch(() => null);
+      populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
+      if (actionModalClienteId) actionModalClienteId.value = clienteId;
+      const matched = (Array.isArray(state.clientesList) ? state.clientesList : []).find((c) => c.id === clienteId);
+      if (matched && actionModalClienteInput) {
+        actionModalClienteInput.value = formatNombreCliente(matched.nombre);
+      }
+      if (actionModalStatus) actionModalStatus.textContent = "Cliente creado.";
+    } catch (err) {
+      if (actionModalStatus) actionModalStatus.textContent = err?.message || "Error al crear cliente.";
+    } finally {
+      syncActionModalClienteButtons();
+    }
+  });
+}
+
 if (actionModalOpenCliente) {
   actionModalOpenCliente.addEventListener("click", () => {
-    if (currentActionEdit && currentActionEdit.cliente_id) {
+    const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
+    const id = String(clienteData.cliente_id || currentActionEdit?.cliente_id || "").trim();
+    if (id) {
       closeActionEditor();
-      openClienteDetail(currentActionEdit.cliente_id);
+      openClienteDetail(id);
+    } else if (actionModalClienteInput) {
+      actionModalClienteInput.focus();
     }
   });
 }
