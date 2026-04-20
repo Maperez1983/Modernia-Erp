@@ -348,7 +348,7 @@ def _iter_s3_legacy_key_candidates(key: str):
     # sin prefijo ni extensión, pero el objeto en S3 podía estar bajo `docs/` o `renta(s)/`
     # o tener `.pdf`. Probamos variantes conservadoras.
     if re.fullmatch(r"[0-9a-fA-F]{32}", safe) and "/" not in safe:
-        prefixes = ["docs", "renta", "rentas"]
+        prefixes = ["gestoria", "gestoria_docs", "docs", "renta", "rentas"]
         suffixes = ["", ".pdf"]
         for pref in prefixes:
             for suf in suffixes:

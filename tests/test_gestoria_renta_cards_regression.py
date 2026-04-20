@@ -23,6 +23,10 @@ class GestoriaRentaCardsRegressionTests(unittest.TestCase):
         self.assertIn('doc_id_clause = "1=0"', server_py)
         self.assertIn('ref_id_clause = "1=0"', server_py)
 
+    def test_s3_legacy_candidates_include_gestoria_prefix(self):
+        server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
+        self.assertIn('prefixes = ["gestoria", "gestoria_docs", "docs", "renta", "rentas"]', server_py)
+
 
 if __name__ == "__main__":
     unittest.main()
