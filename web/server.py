@@ -384,6 +384,12 @@ def _looks_like_placeholder_doc_key(value: object) -> bool:
         return False
     return bool(re.fullmatch(r"[0-9a-fA-F]{32}", text))
 
+def _normalize_doc_key_for_ui(value: object) -> str:
+    text = str(value or "").strip()
+    if not text or _looks_like_placeholder_doc_key(text):
+        return ""
+    return _normalize_s3_key(text) if text.startswith("s3://") else text
+
 
 def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):
     if not session:
@@ -53161,6 +53167,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if cliente_id:
+                # Enriquecimiento: si hay campañas de renta con doc_key/doc_url, pero el registro `gestoria_docs`
+                # quedó con `notas` (ruta local) y sin enlaces públicos, inyectamos el enlace desde la campaña
+                # para que el botón "Ver" funcione.
+                renta_doc_by_doc_id = {}
+                renta_doc_by_ref_id = {}
+                try:
+                    cg_row = conn.execute(
+                        "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                        (cliente_id,),
+                    ).fetchone()
+                    renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+                    entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+                    for entry in entries:
+                        entry_id = str(entry.get("id") or "").strip()
+                        ejercicio = str(entry.get("ejercicio") or "").strip()
+                        doc_key = _normalize_doc_key_for_ui(entry.get("doc_key") or "")
+                        doc_url = str(entry.get("doc_url") or "").strip()
+                        if not doc_key and not _is_public_doc_url(doc_url):
+                            continue
+                        ref_id = f"renta-{ejercicio}-{entry_id}" if ejercicio and entry_id else ""
+                        if ref_id:
+                            renta_doc_by_ref_id[ref_id] = (doc_key, doc_url)
+                        for field in ("doc_borrador_id", "doc_presentada_id"):
+                            doc_id = str(entry.get(field) or "").strip()
+                            if doc_id:
+                                renta_doc_by_doc_id[doc_id] = (doc_key, doc_url)
+                except Exception:
+                    renta_doc_by_doc_id = {}
+                    renta_doc_by_ref_id = {}
+
                 where = ["cliente_id = ?"]
                 values = [cliente_id]
                 if service:
@@ -53238,6 +53274,18 @@ class Handler(BaseHTTPRequestHandler):
                     payload = dict(r)
                     # Sanitiza links: algunos syncs antiguos guardaron rutas locales o "doc_key" placeholder.
                     # Evitamos enseñar botón "Ver" si no hay un enlace abrible desde el navegador.
+                    try:
+                        rid = str(payload.get("id") or "").strip()
+                        ref_id = str(payload.get("referencia_id") or "").strip()
+                        injected = renta_doc_by_doc_id.get(rid) or renta_doc_by_ref_id.get(ref_id)
+                        if injected:
+                            injected_key, injected_url = injected
+                            if not payload.get("doc_key") and injected_key:
+                                payload["doc_key"] = injected_key
+                            if (not _is_public_doc_url(payload.get("doc_url"))) and _is_public_doc_url(injected_url):
+                                payload["doc_url"] = injected_url
+                    except Exception:
+                        pass
                     if not _is_public_doc_url(payload.get("doc_url")):
                         payload["doc_url"] = ""
                     if _looks_like_placeholder_doc_key(payload.get("doc_key")) and not payload.get("doc_url"):

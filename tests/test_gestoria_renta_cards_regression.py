@@ -31,6 +31,8 @@ class GestoriaRentaCardsRegressionTests(unittest.TestCase):
         server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
         self.assertIn("_looks_like_placeholder_doc_key", server_py)
         self.assertIn("_is_public_doc_url", server_py)
+        self.assertIn("renta_doc_by_doc_id", server_py)
+        self.assertIn("renta_doc_by_ref_id", server_py)
 
 
 if __name__ == "__main__":
