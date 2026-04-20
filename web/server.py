@@ -31553,10 +31553,33 @@ def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
                 if oann:
                     tann = tpage.get("/Annots")
                     if tann:
+                        # Evita duplicados: algunos visores/implementaciones pueden copiar /Annots al hacer merge_page().
                         try:
-                            tann.extend(oann)
+                            existing = set()
+                            for a in list(tann):
+                                try:
+                                    key = (getattr(a, "idnum", None), getattr(a, "generation", None))
+                                except Exception:
+                                    key = None
+                                if not key or key == (None, None):
+                                    key = repr(a)
+                                existing.add(key)
+                            for a in list(oann):
+                                try:
+                                    key = (getattr(a, "idnum", None), getattr(a, "generation", None))
+                                except Exception:
+                                    key = None
+                                if not key or key == (None, None):
+                                    key = repr(a)
+                                if key in existing:
+                                    continue
+                                tann.append(a)
+                                existing.add(key)
                         except Exception:
-                            tpage[NameObject("/Annots")] = oann
+                            try:
+                                tann.extend(oann)
+                            except Exception:
+                                tpage[NameObject("/Annots")] = oann
                     else:
                         tpage[NameObject("/Annots")] = oann
             except Exception:
@@ -33559,7 +33582,8 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
         iva_pct = "21"
     lugar = str(extra.get("lugar_firma") or "").strip()
 
-    # Preferimos plantilla Modernia "DECLARACIÓN COMISIÓN - COMPRAVENTA" (no editable) para que sea idéntica al modelo.
+    # Preferimos plantilla Modernia "DECLARACIÓN COMISIÓN - COMPRAVENTA" como base visual idéntica al modelo,
+    # pero con campos editables (AcroForm) para que el usuario complete el resto a criterio.
     template_path = INMO_DECLARACION_COMISION_COMPRAVENTA_TEMPLATE
     if template_path.exists() and rl_canvas is not None and PdfReader is not None:
         try:
@@ -33580,37 +33604,81 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
                 raw = str(value or "").strip()
                 return raw.upper() if raw else ""
 
-            # Datos básicos
-            direccion = str((inmueble or {}).get("direccion") or "").strip()
-            cp = str((inmueble or {}).get("codigo_postal") or "").strip()
-            poblacion = str((inmueble or {}).get("poblacion") or "").strip()
-            provincia = str((inmueble or {}).get("provincia") or "").strip()
-            locality = " ".join([p for p in [cp, poblacion] if p]).strip()
-            direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion
+            # La plantilla está en A4 y se alineó usando referencia estable a 150dpi (1240x1755).
+            w0, h0 = pagesizes[0]
+            sx = float(w0) / 1240.0
+            sy = float(h0) / 1755.0
+            y_pad = 2.4  # ajuste fino (alineación vertical vs subrayado)
 
-            try:
-                fecha_promesa = fmt_ddmmyyyy(fecha)
-            except Exception:
-                fecha_promesa = str(fecha or "").strip()
+            def px_to_pt_x(px):
+                return float(px) * sx
 
-            # Honorarios: si viene importe explícito, se usa; si no, preferimos % + IVA.
-            honorarios_pct = str(extra.get("honorarios_pct") or "").strip()
-            honorarios_eur = str(extra.get("honorarios_eur") or honorarios_importe or "").strip()
-            use_pct = bool(honorarios_pct and not honorarios_eur)
-            if not honorarios_pct:
-                honorarios_pct = "4"
+            def px_to_pt_y(py):
+                return (1755.0 - float(py)) * sy - y_pad
 
-            fields = {
+            buyer_domicilio = str(buyer.get("direccion") or buyer.get("domicilio") or "").strip()
+            buyer_domicilio = u(buyer_domicilio)
+            buyer_nif_u = u(buyer_nif)
+            buyer_tel_u = u(buyer_tel)
+            buyer_email_u = u(buyer_email)
+
+            # 1) Pintamos los datos personales como texto plano (siempre visible en cualquier visor/impresión).
+            text_fields = {
                 0: [
-                    # C1 (nombre + NIF) sobre plantilla Modernia (A4)
-                    {"x": 67.7, "y": 682.6, "width": 346.4, "height": 14, "value": u(buyer_name), "fontSize": 9},
+                    {"x": px_to_pt_x(141), "y": px_to_pt_y(327), "width": px_to_pt_x(863) - px_to_pt_x(141), "height": 14, "value": u(buyer_name), "fontSize": 9},
+                    {"x": px_to_pt_x(208), "y": px_to_pt_y(369), "width": px_to_pt_x(766) - px_to_pt_x(208), "height": 14, "value": buyer_domicilio, "fontSize": 9},
+                    {"x": px_to_pt_x(898), "y": px_to_pt_y(369), "width": px_to_pt_x(1065) - px_to_pt_x(898), "height": 14, "value": buyer_tel_u, "fontSize": 9},
+                    {"x": px_to_pt_x(59), "y": px_to_pt_y(411), "width": px_to_pt_x(480) - px_to_pt_x(59), "height": 14, "value": buyer_email_u, "fontSize": 9},
+                    {"x": px_to_pt_x(551), "y": px_to_pt_y(411), "width": px_to_pt_x(803) - px_to_pt_x(551), "height": 14, "value": buyer_nif_u, "fontSize": 9},
+                    {"x": px_to_pt_x(62), "y": px_to_pt_y(1404), "width": px_to_pt_x(246) - px_to_pt_x(62), "height": 14, "value": u(lugar), "fontSize": 9},
                 ]
             }
-            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
-            if overlay_bytes:
-                merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
-                if merged:
-                    return merged
+            overlay_text_bytes = _build_static_text_overlay_pdf(pagesizes, text_fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            template_with_text = template_bytes
+            if overlay_text_bytes:
+                merged_text = _merge_template_with_overlay_pdf(template_bytes, overlay_text_bytes)
+                if merged_text:
+                    template_with_text = merged_text
+
+            # 2) Campos editables para completar a criterio (sin bordes ni cajas).
+            form_fields = {
+                0: [
+                    # C2 (opcional, editable)
+                    {"name": "c2_nombre", "x": px_to_pt_x(162), "y": px_to_pt_y(466), "width": px_to_pt_x(878) - px_to_pt_x(162), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "c2_domicilio", "x": px_to_pt_x(208), "y": px_to_pt_y(508), "width": px_to_pt_x(766) - px_to_pt_x(208), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "c2_telefono", "x": px_to_pt_x(919), "y": px_to_pt_y(508), "width": px_to_pt_x(1065) - px_to_pt_x(919), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "c2_email", "x": px_to_pt_x(59), "y": px_to_pt_y(550), "width": px_to_pt_x(469) - px_to_pt_x(59), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "c2_nif", "x": px_to_pt_x(550), "y": px_to_pt_y(550), "width": px_to_pt_x(803) - px_to_pt_x(550), "height": 14, "value": "", "fontSize": 9},
+
+                    # Representación (editable)
+                    {"name": "rep_nombre", "x": px_to_pt_x(407), "y": px_to_pt_y(713), "width": px_to_pt_x(1039) - px_to_pt_x(407), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "rep_domicilio", "x": px_to_pt_x(229), "y": px_to_pt_y(768), "width": px_to_pt_x(913) - px_to_pt_x(229), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "rep_nifcif", "x": px_to_pt_x(59), "y": px_to_pt_y(809), "width": px_to_pt_x(311) - px_to_pt_x(59), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "rep_calidad", "x": px_to_pt_x(454), "y": px_to_pt_y(809), "width": px_to_pt_x(770) - px_to_pt_x(454), "height": 14, "value": "", "fontSize": 9},
+
+                    # Cláusula 1 (editable)
+                    {"name": "fecha_promesa", "x": px_to_pt_x(133), "y": px_to_pt_y(1041), "width": px_to_pt_x(1071) - px_to_pt_x(133), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "inmueble_sito", "x": px_to_pt_x(90), "y": px_to_pt_y(1110), "width": px_to_pt_x(1155) - px_to_pt_x(90), "height": 14, "value": "", "fontSize": 9},
+
+                    # Cláusula 2 (honorarios pactados) — editable
+                    {"name": "honorarios_pactados", "x": px_to_pt_x(560), "y": px_to_pt_y(1090), "width": px_to_pt_x(980) - px_to_pt_x(560), "height": 14, "value": "", "fontSize": 9},
+
+                    # Cláusula 3 (penalización % o €) — editable
+                    {"name": "penal_pct", "x": px_to_pt_x(85), "y": px_to_pt_y(1290), "width": px_to_pt_x(155) - px_to_pt_x(85), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "penal_eur", "x": px_to_pt_x(880), "y": px_to_pt_y(1290), "width": px_to_pt_x(1010) - px_to_pt_x(880), "height": 14, "value": "", "fontSize": 9},
+
+                    # Lugar/fecha (editable)
+                    {"name": "firma_dia", "x": px_to_pt_x(269), "y": px_to_pt_y(1404), "width": px_to_pt_x(362) - px_to_pt_x(269), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "firma_mes", "x": px_to_pt_x(399), "y": px_to_pt_y(1404), "width": px_to_pt_x(537) - px_to_pt_x(399), "height": 14, "value": "", "fontSize": 9},
+                    {"name": "firma_ano", "x": px_to_pt_x(574), "y": px_to_pt_y(1404), "width": px_to_pt_x(666) - px_to_pt_x(574), "height": 14, "value": "", "fontSize": 9},
+                ]
+            }
+
+            overlay_form_bytes = _build_acroform_overlay_pdf(pagesizes, form_fields)
+            if overlay_form_bytes:
+                merged_form = _merge_template_with_overlay_acroform(template_with_text, overlay_form_bytes)
+                if merged_form:
+                    return _pdf_fix_acroform_preview_overlap(merged_form)
 
     if rl_canvas is None or rl_colors is None:
         # Fallback no editable.
