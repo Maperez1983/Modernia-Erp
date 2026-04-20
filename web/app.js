@@ -3148,6 +3148,7 @@ const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn")
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
 const hipotecaBdtTable = document.getElementById("hipotecaBdtTable");
 const hipotecaBdtInfo = document.getElementById("hipotecaBdtInfo");
+const hipotecaBdtManualDetails = document.getElementById("hipotecaBdtManualDetails");
 const hipotecaDashboardRefresh = document.getElementById("hipotecaDashboardRefresh");
 const hipotecaDashboardKpis = document.getElementById("hipotecaDashboardKpis");
 const hipotecaDashboardYearSelect = document.getElementById("hipotecaDashboardYear");
@@ -4181,11 +4182,23 @@ const syncCurrentUserScope = () => {
   if (!user) {
     state.currentUserServices = [];
     state.currentUserServiceLabel = "";
+    syncHipotecaBdtManualVisibility();
     return;
   }
   state.currentUserServiceLabel = user.servicio || "";
   state.currentUserServices = expandServiceAliases(parseServiceList(user.servicio || ""));
+  syncHipotecaBdtManualVisibility();
 };
+
+function syncHipotecaBdtManualVisibility() {
+  if (!hipotecaBdtManualDetails) return;
+  const user = getAuthScopeUser();
+  const visible = !!(user && isPrivilegedUser(user));
+  hipotecaBdtManualDetails.classList.toggle("hidden", !visible);
+  if (!visible) {
+    hipotecaBdtManualDetails.open = false;
+  }
+}
 
 const getServiceFilterParam = () => {
   const user = getAuthScopeUser();

@@ -7323,8 +7323,9 @@
             </div>
 	            <div id="hipotecaBdtTable"></div>
 	            <div class="footer" id="hipotecaBdtInfo"></div>
-	            <h4 style="margin: 20px 0 6px;">Alta manual complementaria</h4>
-	            <p class="muted" style="margin-bottom: 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
+              <details id="hipotecaBdtManualDetails" class="form-card hidden" style="margin: 14px 0 18px 0; padding: 14px;">
+                <summary style="cursor:pointer; font-weight:600;">Alta manual complementaria</summary>
+                <p class="muted" style="margin: 10px 0 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
 	            <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
 	              <h4 style="margin-bottom: 6px;">Crear cliente</h4>
               <p class="muted" style="margin-bottom: 10px;">Alta rápida en Clientes y vínculo automático con Financiaciones.</p>
@@ -7475,6 +7476,7 @@
                 <span id="hipotecaFormStatus" class="muted"></span>
               </div>
             </form>
+              </details>
             <datalist id="bankList">
               <option value="Banco Santander"></option>
               <option value="BBVA"></option>
