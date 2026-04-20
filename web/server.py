@@ -1995,6 +1995,19 @@ def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None)
 def normalize_seguro_estado_value(value):
     return runtime_normalize_seguro_estado_value(value)
 
+def seguro_estado_requires_pdf(value: object) -> bool:
+    estado = normalize_seguro_estado_value(value or "")
+    norm = normalize_lookup_text(estado or "")
+    if not norm:
+        return False
+    if "CONTRAT" in norm:
+        return True
+    if "VIGOR" in norm:
+        return True
+    if norm in {"ACTIVA", "VIGENTE"}:
+        return True
+    return False
+
 
 def can_transition_seguro_estado(current_value, target_value):
     return runtime_can_transition_seguro_estado(current_value, target_value)
@@ -43090,6 +43103,9 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_cliente_servicio_link(conn, cliente_id, empresa["id"], "seguros", now)
             poliza_key = payload.get("poliza_key") or ""
             poliza_url = payload.get("poliza_url") or ""
+            if seguro_estado_requires_pdf(estado_incoming) and (not str(poliza_key or "").strip()) and (not str(poliza_url or "").strip()):
+                json_response(self, {"error": "Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor."}, status=400)
+                return
             ocr_quality = payload.get("ocr_quality") or {}
             calidad_ocr = ocr_quality.get("calidad") if isinstance(ocr_quality, dict) else payload.get("calidad_ocr")
             campos_ocr = ""
@@ -43963,6 +43979,16 @@ class Handler(BaseHTTPRequestHandler):
                         status=400,
                     )
                     return
+            next_estado = updates.get("estado", current_row["estado"])
+            next_key = str(updates.get("poliza_key", current_row["poliza_key"]) or "").strip()
+            next_url = str(updates.get("poliza_url", current_row["poliza_url"]) or "").strip()
+            if seguro_estado_requires_pdf(next_estado) and (not next_key) and (not next_url):
+                json_response(
+                    self,
+                    {"error": "Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor."},
+                    status=400,
+                )
+                return
             if "tipo_vigencia" in updates or "ramo" in updates:
                 updates["tipo_vigencia"] = infer_tipo_vigencia(
                     updates.get("ramo", current_row["ramo"]),
@@ -52027,6 +52053,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             key = _normalize_s3_key(key)
             session = getattr(self, "auth_session", None) or self._current_session()
+            # Compat: algunos syncs legacy guardaron `doc_key` como el id (32-hex) de `gestoria_docs`.
+            try:
+                doc_row = (
+                    conn.execute(
+                        "SELECT id, empresa_id, doc_key, doc_url FROM gestoria_docs WHERE id = ? LIMIT 1",
+                        (key,),
+                    ).fetchone()
+                    if _looks_like_placeholder_doc_key(key)
+                    else None
+                )
+            except Exception:
+                doc_row = None
+            if doc_row:
+                if not _gestoria_doc_visible_for_user(conn, session, doc_row["empresa_id"]):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                doc_key, doc_url = _doc_link_from_gestoria_doc_row(doc_row)
+                if doc_key:
+                    key = _normalize_s3_key(doc_key)
+                elif doc_url.startswith("/uploads/") or doc_url.startswith("http://") or doc_url.startswith("https://"):
+                    json_response(self, {"url": doc_url, "key": ""})
+                    return
             ok, err = _s3_key_visible_for_user(conn, session, key)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
@@ -52086,6 +52134,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             key = _normalize_s3_key(key)
             session = getattr(self, "auth_session", None) or self._current_session()
+            try:
+                doc_row = (
+                    conn.execute(
+                        "SELECT id, empresa_id, doc_key, doc_url FROM gestoria_docs WHERE id = ? LIMIT 1",
+                        (key,),
+                    ).fetchone()
+                    if _looks_like_placeholder_doc_key(key)
+                    else None
+                )
+            except Exception:
+                doc_row = None
+            if doc_row:
+                if not _gestoria_doc_visible_for_user(conn, session, doc_row["empresa_id"]):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                doc_key, doc_url = _doc_link_from_gestoria_doc_row(doc_row)
+                if doc_key:
+                    key = _normalize_s3_key(doc_key)
+                elif doc_url.startswith("/uploads/") or doc_url.startswith("http://") or doc_url.startswith("https://"):
+                    self.send_response(302)
+                    self.send_header("Location", doc_url)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    return
             ok, err = _s3_key_visible_for_user(conn, session, key)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
