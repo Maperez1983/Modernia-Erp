@@ -4899,9 +4899,9 @@ body.tc-resizing {
   z-index: 11010;
   display: block;
   padding: 0;
-  /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
-  background: rgba(11, 29, 51, 0.22);
-  backdrop-filter: blur(1px);
+  /* En modo anclado debe sentirse como un desplegable (sin oscurecer ni “pisar” visualmente la ficha). */
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .crm-insert-modal--anchored .crm-insert-card {
