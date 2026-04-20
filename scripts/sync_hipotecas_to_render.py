@@ -36,6 +36,7 @@ HIPOTECAS_COLUMNS = [
     "id",
     "empresa_id",
     "cliente",
+    "cliente_id",
     "banco",
     "precio",
     "importe_hipoteca",
@@ -56,6 +57,9 @@ HIPOTECAS_COLUMNS = [
     "anio",
     "created_at",
     "updated_at",
+    "cliente_inmueble_json",
+    "hipoteca_detalle_json",
+    "liquidacion_json",
 ]
 
 

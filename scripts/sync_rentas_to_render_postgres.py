@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -167,6 +169,11 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
         for doc in doc_rows:
             if allowed_cliente_ids and str(doc["cliente_id"]) not in allowed_cliente_ids:
                 continue
+            doc_key = str(doc["doc_key"] or "").strip()
+            doc_url = str(doc["doc_url"] or "").strip()
+            # Si no hay doc_key/doc_url reales (por ejemplo, solo rutas locales en notas), no sincronizamos.
+            if not doc_key and not doc_url:
+                continue
             docs_by_client.setdefault(str(doc["cliente_id"]), []).append(
                 {
                     "nombre": doc["nombre"],
@@ -174,8 +181,8 @@ def fetch_payload(local_db: Path, only_nifs: set[str] | None = None) -> dict:
                     "fecha": doc["fecha"],
                     "estado": doc["estado"],
                     "notas": doc["notas"],
-                    "doc_key": doc["doc_key"],
-                    "doc_url": doc["doc_url"],
+                    "doc_key": doc_key,
+                    "doc_url": doc_url,
                     "referencia_tipo": doc["referencia_tipo"],
                     "referencia_id": doc["referencia_id"],
                 }
@@ -582,6 +589,13 @@ finally:
     conn.close()
 '''
 
+# El string anterior se mantiene por compatibilidad/histórico, pero el script remoto real vive en
+# `scripts/rentas_sync_remote_pg.py` para evitar problemas de indentación/tabulaciones.
+try:
+    REMOTE_SCRIPT_PG = Path(__file__).with_name("rentas_sync_remote_pg.py").read_text(encoding="utf-8")
+except Exception as exc:
+    raise SystemExit(f"No se pudo leer scripts/rentas_sync_remote_pg.py: {exc}") from exc
+
 
 class CommandError(RuntimeError):
     def __init__(self, cmd: list[str], returncode: int, stdout: str, stderr: str):
@@ -592,10 +606,10 @@ class CommandError(RuntimeError):
         self.stderr = stderr or ""
 
 
-def run(cmd: list[str]) -> None:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+def run(cmd: list[str], *, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(cmd, input=input_bytes, capture_output=True, text=True)
     if proc.returncode == 0:
-        return
+        return proc
     raise CommandError(cmd, proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
@@ -632,6 +646,39 @@ def run_retry(cmd: list[str], retries: int, wait_seconds: float) -> None:
     raise SystemExit(last.returncode)
 
 
+def build_tar_gz(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tf:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            info.mtime = int(time.time())
+            tf.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def run_retry_with_input(cmd: list[str], input_bytes: bytes, retries: int, wait_seconds: float) -> subprocess.CompletedProcess[str]:
+    attempt = 0
+    last: CommandError | None = None
+    while attempt <= max(0, int(retries)):
+        try:
+            return run(cmd, input_bytes=input_bytes)
+        except CommandError as err:
+            last = err
+            if attempt >= retries or not is_transient_ssh_error(err):
+                break
+            print(f"[sync] Transient failure, retry {attempt + 1}/{retries}: {' '.join(cmd)}", file=sys.stderr)
+            time.sleep(max(0.5, float(wait_seconds)))
+            attempt += 1
+    assert last is not None
+    print(f"[sync] Command failed ({last.returncode}): {' '.join(last.cmd)}", file=sys.stderr)
+    if last.stdout:
+        print(last.stdout.rstrip(), file=sys.stderr)
+    if last.stderr:
+        print(last.stderr.rstrip(), file=sys.stderr)
+    raise SystemExit(last.returncode)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sincroniza rentas a Render (Postgres) por SSH.")
     parser.add_argument("--local-db", default="data/erp_import2.sqlite", help="Ruta a la SQLite local.")
@@ -641,6 +688,8 @@ def main() -> None:
     parser.add_argument("--only-nifs-csv", default="", help="CSV con columna 'nif' para sincronizar solo esos clientes.")
     parser.add_argument("--retries", type=int, default=6, help="Reintentos ante fallos transitorios de SSH/SCP.")
     parser.add_argument("--retry-wait", type=float, default=8.0, help="Segundos entre reintentos.")
+    parser.add_argument("--via-stdin", action="store_true", help="Sincroniza en una sola conexión SSH (recomendado en Render).")
+    parser.add_argument("--keep-remote", action="store_true", help="No borra los ficheros temporales en /tmp tras sincronizar.")
     parser.add_argument("--dry-run", action="store_true", help="Genera el payload pero no lo sube.")
     args = parser.parse_args()
 
@@ -665,6 +714,10 @@ def main() -> None:
         script_path = Path(tmpdir) / "rentas_sync_remote_pg.py"
         payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         script_path.write_text(REMOTE_SCRIPT_PG, encoding="utf-8")
+        try:
+            compile(REMOTE_SCRIPT_PG, "rentas_sync_remote_pg.py", "exec")
+        except SyntaxError as exc:
+            raise SystemExit(f"El script remoto no compila: {exc}") from exc
 
         docs_total = sum(len(item.get("docs") or []) for item in payload.get("items") or [])
         print(f"Preparados {len(payload['items'])} clientes de renta para sincronizar.")
@@ -673,11 +726,30 @@ def main() -> None:
         if args.dry_run:
             return
 
-        run_retry(["ssh", *SSH_OPTIONS, args.render_host, f"mkdir -p {scratch_dir}"], args.retries, args.retry_wait)
-        run_retry(["scp", *SSH_OPTIONS, str(payload_path), f"{args.render_host}:{remote_payload}"], args.retries, args.retry_wait)
-        run_retry(["scp", *SSH_OPTIONS, str(script_path), f"{args.render_host}:{remote_script}"], args.retries, args.retry_wait)
-        remote_cmd = f"{render_python} {remote_script} {remote_payload} && rm -f {remote_script} {remote_payload} && echo '__SYNC_OK__'"
-        run_retry(["ssh", *SSH_OPTIONS, args.render_host, remote_cmd], args.retries, args.retry_wait)
+        if args.via_stdin:
+            tar_bytes = build_tar_gz(
+                {
+                    "rentas_sync.json": payload_path.read_bytes(),
+                    "rentas_sync_remote_pg.py": script_path.read_bytes(),
+                }
+            )
+            cleanup = "" if args.keep_remote else f" && rm -rf {scratch_dir}"
+            remote_cmd = (
+                f"set -e; mkdir -p {scratch_dir} "
+                f"&& tar -xzf - -C {scratch_dir} "
+                f"&& {render_python} {remote_script} {remote_payload}{cleanup} "
+                f"&& echo '__SYNC_OK__'"
+            )
+            proc = run_retry_with_input(["ssh", *SSH_OPTIONS, args.render_host, remote_cmd], tar_bytes, args.retries, args.retry_wait)
+            if proc.stdout.strip():
+                print(proc.stdout.strip())
+        else:
+            run_retry(["ssh", *SSH_OPTIONS, args.render_host, f"mkdir -p {scratch_dir}"], args.retries, args.retry_wait)
+            run_retry(["scp", *SSH_OPTIONS, str(payload_path), f"{args.render_host}:{remote_payload}"], args.retries, args.retry_wait)
+            run_retry(["scp", *SSH_OPTIONS, str(script_path), f"{args.render_host}:{remote_script}"], args.retries, args.retry_wait)
+            cleanup = "" if args.keep_remote else f" && rm -rf {scratch_dir}"
+            remote_cmd = f"{render_python} {remote_script} {remote_payload}{cleanup} && echo '__SYNC_OK__'"
+            run_retry(["ssh", *SSH_OPTIONS, args.render_host, remote_cmd], args.retries, args.retry_wait)
         print("Sincronización de rentas completada (Render Postgres).")
 
 
