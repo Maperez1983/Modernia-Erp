@@ -31496,7 +31496,11 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
     cp = _pdf_form_value(inmueble.get("codigo_postal"), "")
     poblacion = _pdf_form_value(inmueble.get("poblacion"), "")
     provincia = _pdf_form_value(inmueble.get("provincia"), "")
-    direccion_full = ", ".join([part for part in [direccion, " ".join([p for p in [cp, poblacion] if p]).strip(), provincia] if part]).strip()
+    locality = " ".join([p for p in [cp, poblacion] if p]).strip()
+    provincia_clean = provincia
+    if provincia_clean and poblacion and provincia_clean.strip().lower() == poblacion.strip().lower():
+        provincia_clean = ""
+    direccion_full = ", ".join([part for part in [direccion, locality, provincia_clean] if part]).strip() or direccion
 
     ref_catastral = _pdf_form_value(inmueble.get("referencia_catastral"), "")
     datos_registrales = _pdf_form_value(extra.get("datos_registrales"), "")
@@ -31538,17 +31542,25 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
     owner2_text = owner_block(owner2)
 
     def _normalize_owner_city(owner):
+        owner = owner or {}
         for key in ("poblacion", "localidad", "ciudad", "municipio"):
-            val = str((owner or {}).get(key) or "").strip()
+            val = str(owner.get(key) or "").strip()
             if val:
                 return val
-        return str(inmueble.get("poblacion") or "").strip()
+        return ""
 
     def _normalize_owner_street(owner, city_hint=""):
-        raw = str((owner or {}).get("direccion") or (owner or {}).get("domicilio") or "").replace("\n", " ").strip()
+        owner = owner or {}
+        raw = str(owner.get("direccion") or owner.get("domicilio") or "").replace("\n", " ").strip()
         if not raw:
             return ""
         city_hint = str(city_hint or "").strip()
+        if city_hint:
+            try:
+                if raw.strip().lower().startswith(city_hint.lower()):
+                    raw = raw.strip()[len(city_hint) :].lstrip(" ,.-")
+            except Exception:
+                pass
         if city_hint:
             try:
                 raw = re.sub(rf",?\s*{re.escape(city_hint)}\\b.*$", "", raw, flags=re.IGNORECASE).strip()
@@ -31556,14 +31568,39 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
                 pass
         raw = re.sub(r"\\b\\d{5}\\b.*$", "", raw).strip()
         raw = re.sub(r"^\\s*(c/|c\\.|calle)\\s*", "", raw, flags=re.IGNORECASE).strip()
-        return raw
+        raw = re.sub(r"^\\s*c\\s*/\\s*", "", raw, flags=re.IGNORECASE).strip()
+        raw = re.sub(r"\\b\\d{5}\\b", "", raw).strip()
+        if city_hint:
+            try:
+                raw = re.sub(rf"\\b{re.escape(city_hint)}\\b", "", raw, flags=re.IGNORECASE).strip(" ,")
+            except Exception:
+                pass
+        return raw.strip(" ,")
 
     def _owner_fields(owner):
-        nombre = _pdf_form_value((owner or {}).get("nombre"), "")
-        nif_val = _pdf_form_value((owner or {}).get("nif"), "")
-        tel_val = _pdf_form_value((owner or {}).get("telefono"), "")
-        email_val = _pdf_form_value((owner or {}).get("email"), "")
-        city = _normalize_owner_city(owner)
+        owner = owner or {}
+        has_any = any(
+            str(owner.get(k) or "").strip()
+            for k in (
+                "nombre",
+                "nif",
+                "telefono",
+                "email",
+                "direccion",
+                "domicilio",
+                "poblacion",
+                "localidad",
+                "ciudad",
+                "municipio",
+            )
+        )
+        if not has_any:
+            return {"nombre": "", "nif": "", "telefono": "", "email": "", "ciudad": "", "calle": ""}
+        nombre = _pdf_form_value(owner.get("nombre"), "")
+        nif_val = _pdf_form_value(owner.get("nif"), "")
+        tel_val = _pdf_form_value(owner.get("telefono"), "")
+        email_val = _pdf_form_value(owner.get("email"), "")
+        city = _normalize_owner_city(owner) or str(inmueble.get("poblacion") or "").strip()
         street = _normalize_owner_street(owner, city_hint=city)
         return {
             "nombre": nombre,
