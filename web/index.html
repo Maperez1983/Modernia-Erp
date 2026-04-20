@@ -923,12 +923,20 @@
 		                    <option value="AL">Álava</option>
 		                  </select>
 		                </label>
-		                <label class="span-2">
-		                  Referencia (opcional)
-		                  <input name="referencia" placeholder="Inmueble / expediente / dirección" />
-		                </label>
-		                <div class="form-actions span-2">
-		                  <button type="button" class="secondary ghost" id="fiscalWizardOpenIrpfBtn">Abrir IRPF/IRNR</button>
+			                <label class="span-2">
+			                  Supuesto (biblioteca)
+			                  <div class="inline-row">
+			                    <select id="fiscalWizardPresetSelect"></select>
+			                    <button type="button" class="secondary ghost" id="fiscalWizardPresetLoadBtn">Cargar</button>
+			                  </div>
+			                  <div class="muted" id="fiscalWizardPresetStatus"></div>
+			                </label>
+			                <label class="span-2">
+			                  Referencia (opcional)
+			                  <input name="referencia" placeholder="Inmueble / expediente / dirección" />
+			                </label>
+			                <div class="form-actions span-2">
+			                  <button type="button" class="secondary ghost" id="fiscalWizardOpenIrpfBtn">Abrir IRPF/IRNR</button>
 		                  <button type="button" class="secondary ghost" id="fiscalWizardOpenIivtnuBtn">Abrir plusvalía (IIVTNU)</button>
 		                  <button type="button" class="secondary" id="fiscalWizardPdfBtn">Informe fiscal (PDF)</button>
 		                  <span id="fiscalWizardStatus" class="muted"></span>

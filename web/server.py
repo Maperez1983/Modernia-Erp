@@ -5716,6 +5716,539 @@ def _iivtnu_objective_coef(acq, devengo, coef_table):
     return {"years": years, "months": months, "coef_objetivo": coef}
 
 
+def _iivtnu_simulate(conn, payload: dict) -> dict:
+    if not conn:
+        raise ValueError("DB no disponible")
+    if not isinstance(payload, dict):
+        raise ValueError("payload inválido")
+
+    municipio_ine = str(payload.get("municipio_ine") or "").strip()
+    cp = normalize_postal_code(payload.get("codigo_postal") or "")
+    if not municipio_ine and cp:
+        try:
+            postal = _iivtnu_load_postal_cache()
+            municipio_ine = str((postal.get("cp_to") or {}).get(cp) or "").strip()
+        except Exception:
+            municipio_ine = ""
+    municipio_ine = str(municipio_ine or "").strip().zfill(5)
+    if not municipio_ine or municipio_ine == "00000":
+        raise ValueError("municipio requerido")
+
+    tipo_transmision = str(payload.get("tipo_transmision") or "").strip().lower()
+    situacion_especial = str(payload.get("situacion_especial") or "").strip().lower()
+    situacion_motivo = str(payload.get("situacion_motivo") or "").strip()
+
+    acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
+    devengo = parse_iso_date(payload.get("fecha_transmision") or "")
+    if not acq or not devengo:
+        raise ValueError("Fechas inválidas")
+    if devengo <= acq:
+        raise ValueError("La fecha de transmisión debe ser posterior a la de adquisición")
+
+    valor_suelo = float(parse_money_value(payload.get("valor_suelo") or 0) or 0.0)
+    if not valor_suelo or valor_suelo <= 0:
+        raise ValueError("valor_suelo inválido")
+
+    def _bool(key: str) -> bool:
+        v = payload.get(key)
+        if isinstance(v, bool):
+            return bool(v)
+        s = str(v or "").strip().lower()
+        return s in ("1", "true", "t", "si", "sí", "yes", "y", "on")
+
+    valor_suelo_reducido = float(parse_money_value(payload.get("valor_suelo_reducido") or 0) or 0.0)
+    coef_reduccion = parse_optional_float(payload.get("coef_reduccion") or None)
+    if coef_reduccion is not None:
+        try:
+            coef_reduccion = float(coef_reduccion)
+        except Exception:
+            coef_reduccion = None
+    if coef_reduccion is not None:
+        if coef_reduccion > 1.5:
+            coef_reduccion = coef_reduccion / 100.0
+        coef_reduccion = max(0.0, min(1.0, coef_reduccion))
+
+    valor_suelo_usado = valor_suelo
+    if valor_suelo_reducido and valor_suelo_reducido > 0:
+        valor_suelo_usado = valor_suelo_reducido
+    elif coef_reduccion is not None and coef_reduccion > 0:
+        valor_suelo_usado = valor_suelo * coef_reduccion
+
+    derecho_tipo = str(payload.get("derecho_tipo") or "pleno_dominio").strip().lower()
+    derecho_factor_pct = parse_optional_float(payload.get("derecho_factor_pct_manual") or payload.get("derecho_factor_pct") or None)
+    derecho_factor_motivo = "Manual" if derecho_factor_pct is not None else ""
+    if derecho_factor_pct is not None:
+        try:
+            derecho_factor_pct = float(derecho_factor_pct)
+        except Exception:
+            derecho_factor_pct = None
+    if derecho_factor_pct is not None:
+        derecho_factor_pct = max(0.0, min(100.0, float(derecho_factor_pct)))
+    else:
+        # Ordenanza Málaga (Art. 11) / regla estándar: calcular factor del derecho cuando aplica.
+        if derecho_tipo in ("", "pleno", "pleno_dominio", "dominio"):
+            derecho_factor_pct = 100.0
+            derecho_factor_motivo = "Pleno dominio"
+        else:
+            dur = parse_optional_float(payload.get("usufructo_duracion_anios") or None)
+            edad = parse_optional_float(payload.get("usufructuario_edad") or None)
+            try:
+                dur = float(dur) if dur is not None else None
+            except Exception:
+                dur = None
+            try:
+                edad = float(edad) if edad is not None else None
+            except Exception:
+                edad = None
+
+            def _usufructo_vitalicio_pct(edad_val: float) -> float:
+                if edad_val < 0:
+                    edad_val = 0
+                pct = 70.0 - max(0.0, edad_val - 20.0)
+                return max(10.0, min(70.0, pct))
+
+            if derecho_tipo in ("usufructo_temporal", "usuf_temp"):
+                if dur is None or dur <= 0:
+                    raise ValueError("Duración del usufructo requerida")
+                derecho_factor_pct = min(70.0, max(0.0, 2.0 * dur))
+                derecho_factor_motivo = "Usufructo temporal (2%/año; máx. 70%)"
+            elif derecho_tipo in ("usufructo_vitalicio", "usuf_vitalicio", "usuf_vital"):
+                if edad is None or edad <= 0:
+                    raise ValueError("Edad del usufructuario/a requerida")
+                derecho_factor_pct = _usufructo_vitalicio_pct(edad)
+                derecho_factor_motivo = "Usufructo vitalicio (70% - 1% por año >20; mín. 10%)"
+            elif derecho_tipo in ("nuda_propiedad", "nuda"):
+                if edad is None or edad <= 0:
+                    raise ValueError("Edad del usufructuario/a requerida (para nuda propiedad)")
+                usuf_pct = _usufructo_vitalicio_pct(edad)
+                derecho_factor_pct = max(0.0, 100.0 - usuf_pct)
+                derecho_factor_motivo = "Nuda propiedad (100% - usufructo vitalicio)"
+            elif derecho_tipo in ("uso_habitacion", "uso", "habitacion"):
+                if edad is None or edad <= 0:
+                    raise ValueError("Edad del usufructuario/a requerida (uso/habitación)")
+                usuf_pct = _usufructo_vitalicio_pct(edad)
+                derecho_factor_pct = max(0.0, min(100.0, 0.75 * usuf_pct))
+                derecho_factor_motivo = "Uso/habitación (75% del usufructo)"
+            elif derecho_tipo in ("manual",):
+                raise ValueError("Factor derecho (%) requerido (modo manual)")
+            else:
+                derecho_factor_pct = 100.0
+                derecho_factor_motivo = "Pleno dominio (asumido)"
+
+    participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
+    if participacion_pct is None:
+        participacion_pct = 100.0
+    try:
+        participacion_pct = float(participacion_pct)
+    except Exception:
+        participacion_pct = 100.0
+    participacion_pct = max(0.0, min(100.0, participacion_pct))
+
+    try:
+        ensure_iivtnu_schema(conn)
+        _iivtnu_seed_andalucia(conn)
+        _iivtnu_seed_malaga(conn)
+    except Exception:
+        pass
+
+    devengo_iso = devengo.isoformat()
+    params_row = None
+    try:
+        params_row = conn.execute(
+            """
+            SELECT
+              tipo_gravamen_pct,
+              coeficientes_json,
+              bonificaciones_json,
+              source_url,
+              source_label
+            FROM iivtnu_param_sets
+            WHERE municipio_ine = ?
+              AND (vigente_desde IS NULL OR vigente_desde <= ?)
+              AND (vigente_hasta IS NULL OR vigente_hasta >= ?)
+            ORDER BY COALESCE(vigente_desde, '') DESC
+            LIMIT 1
+            """,
+            (municipio_ine, devengo_iso, devengo_iso),
+        ).fetchone()
+    except Exception:
+        params_row = None
+
+    tipo_gravamen_pct = None
+    tipo_is_manual = False
+    source_label = ""
+    source_url = ""
+    coef_table = None
+    coef_source = None
+    bonif_pct_from_params = None
+    if params_row:
+        try:
+            tipo_gravamen_pct = float(params_row["tipo_gravamen_pct"])
+        except Exception:
+            try:
+                tipo_gravamen_pct = float(params_row[0])
+            except Exception:
+                tipo_gravamen_pct = None
+        try:
+            if tipo_gravamen_pct is not None and float(tipo_gravamen_pct) <= 0:
+                tipo_gravamen_pct = None
+        except Exception:
+            tipo_gravamen_pct = None
+        try:
+            coef_raw = params_row["coeficientes_json"]
+        except Exception:
+            coef_raw = params_row[1] if len(params_row) > 1 else ""
+        try:
+            coef_obj = json.loads(coef_raw) if coef_raw else {}
+        except Exception:
+            coef_obj = {}
+        if isinstance(coef_obj, dict):
+            coef_table = coef_obj.get("coeficientes") if isinstance(coef_obj.get("coeficientes"), dict) else None
+            coef_source = coef_obj.get("coef_source") if isinstance(coef_obj.get("coef_source"), dict) else None
+        try:
+            bonif_raw = params_row["bonificaciones_json"]
+        except Exception:
+            bonif_raw = params_row[2] if len(params_row) > 2 else ""
+        try:
+            bonif_obj = json.loads(bonif_raw) if bonif_raw else {}
+        except Exception:
+            bonif_obj = {}
+        if isinstance(bonif_obj, dict):
+            bonif_pct_from_params = parse_optional_float(
+                bonif_obj.get("bonificacion_pct") or bonif_obj.get("bonificacion_pct_default") or None
+            )
+        try:
+            source_url = str(params_row["source_url"] or "").strip()
+            source_label = str(params_row["source_label"] or "").strip()
+        except Exception:
+            source_url = str(params_row[3] or "").strip() if len(params_row) > 3 else ""
+            source_label = str(params_row[4] or "").strip() if len(params_row) > 4 else ""
+
+    tipo_is_estimated = False
+    manual_tipo = parse_optional_float(
+        payload.get("tipo_gravamen_pct_manual")
+        or payload.get("tipo_gravamen_pct_override")
+        or payload.get("tipo_gravamen_pct")
+        or None
+    )
+    if manual_tipo is not None:
+        try:
+            manual_tipo = float(manual_tipo)
+        except Exception:
+            manual_tipo = None
+    if manual_tipo is not None and manual_tipo > 0:
+        tipo_gravamen_pct = float(manual_tipo)
+        tipo_is_manual = True
+        tipo_is_estimated = False
+        source_label = "Manual"
+        source_url = ""
+
+    if tipo_gravamen_pct is None:
+        prov_for_tipo = ""
+        try:
+            prow = conn.execute(
+                "SELECT provincia FROM iivtnu_municipios WHERE ine = ? LIMIT 1",
+                (str(municipio_ine).zfill(5),),
+            ).fetchone()
+            if prow:
+                if isinstance(prow, dict):
+                    prov_for_tipo = str(prow.get("provincia") or "").strip()
+                else:
+                    prov_for_tipo = str(prow[0] or "").strip()
+        except Exception:
+            prov_for_tipo = ""
+        if not prov_for_tipo:
+            try:
+                ine_cache = _iivtnu_load_ine_municipios_cache()
+                prov_for_tipo = str((ine_cache.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+            except Exception:
+                prov_for_tipo = ""
+        if not prov_for_tipo:
+            try:
+                postal = _iivtnu_load_postal_cache()
+                prov_for_tipo = str((postal.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+            except Exception:
+                prov_for_tipo = ""
+
+        if _iivtnu_is_andalucia_province(prov_for_tipo):
+            tipo_data = _iivtnu_load_tipo_gravamen_andalucia()
+            years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+            missing_tipo_map = (tipo_data.get("missing_tipo") if isinstance(tipo_data, dict) else {}) or {}
+            year_key = str(devengo.year)
+            available_years = []
+            try:
+                available_years = sorted(
+                    [str(y) for y in (years_map.keys() if isinstance(years_map, dict) else [])],
+                    reverse=True,
+                )
+            except Exception:
+                available_years = []
+            candidates = [year_key] + [y for y in available_years if y != year_key]
+            used_year = None
+            tipo_val = None
+            for cand_year in candidates:
+                cand_map = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                if not isinstance(cand_map, dict):
+                    continue
+                raw = cand_map.get(str(municipio_ine).zfill(5))
+                if raw is None:
+                    raw = cand_map.get(str(int(str(municipio_ine)))) if str(municipio_ine).isdigit() else None
+                if raw is None:
+                    continue
+                try:
+                    v = float(raw)
+                except Exception:
+                    continue
+                if v > 0:
+                    tipo_val = v
+                    used_year = str(cand_year)
+                    break
+            if tipo_val is not None:
+                tipo_gravamen_pct = float(tipo_val)
+                tipo_is_estimated = False
+                src_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+                src = src_map.get(used_year or year_key) if isinstance(src_map, dict) else None
+                if isinstance(src, dict):
+                    source_label = str(src.get("label") or "").strip()
+                    source_url = str(src.get("url") or "").strip()
+                    if used_year and used_year != year_key:
+                        source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
+            else:
+                missing = missing_tipo_map.get(str(municipio_ine).zfill(5)) if isinstance(missing_tipo_map, dict) else None
+                if missing:
+                    tipo_gravamen_pct = float(missing)
+                    tipo_is_estimated = True
+                    source_label = "Tipo ausente en tabla (estimado)"
+                    source_url = ""
+        else:
+            # Fallback conservador.
+            tipo_gravamen_pct = 30.0
+            tipo_is_estimated = True
+            source_label = "Tipo no disponible (usa manual)"
+            source_url = ""
+
+    if not coef_table:
+        coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo)
+
+    coef_info = _iivtnu_objective_coef(acq, devengo, coef_table or {})
+    coef_objetivo = float(coef_info.get("coef_objetivo") or 0.0)
+    factor = participacion_pct / 100.0
+    derecho_factor = float(derecho_factor_pct or 0.0) / 100.0
+    base_objetiva = round(valor_suelo_usado * derecho_factor * coef_objetivo * factor + 1e-9, 2)
+    cuota_objetiva_bruta = round(base_objetiva * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+
+    bonif_mode = str(payload.get("bonificacion_mode") or payload.get("bonif_mode") or "manual").strip().lower()
+    bonif_manual = parse_optional_float(payload.get("bonificacion_pct") or payload.get("bonificacion_pct_manual") or None)
+    bonif_pct = bonif_manual if bonif_manual is not None else bonif_pct_from_params
+    bonif_modo = "manual" if bonif_manual is not None else ("ordenanza" if bonif_pct_from_params is not None else "")
+    bonif_motivo = "Manual" if bonif_manual is not None else ("Param set" if bonif_pct_from_params is not None else "")
+
+    # Bonificación Málaga (Art. 6) - mortis causa vivienda habitual del causante.
+    if (
+        bonif_manual is None
+        and bonif_mode == "malaga_mortis_causa_auto"
+        and str(municipio_ine).zfill(5) == "29067"
+    ):
+        vc_total = float(parse_money_value(payload.get("valor_catastral_total") or 0) or 0.0)
+        if not vc_total or vc_total <= 0:
+            raise ValueError("Para bonificación Málaga (auto) se requiere valor_catastral_total")
+        if tipo_transmision and tipo_transmision not in ("mortis_causa", "herencia"):
+            bonif_pct = 0.0
+            bonif_modo = "malaga_art6"
+            bonif_motivo = "No aplica (no es mortis causa)"
+        elif not _bool("vivienda_habitual_causante"):
+            bonif_pct = 0.0
+            bonif_modo = "malaga_art6"
+            bonif_motivo = "No aplica (no vivienda habitual del causante)"
+        elif not _bool("convivencia_2_anios"):
+            bonif_pct = 0.0
+            bonif_modo = "malaga_art6"
+            bonif_motivo = "No aplica (sin convivencia 2 años)"
+        else:
+            tramo = ""
+            if vc_total < 100000.0:
+                bonif_pct = 95.0
+                tramo = "<100k"
+            elif vc_total <= 150000.0:
+                bonif_pct = 80.0
+                tramo = "100k–150k"
+            elif vc_total <= 200000.0:
+                bonif_pct = 70.0
+                tramo = "150k–200k"
+            elif vc_total <= 250000.0:
+                bonif_pct = 50.0
+                tramo = "200k–250k"
+            else:
+                bonif_pct = 25.0
+                tramo = ">250k"
+
+            cond = str(payload.get("condicion_beneficiario") or "").strip().lower()
+            cond_ok = cond in ("pensionista", "desempleado", "menor_30", "discapacidad", "violencia_genero")
+            ingresos = float(parse_money_value(payload.get("ingresos_unidad") or 0) or 0.0)
+            iprem_14 = float(parse_money_value(payload.get("iprem_14_anual") or 0) or 0.0)
+            limit_ok = bool(iprem_14 and iprem_14 > 0 and ingresos >= 0 and ingresos <= (iprem_14 * 1.7 + 1e-9))
+            if cond_ok and limit_ok:
+                bonif_pct = 95.0
+                bonif_motivo = f"Málaga Art. 6 (95% especial: {cond})"
+            else:
+                bonif_motivo = f"Málaga Art. 6 (tramo {tramo})"
+            bonif_modo = "malaga_art6"
+        if not _bool("mantener_2_anios") and bonif_pct and bonif_pct > 0:
+            bonif_motivo = f"{bonif_motivo} (pendiente confirmar mantenimiento 2 años)"
+
+    if bonif_pct is not None:
+        try:
+            bonif_pct = float(bonif_pct)
+        except Exception:
+            bonif_pct = None
+    if bonif_pct is None:
+        bonif_pct = 0.0
+    bonif_pct = max(0.0, min(100.0, bonif_pct))
+    bonif_importe_obj = round(max(0.0, cuota_objetiva_bruta) * (bonif_pct / 100.0) + 1e-9, 2)
+    cuota_objetiva = round(max(0.0, cuota_objetiva_bruta - bonif_importe_obj) + 1e-9, 2)
+    importe_objetivo = cuota_objetiva
+
+    def _money(key: str) -> float:
+        try:
+            return float(parse_money_value(payload.get(key) or 0) or 0.0)
+        except Exception:
+            return 0.0
+
+    valor_adquisicion = _money("valor_adquisicion")
+    valor_transmision = _money("valor_transmision")
+    gastos_adquisicion = _money("gastos_adquisicion")
+    gastos_transmision = _money("gastos_transmision")
+    valor_catastral_total = _money("valor_catastral_total")
+    porcentaje_suelo = parse_optional_float(payload.get("porcentaje_suelo") or None)
+    if porcentaje_suelo is not None:
+        try:
+            porcentaje_suelo = float(porcentaje_suelo)
+        except Exception:
+            porcentaje_suelo = None
+
+    real = None
+    if valor_adquisicion > 0 and valor_transmision > 0:
+        ganancia_total = (valor_transmision - gastos_transmision) - (valor_adquisicion + gastos_adquisicion)
+        ratio_suelo = None
+        if valor_catastral_total and valor_catastral_total > 0:
+            ratio_suelo = valor_suelo_usado / valor_catastral_total
+        elif porcentaje_suelo is not None and porcentaje_suelo > 0:
+            ratio_suelo = porcentaje_suelo / 100.0
+        if ratio_suelo is not None:
+            ratio_suelo = max(0.0, min(1.0, float(ratio_suelo)))
+            ratio_suelo = max(0.0, min(1.0, ratio_suelo * derecho_factor))
+            ganancia_suelo = ganancia_total * ratio_suelo * factor
+            base_real = round(max(0.0, ganancia_suelo) + 1e-9, 2)
+            cuota_real_bruta = round(base_real * float(tipo_gravamen_pct or 0.0) / 100.0 + 1e-9, 2)
+            bonif_importe_real = round(max(0.0, cuota_real_bruta) * (bonif_pct / 100.0) + 1e-9, 2)
+            cuota_real = round(max(0.0, cuota_real_bruta - bonif_importe_real) + 1e-9, 2)
+            real = {
+                "ganancia_total": round(ganancia_total + 1e-9, 2),
+                "ratio_suelo": round(ratio_suelo + 1e-12, 6),
+                "ganancia_suelo": round(ganancia_suelo + 1e-9, 2),
+                "base_imponible": base_real,
+                "cuota_tributaria_bruta": cuota_real_bruta,
+                "bonificacion_pct": bonif_pct,
+                "bonificacion_importe": bonif_importe_real,
+                "cuota_tributaria": cuota_real,
+                "importe_total": cuota_real,
+                "no_incremento": 1 if ganancia_total <= 0 else 0,
+            }
+
+    metodo_recomendado = "objetivo"
+    cuota_recomendada = cuota_objetiva
+    if isinstance(real, dict):
+        try:
+            cuota_real = float(real.get("cuota_tributaria") or 0.0)
+        except Exception:
+            cuota_real = 0.0
+        if int(real.get("no_incremento") or 0):
+            cuota_recomendada = 0.0
+            metodo_recomendado = "no_sujecion"
+        elif cuota_real >= 0 and cuota_real < cuota_recomendada:
+            cuota_recomendada = cuota_real
+            metodo_recomendado = "real"
+
+    if situacion_especial in ("no_sujeto", "exento"):
+        cuota_recomendada = 0.0
+        metodo_recomendado = "no_sujecion" if situacion_especial == "no_sujeto" else "exencion"
+
+    muni_nombre = ""
+    muni_provincia = ""
+    try:
+        muni_row = conn.execute(
+            "SELECT nombre, provincia FROM iivtnu_municipios WHERE ine = ? LIMIT 1",
+            (municipio_ine,),
+        ).fetchone()
+        if muni_row:
+            if isinstance(muni_row, dict):
+                muni_nombre = str(muni_row.get("nombre") or "").strip()
+                muni_provincia = str(muni_row.get("provincia") or "").strip()
+            else:
+                muni_nombre = str(muni_row[0] or "").strip()
+                muni_provincia = str(muni_row[1] or "").strip() if len(muni_row) > 1 else ""
+    except Exception:
+        muni_nombre = ""
+        muni_provincia = ""
+    if not muni_nombre:
+        try:
+            postal = _iivtnu_load_postal_cache()
+            muni_nombre = str((postal.get("ine_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+            muni_provincia = str((postal.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+        except Exception:
+            muni_nombre = ""
+            muni_provincia = ""
+
+    return {
+        "ok": True,
+        "params": {
+            "municipio_ine": municipio_ine,
+            "municipio": muni_nombre,
+            "provincia": muni_provincia,
+            "tipo_gravamen_pct": tipo_gravamen_pct,
+            "tipo_is_estimated": tipo_is_estimated,
+            "tipo_is_manual": 1 if tipo_is_manual else 0,
+            "source_label": source_label,
+            "source_url": source_url,
+            "coef_source_label": (coef_source or {}).get("source_label") if isinstance(coef_source, dict) else "",
+            "coef_source_url": (coef_source or {}).get("source_url") if isinstance(coef_source, dict) else "",
+        },
+        "result": {
+            "situacion_especial": situacion_especial,
+            "situacion_motivo": situacion_motivo,
+            "years": coef_info.get("years") or 0,
+            "months": coef_info.get("months") or 0,
+            "coef_objetivo": round(coef_objetivo, 6),
+            "valor_suelo_usado": round(valor_suelo_usado + 1e-9, 2),
+            "derecho_factor_pct": round(float(derecho_factor_pct or 0.0) + 1e-9, 4),
+            # Legacy (objetivo).
+            "base_imponible": base_objetiva,
+            "tipo_gravamen_pct": tipo_gravamen_pct,
+            "bonificacion_pct": bonif_pct,
+            "bonificacion_modo": bonif_modo,
+            "bonificacion_motivo": bonif_motivo,
+            "cuota_tributaria_bruta": cuota_objetiva_bruta,
+            "bonificacion_importe": bonif_importe_obj,
+            "cuota_tributaria": cuota_objetiva,
+            "importe_total": importe_objetivo,
+            # Desglose.
+            "objetivo": {
+                "base_imponible": base_objetiva,
+                "bonificacion_pct": bonif_pct,
+                "cuota_tributaria_bruta": cuota_objetiva_bruta,
+                "bonificacion_importe": bonif_importe_obj,
+                "cuota_tributaria": cuota_objetiva,
+                "importe_total": importe_objetivo,
+            },
+            "real": real,
+            "metodo_recomendado": metodo_recomendado,
+            "cuota_recomendada": round(cuota_recomendada + 1e-9, 2),
+            # Info adicional (trazabilidad).
+            "derecho_factor_motivo": derecho_factor_motivo,
+        },
+    }
+
+
 def _iivtnu_seed_malaga(conn, now_iso=None):
     if not conn:
         return
@@ -36946,6 +37479,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/iivtnu_simulate":
+            try:
+                out = _iivtnu_simulate(conn, payload)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(self, out)
+            return
+
             municipio_ine = str(payload.get("municipio_ine") or "").strip()
             cp = normalize_postal_code(payload.get("codigo_postal") or "")
             if not municipio_ine and cp:

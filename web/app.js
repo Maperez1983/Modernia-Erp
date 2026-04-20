@@ -1927,12 +1927,15 @@ const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
 			const irpfRentalForm = document.getElementById("irpfRentalForm");
 			const irpfRentalStatus = document.getElementById("irpfRentalStatus");
 			const irpfRentalResult = document.getElementById("irpfRentalResult");
-			const fiscalWizardForm = document.getElementById("fiscalWizardForm");
-			const fiscalWizardOpenIrpfBtn = document.getElementById("fiscalWizardOpenIrpfBtn");
-			const fiscalWizardOpenIivtnuBtn = document.getElementById("fiscalWizardOpenIivtnuBtn");
-			const fiscalWizardPdfBtn = document.getElementById("fiscalWizardPdfBtn");
-			const fiscalWizardStatus = document.getElementById("fiscalWizardStatus");
-			const fiscalWizardResult = document.getElementById("fiscalWizardResult");
+				const fiscalWizardForm = document.getElementById("fiscalWizardForm");
+				const fiscalWizardOpenIrpfBtn = document.getElementById("fiscalWizardOpenIrpfBtn");
+				const fiscalWizardOpenIivtnuBtn = document.getElementById("fiscalWizardOpenIivtnuBtn");
+				const fiscalWizardPdfBtn = document.getElementById("fiscalWizardPdfBtn");
+				const fiscalWizardStatus = document.getElementById("fiscalWizardStatus");
+				const fiscalWizardResult = document.getElementById("fiscalWizardResult");
+				const fiscalWizardPresetSelect = document.getElementById("fiscalWizardPresetSelect");
+				const fiscalWizardPresetLoadBtn = document.getElementById("fiscalWizardPresetLoadBtn");
+				const fiscalWizardPresetStatus = document.getElementById("fiscalWizardPresetStatus");
 	const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
@@ -6812,6 +6815,79 @@ const inferFiscalTerritoryFromProvincia = (provinciaRaw = "") => {
     ["melilla", { ccaa: "ML" }],
   ]);
   return map.get(provincia) || { ccaa: "", pv_territorio: "" };
+};
+
+let fiscalWizardPresetsCache = null;
+let fiscalWizardPresetsLoading = null;
+
+const loadFiscalWizardPresets = async () => {
+  if (fiscalWizardPresetsCache) return fiscalWizardPresetsCache;
+  if (fiscalWizardPresetsLoading) return fiscalWizardPresetsLoading;
+  fiscalWizardPresetsLoading = (async () => {
+    try {
+      const resp = await fetch("/assets/supuestos/fiscal_venta_presets.json", { credentials: "same-origin" });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || typeof data !== "object") throw new Error("No se pudieron cargar los supuestos.");
+      fiscalWizardPresetsCache = data;
+      return data;
+    } catch (err) {
+      fiscalWizardPresetsCache = null;
+      throw err;
+    } finally {
+      fiscalWizardPresetsLoading = null;
+    }
+  })();
+  return fiscalWizardPresetsLoading;
+};
+
+const setFormFieldValue = (form, name, rawValue) => {
+  if (!form || !name) return;
+  const selector = `[name="${CSS.escape(String(name))}"]`;
+  const el = form.querySelector(selector);
+  if (!el) return;
+  const value = rawValue == null ? "" : rawValue;
+  const type = String(el.type || "").toLowerCase();
+  if (type === "checkbox") {
+    el.checked = Boolean(value);
+  } else {
+    el.value = typeof value === "string" ? value : String(value);
+  }
+  try {
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  } catch {}
+};
+
+const applyFiscalWizardPreset = (preset = null) => {
+  if (!preset || typeof preset !== "object") return;
+  const wizard = preset.wizard && typeof preset.wizard === "object" ? preset.wizard : {};
+  const irpf = preset.irpf && typeof preset.irpf === "object" ? preset.irpf : {};
+  const iivtnu = preset.iivtnu && typeof preset.iivtnu === "object" ? preset.iivtnu : {};
+
+  applyFiscalWizardPrefill({
+    operacion: wizard.operacion || "venta",
+    ccaa: wizard.ccaa || "",
+    pv_territorio: wizard.pv_territorio || "",
+    referencia: wizard.referencia || "",
+    codigo_postal: iivtnu.codigo_postal || "",
+    fecha_transmision: irpf.fecha_transmision || iivtnu.fecha_transmision || "",
+    valor_transmision: irpf.valor_transmision || iivtnu.valor_transmision || "",
+  });
+
+  if (irpfGainForm && irpf && typeof irpf === "object") {
+    Object.entries(irpf).forEach(([k, v]) => setFormFieldValue(irpfGainForm, k, v));
+  }
+
+  if (iivtnuSimulatorForm && iivtnu && typeof iivtnu === "object") {
+    Object.entries(iivtnu).forEach(([k, v]) => setFormFieldValue(iivtnuSimulatorForm, k, v));
+  }
+
+  const cp = normalizePostalCode(iivtnu.codigo_postal || "");
+  if (iivtnuMunicipioCp && cp && cp.length === 5) {
+    iivtnuMunicipioCp.value = cp;
+    try {
+      iivtnuMunicipioCp.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch {}
+  }
 };
 
 const applyFiscalWizardPrefill = (prefill = {}) => {
@@ -60171,6 +60247,50 @@ if (fiscalWizardForm) {
         if (fiscalWizardStatus) fiscalWizardStatus.textContent = "PDF generado.";
       } catch (err) {
         if (fiscalWizardStatus) fiscalWizardStatus.textContent = err?.message || "No se pudo generar el PDF.";
+      }
+    });
+  }
+
+  if (fiscalWizardPresetSelect && fiscalWizardPresetLoadBtn) {
+    fiscalWizardPresetSelect.innerHTML = `<option value="">— Selecciona un supuesto —</option>`;
+    if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = "Cargando supuestos…";
+    loadFiscalWizardPresets()
+      .then((data) => {
+        const presets = Array.isArray(data?.presets) ? data.presets : [];
+        presets.forEach((preset) => {
+          const id = String(preset?.id || "").trim();
+          const title = String(preset?.title || preset?.id || "").trim();
+          if (!id || !title) return;
+          const option = document.createElement("option");
+          option.value = id;
+          option.textContent = title;
+          fiscalWizardPresetSelect.appendChild(option);
+        });
+        if (fiscalWizardPresetStatus) {
+          fiscalWizardPresetStatus.textContent = presets.length ? `${presets.length} supuestos disponibles.` : "Sin supuestos.";
+        }
+      })
+      .catch((err) => {
+        if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = err?.message || "No se pudieron cargar supuestos.";
+      });
+
+    fiscalWizardPresetLoadBtn.addEventListener("click", async () => {
+      const id = String(fiscalWizardPresetSelect.value || "").trim();
+      if (!id) {
+        if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = "Selecciona un supuesto.";
+        return;
+      }
+      if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = "Aplicando…";
+      try {
+        const data = await loadFiscalWizardPresets();
+        const presets = Array.isArray(data?.presets) ? data.presets : [];
+        const preset = presets.find((item) => String(item?.id || "").trim() === id);
+        if (!preset) throw new Error("Supuesto no encontrado.");
+        applyFiscalWizardPreset(preset);
+        const note = String(preset?.description || "").trim();
+        if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = note ? `Cargado. ${note}` : "Cargado.";
+      } catch (err) {
+        if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = err?.message || "No se pudo aplicar el supuesto.";
       }
     });
   }
