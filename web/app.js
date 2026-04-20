@@ -4394,6 +4394,10 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
     if ((ctx.servicio || ctx.service) && actionModalServicioSelect) {
       actionModalServicioSelect.value = String(ctx.servicio || ctx.service || "").trim();
     }
+    const defaultTipo = String(ctx.default_tipo || "").trim();
+    if (defaultTipo && actionModalTipo && !String(actionModalTipo.value || "").trim()) {
+      actionModalTipo.value = defaultTipo;
+    }
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
@@ -19301,12 +19305,13 @@ const collectCrmAlertsSnapshot = () => {
     const ts = parseRowTs(row);
     return ts > 0 && ts < Date.now();
   };
-  const normalizeTipoKey = (row) => {
-    const tipo = normalizeSimple(row?.tipo || row?.asunto || "");
-    if (tipo.includes("cita")) return "cita";
-    if (tipo.includes("actividad")) return "actividad";
-    return "actividad";
-  };
+		  const normalizeTipoKey = (row) => {
+		    const tipo = normalizeSimple(row?.tipo || row?.asunto || "");
+		    if (!tipo) return "cita";
+		    if (tipo.includes("cita")) return "cita";
+		    if (tipo.includes("actividad")) return "actividad";
+		    return "actividad";
+		  };
   const citasCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) === "cita" && isCaducada(row)).length;
   const actividadesCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) !== "cita" && isCaducada(row)).length;
 
@@ -42255,13 +42260,13 @@ const renderCrmAgendaCalendar = (rows = []) => {
   const openNewFromGrid = (dateKey, minutes, serviceValue = "inmobiliaria") => {
     const min = Number(minutes);
     if (!Number.isFinite(min)) {
-      openActionCreator(dateKey, "", serviceValue, { lock_service: true, servicio: serviceValue });
+      openActionCreator(dateKey, "", serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita" });
       return;
     }
     const clamped = clamp(min, 0, 24 * 60 - 1);
     const hh = String(Math.floor(clamped / 60)).padStart(2, "0");
     const mm = String(Math.floor(clamped % 60)).padStart(2, "0");
-    openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue });
+    openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita" });
   };
   const resolveGridClickMinutes = (event, colEl, bounds) => {
     if (!event || !colEl || !bounds) return null;
@@ -42642,35 +42647,35 @@ const loadCrmAgenda = () => {
 	    }
 	    return base.getTime();
 	  };
-	  const todayKey = formatAgendaDate(new Date());
-	  const withinDays = (dateKey, days) => {
-	    const d = parseAgendaDate(dateKey);
-	    if (!d) return false;
-	    const start = parseAgendaDate(todayKey);
-	    if (!start) return false;
-	    const end = new Date(start);
-	    end.setDate(end.getDate() + Number(days || 0));
-	    return d >= start && d <= end;
-	  };
+		  const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
+		  const withinDays = (dateKey, days) => {
+		    const d = parseAgendaDate(dateKey);
+		    if (!d) return false;
+		    const start = parseAgendaDate(anchorDayKey);
+		    if (!start) return false;
+		    const end = new Date(start);
+		    end.setDate(end.getDate() + Number(days || 0));
+		    return d >= start && d <= end;
+		  };
 	  const isCaducada = (row) => {
 	    const estado = normalizeSimple(row?.estado || "");
 	    if (estado.includes("complet") || estado.includes("realiz") || estado.includes("cancel")) return false;
 	    const ts = parseRowTs(row);
 	    return ts > 0 && ts < Date.now();
 	  };
-		  const matchPreset = (row) => {
-		    if (!isMine(row)) return false;
-		    const tipoKey = normalizeTipoKey(row);
-		    const fechaKey = String(row?.fecha || "").trim();
-		    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
-		    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === todayKey;
-		    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
-		    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
-		    if (preset === "citas") return tipoKey === "cita";
-		    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
-		    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === todayKey;
-		    return true;
-		  };
+			  const matchPreset = (row) => {
+			    if (!isMine(row)) return false;
+			    const tipoKey = normalizeTipoKey(row);
+			    const fechaKey = String(row?.fecha || "").trim();
+			    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
+			    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === anchorDayKey;
+			    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
+			    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
+			    if (preset === "citas") return tipoKey === "cita";
+			    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
+			    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
+			    return true;
+			  };
 		  const matchAmbito = (row) => {
 		    if (!ambitoFilter) return true;
 		    const key = resolveCrmAgendaAmbitoKey(row);
@@ -56263,7 +56268,7 @@ if (crmInsertList) {
     } else if (key === "demanda") {
       goToEstudioAlta("demanda");
     } else if (key === "actividad") {
-      openActionCreator("", "", "inmobiliaria", { lock_service: true, servicio: "inmobiliaria" });
+      openActionCreator("", "", "inmobiliaria", { lock_service: true, servicio: "inmobiliaria", default_tipo: "Cita" });
     } else if (key === "cliente") {
       setCrmClienteModalOpen(true);
     } else if (key === "edificio") {
@@ -57819,6 +57824,9 @@ if (actionModalSave) {
         if (actionModalStatus) actionModalStatus.textContent = "Guardado.";
         closeActionEditor();
         loadAgendaGeneral();
+        if (service === "inmobiliaria") {
+          loadCrmAgenda();
+        }
         if (service === "inmobiliaria") {
           const inmId =
             String(payload.inmueble_id || state.currentInmuebleId || "").trim();
