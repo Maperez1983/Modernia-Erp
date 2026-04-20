@@ -4386,7 +4386,12 @@ const parseAgendaDate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const formatAgendaDate = (date) => date.toISOString().slice(0, 10);
+const formatAgendaDate = (date) => {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
 
 const getWeekStart = (date) => {
   const day = new Date(date);
