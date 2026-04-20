@@ -7154,10 +7154,48 @@ def _irnr_capital_gains_rate_for_devengo(devengo: date) -> float:
     return 0.19
 
 
+CCAA_LABELS = {
+    "AN": "Andalucía",
+    "AR": "Aragón",
+    "AS": "Asturias",
+    "IB": "Illes Balears",
+    "CN": "Canarias",
+    "CB": "Cantabria",
+    "CM": "Castilla-La Mancha",
+    "CL": "Castilla y León",
+    "CT": "Cataluña",
+    "VC": "Comunitat Valenciana",
+    "EX": "Extremadura",
+    "GA": "Galicia",
+    "MD": "Comunidad de Madrid",
+    "MC": "Región de Murcia",
+    "NC": "Navarra",
+    "PV": "País Vasco",
+    "RI": "La Rioja",
+    "CE": "Ceuta",
+    "ML": "Melilla",
+}
+
+
+def _normalize_ccaa(value: object) -> str:
+    raw = str(value or "").strip().upper()
+    if raw in CCAA_LABELS:
+        return raw
+    # Permite nombres (básico).
+    key = normalize_simple(raw)
+    for code, label in CCAA_LABELS.items():
+        if normalize_simple(label) == key:
+            return code
+    return "AN"
+
+
 def _irpf_savings_scale_for_year(year):
     y = int(year or 0)
     if y in IRPF_BASE_AHORRO_SCALE:
         return y, IRPF_BASE_AHORRO_SCALE[y], False
+    first = min(IRPF_BASE_AHORRO_SCALE.keys())
+    if y and y < first:
+        raise ValueError(f"IRPF: ejercicio {y} no soportado (mínimo {first})")
     last = max(IRPF_BASE_AHORRO_SCALE.keys())
     return last, IRPF_BASE_AHORRO_SCALE[last], True
 
@@ -7244,6 +7282,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
     year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
+    ccaa = _normalize_ccaa(payload.get("ccaa") or payload.get("comunidad_autonoma") or "AN")
 
     regimen = str(payload.get("regimen_fiscal") or payload.get("regimen") or "irpf").strip().lower()
     if regimen not in ("irpf", "irnr"):
@@ -7281,6 +7320,8 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
         "params": {
             "ejercicio": year,
             "regimen_fiscal": regimen,
+            "ccaa": ccaa,
+            "ccaa_label": CCAA_LABELS.get(ccaa, ccaa),
             "escala_ejercicio": scale_year,
             "escala_asumida": 1 if assumed else 0,
             "tipo_gravamen_pct": tipo_gravamen_pct,
@@ -7344,6 +7385,10 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
 
     input_lines = [
         ("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"),
+        (
+            "CCAA aplicable",
+            CCAA_LABELS.get(_normalize_ccaa(payload.get("ccaa") or "AN"), _normalize_ccaa(payload.get("ccaa") or "AN")),
+        ),
         ("Ejercicio", str(ejercicio or "")),
         ("% participación", pct(payload.get("participacion_pct") or 100)),
         ("Fecha adquisición", date_text(payload.get("fecha_adquisicion"))),

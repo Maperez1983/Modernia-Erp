@@ -6316,6 +6316,7 @@ const ensureIivtnuSimulator = async () => {
 	  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
 	  const fields = [
 	    ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
+	    ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
 	    ["Ejercicio", params.ejercicio ?? ""],
 	  ];
 	  if (regimen === "irnr") {
@@ -6649,6 +6650,30 @@ const openIrpfGananciaModal = (options = {}) => {
 	            </select>
 	          </label>
 	          <label>
+	            CCAA aplicable
+	            <select name="ccaa">
+	              <option value="AN" selected>Andalucía</option>
+	              <option value="AR">Aragón</option>
+	              <option value="AS">Asturias</option>
+	              <option value="IB">Illes Balears</option>
+	              <option value="CN">Canarias</option>
+	              <option value="CB">Cantabria</option>
+	              <option value="CM">Castilla-La Mancha</option>
+	              <option value="CL">Castilla y León</option>
+	              <option value="CT">Cataluña</option>
+	              <option value="VC">Comunitat Valenciana</option>
+	              <option value="EX">Extremadura</option>
+	              <option value="GA">Galicia</option>
+	              <option value="MD">Comunidad de Madrid</option>
+	              <option value="MC">Región de Murcia</option>
+	              <option value="NC">Navarra</option>
+	              <option value="PV">País Vasco</option>
+	              <option value="RI">La Rioja</option>
+	              <option value="CE">Ceuta</option>
+	              <option value="ML">Melilla</option>
+	            </select>
+	          </label>
+	          <label>
 	            Retención % (solo IRNR)
 	            <input name="retencion_pct" inputmode="decimal" placeholder="3" />
 	          </label>
@@ -6750,6 +6775,7 @@ const openIrpfGananciaModal = (options = {}) => {
 	    const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
 	    const fields = [
 	      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
+	      ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
 	      ["Ejercicio", params.ejercicio ?? ""],
 	    ];
 	    if (regimen === "irnr") {
@@ -6800,6 +6826,7 @@ const openIrpfGananciaModal = (options = {}) => {
 	  setValue("referencia", prefill.referencia || "");
 	  setValue("ejercicio", prefill.ejercicio || "");
 	  setValue("regimen_fiscal", prefill.regimen_fiscal || "irpf");
+	  setValue("ccaa", prefill.ccaa || "AN");
 	  setValue("retencion_pct", prefill.retencion_pct || "");
 	  setValue("participacion_pct", prefill.participacion_pct || "100");
   setValue("fecha_adquisicion", prefill.fecha_adquisicion || "");
