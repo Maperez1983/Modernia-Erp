@@ -47244,8 +47244,11 @@ class Handler(BaseHTTPRequestHandler):
                         "noticia_verificada": 1,
                     }
                     if precio_encargo is not None:
-                        cap_updates["precio_objetivo"] = precio_encargo
-                        cap_updates["precio_valoracion"] = precio_encargo
+                        cap_updates["precio_encargo"] = precio_encargo
+                        if parse_money_value(captacion.get("precio_objetivo")) in (None, 0):
+                            cap_updates["precio_objetivo"] = precio_encargo
+                        if parse_money_value(captacion.get("precio_valoracion")) in (None, 0):
+                            cap_updates["precio_valoracion"] = precio_encargo
                     set_clause = ", ".join([f"{key} = ?" for key in cap_updates])
                     conn.execute(
                         f"UPDATE captaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
@@ -47253,8 +47256,11 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     inm_updates = {"estado": destino_label}
                     if precio_encargo is not None:
-                        inm_updates["precio_objetivo"] = precio_encargo
-                        inm_updates["precio_valoracion"] = precio_encargo
+                        inm_updates["precio_encargo"] = precio_encargo
+                        if parse_money_value(inmueble.get("precio_objetivo")) in (None, 0):
+                            inm_updates["precio_objetivo"] = precio_encargo
+                        if parse_money_value(inmueble.get("precio_valoracion")) in (None, 0):
+                            inm_updates["precio_valoracion"] = precio_encargo
                     if honorarios is not None:
                         inm_updates["honorarios"] = honorarios
                     inm_set_clause = ", ".join([f"{key} = ?" for key in inm_updates])

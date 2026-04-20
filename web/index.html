@@ -3843,6 +3843,7 @@
               </div>
               <div class="form-actions">
                 <span id="inmuebleSaveStatus" class="muted"></span>
+                <button class="secondary" type="button" id="inmuebleManualSaveBtn">Guardar</button>
                 <button class="secondary hidden" type="button" id="inmuebleVisitaPdfBtn">Hoja de visita PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaFichaPdfBtn">Ficha venta PDF</button>
                 <button class="secondary hidden" type="button" id="inmuebleVentaPrecioPdfBtn">Nota precio PDF</button>
@@ -9414,11 +9415,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=583"></script>
+				    <script src="app.js?v=584"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=196";
+				        const TARGET_SW = "/sw.js?v=197";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

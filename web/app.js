@@ -1407,6 +1407,7 @@ const openS3File = async (key, fallbackUrl) => {
     return raw.replace(/^\/+/, "");
   };
   const normalizedKey = normalizeS3Key(key);
+  const looksLikeHexId = (value) => /^[0-9a-f]{32}$/i.test(String(value || "").trim());
   const normalizedFallbackKey = fallbackUrl && String(fallbackUrl || "").trim().startsWith("s3://")
     ? normalizeS3Key(fallbackUrl)
     : "";
@@ -1430,6 +1431,11 @@ const openS3File = async (key, fallbackUrl) => {
       alert(message || "No se pudo abrir el archivo.");
     } catch {}
   };
+
+  // Si `key` parece un id legacy (32-hex) y tenemos una URL pública, abrimos la URL directamente.
+  if (normalizedKey && looksLikeHexId(normalizedKey) && fallbackUrl && !String(fallbackUrl).trim().startsWith("s3://")) {
+    if (openUrl(fallbackUrl)) return;
+  }
 
   if (normalizedKey) {
     try {
@@ -39826,13 +39832,11 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
 
 	    const necTd = document.createElement("td");
 	    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
-	    tr.appendChild(necTd);
+    tr.appendChild(necTd);
 
     const precioTd = document.createElement("td");
-    const precio = Number(row.precio_encargo || 0) > 0
-      ? row.precio_encargo
-      : (row.precio_objetivo || row.precio_pedido_cliente || "");
-    const formatted = formatCell("precio_objetivo", precio);
+    const precio = row.precio_encargo ?? "";
+    const formatted = formatCell("precio_encargo", precio);
     precioTd.textContent = formatted === null ? "" : formatted;
     tr.appendChild(precioTd);
 
