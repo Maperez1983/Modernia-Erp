@@ -109,6 +109,7 @@ POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 NOTARIAS_MALAGA_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "notarias_malaga.txt"
 IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_malaga.min.json"
 IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_andalucia.min.json"
+IIVTNU_TIPO_GRAVAMEN_CAPITALES_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_capitales.min.json"
 INE_MUNICIPIOS_2026_PATH = ROOT.parent / "data" / "catalogos" / "ine_municipios_ine_2026.csv"
 ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
@@ -5310,6 +5311,7 @@ _IIVTNU_POSTAL_CACHE_LOCK = threading.Lock()
 _IIVTNU_POSTAL_CACHE = None  # {"cp_to": {cp: ine}, "ine_to": {ine: name}, "prov_to": {ine: provincia}}
 _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_malaga.min.json`
 _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_andalucia.min.json`
+_IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_capitales.min.json`
 _IIVTNU_INE_MUNICIPIOS_CACHE_LOCK = threading.Lock()
 _IIVTNU_INE_MUNICIPIOS_CACHE = None  # {"ine_to":{}, "prov_to":{}, "nameprov_to":{}}
 
@@ -5503,6 +5505,23 @@ def _iivtnu_load_tipo_gravamen_andalucia():
         data = {}
     _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = data
     return _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE
+
+
+def _iivtnu_load_tipo_gravamen_capitales():
+    global _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE
+    if _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE is not None:
+        return _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE
+    try:
+        if not IIVTNU_TIPO_GRAVAMEN_CAPITALES_PATH.exists():
+            _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE = {}
+            return _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE
+        data = json.loads(IIVTNU_TIPO_GRAVAMEN_CAPITALES_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE = data
+    return _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE
 
 
 IIVTNU_MAX_COEFS_RDL_8_2023_2024 = {
@@ -7069,6 +7088,184 @@ def _irpf_tax_progressive(base, brackets):
         if hi is None or base_val <= upper:
             break
     return round(cuota + 1e-9, 2)
+
+
+def _irpf_ganancia_simulate(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("payload inválido")
+    acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
+    devengo = parse_iso_date(payload.get("fecha_transmision") or "")
+    if not acq or not devengo:
+        raise ValueError("Fechas inválidas")
+    if devengo <= acq:
+        raise ValueError("La fecha de transmisión debe ser posterior a la de adquisición")
+
+    def _money(key: str) -> float:
+        try:
+            return float(parse_money_value(payload.get(key) or 0) or 0.0)
+        except Exception:
+            return 0.0
+
+    participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
+    if participacion_pct is None:
+        participacion_pct = 100.0
+    try:
+        participacion_pct = float(participacion_pct)
+    except Exception:
+        participacion_pct = 100.0
+    participacion_pct = max(0.0, min(100.0, participacion_pct))
+    factor = participacion_pct / 100.0
+
+    valor_adq = _money("valor_adquisicion")
+    gastos_adq = _money("gastos_adquisicion")
+    mejoras = _money("inversiones_mejoras")
+    amort = _money("amortizacion_deducida")
+    valor_tx = _money("valor_transmision")
+    gastos_tx = _money("gastos_transmision")
+    plusvalia = _money("plusvalia_municipal")
+
+    valor_adquisicion_calc = max(0.0, (valor_adq + gastos_adq + mejoras - amort) * factor)
+    valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
+    ganancia = round(valor_transmision_calc - valor_adquisicion_calc + 1e-9, 2)
+
+    vivienda_habitual = bool(payload.get("vivienda_habitual") or False)
+    exencion_mayor_65 = bool(payload.get("exencion_mayor_65") or False)
+    reinversion = parse_optional_float(payload.get("importe_reinvertido") or None)
+    if reinversion is not None:
+        try:
+            reinversion = float(reinversion)
+        except Exception:
+            reinversion = None
+    prestamo_pendiente = _money("prestamo_pendiente")
+
+    exento = 0.0
+    exencion_motivo = ""
+    if exencion_mayor_65 and vivienda_habitual and ganancia > 0:
+        exento = ganancia
+        exencion_motivo = "Exención >65 vivienda habitual (marcado)"
+    elif vivienda_habitual and reinversion is not None and reinversion > 0 and ganancia > 0:
+        importe_obtenido = max(0.0, (valor_tx - gastos_tx - prestamo_pendiente) * factor)
+        ratio = 0.0
+        if importe_obtenido > 0:
+            ratio = max(0.0, min(1.0, reinversion / importe_obtenido))
+        exento = round(ganancia * ratio + 1e-9, 2)
+        exencion_motivo = "Exención reinversión (proporcional)"
+
+    base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
+    year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
+    scale_year, brackets, assumed = _irpf_savings_scale_for_year(year)
+    cuota = _irpf_tax_progressive(base_ahorro, brackets)
+    return {
+        "ok": True,
+        "params": {
+            "ejercicio": year,
+            "escala_ejercicio": scale_year,
+            "escala_asumida": 1 if assumed else 0,
+        },
+        "result": {
+            "participacion_factor": round(factor + 1e-12, 6),
+            "valor_adquisicion_calc": round(valor_adquisicion_calc + 1e-9, 2),
+            "valor_transmision_calc": round(valor_transmision_calc + 1e-9, 2),
+            "ganancia_patrimonial": ganancia,
+            "exento": round(exento + 1e-9, 2),
+            "exencion_motivo": exencion_motivo,
+            "base_ahorro_sujeta": base_ahorro,
+            "cuota_ahorro_estimada": cuota,
+        },
+    }
+
+
+def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
+    payload = payload or {}
+    simulate_out = simulate_out or {}
+    params = simulate_out.get("params") or {}
+    result = simulate_out.get("result") or {}
+
+    ejercicio = params.get("ejercicio")
+    escala = params.get("escala_ejercicio")
+    assumed = bool(params.get("escala_asumida"))
+
+    def yn(value: object) -> str:
+        return "Sí" if bool(value) else "No"
+
+    def money(value: object) -> str:
+        raw = "" if value is None else str(value)
+        if not raw.strip():
+            return "—"
+        try:
+            parsed = parse_money_value(value)
+        except Exception:
+            parsed = None
+        if parsed is None:
+            return raw.strip()
+        return format_eur(parsed)
+
+    def pct(value: object) -> str:
+        val = parse_optional_float(value)
+        if val is None:
+            return ""
+        try:
+            val = float(val)
+        except Exception:
+            return ""
+        return f"{val:.2f}%".replace(".", ",")
+
+    def date_text(value: object) -> str:
+        return str(value or "").strip()
+
+    input_lines = [
+        ("Ejercicio", str(ejercicio or "")),
+        ("% participación", pct(payload.get("participacion_pct") or 100)),
+        ("Fecha adquisición", date_text(payload.get("fecha_adquisicion"))),
+        ("Fecha transmisión (devengo)", date_text(payload.get("fecha_transmision"))),
+        ("Valor adquisición", money(payload.get("valor_adquisicion"))),
+        ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
+        ("Mejoras / inversiones", money(payload.get("inversiones_mejoras"))),
+        ("Amortización deducida", money(payload.get("amortizacion_deducida"))),
+        ("Valor transmisión", money(payload.get("valor_transmision"))),
+        ("Gastos transmisión", money(payload.get("gastos_transmision"))),
+        ("Plusvalía municipal pagada", money(payload.get("plusvalia_municipal"))),
+        ("Vivienda habitual", yn(payload.get("vivienda_habitual"))),
+        ("Exención >65", yn(payload.get("exencion_mayor_65"))),
+        ("Importe reinvertido", money(payload.get("importe_reinvertido"))),
+        ("Préstamo pendiente", money(payload.get("prestamo_pendiente"))),
+    ]
+    output_lines = [
+        ("Escala usada", str(escala or "")),
+        ("Escala asumida", "Sí" if assumed else "No"),
+        ("Valor adquisición (calc.)", money(result.get("valor_adquisicion_calc"))),
+        ("Valor transmisión (calc.)", money(result.get("valor_transmision_calc"))),
+        ("Ganancia patrimonial", money(result.get("ganancia_patrimonial"))),
+        ("Exento", money(result.get("exento"))),
+        ("Motivo exención", str(result.get("exencion_motivo") or "—")),
+        ("Base ahorro sujeta", money(result.get("base_ahorro_sujeta"))),
+        ("Cuota ahorro estimada", money(result.get("cuota_ahorro_estimada"))),
+    ]
+
+    empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
+    ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
+    subtitle_parts = [empresa]
+    if ref:
+        subtitle_parts.append(ref)
+    subtitle_parts.append(f"Generado: {format_export_date(datetime.now(timezone.utc).date().isoformat())}")
+    subtitle = " · ".join([p for p in subtitle_parts if p])
+
+    footer = [
+        "Estimación determinista generada por el CRM. Revisar antes de presentar/firmar.",
+        "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (coeficientes, abatimiento, etc.).",
+    ]
+    brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
+    pdf_bytes = build_branded_document_pdf(
+        "INFORME IRPF · GANANCIA PATRIMONIAL",
+        subtitle,
+        [
+            ("Datos de entrada", input_lines),
+            ("Resultado", output_lines),
+        ],
+        footer_lines=footer,
+        brand_logo_url=brand,
+    )
+    return pdf_bytes or b""
 
 
 def _irpf_rental_reduction_pct(payload, ejercicio):
@@ -35553,13 +35750,16 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/copilot_web_fetch",
 	            "/api/copilot_web_ask",
 	            "/api/iivtnu_municipios",
-	            "/api/iivtnu_cp_lookup",
-	            "/api/iivtnu_simulate",
-	            "/api/iivtnu_pdf_parse",
-	            "/api/iivtnu_param_upsert",
-	            "/api/s3_presign",
-	            "/api/s3_multipart_start",
-            "/api/s3_multipart_presign",
+		            "/api/iivtnu_cp_lookup",
+		            "/api/iivtnu_simulate",
+		            "/api/iivtnu_pdf_parse",
+		            "/api/iivtnu_param_upsert",
+		            "/api/irpf_ganancia_simulate",
+		            "/api/irpf_alquiler_simulate",
+		            "/api/irpf_ganancia_pdf",
+		            "/api/s3_presign",
+		            "/api/s3_multipart_start",
+	            "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
             "/api/clientes",
@@ -36677,10 +36877,59 @@ class Handler(BaseHTTPRequestHandler):
                         source_label = "Ayto Málaga · Ordenanza Nº 5 IIVTNU (DocumentoNormativa688)"
                         source_url = "https://www.malaga.eu/visorcontenido/NRMDocumentDisplayer/688/DocumentoNormativa688"
                 else:
-                    tipo_gravamen_pct = 30.0
-                    tipo_is_estimated = True
-                    source_label = "Tipo no disponible (usa manual)"
-                    source_url = ""
+                    tipo_data = _iivtnu_load_tipo_gravamen_capitales()
+                    years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                    year_key = str(devengo.year)
+                    available_years = []
+                    try:
+                        available_years = sorted([str(y) for y in (years_map.keys() if isinstance(years_map, dict) else [])], reverse=True)
+                    except Exception:
+                        available_years = []
+                    candidates = [year_key] + [y for y in available_years if y != year_key]
+                    used_year = None
+                    tipo_found = None
+                    ine_key = str(municipio_ine).zfill(5)
+                    for cand_year in candidates:
+                        ymap = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                        if not isinstance(ymap, dict):
+                            continue
+                        raw = ymap.get(ine_key)
+                        if raw is None and ine_key.isdigit():
+                            try:
+                                raw = ymap.get(str(int(ine_key)))
+                            except Exception:
+                                raw = None
+                        if raw is None:
+                            continue
+                        try:
+                            v = float(raw)
+                        except Exception:
+                            continue
+                        if v > 0:
+                            tipo_found = v
+                            used_year = str(cand_year)
+                            break
+                    if tipo_found is not None and tipo_found > 0:
+                        tipo_gravamen_pct = float(tipo_found)
+                        if used_year != year_key:
+                            tipo_is_estimated = True
+                        source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+                        src = source_map.get(used_year or year_key) if isinstance(source_map, dict) else None
+                        if not isinstance(src, dict) and isinstance(source_map, dict):
+                            try:
+                                src = source_map.get(available_years[0]) if available_years else None
+                            except Exception:
+                                src = None
+                        if isinstance(src, dict):
+                            source_label = str(src.get("label") or "").strip()
+                            source_url = str(src.get("url") or "").strip()
+                            if used_year and used_year != year_key:
+                                source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
+                    else:
+                        tipo_gravamen_pct = 30.0
+                        tipo_is_estimated = True
+                        source_label = "Tipo no disponible (usa manual)"
+                        source_url = ""
 
             if not coef_table:
                 coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo)
@@ -36960,91 +37209,33 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "result": res})
             return
         if parsed.path == "/api/irpf_ganancia_simulate":
-            acq = parse_iso_date(payload.get("fecha_adquisicion") or "")
-            devengo = parse_iso_date(payload.get("fecha_transmision") or "")
-            if not acq or not devengo:
-                json_response(self, {"error": "Fechas inválidas"}, status=400)
-                return
-            if devengo <= acq:
-                json_response(self, {"error": "La fecha de transmisión debe ser posterior a la de adquisición"}, status=400)
-                return
-
-            def _money(key: str) -> float:
-                try:
-                    return float(parse_money_value(payload.get(key) or 0) or 0.0)
-                except Exception:
-                    return 0.0
-
-            participacion_pct = parse_optional_float(payload.get("participacion_pct") or None)
-            if participacion_pct is None:
-                participacion_pct = 100.0
             try:
-                participacion_pct = float(participacion_pct)
-            except Exception:
-                participacion_pct = 100.0
-            participacion_pct = max(0.0, min(100.0, participacion_pct))
-            factor = participacion_pct / 100.0
+                out = _irpf_ganancia_simulate(payload)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(self, out)
+            return
 
-            valor_adq = _money("valor_adquisicion")
-            gastos_adq = _money("gastos_adquisicion")
-            mejoras = _money("inversiones_mejoras")
-            amort = _money("amortizacion_deducida")
-            valor_tx = _money("valor_transmision")
-            gastos_tx = _money("gastos_transmision")
-            plusvalia = _money("plusvalia_municipal")
-
-            valor_adquisicion_calc = max(0.0, (valor_adq + gastos_adq + mejoras - amort) * factor)
-            valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
-            ganancia = round(valor_transmision_calc - valor_adquisicion_calc + 1e-9, 2)
-
-            vivienda_habitual = bool(payload.get("vivienda_habitual") or False)
-            exencion_mayor_65 = bool(payload.get("exencion_mayor_65") or False)
-            reinversion = parse_optional_float(payload.get("importe_reinvertido") or None)
-            if reinversion is not None:
-                try:
-                    reinversion = float(reinversion)
-                except Exception:
-                    reinversion = None
-            prestamo_pendiente = _money("prestamo_pendiente")
-
-            exento = 0.0
-            exencion_motivo = ""
-            if exencion_mayor_65 and vivienda_habitual and ganancia > 0:
-                exento = ganancia
-                exencion_motivo = "Exención >65 vivienda habitual (marcado)"
-            elif vivienda_habitual and reinversion is not None and reinversion > 0 and ganancia > 0:
-                importe_obtenido = max(0.0, (valor_tx - gastos_tx - prestamo_pendiente) * factor)
-                ratio = 0.0
-                if importe_obtenido > 0:
-                    ratio = max(0.0, min(1.0, reinversion / importe_obtenido))
-                exento = round(ganancia * ratio + 1e-9, 2)
-                exencion_motivo = "Exención reinversión (proporcional)"
-
-            base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
-            year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
-            scale_year, brackets, assumed = _irpf_savings_scale_for_year(year)
-            cuota = _irpf_tax_progressive(base_ahorro, brackets)
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "params": {
-                        "ejercicio": year,
-                        "escala_ejercicio": scale_year,
-                        "escala_asumida": 1 if assumed else 0,
-                    },
-                    "result": {
-                        "participacion_factor": round(factor + 1e-12, 6),
-                        "valor_adquisicion_calc": round(valor_adquisicion_calc + 1e-9, 2),
-                        "valor_transmision_calc": round(valor_transmision_calc + 1e-9, 2),
-                        "ganancia_patrimonial": ganancia,
-                        "exento": round(exento + 1e-9, 2),
-                        "exencion_motivo": exencion_motivo,
-                        "base_ahorro_sujeta": base_ahorro,
-                        "cuota_ahorro_estimada": cuota,
-                    },
-                },
-            )
+        if parsed.path == "/api/irpf_ganancia_pdf":
+            try:
+                out = _irpf_ganancia_simulate(payload)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                pdf_bytes = build_irpf_ganancia_report_pdf(payload, out)
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            ejercicio = str((out.get("params") or {}).get("ejercicio") or "").strip() or "irpf"
+            devengo = str(payload.get("fecha_transmision") or "").strip() or "ganancia"
+            safe_devengo = re.sub(r"[^0-9A-Za-z_-]", "_", devengo)[:32] or "ganancia"
+            filename = f"irpf_ganancia_{ejercicio}_{safe_devengo}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if parsed.path == "/api/irpf_alquiler_simulate":

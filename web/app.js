@@ -1920,12 +1920,13 @@ const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
 	const iivtnuPdfApplyBtn = document.getElementById("iivtnuPdfApplyBtn");
 	const iivtnuPdfSaveTipoBtn = document.getElementById("iivtnuPdfSaveTipoBtn");
 	const iivtnuPdfSaveTipoStatus = document.getElementById("iivtnuPdfSaveTipoStatus");
-	const irpfGainForm = document.getElementById("irpfGainForm");
-	const irpfGainStatus = document.getElementById("irpfGainStatus");
-	const irpfGainResult = document.getElementById("irpfGainResult");
-	const irpfRentalForm = document.getElementById("irpfRentalForm");
-	const irpfRentalStatus = document.getElementById("irpfRentalStatus");
-	const irpfRentalResult = document.getElementById("irpfRentalResult");
+		const irpfGainForm = document.getElementById("irpfGainForm");
+		const irpfGainStatus = document.getElementById("irpfGainStatus");
+		const irpfGainResult = document.getElementById("irpfGainResult");
+		const irpfGainPdfBtn = document.getElementById("irpfGainPdfBtn");
+		const irpfRentalForm = document.getElementById("irpfRentalForm");
+		const irpfRentalStatus = document.getElementById("irpfRentalStatus");
+		const irpfRentalResult = document.getElementById("irpfRentalResult");
 	const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
@@ -2079,6 +2080,7 @@ const captacionFormStatus = document.getElementById("captacionFormStatus");
 const compraventaForm = document.getElementById("compraventaForm");
 const compraventaFormStatus = document.getElementById("compraventaFormStatus");
 const compraventaCerrarBtn = document.getElementById("compraventaCerrarBtn");
+const compraventaOpenIrpfBtn = document.getElementById("compraventaOpenIrpfBtn");
 const demandaForm = document.getElementById("demandaForm");
 const demandaFormStatus = document.getElementById("demandaFormStatus");
 const demandaCliente = document.getElementById("demandaCliente");
@@ -2319,6 +2321,7 @@ const gestoriaCrmUploadRentaBtn = document.getElementById("gestoriaCrmUploadRent
 const gestoriaTrabajoForm = document.getElementById("gestoriaTrabajoForm");
 const gestoriaTrabajoCliente = document.getElementById("gestoriaTrabajoCliente");
 const gestoriaTrabajoStatus = document.getElementById("gestoriaTrabajoStatus");
+const gestoriaOpenIrpfBtn = document.getElementById("gestoriaOpenIrpfBtn");
 const gestoriaTrabajosTable = document.getElementById("gestoriaTrabajosTable");
 const gestoriaTrabajosInfo = document.getElementById("gestoriaTrabajosInfo");
 const gestoriaModelosTable = document.getElementById("gestoriaModelosTable");
@@ -3052,6 +3055,7 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
 	const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
 		const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleEncargoModalOpenBtn = document.getElementById("inmuebleEncargoModalOpenBtn");
+const inmuebleNoticiaOpenIrpfBtn = document.getElementById("inmuebleNoticiaOpenIrpfBtn");
 const inmuebleEncargoModal = document.getElementById("inmuebleEncargoModal");
 const inmuebleEncargoModalClose = document.getElementById("inmuebleEncargoModalClose");
 		 const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
@@ -6590,6 +6594,240 @@ const openWorkspaceFinCopilot = () => {
       finCopilotForm.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, 220);
+};
+
+const openWorkspaceIrpfSimulator = () => {
+  const user = getAuthScopeUser();
+  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
+  openHolding({ mode });
+  window.setTimeout(() => {
+    const options = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
+    focusWorkspaceEngine("simuladores", irpfGainForm, options).catch(() => {});
+  }, 220);
+};
+
+const openIrpfGananciaModal = (options = {}) => {
+  let modal = document.getElementById("irpfGainModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "irpfGainModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 980px;">
+        <div class="modal-header">
+          <h3>Simulador IRPF · Ganancia patrimonial</h3>
+          <button type="button" class="ghost" data-irpf-close>✕</button>
+        </div>
+        <form class="modal-body form-grid" data-irpf-form>
+          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
+          <label class="span-2">
+            Referencia (opcional)
+            <input name="referencia" placeholder="Inmueble / expediente / dirección" />
+          </label>
+          <label>
+            Ejercicio (opcional)
+            <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+          </label>
+          <label>
+            % participación
+            <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+          </label>
+          <label>
+            Fecha adquisición
+            <input name="fecha_adquisicion" type="date" required />
+          </label>
+          <label>
+            Fecha transmisión (devengo)
+            <input name="fecha_transmision" type="date" required />
+          </label>
+          <label>
+            Valor adquisición
+            <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
+          </label>
+          <label>
+            Gastos adquisición (opcional)
+            <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label>
+            Mejoras / inversiones (opcional)
+            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label>
+            Amortización deducida (opcional)
+            <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label>
+            Valor transmisión
+            <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
+          </label>
+          <label>
+            Gastos transmisión (opcional)
+            <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label>
+            Plusvalía municipal pagada (opcional)
+            <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label class="span-2">
+            <div class="inline-row">
+              <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
+              <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención &gt;65 (si aplica)</label>
+            </div>
+          </label>
+          <label>
+            Importe reinvertido (opcional)
+            <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <label>
+            Préstamo pendiente (opcional)
+            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+          </label>
+          <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" class="secondary" data-irpf-simulate>Simular</button>
+            <button type="button" class="secondary ghost" data-irpf-pdf>Informe PDF</button>
+            <span class="muted" data-irpf-status></span>
+          </div>
+        </form>
+        <div class="modal-body">
+          <div data-irpf-result></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  const form = modal.querySelector("[data-irpf-form]");
+  const closeBtn = modal.querySelector("[data-irpf-close]");
+  const simulateBtn = modal.querySelector("[data-irpf-simulate]");
+  const pdfBtn = modal.querySelector("[data-irpf-pdf]");
+  const statusEl = modal.querySelector("[data-irpf-status]");
+  const resultEl = modal.querySelector("[data-irpf-result]");
+
+  const setValue = (name, value) => {
+    const el = form?.querySelector(`[name=\"${name}\"]`);
+    if (!el) return;
+    el.value = value === null || value === undefined ? "" : String(value);
+  };
+  const setChecked = (name, checked) => {
+    const el = form?.querySelector(`[name=\"${name}\"]`);
+    if (!el) return;
+    el.checked = Boolean(checked);
+  };
+  const readPayload = () => Object.fromEntries(new FormData(form).entries());
+
+  const renderResult = (resp = null) => {
+    if (!resultEl) return;
+    if (!resp) {
+      resultEl.innerHTML = "";
+      return;
+    }
+    const params = resp?.params || {};
+    const result = resp?.result || {};
+    const fields = [
+      ["Ejercicio", params.ejercicio ?? ""],
+      ["Escala usada", params.escala_ejercicio ?? ""],
+      ["Escala asumida", params.escala_asumida ? "Sí" : "No"],
+      ["Participación", result.participacion_factor],
+      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+      ["Valor transmisión (calc.)", result.valor_transmision_calc],
+      ["Ganancia patrimonial", result.ganancia_patrimonial],
+      ["Exento", result.exento],
+      ["Motivo exención", result.exencion_motivo || "—"],
+      ["Base ahorro sujeta", result.base_ahorro_sujeta],
+      ["Cuota ahorro estimada", result.cuota_ahorro_estimada],
+    ];
+    resultEl.innerHTML = `
+      <div class="ui-table">
+        <table class="data-table">
+          <tbody>
+            ${fields
+              .map(
+                ([label, value]) => `
+	                  <tr>
+	                    <th>${escapeHtml(label)}</th>
+	                    <td>${escapeHtml(value == null ? "" : String(value))}</td>
+	                  </tr>
+	                `
+	              )
+	              .join("")}
+	          </tbody>
+	        </table>
+	      </div>
+	    `;
+  };
+
+  const prefill = (options && typeof options === "object" ? options : {}) || {};
+  try {
+    form?.reset();
+  } catch {}
+  setValue("referencia", prefill.referencia || "");
+  setValue("ejercicio", prefill.ejercicio || "");
+  setValue("participacion_pct", prefill.participacion_pct || "100");
+  setValue("fecha_adquisicion", prefill.fecha_adquisicion || "");
+  setValue("fecha_transmision", prefill.fecha_transmision || "");
+  setValue("valor_adquisicion", prefill.valor_adquisicion || "");
+  setValue("gastos_adquisicion", prefill.gastos_adquisicion || "");
+  setValue("inversiones_mejoras", prefill.inversiones_mejoras || "");
+  setValue("amortizacion_deducida", prefill.amortizacion_deducida || "");
+  setValue("valor_transmision", prefill.valor_transmision || "");
+  setValue("gastos_transmision", prefill.gastos_transmision || "");
+  setValue("plusvalia_municipal", prefill.plusvalia_municipal || "");
+  setValue("importe_reinvertido", prefill.importe_reinvertido || "");
+  setValue("prestamo_pendiente", prefill.prestamo_pendiente || "");
+  setChecked("vivienda_habitual", Boolean(prefill.vivienda_habitual));
+  setChecked("exencion_mayor_65", Boolean(prefill.exencion_mayor_65));
+  renderResult(null);
+  if (statusEl) statusEl.textContent = "";
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    modal.classList.remove("open");
+  };
+  closeBtn.onclick = () => cleanup();
+  modal.onclick = (event) => {
+    if (event.target === modal) cleanup();
+  };
+
+  let lastResp = null;
+  simulateBtn.onclick = async () => {
+    if (statusEl) statusEl.textContent = "Simulando...";
+    renderResult(null);
+    try {
+      const payload = readPayload();
+      const resp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", payload, { timeoutMs: 30000 });
+      lastResp = resp;
+      renderResult(resp);
+      if (statusEl) statusEl.textContent = "OK.";
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err?.message || "No se pudo simular.";
+    }
+  };
+  pdfBtn.onclick = async () => {
+    if (statusEl) statusEl.textContent = "Generando PDF...";
+    try {
+      const payload = readPayload();
+      if (payload.referencia && !payload.empresa_nombre) {
+        payload.empresa_nombre = resolveCrmInmoEmpresaNombre() || resolveCrmGestoriaEmpresaNombre() || state.currentWorkspaceCompanyName || "";
+      }
+      await downloadPdfFromApi("/api/irpf_ganancia_pdf", payload, {
+        filenameFallback: "irpf_ganancia.pdf",
+      });
+      if (statusEl) statusEl.textContent = "PDF generado.";
+      // Si aún no se simuló, intentamos renderizar resultado usando el API estándar.
+      if (!lastResp) {
+        try {
+          const resp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", payload, { timeoutMs: 30000 });
+          lastResp = resp;
+          renderResult(resp);
+        } catch {}
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err?.message || "No se pudo generar el PDF.";
+    }
+  };
 };
 
 const WORKSPACE_LAUNCHERS = {
@@ -22786,6 +23024,11 @@ const normalizeCrmMainEtapa = (value) => {
   return "Inmueble";
 };
 
+const resolveInmuebleMainEtapa = (inmueble = {}, captacion = {}) =>
+  normalizeCrmMainEtapa(
+    captacion?.etapa || captacion?.situacion_comercial || inmueble?.estado || ""
+  );
+
 const normalizeInmoTipoOperacion = (value) => {
   const key = normalizeSimple(value || "");
   if (!key) return "";
@@ -24985,7 +25228,7 @@ const rerenderCurrentInmuebleGrids = () => {
   const captacion = state.currentInmuebleContext?.captacion || {};
   const docs = state.currentInmuebleContext?.docs || [];
   state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, docs);
-	      const etapaMain = normalizeCrmMainEtapa(inmueble.estado || normalizedCaptacion.situacion_comercial || captacion.etapa || "");
+  const etapaMain = resolveInmuebleMainEtapa(inmueble, captacion);
   syncInmuebleNoticiaTab(inmueble, captacion);
   if (inmuebleDatosGrid) {
     const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
@@ -43242,14 +43485,14 @@ const setInmuebleTab = (tab) => {
 
 const syncInmuebleEncargoModalButton = (inmueble = {}, captacion = {}) => {
   if (!inmuebleEncargoModalOpenBtn) return;
-  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || captacion?.situacion_comercial || "");
+  const stage = resolveInmuebleMainEtapa(inmueble, captacion);
   const available = ["Noticia", "Encargo"].includes(stage);
   inmuebleEncargoModalOpenBtn.classList.toggle("hidden", !available);
 };
 
 const syncInmuebleNoticiaTab = (inmueble = {}, captacion = {}) => {
   if (!inmuebleTabs || !inmuebleNoticiaTabBtn || !inmuebleTabNoticia) return;
-  const stage = normalizeCrmMainEtapa(inmueble?.estado || captacion?.etapa || captacion?.situacion_comercial || "");
+  const stage = resolveInmuebleMainEtapa(inmueble, captacion);
   const available = ["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage);
   inmuebleNoticiaTabBtn.classList.toggle("hidden", !available);
   if (!available) {
@@ -43728,14 +43971,14 @@ const openInmuebleDetail = (id, originView = "") => {
 	        compradores: [],
 	      };
       state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
-  const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.situacion_comercial || captacion.etapa || "");
+      const etapaMain = resolveInmuebleMainEtapa(inmueble, normalizedCaptacion);
 		      if (hasPendingPrefill) {
 		        applyPendingInmuebleCitaPrefill();
 		      }
 		      syncInmuebleEncargoModalButton(inmueble, normalizedCaptacion);
 		      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
       if (inmuebleTitle) {
-        const etapa = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "") || "Inmueble";
+        const etapa = resolveInmuebleMainEtapa(inmueble, normalizedCaptacion) || "Inmueble";
         const tecnoStage = etapa === "Inmueble" || etapa === "Noticia" ? etapa : "Encargo";
         const codePrefix = resolveCaptacionCodePrefix(tecnoStage);
         const label = inmueble.direccion || inmueble.referencia || "Ficha de inmueble";
@@ -43779,11 +44022,11 @@ const openInmuebleDetail = (id, originView = "") => {
 	        renderEditableGrid(inmuebleCaptacionGrid, fields, normalizedCaptacion, "captacion");
 	        renderPropietariosEditor(data.propietarios || []);
 	      }
-	      if (inmuebleNoticiaGrid) {
-	        const stage = normalizeCrmMainEtapa(inmueble.estado || normalizedCaptacion.etapa || normalizedCaptacion.situacion_comercial || "");
-	        if (["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage)) {
-	          renderEditableGrid(inmuebleNoticiaGrid, CAPTACION_FIELDS_NOTICIA, normalizedCaptacion, "captacion");
-	        } else {
+		      if (inmuebleNoticiaGrid) {
+		        const stage = resolveInmuebleMainEtapa(inmueble, normalizedCaptacion);
+		        if (["Noticia", "Encargo", "Propuesta", "Vendido"].includes(stage)) {
+		          renderEditableGrid(inmuebleNoticiaGrid, CAPTACION_FIELDS_NOTICIA, normalizedCaptacion, "captacion");
+		        } else {
 	          inmuebleNoticiaGrid.innerHTML = "<p class='muted'>Disponible al convertir el inmueble en Noticia.</p>";
 	        }
 	      }
@@ -51153,6 +51396,40 @@ const downloadCsvFile = (filename, content) => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+};
+
+const downloadBlobFile = (filename, blob) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "archivo";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
+  const { filenameFallback = "informe.pdf" } = options || {};
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text || `HTTP ${res.status}`;
+    try {
+      const parsed = text ? JSON.parse(text) : null;
+      if (parsed && parsed.error) detail = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
+    } catch {}
+    throw new Error(detail);
+  }
+  const disposition = String(res.headers.get("Content-Disposition") || "");
+  const match = disposition.match(/filename=\"([^\"]+)\"/i);
+  const filename = match && match[1] ? match[1] : filenameFallback;
+  const blob = await res.blob();
+  downloadBlobFile(filename, blob);
 };
 
 const buildPlantillaConversorRows = (diario = []) => {
@@ -59550,6 +59827,27 @@ if (iivtnuPdfParseForm) {
 }
 
 if (irpfGainForm) {
+  if (irpfGainPdfBtn) {
+    irpfGainPdfBtn.addEventListener("click", async () => {
+      if (irpfGainStatus) irpfGainStatus.textContent = "Generando PDF...";
+      try {
+        const formData = new FormData(irpfGainForm);
+        const payload = Object.fromEntries(formData.entries());
+        payload.brand_logo_url = "/assets/grupo_modernia_logo.png";
+        if (!payload.empresa_nombre) {
+          payload.empresa_nombre =
+            resolveCrmInmoEmpresaNombre() ||
+            resolveCrmGestoriaEmpresaNombre() ||
+            state.currentWorkspaceCompanyName ||
+            "";
+        }
+        await downloadPdfFromApi("/api/irpf_ganancia_pdf", payload, { filenameFallback: "irpf_ganancia.pdf" });
+        if (irpfGainStatus) irpfGainStatus.textContent = "PDF generado.";
+      } catch (err) {
+        if (irpfGainStatus) irpfGainStatus.textContent = err?.message || "No se pudo generar el PDF.";
+      }
+    });
+  }
   irpfGainForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     renderIrpfGainResult(null);
@@ -62167,6 +62465,23 @@ if (inmuebleEncargoModalOpenBtn) {
   });
 }
 
+if (inmuebleNoticiaOpenIrpfBtn) {
+  inmuebleNoticiaOpenIrpfBtn.addEventListener("click", () => {
+    const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+    const captacion = state.currentInmuebleContext?.captacion || {};
+    const referencia =
+      String(inmueble.direccion || "").trim() ||
+      String(inmueble.referencia || "").trim() ||
+      String(inmueble.id || "").trim() ||
+      "";
+    openIrpfGananciaModal({
+      empresa_nombre: resolveCrmInmoEmpresaNombre(),
+      referencia,
+      valor_transmision: inmueble.precio_encargo || inmueble.precio_objetivo || captacion.precio_objetivo || "",
+    });
+  });
+}
+
 if (inmuebleEncargoModalClose) {
   inmuebleEncargoModalClose.addEventListener("click", () => {
     closeInmuebleEncargoModal();
@@ -63881,6 +64196,13 @@ if (gestoriaCrmForm) {
 }
 
 if (gestoriaTrabajoForm) {
+  if (gestoriaOpenIrpfBtn) {
+    gestoriaOpenIrpfBtn.addEventListener("click", () => {
+      openIrpfGananciaModal({
+        empresa_nombre: resolveCrmGestoriaEmpresaNombre(),
+      });
+    });
+  }
   gestoriaTrabajoForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (gestoriaTrabajoStatus) {
@@ -64949,6 +65271,21 @@ if (captacionForm) {
 }
 
 if (compraventaForm) {
+  if (compraventaOpenIrpfBtn) {
+    compraventaOpenIrpfBtn.addEventListener("click", () => {
+      let prefill = { empresa_nombre: resolveCrmInmoEmpresaNombre() };
+      try {
+        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
+        prefill = {
+          ...prefill,
+          referencia: payload.direccion || payload.id || "",
+          fecha_transmision: payload.fecha_escritura || "",
+          valor_transmision: payload.precio_escritura || "",
+        };
+      } catch {}
+      openIrpfGananciaModal(prefill);
+    });
+  }
   compraventaForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (compraventaFormStatus) {

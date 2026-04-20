@@ -1112,11 +1112,12 @@
 		                Préstamo pendiente (opcional)
 		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
 		              </label>
-		              <div class="form-actions span-2">
-		                <button type="submit">Simular ganancia IRPF</button>
-		                <span id="irpfGainStatus" class="muted"></span>
-		              </div>
-		            </form>
+			              <div class="form-actions span-2">
+			                <button type="submit">Simular ganancia IRPF</button>
+			                <button type="button" class="secondary ghost" id="irpfGainPdfBtn">Informe PDF</button>
+			                <span id="irpfGainStatus" class="muted"></span>
+			              </div>
+			            </form>
 		            <div id="irpfGainResult"></div>
 		          </div>
 		          <div class="form-card">
@@ -3919,12 +3920,13 @@
 			                    <h3>Datos de la noticia</h3>
 			                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
 			                  </div>
-			                  <div class="form-actions">
-			                    <button type="button" class="secondary hidden" id="inmuebleEncargoModalOpenBtn">Hoja de encargo</button>
-			                  </div>
-			                </div>
-			                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
-			              </div>
+				                  <div class="form-actions">
+				                    <button type="button" class="secondary hidden" id="inmuebleEncargoModalOpenBtn">Hoja de encargo</button>
+				                    <button type="button" class="secondary ghost" id="inmuebleNoticiaOpenIrpfBtn">Simular IRPF</button>
+				                  </div>
+				                </div>
+				                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
+				              </div>
 			            </div>
 		            <div id="inmuebleTabDemandas" class="hidden">
 	              <div class="form-card">
@@ -4498,6 +4500,7 @@
                 </label>
                 <div class="form-actions">
                   <button type="submit">Añadir gestión</button>
+                  <button type="button" id="gestoriaOpenIrpfBtn" class="secondary ghost">Simular IRPF</button>
                   <span id="gestoriaTrabajoStatus" class="muted"></span>
                 </div>
               </form>
@@ -6667,6 +6670,7 @@
                 <div class="form-actions">
                   <button type="submit">Guardar compraventa</button>
                   <button type="button" id="compraventaCerrarBtn" class="secondary ghost hidden">Cerrar positivamente (Histórico)</button>
+                  <button type="button" id="compraventaOpenIrpfBtn" class="secondary">Simular IRPF</button>
                   <span id="compraventaFormStatus" class="muted"></span>
                 </div>
               </form>
