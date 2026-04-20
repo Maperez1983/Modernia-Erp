@@ -42211,6 +42211,7 @@ const renderCrmAgendaCalendar = (rows = []) => {
   const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
   const SLOT_MIN = 30;
   const SLOT_H = 26;
+  const GRID_HEAD_H = 44;
 
   const computeTimeBounds = (events, { defaultStart = 8, defaultEnd = 20 } = {}) => {
     const mins = [];
@@ -42370,7 +42371,7 @@ const renderCrmAgendaCalendar = (rows = []) => {
       const grid = document.createElement("div");
       grid.className = "tc-weektime-grid";
       grid.style.gridTemplateColumns = "72px repeat(7, minmax(0, 1fr))";
-      grid.style.gridTemplateRows = "34px auto";
+      grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
 
       const corner = document.createElement("div");
       corner.className = "tc-weektime-corner";
@@ -42434,7 +42435,7 @@ const renderCrmAgendaCalendar = (rows = []) => {
       const grid = document.createElement("div");
       grid.className = "tc-dayone-grid";
       grid.style.gridTemplateColumns = "72px minmax(0, 1fr)";
-      grid.style.gridTemplateRows = "34px auto";
+      grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
 
       const corner = document.createElement("div");
       corner.className = "tc-dayone-corner";
