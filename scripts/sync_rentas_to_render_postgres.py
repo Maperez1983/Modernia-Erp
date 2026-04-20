@@ -535,7 +535,10 @@ try:
                         """
                         UPDATE gestoria_docs SET
                           empresa_id=%s, referencia_tipo=%s, referencia_id=%s, nombre=%s, tipo=%s, fecha=%s, estado=%s,
-                          notas=%s, doc_key=%s, doc_url=%s, updated_at=%s
+                          notas=%s,
+                          doc_key=COALESCE(NULLIF(%s, ''), doc_key),
+                          doc_url=COALESCE(NULLIF(%s, ''), doc_url),
+                          updated_at=%s
                         WHERE id=%s
                         """,
                         (
@@ -547,8 +550,9 @@ try:
                             doc.get("fecha"),
                             doc.get("estado"),
                             doc.get("notas"),
-                            doc.get("doc_key") or uuid.uuid4().hex,
                             doc_url,
+                            doc.get("doc_key") or "",
+                            doc_url or "",
                             now,
                             existing_doc["id"],
                         ),
@@ -574,8 +578,8 @@ try:
                             doc.get("fecha"),
                             doc.get("estado"),
                             doc.get("notas"),
-                            doc.get("doc_key") or uuid.uuid4().hex,
-                            doc_url,
+                            doc.get("doc_key") or None,
+                            doc_url or None,
                             now,
                             now,
                         ),

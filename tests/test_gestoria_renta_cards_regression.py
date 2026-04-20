@@ -27,6 +27,11 @@ class GestoriaRentaCardsRegressionTests(unittest.TestCase):
         server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
         self.assertIn('prefixes = ["gestoria", "gestoria_docs", "docs", "renta", "rentas"]', server_py)
 
+    def test_gestoria_docs_api_sanitizes_placeholder_doc_key(self):
+        server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
+        self.assertIn("_looks_like_placeholder_doc_key", server_py)
+        self.assertIn("_is_public_doc_url", server_py)
+
 
 if __name__ == "__main__":
     unittest.main()

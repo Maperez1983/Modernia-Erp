@@ -364,6 +364,26 @@ def _iter_s3_legacy_key_candidates(key: str):
             out.append(item)
     return out
 
+def _is_public_doc_url(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text.startswith("/uploads/"):
+        return True
+    if text.startswith("s3://"):
+        return True
+    if text.startswith("http://") or text.startswith("https://"):
+        return True
+    return False
+
+def _looks_like_placeholder_doc_key(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if "/" in text or "." in text:
+        return False
+    return bool(re.fullmatch(r"[0-9a-fA-F]{32}", text))
+
 
 def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):
     if not session:
@@ -53215,12 +53235,19 @@ class Handler(BaseHTTPRequestHandler):
                 out = []
                 seen = set()
                 for r in rows:
-                    rid = str(r["id"] or "").strip()
+                    payload = dict(r)
+                    # Sanitiza links: algunos syncs antiguos guardaron rutas locales o "doc_key" placeholder.
+                    # Evitamos enseñar botón "Ver" si no hay un enlace abrible desde el navegador.
+                    if not _is_public_doc_url(payload.get("doc_url")):
+                        payload["doc_url"] = ""
+                    if _looks_like_placeholder_doc_key(payload.get("doc_key")) and not payload.get("doc_url"):
+                        payload["doc_key"] = ""
+                    rid = str(payload.get("id") or "").strip()
                     if rid and rid in seen:
                         continue
                     if rid:
                         seen.add(rid)
-                    out.append(dict(r))
+                    out.append(payload)
                 json_response(self, {"rows": out})
                 return
 
