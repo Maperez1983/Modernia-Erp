@@ -7453,6 +7453,126 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     return pdf_bytes or b""
 
 
+def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dict) -> bytes:
+    payload = payload or {}
+    irpf_out = irpf_out or {}
+    iivtnu_out = iivtnu_out or {}
+
+    irpf_payload = payload.get("irpf_payload") if isinstance(payload.get("irpf_payload"), dict) else {}
+    iivtnu_payload = payload.get("iivtnu_payload") if isinstance(payload.get("iivtnu_payload"), dict) else {}
+
+    irpf_params = irpf_out.get("params") or {}
+    irpf_result = irpf_out.get("result") or {}
+    iiv_params = iivtnu_out.get("params") or {}
+    iiv_result = iivtnu_out.get("result") or {}
+
+    ccaa = _normalize_ccaa(payload.get("ccaa") or irpf_params.get("ccaa") or irpf_payload.get("ccaa") or "AN")
+    ccaa_label = CCAA_LABELS.get(ccaa, ccaa)
+    pv_territorio = str(payload.get("pv_territorio") or "").strip().upper()
+    pv_label_map = {"AL": "Álava", "BI": "Bizkaia", "GI": "Gipuzkoa"}
+
+    empresa = str(payload.get("empresa_nombre") or "").strip() or str(irpf_payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
+    ref = str(payload.get("referencia") or irpf_payload.get("referencia") or "").strip()
+
+    def yn(value: object) -> str:
+        return "Sí" if bool(value) else "No"
+
+    def money(value: object) -> str:
+        raw = "" if value is None else str(value)
+        if not raw.strip():
+            return "—"
+        try:
+            parsed = parse_money_value(value)
+        except Exception:
+            parsed = None
+        if parsed is None:
+            return raw.strip()
+        return format_eur(parsed)
+
+    def text(value: object) -> str:
+        return str(value or "").strip() or "—"
+
+    subtitle_parts = [empresa]
+    if ref:
+        subtitle_parts.append(ref)
+    subtitle_parts.append(f"CCAA: {ccaa_label}")
+    if ccaa == "PV":
+        subtitle_parts.append(f"Territorio: {pv_label_map.get(pv_territorio, pv_territorio or '—')}")
+    subtitle_parts.append(f"Generado: {format_export_date(datetime.now(timezone.utc).date().isoformat())}")
+    subtitle = " · ".join([p for p in subtitle_parts if p])
+
+    input_lines = [
+        ("Operación", "Venta de inmueble"),
+        ("Régimen fiscal", "IRNR (no residente)" if str(irpf_params.get("regimen_fiscal") or "").lower() == "irnr" else "IRPF (residente)"),
+        ("Ejercicio", text(irpf_params.get("ejercicio") or irpf_payload.get("ejercicio"))),
+        ("Fecha adquisición", text(irpf_payload.get("fecha_adquisicion"))),
+        ("Fecha transmisión (devengo)", text(irpf_payload.get("fecha_transmision"))),
+        ("% participación", text(irpf_payload.get("participacion_pct") or iivtnu_payload.get("participacion_pct") or "100")),
+        ("Valor adquisición", money(irpf_payload.get("valor_adquisicion"))),
+        ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
+        ("Mejoras / inversiones", money(irpf_payload.get("inversiones_mejoras"))),
+        ("Amortización deducida", money(irpf_payload.get("amortizacion_deducida"))),
+        ("Valor transmisión", money(irpf_payload.get("valor_transmision"))),
+        ("Gastos transmisión", money(irpf_payload.get("gastos_transmision"))),
+        ("Plusvalía municipal pagada (IRPF)", money(irpf_payload.get("plusvalia_municipal"))),
+        ("Vivienda habitual", yn(irpf_payload.get("vivienda_habitual"))),
+        ("Exención >65", yn(irpf_payload.get("exencion_mayor_65"))),
+        ("Importe reinvertido", money(irpf_payload.get("importe_reinvertido"))),
+        ("Préstamo pendiente", money(irpf_payload.get("prestamo_pendiente"))),
+        ("Municipio (INE)", text(iivtnu_payload.get("municipio_ine"))),
+        ("CP (autoselección)", text(iivtnu_payload.get("codigo_postal"))),
+        ("Valor catastral suelo", money(iivtnu_payload.get("valor_suelo"))),
+    ]
+
+    irpf_lines = [
+        ("Valor adquisición (calc.)", money(irpf_result.get("valor_adquisicion_calc"))),
+        ("Valor transmisión (calc.)", money(irpf_result.get("valor_transmision_calc"))),
+        ("Ganancia patrimonial", money(irpf_result.get("ganancia_patrimonial"))),
+        ("Exento", money(irpf_result.get("exento"))),
+        ("Motivo exención", text(irpf_result.get("exencion_motivo") or "—")),
+        ("Base ahorro sujeta", money(irpf_result.get("base_ahorro_sujeta"))),
+        ("Cuota estimada", money(irpf_result.get("cuota_ahorro_estimada"))),
+    ]
+    if str(irpf_params.get("regimen_fiscal") or "").lower() == "irnr":
+        irpf_lines.append(("Retención (importe)", money(irpf_result.get("retencion_importe"))))
+        irpf_lines.append(("Cuota neta (cuota - retención)", money(irpf_result.get("cuota_neta"))))
+
+    iivtnu_lines = [
+        ("Método recomendado", text(iiv_result.get("metodo_recomendado"))),
+        ("Cuota recomendada", money(iiv_result.get("cuota_recomendada"))),
+        ("Años", text(iiv_result.get("years"))),
+        ("Meses", text(iiv_result.get("months"))),
+        ("Coeficiente objetivo", text(iiv_result.get("coef_objetivo"))),
+        ("Base (objetivo)", money((iiv_result.get("objetivo") or {}).get("base_imponible") or iiv_result.get("base_imponible"))),
+        ("Tipo gravamen (%)", text(iiv_result.get("tipo_gravamen_pct"))),
+        ("Bonificación (%)", text(iiv_result.get("bonificacion_pct"))),
+        ("Cuota neta (objetivo)", money((iiv_result.get("objetivo") or {}).get("cuota_tributaria") or iiv_result.get("cuota_tributaria"))),
+        ("Fuente tipo", text(iiv_params.get("source_label") or iiv_params.get("source_url") or "—")),
+        ("Fuente coeficientes", text(iiv_params.get("coef_source_label") or iiv_params.get("coef_source_url") or "—")),
+    ]
+
+    footer = [
+        "Informe determinista generado por el CRM (sin IA). Revisar antes de presentar/firmar.",
+        "IRPF/IRNR: estimación de la cuota sobre base del ahorro según escala/tipo configurado.",
+        "IIVTNU: cálculo sujeto a ordenanza municipal, bonificaciones y datos catastrales; validar con la autoliquidación.",
+    ]
+    brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
+    return (
+        build_branded_document_pdf(
+            "INFORME FISCAL · VENTA INMUEBLE",
+            subtitle,
+            [
+                ("Datos de entrada", input_lines),
+                ("IRPF/IRNR · Ganancia patrimonial", irpf_lines),
+                ("IIVTNU · Plusvalía municipal", iivtnu_lines),
+            ],
+            footer_lines=footer,
+            brand_logo_url=brand,
+        )
+        or b""
+    )
+
+
 def _irpf_rental_reduction_pct(payload, ejercicio):
     manual = parse_optional_float(payload.get("reduccion_pct_manual") or None)
     if manual is not None:
@@ -36000,14 +36120,15 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/iivtnu_municipios",
 		            "/api/iivtnu_cp_lookup",
 		            "/api/iivtnu_simulate",
-		            "/api/iivtnu_pdf_parse",
-		            "/api/iivtnu_param_upsert",
-		            "/api/irpf_ganancia_simulate",
-		            "/api/irpf_alquiler_simulate",
-		            "/api/irpf_ganancia_pdf",
-		            "/api/s3_presign",
-		            "/api/s3_multipart_start",
-	            "/api/s3_multipart_presign",
+            "/api/iivtnu_pdf_parse",
+            "/api/iivtnu_param_upsert",
+            "/api/irpf_ganancia_simulate",
+            "/api/irpf_alquiler_simulate",
+            "/api/irpf_ganancia_pdf",
+            "/api/fiscal_venta_pdf",
+            "/api/s3_presign",
+            "/api/s3_multipart_start",
+            "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
             "/api/clientes",
@@ -36396,6 +36517,7 @@ class Handler(BaseHTTPRequestHandler):
             or path_value.startswith("/api/copilot_web_")
             or path_value.startswith("/api/iivtnu_")
             or path_value.startswith("/api/irpf_")
+            or path_value.startswith("/api/fiscal_")
             or path_value
             in {
                 "/api/convenios_catalog",
@@ -37541,6 +37663,31 @@ class Handler(BaseHTTPRequestHandler):
             devengo = str(payload.get("fecha_transmision") or "").strip() or "ganancia"
             safe_devengo = re.sub(r"[^0-9A-Za-z_-]", "_", devengo)[:32] or "ganancia"
             filename = f"irpf_ganancia_{ejercicio}_{safe_devengo}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if parsed.path == "/api/fiscal_venta_pdf":
+            irpf_out = payload.get("irpf_result") if isinstance(payload, dict) else None
+            iivtnu_out = payload.get("iivtnu_result") if isinstance(payload, dict) else None
+            if not isinstance(irpf_out, dict) or not isinstance(iivtnu_out, dict):
+                json_response(self, {"error": "Faltan resultados (irpf_result / iivtnu_result). Simula antes de pedir el PDF."}, status=400)
+                return
+            try:
+                pdf_bytes = build_fiscal_venta_report_pdf(payload, irpf_out, iivtnu_out)
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            devengo = ""
+            try:
+                irpf_payload = payload.get("irpf_payload") if isinstance(payload.get("irpf_payload"), dict) else {}
+                devengo = str(irpf_payload.get("fecha_transmision") or payload.get("fecha_transmision") or "").strip()
+            except Exception:
+                devengo = ""
+            safe_devengo = re.sub(r"[^0-9A-Za-z_-]", "_", devengo)[:32] or "venta"
+            filename = f"informe_fiscal_venta_{safe_devengo}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

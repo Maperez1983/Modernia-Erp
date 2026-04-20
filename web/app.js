@@ -2771,6 +2771,18 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmCaptacionCreateDuplicates = document.getElementById("crmCaptacionCreateDuplicates");
 			const crmCaptacionCatastroOpen = document.getElementById("crmCaptacionCatastroOpen");
 		  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
+
+const portalCrmOverlayModalsToBody = () => {
+  try {
+    const root = document.body;
+    [crmInsertModal, crmClienteModal, crmCaptacionModal].forEach((el) => {
+      if (!el || !root) return;
+      if (el.parentElement !== root) root.appendChild(el);
+    });
+  } catch {}
+};
+portalCrmOverlayModalsToBody();
+
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CRM UI Fixture · Modal Overlay</title>
+    <style>
+      :root { --safe-top: 0px; --safe-right: 0px; --safe-bottom: 0px; --safe-left: 0px; }
+      body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7f9; }
+      .page {
+        height: 100vh;
+        overflow: auto;
+        padding: 18px;
+      }
+      .table-wrap {
+        border-radius: 14px;
+        overflow: auto;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: #fff;
+        height: 520px;
+      }
+      table { border-collapse: collapse; width: 1200px; }
+      th, td { padding: 12px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: #fff;
+        z-index: 2;
+        box-shadow: 0 2px 0 rgba(15, 23, 42, 0.06);
+      }
+      .filler { height: 900px; }
+
+      /* Modal styles mirroring `web/styles.css` */
+      #crmCaptacionModal.crm-insert-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding:
+          calc(22px + var(--safe-top))
+          calc(16px + var(--safe-right))
+          calc(22px + var(--safe-bottom))
+          calc(16px + var(--safe-left));
+        background: rgba(11, 29, 51, 0.45);
+        backdrop-filter: blur(2px);
+      }
+      #crmCaptacionModal .crm-insert-card {
+        width: min(760px, 92vw);
+        max-height: min(78vh, 720px);
+        overflow: auto;
+        border-radius: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.18);
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 22px 48px rgba(11, 29, 51, 0.22);
+        padding: 16px;
+      }
+      #crmCaptacionModal .crm-insert-head {
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .muted { color: rgba(15, 23, 42, 0.66); }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Fixture · Solape modal</h1>
+      <p class="muted">Simula headers sticky + modal (debe quedar por encima).</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Columna</th>
+              <th>Otra</th>
+              <th>Más</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Fila 1</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 2</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 3</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 4</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 5</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 6</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 7</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 8</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 9</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 10</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 11</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 12</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 13</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 14</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 15</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 16</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 17</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 18</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 19</td><td>dato</td><td>dato</td></tr>
+            <tr><td>Fila 20</td><td>dato</td><td>dato</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="filler"></div>
+    </div>
+
+    <div id="crmCaptacionModal" class="crm-insert-modal">
+      <div class="crm-insert-card">
+        <div class="crm-insert-head">Crear inmueble</div>
+        <p class="muted">Este modal debe estar por encima de cualquier header sticky.</p>
+        <label>
+          Título
+          <input style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,.18)" value="Ej. Ático centro" />
+        </label>
+      </div>
+    </div>
+  </body>
+</html>
+

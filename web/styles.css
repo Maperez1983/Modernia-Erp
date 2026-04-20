@@ -4866,11 +4866,11 @@ body.tc-resizing {
   justify-content: flex-start;
 }
 
-#crmSection .crm-insert-modal {
+.crm-insert-modal {
   position: fixed;
   inset: 0;
   /* Debe quedar por encima del explorador legacy (sticky headers, etc.). */
-  z-index: 9000;
+  z-index: 11000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4883,7 +4883,7 @@ body.tc-resizing {
   backdrop-filter: blur(2px);
 }
 
-#crmSection .crm-insert-modal--dropdown {
+.crm-insert-modal--dropdown {
   position: static;
   inset: auto;
   z-index: auto;
@@ -4893,10 +4893,10 @@ body.tc-resizing {
   backdrop-filter: none;
 }
 
-#crmSection .crm-insert-modal--anchored {
+.crm-insert-modal--anchored {
   position: fixed;
   inset: 0;
-  z-index: 9010;
+  z-index: 11010;
   display: block;
   padding: 0;
   /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
@@ -4904,7 +4904,7 @@ body.tc-resizing {
   backdrop-filter: blur(1px);
 }
 
-#crmSection .crm-insert-modal--anchored .crm-insert-card {
+.crm-insert-modal--anchored .crm-insert-card {
   position: absolute;
   top: var(--crm-insert-top, 76px);
   left: max(var(--crm-insert-left, 16px), calc(var(--crm-sidebar-right, 110px) + 16px));
@@ -4918,11 +4918,11 @@ body.tc-resizing {
   padding: 14px;
 }
 
-#crmSection .crm-insert-modal.hidden {
+.crm-insert-modal.hidden {
   display: none;
 }
 
-#crmSection .crm-insert-card {
+.crm-insert-card {
   width: min(760px, 92vw);
   max-height: min(78vh, 720px);
   overflow: auto;
@@ -4933,7 +4933,7 @@ body.tc-resizing {
   padding: 16px;
 }
 
-#crmSection .crm-insert-modal--dropdown .crm-insert-card {
+.crm-insert-modal--dropdown .crm-insert-card {
   width: 100%;
   max-height: 520px;
   border-radius: 8px;
@@ -9875,7 +9875,7 @@ body.auth-locked {
 .auth-login-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 13000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9903,7 +9903,7 @@ body.auth-locked {
   width: min(520px, calc(100vw - 36px));
   max-height: min(60vh, 520px);
   overflow: auto;
-  z-index: 10000;
+  z-index: 12000;
   padding: 14px 16px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
