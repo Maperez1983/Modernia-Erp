@@ -128,11 +128,13 @@ def _iter_target_rows_sqlite(conn: sqlite3.Connection, empresa_id: str | None):
 
 
 def _iter_target_rows_pg(conn, empresa_id: str | None):
+    # psycopg usa "pyformat": el carácter "%" es especial y NO puede aparecer literal en el SQL.
+    # Por eso pasamos los patrones LIKE como parámetros en vez de escribir "renta %" / "modelo 100%".
     where_empresa = ""
-    values: tuple[object, ...] = ()
+    values: list[object] = ["renta %", "modelo 100%"]
     if empresa_id:
         where_empresa = "AND empresa_id = %s"
-        values = (empresa_id,)
+        values.append(empresa_id)
     with conn.cursor() as cur:
         return cur.execute(
             f"""
@@ -143,13 +145,13 @@ def _iter_target_rows_pg(conn, empresa_id: str | None):
               LOWER(COALESCE(referencia_tipo, '')) = 'renta'
               OR LOWER(COALESCE(tipo, '')) = 'renta'
               OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
-              OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
-              OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%%'
+              OR LOWER(COALESCE(nombre, '')) LIKE %s
+              OR LOWER(COALESCE(tipo, '')) LIKE %s
             )
             {where_empresa}
             ORDER BY COALESCE(updated_at, created_at) DESC
             """,
-            values,
+            tuple(values),
         ).fetchall()
 
 
