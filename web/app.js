@@ -4271,6 +4271,25 @@ const populateActionModalResponsables = (serviceValue = "") => {
     });
 };
 
+const setDefaultActionModalResponsable = (desiredRaw) => {
+  if (!actionModalResponsable) return;
+  const current = String(actionModalResponsable.value || "").trim();
+  if (current) return;
+  const desired = String(desiredRaw || "").trim();
+  if (!desired) return;
+  const options = Array.from(actionModalResponsable.options || []);
+  const direct = options.find((opt) => String(opt.value || "").trim() === desired);
+  if (direct) {
+    actionModalResponsable.value = direct.value;
+    return;
+  }
+  const desiredKey = normalizeSimple(desired);
+  const byLabel = options.find((opt) => normalizeSimple(opt.textContent || "") === desiredKey);
+  if (byLabel) {
+    actionModalResponsable.value = byLabel.value;
+  }
+};
+
 const ensureModalDataLoaded = async () => {
   if (modalLoading) return;
   modalLoading = true;
@@ -4398,6 +4417,10 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
     if (defaultTipo && actionModalTipo && !String(actionModalTipo.value || "").trim()) {
       actionModalTipo.value = defaultTipo;
     }
+  }
+  if (actionModalResponsable) {
+    const ctxResp = String(state.actionModalContext?.default_responsable || "").trim();
+    setDefaultActionModalResponsable(ctxResp || getCurrentUser());
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
@@ -42257,17 +42280,18 @@ const renderCrmAgendaCalendar = (rows = []) => {
   const SLOT_MIN = 30;
   const SLOT_H = 26;
   const GRID_HEAD_H = 44;
-  const openNewFromGrid = (dateKey, minutes, serviceValue = "inmobiliaria") => {
-    const min = Number(minutes);
-    if (!Number.isFinite(min)) {
-      openActionCreator(dateKey, "", serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita" });
-      return;
-    }
-    const clamped = clamp(min, 0, 24 * 60 - 1);
-    const hh = String(Math.floor(clamped / 60)).padStart(2, "0");
-    const mm = String(Math.floor(clamped % 60)).padStart(2, "0");
-    openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita" });
-  };
+	  const openNewFromGrid = (dateKey, minutes, serviceValue = "inmobiliaria") => {
+	    const defaultResp = getCurrentUser();
+	    const min = Number(minutes);
+	    if (!Number.isFinite(min)) {
+      openActionCreator(dateKey, "", serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita", default_responsable: defaultResp });
+	      return;
+	    }
+	    const clamped = clamp(min, 0, 24 * 60 - 1);
+	    const hh = String(Math.floor(clamped / 60)).padStart(2, "0");
+	    const mm = String(Math.floor(clamped % 60)).padStart(2, "0");
+    openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita", default_responsable: defaultResp });
+	  };
 	  const resolveGridClickMinutes = (event, colEl, bounds) => {
 	    if (!event || !colEl || !bounds) return null;
 	    const rect = colEl.getBoundingClientRect();
@@ -56274,7 +56298,12 @@ if (crmInsertList) {
     } else if (key === "demanda") {
       goToEstudioAlta("demanda");
     } else if (key === "actividad") {
-      openActionCreator("", "", "inmobiliaria", { lock_service: true, servicio: "inmobiliaria", default_tipo: "Cita" });
+      openActionCreator("", "", "inmobiliaria", {
+        lock_service: true,
+        servicio: "inmobiliaria",
+        default_tipo: "Cita",
+        default_responsable: getCurrentUser(),
+      });
     } else if (key === "cliente") {
       setCrmClienteModalOpen(true);
     } else if (key === "edificio") {
@@ -57789,6 +57818,9 @@ if (actionModalSave) {
       cliente_id: clienteData.cliente_id,
       cliente_nombre: clienteData.cliente_nombre,
     };
+    if (!String(payload.responsable || "").trim()) {
+      payload.responsable = getCurrentUser();
+    }
     const ctx = state.actionModalContext;
     if (ctx && typeof ctx === "object") {
       ["asesoramiento_id", "inmueble_id", "related_id", "related_tipo"].forEach((key) => {
