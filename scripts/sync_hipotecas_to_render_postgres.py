@@ -144,7 +144,15 @@ class CommandError(RuntimeError):
 
 
 def run(cmd: list[str], *, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(cmd, input=input_bytes, capture_output=True, text=True)
+    if input_bytes is None:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    else:
+        # Python 3.9: si `text=True`, `input` debe ser str. Enviamos bytes sin modo texto y decodificamos.
+        proc = subprocess.run(cmd, input=input_bytes, capture_output=True)
+        if isinstance(proc.stdout, (bytes, bytearray)):
+            proc.stdout = proc.stdout.decode("utf-8", errors="replace")
+        if isinstance(proc.stderr, (bytes, bytearray)):
+            proc.stderr = proc.stderr.decode("utf-8", errors="replace")
     if proc.returncode == 0:
         return proc
     raise CommandError(cmd, proc.returncode, proc.stdout or "", proc.stderr or "")
