@@ -5799,6 +5799,110 @@ _IIVTNU_ANDALUCIA_PROVINCES = (
 
 _IIVTNU_ANDALUCIA_PROVINCES_NORM = {_iivtnu_norm_text(p) for p in _IIVTNU_ANDALUCIA_PROVINCES}
 
+_IIVTNU_PROVINCIA_TO_COMUNIDAD = {
+    "A Coruña": "Galicia",
+    "Albacete": "Castilla-La Mancha",
+    "Alicante": "Comunidad Valenciana",
+    "Almería": "Andalucía",
+    "Asturias": "Principado de Asturias",
+    "Álava": "País Vasco",
+    "Ávila": "Castilla y León",
+    "Badajoz": "Extremadura",
+    "Barcelona": "Cataluña",
+    "Burgos": "Castilla y León",
+    "Cantabria": "Cantabria",
+    "Castellón": "Comunidad Valenciana",
+    "Ceuta": "Ceuta",
+    "Ciudad Real": "Castilla-La Mancha",
+    "Cuenca": "Castilla-La Mancha",
+    "Cáceres": "Extremadura",
+    "Cádiz": "Andalucía",
+    "Córdoba": "Andalucía",
+    "Girona": "Cataluña",
+    "Granada": "Andalucía",
+    "Guadalajara": "Castilla-La Mancha",
+    "Guipúzcoa": "País Vasco",
+    "Huelva": "Andalucía",
+    "Huesca": "Aragón",
+    "Islas Baleares": "Illes Balears",
+    "Jaén": "Andalucía",
+    "La Rioja": "La Rioja",
+    "Las Palmas": "Canarias",
+    "León": "Castilla y León",
+    "Lleida": "Cataluña",
+    "Lugo": "Galicia",
+    "Madrid": "Comunidad de Madrid",
+    "Málaga": "Andalucía",
+    "Melilla": "Melilla",
+    "Murcia": "Región de Murcia",
+    "Navarra": "Comunidad Foral de Navarra",
+    "Ourense": "Galicia",
+    "Palencia": "Castilla y León",
+    "Pontevedra": "Galicia",
+    "Salamanca": "Castilla y León",
+    "Santa Cruz de Tenerife": "Canarias",
+    "Segovia": "Castilla y León",
+    "Sevilla": "Andalucía",
+    "Soria": "Castilla y León",
+    "Tarragona": "Cataluña",
+    "Teruel": "Aragón",
+    "Toledo": "Castilla-La Mancha",
+    "Valencia": "Comunidad Valenciana",
+    "Valladolid": "Castilla y León",
+    "Vizcaya": "País Vasco",
+    "Zamora": "Castilla y León",
+    "Zaragoza": "Aragón",
+}
+_IIVTNU_PROVINCIA_TO_COMUNIDAD_NORM = {_iivtnu_norm_text(k): v for k, v in _IIVTNU_PROVINCIA_TO_COMUNIDAD.items()}
+
+
+def _iivtnu_provincia_to_comunidad(provincia: object) -> str:
+    prov = _iivtnu_norm_text(provincia)
+    if not prov:
+        return ""
+    return str(_IIVTNU_PROVINCIA_TO_COMUNIDAD_NORM.get(prov) or "").strip()
+
+
+def _iivtnu_seed_spain_municipios(conn, now_iso=None, min_count=8000):
+    if not conn:
+        return
+    now_iso = str(now_iso or datetime.now(timezone.utc).isoformat())
+    try:
+        ensure_iivtnu_schema(conn)
+    except Exception:
+        return
+    # Si no existe la tabla aún (DB legacy sin schema), aborta.
+    try:
+        conn.execute("SELECT 1 FROM iivtnu_municipios LIMIT 1").fetchone()
+    except Exception:
+        return
+    try:
+        row = conn.execute("SELECT COUNT(1) FROM iivtnu_municipios").fetchone()
+        current = int((row[0] if row else 0) or 0)
+    except Exception:
+        current = 0
+    if current >= int(min_count or 0):
+        return
+
+    ine_cache = _iivtnu_load_ine_municipios_cache()
+    ine_to = ine_cache.get("ine_to") or {}
+    prov_to = ine_cache.get("prov_to") or {}
+    for ine, nombre in sorted(ine_to.items()):
+        ine = str(ine).zfill(5)
+        provincia = str(prov_to.get(ine) or "").strip()
+        comunidad = _iivtnu_provincia_to_comunidad(provincia)
+        es_capital = 1 if _iivtnu_norm_text(nombre) and _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
+        try:
+            conn.execute(
+                """
+                INSERT INTO iivtnu_municipios (ine, nombre, provincia, comunidad, es_capital, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ine, str(nombre), provincia, comunidad, es_capital, now_iso, now_iso),
+            )
+        except Exception:
+            pass
+
 
 def _iivtnu_is_andalucia_province(value: object) -> bool:
     prov = _iivtnu_norm_text(value)
@@ -6592,11 +6696,19 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             ine_cache = _iivtnu_load_ine_municipios_cache()
             found = (ine_cache.get("nameprov_to") or {}).get((target, _iivtnu_norm_text(provincia))) if provincia else ""
             if not found:
-                # Si no tenemos provincia, intentamos match por nombre exacto dentro de Andalucía (suficiente para este motor).
+                # Si no tenemos provincia, intentamos match por nombre exacto en toda España
+                # (si el nombre es único) y, si no lo es, resolvemos por Andalucía si es único ahí.
+                candidates = []
                 for (name_norm, prov_norm), ine in (ine_cache.get("nameprov_to") or {}).items():
-                    if name_norm == target and prov_norm in _IIVTNU_ANDALUCIA_PROVINCES_NORM:
-                        found = ine
-                        break
+                    if name_norm == target:
+                        candidates.append((prov_norm, ine))
+                unique_all = sorted({ine for _p, ine in candidates})
+                if len(unique_all) == 1:
+                    found = unique_all[0]
+                else:
+                    unique_and = sorted({ine for p, ine in candidates if p in _IIVTNU_ANDALUCIA_PROVINCES_NORM})
+                    if len(unique_and) == 1:
+                        found = unique_and[0]
             if found:
                 municipio_ine = str(found).zfill(5)
                 provincia = str((ine_cache.get("prov_to") or {}).get(municipio_ine) or "").strip()
@@ -31132,7 +31244,12 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                 )
             except Exception:
                 continue
-        # NO showPage(): evita "forward reference to Page2" en algunas versiones de ReportLab.
+        # Finaliza la página antes de guardar: necesario para que ReportLab resuelva referencias de AcroForm.
+        # (Si no se llama, algunas versiones lanzan "forward reference to Page1 not resolved".)
+        try:
+            c.showPage()
+        except Exception:
+            pass
         c.save()
         return buf.getvalue()
 
@@ -31247,10 +31364,38 @@ def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
         overlay_reader = PdfReader(BytesIO(overlay_bytes))
     except Exception:
         return None
+
+    def _strip_widget_appearance(page_obj):
+        """
+        macOS Preview puede "duplicar" el texto (solape) cuando un widget ya trae /AP.
+        Forzamos a que el visor regenere apariencias eliminando /AP y /AS.
+        """
+        try:
+            annots = page_obj.get("/Annots")
+        except Exception:
+            annots = None
+        if not annots:
+            return
+        for aref in list(annots):
+            try:
+                aobj = aref.get_object()
+            except Exception:
+                aobj = None
+            if not aobj:
+                continue
+            try:
+                if aobj.get("/Subtype") == NameObject("/Widget"):
+                    if "/AP" in aobj:
+                        del aobj["/AP"]
+                    if "/AS" in aobj:
+                        del aobj["/AS"]
+            except Exception:
+                continue
     writer = PdfWriter()
     for idx, tpage in enumerate(template_reader.pages):
         if idx < len(overlay_reader.pages):
             opage = overlay_reader.pages[idx]
+            _strip_widget_appearance(opage)
             try:
                 tpage.merge_page(opage)
             except Exception:
@@ -31286,6 +31431,23 @@ def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
         acro = DictionaryObject()
         acro[NameObject("/Fields")] = fields
         acro[NameObject("/NeedAppearances")] = BooleanObject(True)
+        # Copia recursos de la AcroForm del overlay (fuentes /DA) si están disponibles.
+        try:
+            o_root = overlay_reader.trailer.get("/Root") if overlay_reader and overlay_reader.trailer else None
+            o_acro = o_root.get("/AcroForm") if o_root else None
+            if o_acro:
+                try:
+                    o_acro = o_acro.get_object()
+                except Exception:
+                    pass
+                for key in ("/DA", "/DR", "/Q"):
+                    try:
+                        if key in o_acro and key not in acro:
+                            acro[NameObject(key)] = o_acro[key]
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         writer._root_object.update({NameObject("/AcroForm"): writer._add_object(acro)})
     except Exception:
         pass
@@ -31375,6 +31537,80 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
     owner1_text = owner_block(owner1)
     owner2_text = owner_block(owner2)
 
+    def _normalize_owner_city(owner):
+        for key in ("poblacion", "localidad", "ciudad", "municipio"):
+            val = str((owner or {}).get(key) or "").strip()
+            if val:
+                return val
+        return str(inmueble.get("poblacion") or "").strip()
+
+    def _normalize_owner_street(owner, city_hint=""):
+        raw = str((owner or {}).get("direccion") or (owner or {}).get("domicilio") or "").replace("\n", " ").strip()
+        if not raw:
+            return ""
+        city_hint = str(city_hint or "").strip()
+        if city_hint:
+            try:
+                raw = re.sub(rf",?\s*{re.escape(city_hint)}\\b.*$", "", raw, flags=re.IGNORECASE).strip()
+            except Exception:
+                pass
+        raw = re.sub(r"\\b\\d{5}\\b.*$", "", raw).strip()
+        raw = re.sub(r"^\\s*(c/|c\\.|calle)\\s*", "", raw, flags=re.IGNORECASE).strip()
+        return raw
+
+    def _owner_fields(owner):
+        nombre = _pdf_form_value((owner or {}).get("nombre"), "")
+        nif_val = _pdf_form_value((owner or {}).get("nif"), "")
+        tel_val = _pdf_form_value((owner or {}).get("telefono"), "")
+        email_val = _pdf_form_value((owner or {}).get("email"), "")
+        city = _normalize_owner_city(owner)
+        street = _normalize_owner_street(owner, city_hint=city)
+        return {
+            "nombre": nombre,
+            "nif": nif_val,
+            "telefono": tel_val,
+            "email": email_val,
+            "ciudad": city,
+            "calle": street,
+        }
+
+    def _normalize_owner_city(owner):
+        for key in ("poblacion", "localidad", "ciudad", "municipio"):
+            val = str((owner or {}).get(key) or "").strip()
+            if val:
+                return val
+        return str(inmueble.get("poblacion") or "").strip()
+
+    def _normalize_owner_street(owner, city_hint=""):
+        raw = str((owner or {}).get("direccion") or (owner or {}).get("domicilio") or "").replace("\n", " ").strip()
+        if not raw:
+            return ""
+        city_hint = str(city_hint or "").strip()
+        if city_hint:
+            try:
+                raw = re.sub(rf",?\s*{re.escape(city_hint)}\\b.*$", "", raw, flags=re.IGNORECASE).strip()
+            except Exception:
+                pass
+        raw = re.sub(r"\\b\\d{5}\\b.*$", "", raw).strip()
+        raw = re.sub(r"^\\s*(c/|c\\.|calle)\\s*", "", raw, flags=re.IGNORECASE).strip()
+        return raw
+
+    def _owner_fields(owner):
+        nombre = _pdf_form_value((owner or {}).get("nombre"), "")
+        nif_val = _pdf_form_value((owner or {}).get("nif"), "")
+        tel_val = _pdf_form_value((owner or {}).get("telefono"), "")
+        email_val = _pdf_form_value((owner or {}).get("email"), "")
+        city = _normalize_owner_city(owner)
+        street = _normalize_owner_street(owner, city_hint=city)
+        return {
+            "nombre": nombre,
+            "nif": nif_val,
+            "telefono": tel_val,
+            "email": email_val,
+            "ciudad": city,
+            "calle": street,
+        }
+
     if tipo_operacion == "alquiler":
         precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
         honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
@@ -31421,20 +31657,37 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
             ]
     else:
         w, h = pagesizes[0]
-        # Coordenadas calculadas sobre plantilla Modernia arrendamiento (letter) usando bbox.
+        o1 = _owner_fields(owner1)
+        o2 = _owner_fields(owner2)
+        # Coordenadas calculadas sobre plantilla Modernia arrendamiento (letter).
+        # Evitamos bloques multilinea en propietarios para que no solapen etiquetas/punteados.
         fields[0] = [
-            {"name": "direccion", "x": 105.6, "y": h - 430.70, "width": w - 130, "height": 14, "value": direccion_full},
-            {"name": "datos_registrales", "x": 147.5, "y": h - 442.82, "width": 360, "height": 14, "value": datos_registrales},
-            {"name": "ref_catastral", "x": 150, "y": h - 454.94, "width": 200, "height": 14, "value": ref_catastral},
-            {"name": "m2_construidos", "x": 428.6, "y": h - 454.94, "width": 55, "height": 14, "value": m2_construidos},
-            {"name": "m2_utiles", "x": 513.4, "y": h - 454.94, "width": 55, "height": 14, "value": m2_utiles},
-            {"name": "otros", "x": 100, "y": h - 467.02, "width": w - 130, "height": 14, "value": otros},
-            {"name": "precio_mensual", "x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
-            {"name": "plazo_arr", "x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
-            {"name": "honorarios", "x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
-            # Bloques propietarios (plantilla letter): ajustados a los huecos "De D./Dª..." (evita solapes).
-            {"name": "owner1", "x": 93, "y": h - 181.3, "width": w - 140, "height": 56, "value": owner1_text, "multiline": True, "fontSize": 9},
-            {"name": "owner2", "x": 93, "y": h - 262.7, "width": w - 140, "height": 56, "value": owner2_text, "multiline": True, "fontSize": 9},
+            {"name": "direccion", "x": 106, "y": 355, "width": w - 135, "height": 12, "value": direccion_full, "fontSize": 9},
+            {"name": "datos_registrales", "x": 148, "y": 343, "width": 360, "height": 12, "value": datos_registrales, "fontSize": 9},
+            {"name": "ref_catastral", "x": 150, "y": 331, "width": 200, "height": 12, "value": ref_catastral, "fontSize": 9},
+            {"name": "m2_construidos", "x": 430, "y": 331, "width": 55, "height": 12, "value": m2_construidos, "fontSize": 9},
+            {"name": "m2_utiles", "x": 514, "y": 331, "width": 55, "height": 12, "value": m2_utiles, "fontSize": 9},
+            {"name": "otros", "x": 100, "y": 319, "width": w - 135, "height": 12, "value": otros, "fontSize": 9},
+            # Cláusula 4 (renta mensual)
+            {"name": "precio_mensual", "x": 425, "y": 276, "width": 95, "height": 12, "value": precio, "fontSize": 9},
+            # Cláusula 5 (plazo)
+            {"name": "plazo_arr", "x": 325, "y": 263, "width": 95, "height": 12, "value": plazo, "fontSize": 9},
+            # Cláusula 8 (honorarios)
+            {"name": "honorarios", "x": 330, "y": 129, "width": 110, "height": 12, "value": honorarios, "fontSize": 9},
+            # Propietario 1
+            {"name": "owner1_nombre", "x": 120, "y": 653, "width": 410, "height": 12, "value": o1["nombre"], "fontSize": 9},
+            {"name": "owner1_ciudad", "x": 210, "y": 639, "width": 170, "height": 12, "value": o1["ciudad"], "fontSize": 9},
+            {"name": "owner1_calle", "x": 405, "y": 639, "width": 165, "height": 12, "value": o1["calle"], "fontSize": 9},
+            {"name": "owner1_tel", "x": 397, "y": 625, "width": 130, "height": 12, "value": o1["telefono"], "fontSize": 9},
+            {"name": "owner1_email", "x": 130, "y": 611, "width": 170, "height": 12, "value": o1["email"], "fontSize": 9},
+            {"name": "owner1_nif", "x": 305, "y": 611, "width": 220, "height": 12, "value": o1["nif"], "fontSize": 9},
+            # Propietario 2 (opcional)
+            {"name": "owner2_nombre", "x": 120, "y": 572, "width": 410, "height": 12, "value": o2["nombre"], "fontSize": 9},
+            {"name": "owner2_ciudad", "x": 210, "y": 558, "width": 170, "height": 12, "value": o2["ciudad"], "fontSize": 9},
+            {"name": "owner2_calle", "x": 405, "y": 558, "width": 165, "height": 12, "value": o2["calle"], "fontSize": 9},
+            {"name": "owner2_tel", "x": 397, "y": 544, "width": 130, "height": 12, "value": o2["telefono"], "fontSize": 9},
+            {"name": "owner2_email", "x": 130, "y": 531, "width": 170, "height": 12, "value": o2["email"], "fontSize": 9},
+            {"name": "owner2_nif", "x": 305, "y": 531, "width": 220, "height": 12, "value": o2["nif"], "fontSize": 9},
         ]
 
     overlay_bytes = _build_acroform_overlay_pdf(pagesizes, fields)
@@ -31522,6 +31775,43 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
     owner1_text = owner_block(owner1)
     owner2_text = owner_block(owner2)
 
+    def _normalize_owner_city(owner):
+        for key in ("poblacion", "localidad", "ciudad", "municipio"):
+            val = str((owner or {}).get(key) or "").strip()
+            if val:
+                return val
+        return str(inmueble.get("poblacion") or "").strip()
+
+    def _normalize_owner_street(owner, city_hint=""):
+        raw = str((owner or {}).get("direccion") or (owner or {}).get("domicilio") or "").replace("\n", " ").strip()
+        if not raw:
+            return ""
+        city_hint = str(city_hint or "").strip()
+        if city_hint:
+            try:
+                raw = re.sub(rf",?\s*{re.escape(city_hint)}\\b.*$", "", raw, flags=re.IGNORECASE).strip()
+            except Exception:
+                pass
+        raw = re.sub(r"\\b\\d{5}\\b.*$", "", raw).strip()
+        raw = re.sub(r"^\\s*(c/|c\\.|calle)\\s*", "", raw, flags=re.IGNORECASE).strip()
+        return raw
+
+    def _owner_fields(owner):
+        nombre = _pdf_form_value((owner or {}).get("nombre"), "")
+        nif_val = _pdf_form_value((owner or {}).get("nif"), "")
+        tel_val = _pdf_form_value((owner or {}).get("telefono"), "")
+        email_val = _pdf_form_value((owner or {}).get("email"), "")
+        city = _normalize_owner_city(owner)
+        street = _normalize_owner_street(owner, city_hint=city)
+        return {
+            "nombre": nombre,
+            "nif": nif_val,
+            "telefono": tel_val,
+            "email": email_val,
+            "ciudad": city,
+            "calle": street,
+        }
+
     if tipo_operacion == "alquiler":
         precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
         honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
@@ -31566,18 +31856,35 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
             ]
     else:
         w, h = pagesizes[0]
+        o1 = _owner_fields(owner1)
+        o2 = _owner_fields(owner2)
         fields[0] = [
-            {"x": 105.6, "y": h - 430.70, "width": w - 130, "height": 14, "value": direccion_full},
-            {"x": 147.5, "y": h - 442.82, "width": 360, "height": 14, "value": datos_registrales},
-            {"x": 150, "y": h - 454.94, "width": 200, "height": 14, "value": ref_catastral},
-            {"x": 428.6, "y": h - 454.94, "width": 55, "height": 14, "value": m2_construidos},
-            {"x": 513.4, "y": h - 454.94, "width": 55, "height": 14, "value": m2_utiles},
-            {"x": 100, "y": h - 467.02, "width": w - 130, "height": 14, "value": otros},
-            {"x": 345, "y": h - 520.46, "width": 75, "height": 14, "value": precio},
-            {"x": 420, "y": h - 534.26, "width": 90, "height": 14, "value": plazo},
-            {"x": 260, "y": h - 548.06, "width": 120, "height": 14, "value": honorarios},
-            {"x": 93, "y": h - 181.3, "width": w - 140, "height": 56, "value": owner1_text, "multiline": True, "fontSize": 9, "leading": 11},
-            {"x": 93, "y": h - 262.7, "width": w - 140, "height": 56, "value": owner2_text, "multiline": True, "fontSize": 9, "leading": 11},
+            {"x": 106, "y": 355, "width": w - 135, "height": 12, "value": direccion_full, "fontSize": 9},
+            {"x": 148, "y": 343, "width": 360, "height": 12, "value": datos_registrales, "fontSize": 9},
+            {"x": 150, "y": 331, "width": 200, "height": 12, "value": ref_catastral, "fontSize": 9},
+            {"x": 430, "y": 331, "width": 55, "height": 12, "value": m2_construidos, "fontSize": 9},
+            {"x": 514, "y": 331, "width": 55, "height": 12, "value": m2_utiles, "fontSize": 9},
+            {"x": 100, "y": 319, "width": w - 135, "height": 12, "value": otros, "fontSize": 9},
+            # Cláusula 4 (renta mensual)
+            {"x": 425, "y": 276, "width": 95, "height": 12, "value": precio, "fontSize": 9},
+            # Cláusula 5 (plazo)
+            {"x": 325, "y": 263, "width": 95, "height": 12, "value": plazo, "fontSize": 9},
+            # Cláusula 8 (honorarios)
+            {"x": 330, "y": 129, "width": 110, "height": 12, "value": honorarios, "fontSize": 9},
+            # Propietario 1
+            {"x": 120, "y": 653, "width": 410, "height": 12, "value": o1["nombre"], "fontSize": 9},
+            {"x": 210, "y": 639, "width": 170, "height": 12, "value": o1["ciudad"], "fontSize": 9},
+            {"x": 405, "y": 639, "width": 165, "height": 12, "value": o1["calle"], "fontSize": 9},
+            {"x": 397, "y": 625, "width": 130, "height": 12, "value": o1["telefono"], "fontSize": 9},
+            {"x": 130, "y": 611, "width": 170, "height": 12, "value": o1["email"], "fontSize": 9},
+            {"x": 305, "y": 611, "width": 220, "height": 12, "value": o1["nif"], "fontSize": 9},
+            # Propietario 2
+            {"x": 120, "y": 572, "width": 410, "height": 12, "value": o2["nombre"], "fontSize": 9},
+            {"x": 210, "y": 558, "width": 170, "height": 12, "value": o2["ciudad"], "fontSize": 9},
+            {"x": 405, "y": 558, "width": 165, "height": 12, "value": o2["calle"], "fontSize": 9},
+            {"x": 397, "y": 544, "width": 130, "height": 12, "value": o2["telefono"], "fontSize": 9},
+            {"x": 130, "y": 531, "width": 170, "height": 12, "value": o2["email"], "fontSize": 9},
+            {"x": 305, "y": 531, "width": 220, "height": 12, "value": o2["nif"], "fontSize": 9},
         ]
 
     overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields)
@@ -33200,6 +33507,8 @@ class Handler(BaseHTTPRequestHandler):
     _hipotecas_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error}}
     _seguros_sync_lock = threading.Lock()
     _seguros_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error, last_result}}
+    _gestoria_docs_recent_lock = threading.Lock()
+    _gestoria_docs_recent_cache = {}  # {(empresa_id, limit): (expires_ts, payload_dict)}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -33909,6 +34218,19 @@ class Handler(BaseHTTPRequestHandler):
             except DbUnavailableError as exc:
                 json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
             except Exception as exc:
+                # Backpressure: pool saturado -> 503 con Retry-After (api() lo reintenta y no ensucia UI).
+                try:
+                    msg = str(exc or "").lower()
+                    if "pool postgres saturado" in msg:
+                        json_response(
+                            self,
+                            {"error": "Servidor ocupado", "detail": "Demasiadas peticiones simultáneas. Reintenta en unos segundos."},
+                            status=503,
+                            extra_headers=[("Retry-After", "2")],
+                        )
+                        return
+                except Exception:
+                    pass
                 if Handler._is_db_disconnect_error(exc):
                     Handler._mark_db_unavailable(exc)
                     try:
@@ -34246,8 +34568,10 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/copilot_web_fetch",
 	            "/api/copilot_web_ask",
 	            "/api/iivtnu_municipios",
+	            "/api/iivtnu_cp_lookup",
 	            "/api/iivtnu_simulate",
 	            "/api/iivtnu_pdf_parse",
+	            "/api/iivtnu_param_upsert",
 	            "/api/s3_presign",
 	            "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -34921,9 +35245,23 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
         if parsed.path == "/api/iivtnu_municipios":
+            scope = str(payload.get("scope") or "all").strip().lower()
+            q = str(payload.get("q") or "").strip()
+            provincia_filter = str(payload.get("provincia") or "").strip()
+            comunidad_filter = str(payload.get("comunidad") or "").strip()
+            limit = parse_optional_int(payload.get("limit") or None)
+            if limit is None:
+                limit = 0
+            try:
+                limit = int(limit or 0)
+            except Exception:
+                limit = 0
+            limit = max(0, min(1000, limit))
+            if q and limit <= 0:
+                limit = 200
             try:
                 ensure_iivtnu_schema(conn)
-                _iivtnu_seed_andalucia(conn)
+                _iivtnu_seed_spain_municipios(conn)
                 _iivtnu_seed_malaga(conn)
                 try:
                     conn.commit()
@@ -34933,14 +35271,34 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             rows = []
             try:
-                rows = conn.execute(
-                    """
+                where = []
+                args = []
+                if scope == "andalucia":
+                    where.append("(COALESCE(comunidad, '') = 'Andalucía' OR LOWER(COALESCE(provincia,'')) IN (?,?,?,?,?,?,?,?))")
+                    args.extend([p.lower() for p in _IIVTNU_ANDALUCIA_PROVINCES])
+                elif scope == "malaga":
+                    where.append("(COALESCE(provincia,'') = 'Málaga' OR ine LIKE '29%')")
+                if provincia_filter:
+                    where.append("LOWER(COALESCE(provincia,'')) = ?")
+                    args.append(str(provincia_filter).strip().lower())
+                if comunidad_filter:
+                    where.append("LOWER(COALESCE(comunidad,'')) = ?")
+                    args.append(str(comunidad_filter).strip().lower())
+                if q:
+                    where.append("(LOWER(COALESCE(nombre,'')) LIKE ? OR LOWER(COALESCE(provincia,'')) LIKE ?)")
+                    qq = f"%{str(q).strip().lower()}%"
+                    args.extend([qq, qq])
+                sql = """
                     SELECT ine, nombre, provincia, comunidad, COALESCE(es_capital, 0) AS es_capital
                     FROM iivtnu_municipios
-                    WHERE comunidad = 'Andalucía'
-                    ORDER BY LOWER(COALESCE(nombre, '')) ASC
-                    """
-                ).fetchall()
+                """
+                if where:
+                    sql += " WHERE " + " AND ".join(where)
+                sql += " ORDER BY LOWER(COALESCE(nombre, '')) ASC"
+                if limit and limit > 0:
+                    sql += " LIMIT ?"
+                    args.append(int(limit))
+                rows = conn.execute(sql, tuple(args)).fetchall()
             except Exception:
                 rows = []
             items = []
@@ -34960,17 +35318,65 @@ class Handler(BaseHTTPRequestHandler):
                         }
                     )
             else:
-                # Fallback: si no hay seed en DB (o falla la tabla), devolvemos del catálogo INE (completo).
+                # Fallback: si falla la DB, devolvemos del catálogo INE.
                 ine_cache = _iivtnu_load_ine_municipios_cache()
                 ine_to = ine_cache.get("ine_to") or {}
                 prov_to = ine_cache.get("prov_to") or {}
                 for ine, nombre in sorted(ine_to.items(), key=lambda kv: _iivtnu_norm_text(kv[1])):
-                    provincia = prov_to.get(str(ine).zfill(5)) or ""
-                    if not _iivtnu_is_andalucia_province(provincia):
+                    ine = str(ine).zfill(5)
+                    provincia = str(prov_to.get(ine) or "").strip()
+                    comunidad = _iivtnu_provincia_to_comunidad(provincia)
+                    if scope == "andalucia" and not _iivtnu_is_andalucia_province(provincia):
                         continue
+                    if scope == "malaga" and not (ine.startswith("29") or provincia == "Málaga"):
+                        continue
+                    if provincia_filter and _iivtnu_norm_text(provincia) != _iivtnu_norm_text(provincia_filter):
+                        continue
+                    if comunidad_filter and _iivtnu_norm_text(comunidad) != _iivtnu_norm_text(comunidad_filter):
+                        continue
+                    if q:
+                        qq = _iivtnu_norm_text(q)
+                        if qq and qq not in _iivtnu_norm_text(nombre) and qq not in _iivtnu_norm_text(provincia):
+                            continue
                     es_capital = 1 if _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
-                    items.append({"ine": str(ine).zfill(5), "nombre": str(nombre), "provincia": str(provincia), "comunidad": "Andalucía", "es_capital": es_capital})
+                    items.append({"ine": ine, "nombre": str(nombre), "provincia": str(provincia), "comunidad": comunidad, "es_capital": es_capital})
+                    if limit and len(items) >= limit:
+                        break
             json_response(self, {"ok": True, "items": items})
+            return
+
+        if parsed.path == "/api/iivtnu_cp_lookup":
+            cp = normalize_postal_code(payload.get("codigo_postal") or payload.get("cp") or "")
+            if not cp:
+                json_response(self, {"error": "codigo_postal requerido"}, status=400)
+                return
+            ine = ""
+            try:
+                postal = _iivtnu_load_postal_cache()
+                ine = str((postal.get("cp_to") or {}).get(cp) or "").strip().zfill(5)
+            except Exception:
+                ine = ""
+            if not ine:
+                json_response(self, {"ok": True, "ine": "", "item": None})
+                return
+            ine_cache = _iivtnu_load_ine_municipios_cache()
+            nombre = str((ine_cache.get("ine_to") or {}).get(ine) or "").strip()
+            provincia = str((ine_cache.get("prov_to") or {}).get(ine) or "").strip()
+            comunidad = _iivtnu_provincia_to_comunidad(provincia)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "ine": ine,
+                    "item": {
+                        "ine": ine,
+                        "nombre": nombre or ine,
+                        "provincia": provincia,
+                        "comunidad": comunidad,
+                        "es_capital": 1 if _iivtnu_norm_text(nombre) and _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0,
+                    },
+                },
+            )
             return
 
         if parsed.path == "/api/iivtnu_simulate":
@@ -53302,6 +53708,22 @@ class Handler(BaseHTTPRequestHandler):
             limit_clause = "LIMIT 50"
             if limit.isdigit():
                 limit_clause = f"LIMIT {int(limit)}"
+            # Cache corto para evitar saturar el pool en dashboards que recargan a menudo.
+            try:
+                limit_key = int(limit) if str(limit or "").isdigit() else 50
+            except Exception:
+                limit_key = 50
+            limit_key = max(1, min(200, int(limit_key)))
+            cache_key = (str(empresa_id or "").strip(), int(limit_key))
+            now_ts = time.time()
+            try:
+                with Handler._gestoria_docs_recent_lock:
+                    cached = Handler._gestoria_docs_recent_cache.get(cache_key)
+                    if cached and float(cached[0] or 0.0) > now_ts:
+                        json_response(self, cached[1] or {"rows": []})
+                        return
+            except Exception:
+                pass
             rows = conn.execute(
                 f"""
                 SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
@@ -53314,7 +53736,18 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            payload = {"rows": [dict(r) for r in rows]}
+            try:
+                with Handler._gestoria_docs_recent_lock:
+                    Handler._gestoria_docs_recent_cache[cache_key] = (now_ts + 3.0, payload)
+                    if len(Handler._gestoria_docs_recent_cache) > 500:
+                        # best-effort cleanup de entradas expiradas
+                        for k, (exp, _val) in list(Handler._gestoria_docs_recent_cache.items())[:200]:
+                            if float(exp or 0.0) <= now_ts:
+                                Handler._gestoria_docs_recent_cache.pop(k, None)
+            except Exception:
+                pass
+            json_response(self, payload)
             return
 
         if path == "/api/gestoria_contabilidad":

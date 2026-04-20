@@ -28123,6 +28123,10 @@ const loadGestoriaDocsRecent = () => {
     gestoriaDocsRecent.innerHTML = "";
     gestoriaDocsRecent.appendChild(table);
     gestoriaDocsRecentInfo.textContent = `Mostrando ${rows.length} documentos.`;
+  }).catch((err) => {
+    // Evita "Error interno (promesa)" global en dashboards: este widget es opcional.
+    gestoriaDocsRecent.innerHTML = "<p class='muted'>No se pudieron cargar documentos recientes.</p>";
+    gestoriaDocsRecentInfo.textContent = err?.message ? String(err.message) : "";
   });
 };
 
