@@ -95,6 +95,9 @@ ASSETS = ROOT.parent / "assets"
 INMO_TEMPLATES = ROOT / "templates" / "inmo"
 INMO_NOTA_ENCARGO_VENTA_TEMPLATE = INMO_TEMPLATES / "nota_encargo_venta_modernia.pdf"
 INMO_NOTA_ENCARGO_ALQUILER_TEMPLATE = INMO_TEMPLATES / "nota_encargo_alquiler_modernia.pdf"
+INMO_PROMESA_COMPRAVENTA_TEMPLATE = INMO_TEMPLATES / "promesa_compraventa_modernia.pdf"
+INMO_DECLARACION_COMISION_COMPRAVENTA_TEMPLATE = INMO_TEMPLATES / "declaracion_comision_compraventa_modernia.pdf"
+INMO_INFORMACION_PRECIO_TEMPLATE = INMO_TEMPLATES / "informacion_precio_modernia.pdf"
 LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
 LEGAL_RADAR_SOURCES_PATH = ROOT.parent / "docs" / "legal_radar_sources.json"
 CONVENIOS_CATALOG_PATH = ROOT.parent / "docs" / "convenios_catalog.json"
@@ -33221,198 +33224,135 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
 
 
 def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
-    if rl_canvas is None or rl_colors is None:
-        price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
-        sections = [
-            ("Datos económicos", [("Vivienda", inmueble.get("direccion") or "Pendiente"), ("Precio de venta", price)]),
-        ]
-        footer = ["Documento orientativo."]
-        return build_branded_document_pdf("NOTA EXPLICATIVA PRECIO", "Oferta económica del inmueble", sections, footer)
-
-    def u(value, fallback=""):
-        raw = str(value or "").strip()
-        raw = raw if raw else str(fallback or "").strip()
-        return raw.upper() if raw else raw
-
-    def _fit_text(canvas, text, max_width, font_name, font_size):
-        raw = str(text or "")
-        if not raw:
-            return raw
+    template_path = INMO_INFORMACION_PRECIO_TEMPLATE
+    if template_path.exists() and rl_canvas is not None and PdfReader is not None:
         try:
-            if canvas.stringWidth(raw, font_name, font_size) <= max_width:
-                return raw
+            template_bytes = template_path.read_bytes()
+            reader = PdfReader(BytesIO(template_bytes))
+            pagesizes = []
+            for page in reader.pages:
+                try:
+                    pagesizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+                except Exception:
+                    pagesizes.append((595.0, 842.0))
         except Exception:
-            return raw
-        ell = "…"
-        lo, hi = 0, len(raw)
-        while lo < hi:
-            mid = (lo + hi + 1) // 2
-            cand = raw[:mid] + ell
-            try:
-                ok = canvas.stringWidth(cand, font_name, font_size) <= max_width
-            except Exception:
-                ok = True
-            if ok:
-                lo = mid
-            else:
-                hi = mid - 1
-        return (raw[:lo] + ell) if lo > 0 else ell
+            template_bytes = None
+            pagesizes = None
 
-    def _wrap(canvas, text, max_width, font_name, font_size):
-        words = str(text or "").split()
-        if not words:
-            return [""]
-        lines = []
-        current = ""
-        for w in words:
-            candidate = (current + " " + w).strip() if current else w
-            try:
-                width = canvas.stringWidth(candidate, font_name, font_size)
-            except Exception:
-                width = len(candidate) * (font_size * 0.55)
-            if width <= max_width:
-                current = candidate
-                continue
-            if current:
-                lines.append(current)
-            current = w
-        if current:
-            lines.append(current)
-        return lines
+        if template_bytes and pagesizes:
+            def u(value):
+                raw = str(value or "").strip()
+                return raw.upper() if raw else ""
 
-    company_name = str((company or {}).get("nombre") or "MODERNIA").strip() or "MODERNIA"
-    company_cif = str((company or {}).get("cif") or (company or {}).get("nif") or "").strip()
-    company_addr = str((company or {}).get("direccion") or "").strip()
-    company_phone = str((company or {}).get("telefono") or "").strip()
+            direccion = str((inmueble or {}).get("direccion") or "").strip()
+            cp = str((inmueble or {}).get("codigo_postal") or "").strip()
+            poblacion = str((inmueble or {}).get("poblacion") or "").strip()
+            provincia = str((inmueble or {}).get("provincia") or "").strip()
+            locality = " ".join([p for p in [cp, poblacion] if p]).strip()
+            direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion
 
-    direccion = str((inmueble or {}).get("direccion") or "").strip()
-    cp = str((inmueble or {}).get("codigo_postal") or "").strip()
-    poblacion = str((inmueble or {}).get("poblacion") or "").strip()
-    provincia = str((inmueble or {}).get("provincia") or "").strip()
-    locality = " ".join([p for p in [cp, poblacion] if p]).strip()
-    direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion or "—"
+            price_value = parse_money_value((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0) or 0.0
+            price = format_eur(price_value)
 
-    price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
-    fecha = format_export_date(datetime.now(timezone.utc).date().isoformat())
+            # Anejos (si se modela explícito, se rellena; si no, por defecto "NO" como en el manual)
+            plaza = str((inmueble or {}).get("plaza_aparcamiento") or (captacion or {}).get("plaza_aparcamiento") or "").strip()
+            trastero = str((inmueble or {}).get("trastero") or (captacion or {}).get("trastero") or "").strip()
+            otros = str((inmueble or {}).get("otros_anejos") or (captacion or {}).get("otros_anejos") or "").strip()
+            plaza_txt = u(plaza) if plaza else "NO"
+            trastero_txt = u(trastero) if trastero else "NO"
+            otros_txt = u(otros)
 
-    w, h = (595.27, 841.89)
-    margin = 42
-    sidebar_w = 16
-    accent = rl_colors.HexColor("#C8A24A")
-    ink = rl_colors.HexColor("#111827")
-    muted = rl_colors.HexColor("#4B5563")
-    line = rl_colors.HexColor("#D1D5DB")
+            # Validez: si no se define, fin de año (como los modelos de Modernia/Tecnocasa).
+            today = datetime.now(timezone.utc).date()
+            validez = str((captacion or {}).get("validez_precio") or "").strip()
+            if not validez:
+                try:
+                    validez = datetime(today.year, 12, 31).strftime("%d/%m/%Y")
+                except Exception:
+                    validez = ""
 
-    buf = BytesIO()
-    c = rl_canvas.Canvas(buf, pagesize=(w, h))
+            ref_catastral = u((inmueble or {}).get("referencia_catastral") or (inmueble or {}).get("ref_catastral") or "")
 
-    c.setFillColor(accent)
-    c.rect(0, 0, sidebar_w, h, stroke=0, fill=1)
+            # Certificación energética (si no consta, se deja en blanco)
+            consumo = str((inmueble or {}).get("cee_consumo") or "").strip()
+            emision = str((inmueble or {}).get("cee_emision") or "").strip()
+            energia_txt = u((inmueble or {}).get("cee_clase") or "")
+            cee_line = ""
+            if energia_txt or consumo or emision:
+                parts = []
+                if energia_txt:
+                    parts.append(f"{energia_txt}")
+                if consumo:
+                    parts.append(f"CONSUMO {consumo}")
+                if emision:
+                    parts.append(f"EMISIÓN {emision}")
+                cee_line = " / ".join(parts)
 
-    c.setFillColor(ink)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(margin, h - 48, company_name)
-    c.setFont("Helvetica", 8)
-    header_right = []
-    if company_cif:
-        header_right.append(f"CIF: {company_cif}")
-    if company_addr:
-        header_right.append(company_addr)
-    if company_phone:
-        header_right.append(f"Tel: {company_phone}")
-    if header_right:
-        ty = h - 42
-        for line_txt in header_right[:3]:
-            c.drawRightString(w - margin, ty, line_txt)
-            ty -= 10
+            # Gastos y tributos: valores orientativos (por defecto como en los modelos).
+            honor_pct = float((captacion or {}).get("honorarios_pct") or 4.0)
+            iva_pct = float((captacion or {}).get("iva_pct") or 21.0)
+            itp_pct = float((captacion or {}).get("itp_pct") or 7.0)
+            notario = float((captacion or {}).get("gasto_notario") or 700.0)
+            registro = float((captacion or {}).get("gasto_registro") or 600.0)
+            gestoria = float((captacion or {}).get("gasto_gestoria") or 500.0)
+            honor = price_value * (honor_pct / 100.0) * (1.0 + iva_pct / 100.0)
+            itp = price_value * (itp_pct / 100.0)
+            total_estimado = price_value + honor + itp + notario + registro + gestoria
 
-    c.setFillColor(accent)
-    c.rect(margin, h - 92, w - margin * 2, 22, stroke=0, fill=1)
-    c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(w / 2, h - 84, "NOTA EXPLICATIVA DEL PRECIO")
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
-    c.drawCentredString(w / 2, h - 106, "SEGUNDAS O ULTERIORES TRANSMISIONES DE VIVIENDA (ANDALUCÍA)")
+            # Forma de pago: por defecto, como en el modelo (señal 3.000€ y arras 10%).
+            senal = parse_money_value((captacion or {}).get("senal_promesa") or 3000) or 3000.0
+            arras = parse_money_value((captacion or {}).get("arras_pct") or "") or None
+            if arras is None:
+                arras = price_value * 0.10
+            resto = max(0.0, price_value - float(senal or 0) - float(arras or 0))
 
-    y = h - 132
+            def money(x):
+                try:
+                    return format_eur(float(x or 0))
+                except Exception:
+                    return ""
 
-    def field_row(label, value, y_row, value_w=None):
-        label_x = margin
-        value_x = margin + 140
-        line_x1 = value_x
-        line_x2 = w - margin
-        if value_w is not None:
-            line_x2 = min(line_x2, value_x + float(value_w))
-        c.setFillColor(ink)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(label_x, y_row, label)
-        c.setStrokeColor(line)
-        c.setLineWidth(0.8)
-        c.line(line_x1, y_row - 2, line_x2, y_row - 2)
-        c.setFont("Helvetica-Bold", 9)
-        fitted = _fit_text(c, u(value), (line_x2 - line_x1) - 4, "Helvetica-Bold", 9)
-        c.drawString(value_x + 2, y_row, fitted)
+            fields = {
+                0: [
+                    # Dirección y precio
+                    {"x": 270, "y": 708, "width": 310, "height": 14, "value": u(direccion_full), "fontSize": 9},
+                    {"x": 130, "y": 680, "width": 180, "height": 14, "value": u(price), "fontSize": 9},
+                    # Anejos
+                    {"x": 235, "y": 617, "width": 70, "height": 14, "value": plaza_txt, "fontSize": 9},
+                    {"x": 365, "y": 617, "width": 70, "height": 14, "value": trastero_txt, "fontSize": 9},
+                    {"x": 492, "y": 617, "width": 90, "height": 14, "value": otros_txt, "fontSize": 9},
+                    # Validez y catastro
+                    {"x": 250, "y": 566, "width": 140, "height": 14, "value": u(validez), "fontSize": 9},
+                    {"x": 240, "y": 552, "width": 340, "height": 14, "value": ref_catastral, "fontSize": 9},
+                    # CEE
+                    {"x": 200, "y": 522, "width": 380, "height": 14, "value": cee_line, "fontSize": 8.6},
+                    # Gastos y tributos
+                    {"x": 442, "y": 477, "width": 138, "height": 14, "value": u(f"{honor_pct:g}% + IVA"), "fontSize": 9},
+                    {"x": 510, "y": 463, "width": 70, "height": 14, "value": u(f"{int(notario)}€"), "fontSize": 9},
+                    {"x": 510, "y": 449, "width": 70, "height": 14, "value": u(f"{int(registro)}€"), "fontSize": 9},
+                    {"x": 510, "y": 435, "width": 70, "height": 14, "value": u(f"{int(gestoria)}€"), "fontSize": 9},
+                    {"x": 430, "y": 421, "width": 150, "height": 14, "value": u(f"{itp_pct:g}%"), "fontSize": 9},
+                    # Forma de pago
+                    {"x": 430, "y": 372, "width": 150, "height": 14, "value": u(money(senal)), "fontSize": 9},
+                    {"x": 430, "y": 358, "width": 150, "height": 14, "value": u(f"{int(round((arras / price_value) * 100))}%" if price_value else "10%"), "fontSize": 9},
+                    {"x": 430, "y": 344, "width": 150, "height": 14, "value": u(money(resto)), "fontSize": 9},
+                    # Checkboxes (por defecto: NO)
+                    {"x": 138.0, "y": 282.0, "width": 12, "height": 12, "value": "X", "fontSize": 10},
+                    {"x": 138.0, "y": 224.0, "width": 12, "height": 12, "value": "X", "fontSize": 10},
+                    # Total estimado
+                    {"x": 250, "y": 176, "width": 200, "height": 14, "value": u(money(total_estimado)), "fontSize": 9},
+                ],
+            }
+            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            if overlay_bytes:
+                merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
+                if merged:
+                    return merged
 
-    c.setFillColor(muted)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(margin, y + 10, "DATOS DEL INMUEBLE")
-    field_row("DIRECCIÓN:", direccion_full, y)
-    y -= 18
-    field_row("PRECIO:", price, y, value_w=200)
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
-    c.drawString(margin + 360, y, f"FECHA: {fecha}")
-    y -= 26
-
-    c.setFillColor(muted)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(margin, y + 10, "FORMA DE PAGO (RESUMEN)")
-    c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
-    pay_text = (
-        "La forma de pago se concretará en el contrato, indicando entregas a cuenta, "
-        "señal/arras y resto a la firma. Los tributos y gastos se detallarán según corresponda."
-    )
-    max_w = w - margin * 2
-    lines = _wrap(c, pay_text, max_w, "Helvetica", 9)
-    for line_txt in lines:
-        c.drawString(margin, y, line_txt)
-        y -= 12
-    y -= 10
-
-    c.setFillColor(muted)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(margin, y + 10, "OBSERVACIONES")
-    obs = str((captacion or {}).get("notas") or "").strip() or "—"
-    obs_lines = _wrap(c, obs, max_w, "Helvetica", 9)[:6]
-    c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
-    for line_txt in obs_lines:
-        c.drawString(margin, y, line_txt)
-        y -= 12
-    y -= 14
-
-    c.setStrokeColor(line)
-    c.setLineWidth(0.8)
-    col_w = (w - margin * 2 - 24) / 2
-    c.line(margin, y, margin + col_w, y)
-    c.line(margin + col_w + 24, y, margin + col_w + 24 + col_w, y)
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
-    c.drawString(margin, y - 12, "RECIBÍ (NOMBRE Y FIRMA)")
-    c.drawString(margin + col_w + 24, y - 12, "POR LA AGENCIA (FIRMA)")
-
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 6.8)
-    c.drawString(
-        margin,
-        22,
-        "Documento orientativo para informar del precio y forma de pago. Revisar y adaptar antes de firma conforme a normativa aplicable.",
-    )
-
-    c.save()
-    return buf.getvalue()
+    # Fallback si faltan dependencias/plantillas.
+    price = format_eur((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0)
+    sections = [("Datos económicos", [("Vivienda", (inmueble or {}).get("direccion") or "Pendiente"), ("Precio de venta", price)])]
+    return build_branded_document_pdf("NOTA EXPLICATIVA DEL PRECIO", "Modelo Modernia (fallback)", sections, ["Documento orientativo."])
 
 
 def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
@@ -33474,179 +33414,115 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
 
 
 def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
-    if rl_canvas is None or rl_colors is None:
-        amount = format_eur(action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0)
-        doc_kind = str(action.get("documento_tipo") or "Propuesta de compra").strip() or "Propuesta de compra"
-        sections = [("Propuesta", [("Documento", doc_kind), ("Importe", amount)])]
-        footer = ["Documento orientativo."]
-        return build_branded_document_pdf(doc_kind.upper(), "Expediente de negociación", sections, footer)
-
-    def u(value, fallback=""):
-        raw = str(value or "").strip()
-        raw = raw if raw else str(fallback or "").strip()
-        return raw.upper() if raw else raw
-
-    def _fit_text(canvas, text, max_width, font_name, font_size):
-        raw = str(text or "")
-        if not raw:
-            return raw
+    template_path = INMO_PROMESA_COMPRAVENTA_TEMPLATE
+    if template_path.exists() and rl_canvas is not None and PdfReader is not None:
         try:
-            if canvas.stringWidth(raw, font_name, font_size) <= max_width:
-                return raw
+            template_bytes = template_path.read_bytes()
+            reader = PdfReader(BytesIO(template_bytes))
+            pagesizes = []
+            for page in reader.pages:
+                try:
+                    pagesizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+                except Exception:
+                    pagesizes.append((612.0, 792.0))
         except Exception:
-            return raw
-        ell = "…"
-        lo, hi = 0, len(raw)
-        while lo < hi:
-            mid = (lo + hi + 1) // 2
-            cand = raw[:mid] + ell
-            try:
-                ok = canvas.stringWidth(cand, font_name, font_size) <= max_width
-            except Exception:
-                ok = True
-            if ok:
-                lo = mid
-            else:
-                hi = mid - 1
-        return (raw[:lo] + ell) if lo > 0 else ell
+            template_bytes = None
+            pagesizes = None
 
-    def _wrap(canvas, text, max_width, font_name, font_size):
-        words = str(text or "").split()
-        if not words:
-            return [""]
-        lines = []
-        current = ""
-        for w in words:
-            candidate = (current + " " + w).strip() if current else w
-            try:
-                width = canvas.stringWidth(candidate, font_name, font_size)
-            except Exception:
-                width = len(candidate) * (font_size * 0.55)
-            if width <= max_width:
-                current = candidate
-                continue
-            if current:
-                lines.append(current)
-            current = w
-        if current:
-            lines.append(current)
-        return lines
+        if template_bytes and pagesizes:
+            buyer = buyer or {}
+            action = action or {}
+            inmueble = inmueble or {}
 
-    company_name = str((company or {}).get("nombre") or "MODERNIA").strip() or "MODERNIA"
-    buyer = buyer or {}
-    action = action or {}
+            def u(value):
+                raw = str(value or "").strip()
+                return raw.upper() if raw else ""
 
-    amount = format_eur(action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0)
-    doc_kind = str(action.get("documento_tipo") or "Propuesta de compra").strip() or "Propuesta de compra"
+            def ddmmyyyy(value):
+                raw = str(value or "").strip()
+                if not raw:
+                    return ""
+                if re.match(r"^\\d{2}/\\d{2}/\\d{4}$", raw):
+                    return raw
+                parsed = parse_iso_date(raw)
+                return parsed.strftime("%d/%m/%Y") if parsed else raw
 
-    direccion = str((inmueble or {}).get("direccion") or "").strip()
-    cp = str((inmueble or {}).get("codigo_postal") or "").strip()
-    poblacion = str((inmueble or {}).get("poblacion") or "").strip()
-    provincia = str((inmueble or {}).get("provincia") or "").strip()
-    locality = " ".join([p for p in [cp, poblacion] if p]).strip()
-    direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion or "—"
+            direccion = str(inmueble.get("direccion") or "").strip()
+            cp = str(inmueble.get("codigo_postal") or "").strip()
+            poblacion = str(inmueble.get("poblacion") or "").strip()
+            provincia = str(inmueble.get("provincia") or "").strip()
+            locality = " ".join([p for p in [cp, poblacion] if p]).strip()
+            direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip()
 
-    buyer_name = u(buyer.get("nombre"), "—")
-    buyer_nif = u(buyer.get("nif"), "—")
-    buyer_phone = u(buyer.get("telefono") or "")
-    buyer_email = u(buyer.get("email") or "")
+            c1_name = u(buyer.get("nombre"))
+            c1_nif = u(buyer.get("nif"))
+            c1_tel = u(buyer.get("telefono"))
+            c1_email = u(buyer.get("email"))
 
-    fecha = str(action.get("fecha") or format_export_date(datetime.now(timezone.utc).date().isoformat())).strip()
+            propietario_nombre = u(action.get("propietario_nombre") or inmueble.get("propietario_nombre"))
+            propietario_nif = u(action.get("propietario_nif") or inmueble.get("propietario_nif"))
 
-    w, h = (595.27, 841.89)
-    margin = 42
-    sidebar_w = 16
-    accent = rl_colors.HexColor("#C8A24A")
-    ink = rl_colors.HexColor("#111827")
-    muted = rl_colors.HexColor("#4B5563")
-    line = rl_colors.HexColor("#D1D5DB")
+            ref_catastral = u(inmueble.get("referencia_catastral") or inmueble.get("ref_catastral"))
+            datos_registrales = u(action.get("datos_registrales") or inmueble.get("datos_registrales") or "")
 
-    buf = BytesIO()
-    c = rl_canvas.Canvas(buf, pagesize=(w, h))
+            amount_value = parse_money_value(action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0) or 0.0
+            amount = u(format_eur_short(amount_value))
 
-    c.setFillColor(accent)
-    c.rect(0, 0, sidebar_w, h, stroke=0, fill=1)
+            garantia = parse_money_value(action.get("garantia") or action.get("senal") or 3000) or 3000.0
+            entrega_2 = parse_money_value(action.get("entrega_2") or action.get("arras") or "") or 0.0
+            entrega_3 = max(0.0, amount_value - garantia - entrega_2)
 
-    c.setFillColor(ink)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(margin, h - 48, company_name)
+            fecha_firma = ddmmyyyy(action.get("fecha") or datetime.now(timezone.utc).date().isoformat())
+            lugar = u(action.get("lugar_firma") or poblacion or provincia or "")
+            fecha_privado = ddmmyyyy(action.get("fecha_privado") or "")
+            fecha_publico = ddmmyyyy(action.get("fecha_publico") or "")
 
-    c.setFillColor(accent)
-    c.rect(margin, h - 92, w - margin * 2, 26, stroke=0, fill=1)
-    c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(w / 2, h - 82, u(doc_kind))
+            def money(x):
+                try:
+                    return u(format_eur_short(float(x or 0)))
+                except Exception:
+                    return ""
 
-    y = h - 130
-    max_w = w - margin * 2
+            # Coordenadas ajustadas a la plantilla Modernia (US Letter 612x792) para evitar solapes.
+            fields = {
+                0: [
+                    # C1 (nombre y NIF)
+                    {"x": 106.6, "y": 626.3, "width": 294.7, "height": 14, "value": c1_name, "fontSize": 9},
+                    {"x": 229.9, "y": 599.9, "width": 142.1, "height": 14, "value": c1_nif, "fontSize": 9},
+                    # Inmueble (ref. catastral + 'sito en')
+                    {"x": 60.0, "y": 398.3, "width": 226.6, "height": 14, "value": ref_catastral, "fontSize": 8.6},
+                    {"x": 376.8, "y": 398.3, "width": 168.0, "height": 14, "value": u(direccion_full), "fontSize": 8.6},
+                    # P1 (nombre y NIF)
+                    {"x": 93.6, "y": 360.8, "width": 185.3, "height": 14, "value": propietario_nombre, "fontSize": 9},
+                    {"x": 388.3, "y": 360.8, "width": 83.0, "height": 14, "value": propietario_nif, "fontSize": 9},
+                    # Precio y entregas
+                    {"x": 137.3, "y": 271.1, "width": 120.5, "height": 14, "value": amount, "fontSize": 9},
+                    {"x": 73.9, "y": 246.6, "width": 120.0, "height": 14, "value": money(garantia), "fontSize": 9},
+                    {"x": 73.9, "y": 200.5, "width": 120.0, "height": 14, "value": money(entrega_2), "fontSize": 9},
+                    {"x": 73.9, "y": 155.9, "width": 120.0, "height": 14, "value": money(entrega_3), "fontSize": 9},
+                ],
+                1: [
+                    {"x": 290, "y": 618, "width": 125, "height": 14, "value": fecha_privado, "fontSize": 9},
+                    {"x": 488, "y": 618, "width": 125, "height": 14, "value": fecha_publico, "fontSize": 9},
+                    {"x": 70, "y": 240, "width": 260, "height": 14, "value": lugar, "fontSize": 9},
+                    {"x": 70, "y": 226, "width": 260, "height": 14, "value": u(fecha_firma), "fontSize": 9},
+                    {"x": 340, "y": 240, "width": 260, "height": 14, "value": lugar, "fontSize": 9},
+                    {"x": 340, "y": 226, "width": 260, "height": 14, "value": u(fecha_firma), "fontSize": 9},
+                    {"x": 72, "y": 160, "width": 240, "height": 14, "value": c1_name, "fontSize": 9},
+                    {"x": 342, "y": 160, "width": 240, "height": 14, "value": propietario_nombre, "fontSize": 9},
+                ],
+            }
 
-    def heading(text):
-        nonlocal y
-        c.setFillColor(muted)
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(margin, y, text)
-        y -= 12
+            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            if overlay_bytes:
+                merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
+                if merged:
+                    return merged
 
-    def field_row(label, value):
-        nonlocal y
-        label_x = margin
-        value_x = margin + 130
-        line_x2 = w - margin
-        c.setFillColor(ink)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(label_x, y, label)
-        c.setStrokeColor(line)
-        c.setLineWidth(0.8)
-        c.line(value_x, y - 2, line_x2, y - 2)
-        c.setFont("Helvetica-Bold", 9)
-        fitted = _fit_text(c, u(value), (line_x2 - value_x) - 4, "Helvetica-Bold", 9)
-        c.drawString(value_x + 2, y, fitted)
-        y -= 16
-
-    heading("INMUEBLE")
-    field_row("DIRECCIÓN:", direccion_full)
-    field_row("REFERENCIA:", inmueble.get("referencia") or inmueble.get("referencia_catastral") or "—")
-    y -= 8
-
-    heading("COMPRADOR")
-    field_row("NOMBRE:", buyer_name)
-    field_row("NIF:", buyer_nif)
-    field_row("TELÉFONO:", buyer_phone)
-    field_row("E-MAIL:", buyer_email)
-    y -= 8
-
-    heading("PROPUESTA ECONÓMICA")
-    field_row("IMPORTE:", amount)
-    field_row("FECHA:", fecha)
-
-    c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
-    obs = str(action.get("notas") or "").strip() or "—"
-    heading("OBSERVACIONES")
-    obs_lines = _wrap(c, obs, max_w, "Helvetica", 9)[:8]
-    c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
-    for line_txt in obs_lines:
-        c.drawString(margin, y, line_txt)
-        y -= 12
-
-    y -= 18
-    c.setStrokeColor(line)
-    c.setLineWidth(0.8)
-    col_w = (w - margin * 2 - 24) / 2
-    c.line(margin, y, margin + col_w, y)
-    c.line(margin + col_w + 24, y, margin + col_w + 24 + col_w, y)
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
-    c.drawString(margin, y - 12, "FIRMA COMPRADOR")
-    c.drawString(margin + col_w + 24, y - 12, "FIRMA AGENCIA")
-
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 6.8)
-    c.drawString(margin, 22, "Documento orientativo. Revisar condiciones antes de firma por las partes.")
-
-    c.save()
-    return buf.getvalue()
+    amount = format_eur((action or {}).get("importe_propuesta") or (inmueble or {}).get("precio_objetivo") or 0)
+    doc_kind = str((action or {}).get("documento_tipo") or "Promesa de compraventa").strip() or "Promesa de compraventa"
+    sections = [("Propuesta", [("Documento", doc_kind), ("Importe", amount), ("Inmueble", (inmueble or {}).get("direccion") or "Pendiente")])]
+    return build_branded_document_pdf(doc_kind.upper(), "Modelo Modernia (fallback)", sections, ["Documento orientativo."])
 
 
 def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action, extra=None):
@@ -33682,6 +33558,59 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     if iva_pct in (None, ""):
         iva_pct = "21"
     lugar = str(extra.get("lugar_firma") or "").strip()
+
+    # Preferimos plantilla Modernia "DECLARACIÓN COMISIÓN - COMPRAVENTA" (no editable) para que sea idéntica al modelo.
+    template_path = INMO_DECLARACION_COMISION_COMPRAVENTA_TEMPLATE
+    if template_path.exists() and rl_canvas is not None and PdfReader is not None:
+        try:
+            template_bytes = template_path.read_bytes()
+            reader = PdfReader(BytesIO(template_bytes))
+            pagesizes = []
+            for page in reader.pages:
+                try:
+                    pagesizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+                except Exception:
+                    pagesizes.append((595.0, 842.0))
+        except Exception:
+            template_bytes = None
+            pagesizes = None
+
+        if template_bytes and pagesizes:
+            def u(value):
+                raw = str(value or "").strip()
+                return raw.upper() if raw else ""
+
+            # Datos básicos
+            direccion = str((inmueble or {}).get("direccion") or "").strip()
+            cp = str((inmueble or {}).get("codigo_postal") or "").strip()
+            poblacion = str((inmueble or {}).get("poblacion") or "").strip()
+            provincia = str((inmueble or {}).get("provincia") or "").strip()
+            locality = " ".join([p for p in [cp, poblacion] if p]).strip()
+            direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion
+
+            try:
+                fecha_promesa = fmt_ddmmyyyy(fecha)
+            except Exception:
+                fecha_promesa = str(fecha or "").strip()
+
+            # Honorarios: si viene importe explícito, se usa; si no, preferimos % + IVA.
+            honorarios_pct = str(extra.get("honorarios_pct") or "").strip()
+            honorarios_eur = str(extra.get("honorarios_eur") or honorarios_importe or "").strip()
+            use_pct = bool(honorarios_pct and not honorarios_eur)
+            if not honorarios_pct:
+                honorarios_pct = "4"
+
+            fields = {
+                0: [
+                    # C1 (nombre + NIF) sobre plantilla Modernia (A4)
+                    {"x": 67.7, "y": 682.6, "width": 346.4, "height": 14, "value": u(buyer_name), "fontSize": 9},
+                ]
+            }
+            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            if overlay_bytes:
+                merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
+                if merged:
+                    return merged
 
     if rl_canvas is None or rl_colors is None:
         # Fallback no editable.
