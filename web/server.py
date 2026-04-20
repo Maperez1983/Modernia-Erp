@@ -32441,7 +32441,13 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
             ),
             ("Datos del cliente visitante", [("Nombre", buyer_name), ("DNI / NIF", buyer_nif), ("Teléfono", buyer_phone), ("Email", buyer_email)]),
         ]
-        return build_branded_document_pdf("HOJA DE VISITA", "Documento comercial de visita vinculado al expediente del inmueble", sections, [])
+        return build_company_branded_document_pdf(
+            company,
+            "HOJA DE VISITA",
+            "Documento comercial de visita vinculado al expediente del inmueble",
+            sections,
+            [],
+        )
 
     def u(value, fallback=""):
         raw = str(value or "").strip()
@@ -32532,8 +32538,21 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
 
     # Header
     c.setFillColor(ink)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(margin, h - 48, company_name)
+    if _company_uses_modernia_pdf_brand(company):
+        try:
+            from reportlab.lib.utils import ImageReader  # type: ignore
+            logo = _load_brand_logo("/assets/grupo_modernia_logo.png", max_width=240)
+            if logo:
+                img_buf = BytesIO()
+                logo.convert("RGBA").save(img_buf, format="PNG")
+                img_buf.seek(0)
+                c.drawImage(ImageReader(img_buf), margin, h - 66, width=logo.width * 0.45, height=logo.height * 0.45, mask="auto")
+        except Exception:
+            c.setFont("Helvetica-Bold", 18)
+            c.drawString(margin, h - 48, company_name)
+    else:
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(margin, h - 48, company_name)
     c.setFont("Helvetica", 8)
     header_right = []
     if company_cif:
@@ -32835,6 +32854,33 @@ def _company_uses_modernia_pdf_brand(company):
     name = str(company.get("nombre") or "").strip().lower()
     logo_url = str(company.get("logo_url") or "").strip().lower()
     return ("modernia" in name) or ("modernia" in logo_url) or ("grupo_modernia" in logo_url)
+
+
+def build_company_branded_document_pdf(company, title, subtitle, sections, footer_lines=None, brand_logo_url=None):
+    company = company or {}
+    if _company_uses_modernia_pdf_brand(company):
+        return build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines, company=company, brand_logo_url=brand_logo_url)
+    return build_branded_document_pdf(
+        title,
+        subtitle,
+        sections,
+        footer_lines,
+        brand_logo_url=brand_logo_url or company.get("logo_url"),
+    )
+
+
+def build_company_branded_text_document_pdf(company, title, subtitle, body_lines, footer_lines=None, brand_logo_url=None):
+    company = company or {}
+    if _company_uses_modernia_pdf_brand(company):
+        sections = [("Contenido", body_lines or [])]
+        return build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines, company=company, brand_logo_url=brand_logo_url)
+    return build_branded_text_document_pdf(
+        title,
+        subtitle,
+        body_lines,
+        footer_lines=footer_lines,
+        brand_logo_url=brand_logo_url or company.get("logo_url"),
+    )
 
 
 def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
@@ -33394,8 +33440,8 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     if rl_canvas is None or rl_colors is None:
         price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
         sections = [("Identificación", [("Dirección", inmueble.get("direccion") or "Pendiente"), ("Precio", price)])]
-        footer = ["Documento orientativo."]
-        return build_branded_document_pdf("FICHA INFORMATIVA DE VENTA", "Modelo adaptado", sections, footer)
+        footer = []
+        return build_company_branded_document_pdf(company, "FICHA INFORMATIVA DE VENTA", "Modelo adaptado", sections, footer)
 
     def u(value, fallback=""):
         raw = str(value or "").strip()
@@ -33479,8 +33525,21 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     c.rect(0, 0, sidebar_w, h, stroke=0, fill=1)
 
     c.setFillColor(ink)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(margin, h - 48, company_name)
+    if _company_uses_modernia_pdf_brand(company):
+        try:
+            from reportlab.lib.utils import ImageReader  # type: ignore
+            logo = _load_brand_logo("/assets/grupo_modernia_logo.png", max_width=240)
+            if logo:
+                img_buf = BytesIO()
+                logo.convert("RGBA").save(img_buf, format="PNG")
+                img_buf.seek(0)
+                c.drawImage(ImageReader(img_buf), margin, h - 66, width=logo.width * 0.45, height=logo.height * 0.45, mask="auto")
+        except Exception:
+            c.setFont("Helvetica-Bold", 18)
+            c.drawString(margin, h - 48, company_name)
+    else:
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(margin, h - 48, company_name)
 
     c.setFillColor(accent)
     c.rect(margin, h - 92, w - margin * 2, 22, stroke=0, fill=1)
@@ -33557,9 +33616,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     c.drawString(margin, y - 12, "RECIBÍ (NOMBRE Y FIRMA)")
     c.drawString(margin + col_w + 24, y - 12, "POR LA AGENCIA (FIRMA)")
 
-    c.setFillColor(muted)
-    c.setFont("Helvetica", 6.8)
-    c.drawString(margin, 22, "Documento orientativo. Revisar y adaptar antes de firma conforme a normativa aplicable.")
+    # Sin nota de "orientativo" (documento definitivo).
 
     c.save()
     return buf.getvalue()
@@ -33694,11 +33751,20 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
     # Fallback si faltan dependencias/plantillas.
     price = format_eur((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0)
     sections = [("Datos económicos", [("Vivienda", (inmueble or {}).get("direccion") or "Pendiente"), ("Precio de venta", price)])]
-    return build_branded_document_pdf("NOTA EXPLICATIVA DEL PRECIO", "Modelo Modernia (fallback)", sections, ["Documento orientativo."])
+    return build_company_branded_document_pdf(company, "NOTA EXPLICATIVA DEL PRECIO", "Modelo Modernia (fallback)", sections, [])
 
 
 def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
-    rent_amount = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
+    rent_raw = (
+        inmueble.get("renta_mensual")
+        or captacion.get("renta_mensual")
+        or inmueble.get("precio_alquiler")
+        or captacion.get("precio_alquiler")
+        or inmueble.get("precio_objetivo")
+        or captacion.get("precio_objetivo")
+        or 0
+    )
+    rent_amount = format_eur(parse_money_value(rent_raw) if parse_money_value(rent_raw) is not None else (rent_raw or 0))
     locality = " · ".join([part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
     docs_text = ", ".join(
         str(item.get("tipo") or item.get("nombre") or "").strip()
@@ -33749,9 +33815,7 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
     ]
     title = "DOCUMENTO INFORMATIVO ABREVIADO · ARRENDAMIENTO"
     subtitle = "Modelo adaptado para alquiler de vivienda"
-    if _company_uses_modernia_pdf_brand(company):
-        return build_modernia_branded_document_pdf(title, subtitle, sections, footer, company=company)
-    return build_branded_document_pdf(title, subtitle, sections, footer, brand_logo_url=company.get("logo_url"))
+    return build_company_branded_document_pdf(company, title, subtitle, sections, footer)
 
 
 def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
@@ -33828,8 +33892,9 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
             fields = {
                 0: [
                     # C1 (nombre y NIF)
-                    {"x": 106.6, "y": 626.3, "width": 294.7, "height": 14, "value": c1_name, "fontSize": 9},
-                    {"x": 229.9, "y": 599.9, "width": 142.1, "height": 14, "value": c1_nif, "fontSize": 9},
+                    # Reducimos ancho para no invadir texto estático ("mayor de edad...") en nombres largos.
+                    {"x": 106.6, "y": 626.3, "width": 200.0, "height": 14, "value": c1_name, "fontSize": 9},
+                    {"x": 229.9, "y": 599.9, "width": 120.0, "height": 14, "value": c1_nif, "fontSize": 9},
                     # Inmueble (ref. catastral + 'sito en')
                     {"x": 60.0, "y": 398.3, "width": 226.6, "height": 14, "value": ref_catastral, "fontSize": 8.6},
                     {"x": 376.8, "y": 398.3, "width": 168.0, "height": 14, "value": u(direccion_full), "fontSize": 8.6},
@@ -33863,7 +33928,7 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
     amount = format_eur((action or {}).get("importe_propuesta") or (inmueble or {}).get("precio_objetivo") or 0)
     doc_kind = str((action or {}).get("documento_tipo") or "Promesa de compraventa").strip() or "Promesa de compraventa"
     sections = [("Propuesta", [("Documento", doc_kind), ("Importe", amount), ("Inmueble", (inmueble or {}).get("direccion") or "Pendiente")])]
-    return build_branded_document_pdf(doc_kind.upper(), "Modelo Modernia (fallback)", sections, ["Documento orientativo."])
+    return build_company_branded_document_pdf(company, doc_kind.upper(), "Modelo Modernia (fallback)", sections, [])
 
 
 def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action, extra=None):
@@ -34006,7 +34071,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
             ("Interesado", [("Nombre", buyer_name), ("NIF", buyer_nif or "Pendiente"), ("Teléfono", buyer_tel or "Pendiente"), ("Email", buyer_email or "Pendiente")]),
             ("Honorarios", ["Documento de reconocimiento de honorarios pendiente de revisión."]),
         ]
-        return build_branded_document_pdf("RECONOCIMIENTO DE HONORARIOS", f"{company_name} · {inmueble_dir}", sections, [])
+        return build_company_branded_document_pdf(company, "RECONOCIMIENTO DE HONORARIOS", f"{company_name} · {inmueble_dir}", sections, [])
 
     # A4
     w, h = (595.27, 841.89)
@@ -34239,9 +34304,7 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
     ]
     title = "FICHA CATASTRAL"
     subtitle = "Resumen operativo del inmueble obtenido desde la Sede Electrónica del Catastro"
-    if _company_uses_modernia_pdf_brand(company):
-        return build_modernia_branded_document_pdf(title, subtitle, sections, footer, company=company)
-    return build_branded_document_pdf(title, subtitle, sections, footer, brand_logo_url=company.get("logo_url"))
+    return build_company_branded_document_pdf(company, title, subtitle, sections, footer)
 
 
 def send_file(handler, path):

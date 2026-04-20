@@ -81,6 +81,7 @@ def main() -> int:
         "habitaciones": "3",
         "banos": "2",
         "precio_objetivo": "220000",
+        "renta_mensual": "1200",
     }
     captacion = {
         "precio_objetivo": inmueble["precio_objetivo"],
