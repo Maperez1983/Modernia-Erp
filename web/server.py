@@ -5761,13 +5761,33 @@ def _iivtnu_parse_uploaded_pdf(body, content_type=""):
 
 def _iivtnu_detect_doc_type(text_upper: str) -> str:
     upper = str(text_upper or "").upper()
+    # Evita falsos positivos (p.ej. cartas de pago de otros tributos con NRC).
+    is_iivtnu_context = any(
+        token in upper
+        for token in (
+            "INCREMENTO DEL VALOR",
+            "TERRENOS DE NATURALEZA URBANA",
+            "NATURALEZA URBANA",
+            "IIVTNU",
+            "PLUSVALIA",
+            "PLUSVALÍA",
+            "GESTRISAM",
+            "IMPOST INCREMENT VALOR TERRENYS",
+        )
+    ) or (
+        "MODELO 004" in upper
+        or "MOD. 004" in upper
+        or "MOD.004" in upper
+        or "MOD. 004-" in upper
+        or bool(re.search(r"\bMODELO\b\s*[:\-]?\s*004\b", upper, flags=re.IGNORECASE | re.MULTILINE))
+    )
     if "PROGRAMA DE AYUDA AL CÁLCULO" in upper or "PROGRAMA DE AYUDA AL CALCULO" in upper:
         return "simulacion_ayuda"
     if "ESTIMACIÓN DEL IMPORTE A PAGAR" in upper or "ESTIMACION DEL IMPORTE A PAGAR" in upper:
         return "simulacion_ayuda"
     if "GUÍA DE AUTOLIQUIDACIÓN" in upper or "GUIA DE AUTOLIQUIDACION" in upper:
         return "guia_autoliquidacion"
-    if "CARTA DE PAGO" in upper or "NRC" in upper:
+    if ("CARTA DE PAGO" in upper or "NRC" in upper) and is_iivtnu_context:
         return "carta_pago"
     if "DOCUMENTO DE PAGO" in upper and (
         "Nº DE LIQUIDACIÓN" in upper
@@ -5778,7 +5798,7 @@ def _iivtnu_detect_doc_type(text_upper: str) -> str:
         return "carta_pago"
     if "SOLICITUD ESPECIFICA" in upper and ("INEXISTENCIA" in upper or "INCREMENTO" in upper):
         return "solicitud_inexistencia_incremento"
-    if "AUTOLIQUIDACI" in upper:
+    if "AUTOLIQUIDACI" in upper and is_iivtnu_context:
         return "autoliquidacion"
     return ""
 
@@ -5847,7 +5867,13 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         raw = pick_first(patterns, text_in)
         if not raw:
             return None
-        return parse_optional_float(raw)
+        # OCR/PDF: a veces viene decimal con punto (p.ej. 21.5) y `parse_optional_float`
+        # lo interpreta como miles. Normalizamos a coma decimal en ese caso.
+        raw_norm = str(raw or "").strip()
+        if "." in raw_norm and "," not in raw_norm:
+            if re.match(r"^\d+\.\d{1,2}$", raw_norm):
+                raw_norm = raw_norm.replace(".", ",")
+        return parse_optional_float(raw_norm)
 
     def pick_date_near(patterns, text_in, window=160):
         for pat in patterns:
@@ -5920,14 +5946,28 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         [
             r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40}?)(?:\s+(?:DISPONE|ORGANISMO|GESTI|SERVICIO|NIF|CIF|AREA|ÁREA)\b|$)",
             r"AYUNTAMIENTO\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})",
+            r"AJUNTAMENT\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40}?)(?:\s+(?:EXEMPLAR|CONTRIBUENT|ORGANISME|NIF|CIF)\b|$)",
+            r"AJUNTAMENT\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.\-]{2,40})",
         ],
         upper,
     )
     municipio = municipio.title().strip() if municipio else ""
+    if municipio and " Exemplar" in municipio:
+        municipio = municipio.split(" Exemplar", 1)[0].strip()
 
     cp_norm = ""
+    # Evita capturar trozos de importes (p.ej. 18190,74) como código postal.
     try:
-        cp_candidates = re.findall(r"\b([0-9]{5})\b", clean or "")
+        cp_candidates = []
+        for m in re.finditer(r"\b([0-9]{5})\b", clean or ""):
+            cp = str(m.group(1) or "")
+            if not cp:
+                continue
+            tail = (clean or "")[m.end() : m.end() + 3]
+            # Si el token continúa como decimal monetario (',74' o '.74'), lo descartamos.
+            if tail and tail[0] in (",", ".") and len(tail) >= 3 and tail[1:3].isdigit():
+                continue
+            cp_candidates.append(cp)
     except Exception:
         cp_candidates = []
     if cp_candidates:
@@ -5948,6 +5988,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"FECHA\s+ADQUISIC(?:IÓ|IO)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"ADQUISIC(?:IÓ|IO)N\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ANTERIOR",
+            r"F\.?\s*TRANS\.?\s*ANT\.?\s*(?:\(%\))?\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
         ],
         upper,
     )
@@ -5960,6 +6001,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"TRANSMISI(?:Ó|O)N\s+ACTUAL[\s\S]{0,240}?\b(?:COMPRAVENTA|COMPRA[\-\s]*VENTA|DONACI(?:Ó|O)N|HERENCIA|EXPROPIACI(?:Ó|O)N|PERMUTA|AUTO|ADJUDICACI(?:Ó|O)N)\b\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"FECHA\s+DOCUMENTO\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
             r"([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})\s{0,40}FECHA\s+TRANSMISI(?:Ó|O)N\s+ACTUAL",
+            r"D\.?\s*MERITACI(?:Ó|O)\s*(?:ACTUAL)?\s*[:\-]?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
         ],
         upper,
     )
@@ -6005,6 +6047,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"VALOR\s+CAT(?:ASTRAL)?\s+DEL\s+SUELO\s*[:\-]?\s*([0-9\.,]+)",
             r"V\.?\s*C\.?\s*SUELO\s*[:\-]?\s*([0-9\.,]+)",
             r"V\.?\s*SUEL[OA]\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bVC\s+S[OÒ]L\s*[:\-]?\s*([0-9\.,]+)",
             # Preferir importes con coma decimal (evita capturar FINCA REGISTRAL / IDs).
             rf"VALOR\s+SUELO\s*[:\-]?\s*{MONEY_RE}",
             rf"{MONEY_RE}[ \t]{{0,40}}VALOR\s+SUELO\b",
@@ -6044,6 +6087,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"V\.?\s*C\.?\s*TOTAL\s*[:\-]?\s*([0-9\.,]+)",
             r"VALOR\s+CAT(?:ASTRAL)?\s*(?!DEL\s+SUELO)(?!DEL\s+SOLAR)\s*\(TOTAL\)\s*[:\-]?\s*([0-9\.,]+)",
             r"V\.?\s*CAT(?:ASTRAL)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bVC\s+S[OÒ]L\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
@@ -6131,6 +6175,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"BASE\s+IMPONIBLE\s*[:\-]?\s*([0-9\.,]+)",
             r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\s*[:\-]?\s*([0-9\.,]+)",
             r"BI[\-\s]*M[ÉE]T\.?\s*OBJ\.\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bB\.?\s*IMPOSABLE\b\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
@@ -6157,6 +6202,7 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"TIPO\s*%+\s*[:\-]?\s*([0-9\.,]+)",
             r"TIPO\s+GRAVAMEN\s*[:\-]?\s*([0-9\.,]+)",
             r"TIPO\s+GRAVAMEN\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bTIPUS\s*%+\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
@@ -6166,13 +6212,16 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"CUOTA\s*[:\-]?\s*([0-9\.,]+)",
             r"([0-9\.,]+)[ \t]{0,40}CUOTA\s+TRIBUTARIA",
             r"CUOTA\s+(?:I|Í)NTEGRA\s*[:\-]?\s*([0-9\.,]+)",
+            # Catalán (Palma): evita capturar la fecha de la fila de tabla (QUOTA INT \n 06/06/2016 ...).
+            r"\bQUOTA\s+INT\b\s*(?:T\s*)?[:\-]\s*([0-9\.,]+)",
+            r"\bQUOTA\s+INT\s+T\b\s*[:\-]\s*([0-9\.,]+)",
         ],
         upper,
     )
     bonificacion_pct = pick_number(
         [
+            # Importante: evitar capturar el importe de cuota/total cuando el PDF muestra “Bonificación %” sin valor.
             r"BONIFICACI(?:Ó|O)N\s*\(?%\)?\s*[:\-]?\s*([0-9\.,]+)",
-            r"([0-9\.,]+)\s{0,40}BONIFICACI(?:Ó|O)N\s*\(?%\)?",
             r"\bBON\.\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
@@ -6203,9 +6252,57 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
             r"IMPORTE\s+TOTAL\s*[:\-]?\s*([0-9\.,]+)",
             r"TOTAL\s+A\s+INGRESAR\s*[:\-]?\s*([0-9\.,]+)",
             r"([0-9\.,]+)[ \t]{0,40}IMPORTE\s+TOTAL",
+            r"\bQUOTA\s+LIQ\b\s*[:\-]?\s*([0-9\.,]+)",
         ],
         upper,
     )
+    # Palma (Catalán): tabla en una línea con coeficiente, base, tipo y cuota; el header puede venir pegado (B.IMPOSABLETIPUS%).
+    if (base_imponible is None or tipo_gravamen_pct is None) and ("QUOTA INT" in upper and "TIPUS" in upper):
+        try:
+            lines = [ln.strip() for ln in clean.splitlines() if str(ln or "").strip()]
+        except Exception:
+            lines = []
+        def _parse_token(token: str):
+            raw_tok = str(token or "").strip()
+            if "." in raw_tok and "," not in raw_tok and re.match(r"^\d+\.\d{1,2}$", raw_tok):
+                raw_tok = raw_tok.replace(".", ",")
+            return parse_optional_float(raw_tok)
+
+        for ln in lines:
+            uln = ln.upper()
+            if "PD" not in uln:
+                continue
+            if not re.search(r"\b[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}\b", uln):
+                continue
+            parts = ln.split()
+            # ejemplo: 06/06/2016 100 PD 8A 0.19 3456,24 21.5 743,09
+            coef_idx = None
+            for i, tok in enumerate(parts):
+                if not re.match(r"^[0-9]+[.,][0-9]+$", tok):
+                    continue
+                # coef suele ser <= 1
+                val = _parse_token(tok)
+                if val is None:
+                    continue
+                try:
+                    fv = float(val)
+                except Exception:
+                    continue
+                if 0 < fv <= 1.0:
+                    coef_idx = i
+                    break
+            if coef_idx is None or coef_idx + 3 >= len(parts):
+                continue
+            base_tok = parts[coef_idx + 1]
+            tipo_tok = parts[coef_idx + 2]
+            cuota_tok = parts[coef_idx + 3]
+            if base_imponible is None:
+                base_imponible = _parse_token(base_tok)
+            if tipo_gravamen_pct is None:
+                tipo_gravamen_pct = _parse_token(tipo_tok)
+            if cuota is None:
+                cuota = _parse_token(cuota_tok)
+            break
     # "Programa de ayuda" (Málaga) suele venir en formato tabla con cabeceras y una fila de importes.
     if doc_type == "simulacion_ayuda" and (
         base_imponible is None
@@ -6294,6 +6391,76 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
     )
     fecha_pago_dt = parse_iso_date(fecha_pago_raw)
     fecha_pago = fecha_pago_dt.isoformat() if fecha_pago_dt else ""
+
+    # Normalizaciones rápidas (evita falsos positivos OCR).
+    if bonificacion_pct is not None:
+        try:
+            bonificacion_pct = float(bonificacion_pct)
+        except Exception:
+            bonificacion_pct = None
+    if bonificacion_pct is not None and (bonificacion_pct < 0 or bonificacion_pct > 100.0):
+        bonificacion_pct = None
+
+    if tipo_gravamen_pct is not None:
+        try:
+            tipo_gravamen_pct = float(tipo_gravamen_pct)
+        except Exception:
+            tipo_gravamen_pct = None
+    # Los tipos municipales suelen estar acotados (p.ej. 30% máx.); >60% casi seguro es OCR erróneo.
+    if tipo_gravamen_pct is not None and (tipo_gravamen_pct < 0 or tipo_gravamen_pct > 60.0):
+        tipo_gravamen_pct = None
+
+    # Heurística (Gestrisam / Málaga): en algunas “solicitudes” el % de participación aparece en la fila t1 con la fecha.
+    if participacion_pct is None and fecha_adq_dt:
+        try:
+            d1 = fecha_adq_dt.strftime("%d/%m/%Y")
+            d2 = fecha_adq_dt.strftime("%d-%m-%Y")
+            m = re.search(rf"\\bT1\\b[\\s\\S]{{0,120}}{re.escape(d1)}[\\s\\S]{{0,80}}\\b([0-9\\.,]+)\\b", upper)
+            if not m:
+                m = re.search(rf"\\bT1\\b[\\s\\S]{{0,120}}{re.escape(d2)}[\\s\\S]{{0,80}}\\b([0-9\\.,]+)\\b", upper)
+            if m:
+                cand = parse_optional_float(m.group(1))
+                if cand is not None:
+                    try:
+                        cand = float(cand)
+                    except Exception:
+                        cand = None
+                if cand is not None and 0 < cand <= 100:
+                    participacion_pct = cand
+        except Exception:
+            pass
+
+    # Heurística: si falta % participación pero tenemos base y valor suelo (método objetivo), inferirla.
+    # Nota: sólo cuando el derecho transmitido parece pleno (o no consta).
+    if (
+        participacion_pct is None
+        and valor_suelo is not None
+        and base_imponible is not None
+        and fecha_adq_dt
+        and fecha_tx_dt
+        and (not derecho_transmitido or "PLENO" in str(derecho_transmitido).upper())
+    ):
+        try:
+            vs = float(valor_suelo or 0.0)
+            bi = float(base_imponible or 0.0)
+        except Exception:
+            vs = 0.0
+            bi = 0.0
+        if vs > 0 and bi > 0:
+            try:
+                coef_table, _coef_src = _iivtnu_max_coefs_for_devengo(fecha_tx_dt)
+                info = _iivtnu_objective_coef(fecha_adq_dt, fecha_tx_dt, coef_table or {})
+                coef_obj = float(info.get("coef_objetivo") or 0.0)
+            except Exception:
+                coef_obj = 0.0
+            if coef_obj and coef_obj > 0:
+                implied = (bi / (vs * coef_obj)) * 100.0
+                # tolerancia amplia; muchos casos son 50/33,33/25/100.
+                if 0 < implied <= 100.0:
+                    implied_round = round(implied, 2)
+                    if abs(implied_round - round(implied_round)) <= 0.15:
+                        implied_round = float(round(implied_round))
+                    participacion_pct = implied_round
 
     municipio_ine = ""
     provincia = ""
@@ -6419,6 +6586,31 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
         bonus = 0.0
         if str(out.get("doc_type") or "").strip():
             bonus += 0.5
+        # Penalizaciones: campos incoherentes típicos de pypdf en PDFs con tablas (mejorar selección vs pdftotext/OCR).
+        try:
+            bonif = float(out.get("bonificacion_pct") or 0.0)
+        except Exception:
+            bonif = 0.0
+        if bonif > 100.0:
+            bonus -= 2.0
+        try:
+            tipo = float(out.get("tipo_gravamen_pct") or 0.0)
+        except Exception:
+            tipo = 0.0
+        if tipo > 60.0:
+            bonus -= 2.0
+        try:
+            doc = str(out.get("doc_type") or "").strip().lower()
+        except Exception:
+            doc = ""
+        if doc in ("autoliquidacion", "simulacion_ayuda", "guia_autoliquidacion"):
+            # Si hay cuota pero falta base, suele ser un fallo de extracción de tablas.
+            try:
+                cuota_val = float(out.get("cuota_tributaria") or 0.0)
+            except Exception:
+                cuota_val = 0.0
+            if cuota_val > 0 and out.get("base_imponible") in (None, "", 0, 0.0):
+                bonus -= 1.5
         # Penalización: incoherencia base/tipo/cuota cuando parecen estar presentes.
         try:
             base = float(out.get("base_imponible") or 0.0)
@@ -6459,6 +6651,18 @@ def _iivtnu_extract_from_pdf(pdf_bytes, filename=""):
 
     # 2) Fallback: pdftotext / OCR (tesseract) para PDFs escaneados o cuando pypdf no extrae bien tablas/columnas.
     need_fallback = (not raw_text or len(raw_text.strip()) < 150) or (best_score < 11.0)
+    try:
+        doc = str((best or {}).get("doc_type") or "").strip().lower()
+    except Exception:
+        doc = ""
+    if doc in ("autoliquidacion", "simulacion_ayuda", "guia_autoliquidacion") and best:
+        # pypdf a veces desordena tablas: si hay cuota pero falta base o valor suelo, probamos fallback.
+        try:
+            cuota_val = float(best.get("cuota_tributaria") or 0.0)
+        except Exception:
+            cuota_val = 0.0
+        if cuota_val > 0 and (best.get("base_imponible") is None or best.get("valor_suelo") is None):
+            need_fallback = True
     if need_fallback:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:

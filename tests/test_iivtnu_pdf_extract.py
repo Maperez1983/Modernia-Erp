@@ -180,3 +180,27 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 29.0, places=2)
         self.assertAlmostEqual(float(out.get("cuota_tributaria") or 0), 882.54, places=2)
         self.assertAlmostEqual(float(out.get("importe_total") or 0), 882.54, places=2)
+
+    def test_extracts_palma_catalan_autoliquidacion_fields(self):
+        text = """
+        Ajuntament de Palma Exemplar per al Contribuent
+        IMPOST INCREMENT VALOR TERRENYS NATURALESA URBANA
+        Detalle de la Autoliquidación
+        D.MERITACIÓ ACTUAL: 18/02/2025 REF.CADASTRAL:1298501DD7719G0303WE
+        VC SÒL: 18190,74 V.TRIB: 18190,74
+        F.TRANS ANT. (%) OPERACIÓ TEMPS COEFICIENT B.IMPOSABLETIPUS% QUOTA INT
+        06/06/2016 100 PD 8A 0.19 3456,24 21.5 743,09
+        ADQUIRENTS (0): QUOTA INT T:743,09
+        % BONIF: QUOTA LIQ: 743,09
+        """
+        out = _iivtnu_extract_from_text(text, filename="palma.pdf")
+        self.assertEqual(out.get("doc_type"), "autoliquidacion")
+        self.assertEqual(out.get("municipio"), "Palma")
+        self.assertEqual(out.get("codigo_postal") or "", "")
+        self.assertEqual(out.get("fecha_adquisicion"), "2016-06-06")
+        self.assertEqual(out.get("fecha_transmision"), "2025-02-18")
+        self.assertAlmostEqual(float(out.get("valor_suelo") or 0), 18190.74, places=2)
+        self.assertAlmostEqual(float(out.get("base_imponible") or 0), 3456.24, places=2)
+        self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 21.5, places=2)
+        self.assertAlmostEqual(float(out.get("cuota_tributaria") or 0), 743.09, places=2)
+        self.assertAlmostEqual(float(out.get("importe_total") or 0), 743.09, places=2)
