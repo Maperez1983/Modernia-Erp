@@ -1049,19 +1049,30 @@
 		          <div class="form-card">
 		            <div class="section-head">
 		              <div>
-		                <h3>Ganancia patrimonial (IRPF)</h3>
+			                <h3>Ganancia patrimonial (IRPF/IRNR)</h3>
 		                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
 		              </div>
 		            </div>
-		            <form id="irpfGainForm" class="form-grid">
-		              <label>
-		                Ejercicio (opcional)
-		                <input name="ejercicio" inputmode="numeric" placeholder="2025" />
-		              </label>
-		              <label>
-		                % participación transmitida
-		                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
-		              </label>
+			            <form id="irpfGainForm" class="form-grid">
+			              <label>
+			                Ejercicio (opcional)
+			                <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+			              </label>
+			              <label>
+			                Régimen fiscal
+			                <select name="regimen_fiscal">
+			                  <option value="irpf" selected>IRPF (residente)</option>
+			                  <option value="irnr">IRNR (no residente)</option>
+			                </select>
+			              </label>
+			              <label>
+			                Retención % (solo IRNR)
+			                <input name="retencion_pct" inputmode="decimal" placeholder="3" />
+			              </label>
+			              <label>
+			                % participación transmitida
+			                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+			              </label>
 		              <label>
 		                Fecha adquisición
 		                <input name="fecha_adquisicion" type="date" required />

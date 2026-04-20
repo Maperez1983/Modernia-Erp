@@ -110,6 +110,9 @@ NOTARIAS_MALAGA_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "notarias_ma
 IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_malaga.min.json"
 IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_andalucia.min.json"
 IIVTNU_TIPO_GRAVAMEN_CAPITALES_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_capitales.min.json"
+IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_PATH = (
+    ROOT.parent / "data" / "catalogos" / "iivtnu_params_spain_hacienda_excel2022.min.json"
+)
 INE_MUNICIPIOS_2026_PATH = ROOT.parent / "data" / "catalogos" / "ine_municipios_ine_2026.csv"
 ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
@@ -5312,6 +5315,7 @@ _IIVTNU_POSTAL_CACHE = None  # {"cp_to": {cp: ine}, "ine_to": {ine: name}, "prov
 _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_malaga.min.json`
 _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_andalucia.min.json`
 _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_capitales.min.json`
+_IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE = None  # contents of `data/catalogos/iivtnu_params_spain_hacienda_excel2022.min.json`
 _IIVTNU_INE_MUNICIPIOS_CACHE_LOCK = threading.Lock()
 _IIVTNU_INE_MUNICIPIOS_CACHE = None  # {"ine_to":{}, "prov_to":{}, "nameprov_to":{}}
 
@@ -5522,6 +5526,39 @@ def _iivtnu_load_tipo_gravamen_capitales():
         data = {}
     _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE = data
     return _IIVTNU_TIPO_GRAVAMEN_CAPITALES_CACHE
+
+
+def _iivtnu_load_params_spain_hacienda_excel2022():
+    global _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE
+    if _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE is not None:
+        return _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE
+    try:
+        if not IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_PATH.exists():
+            _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE = {}
+            return _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE
+        data = json.loads(IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE = data
+    return _IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_CACHE
+
+
+def _iivtnu_coef_table_from_list(coefs_list):
+    if not isinstance(coefs_list, list) or len(coefs_list) != 21:
+        return None
+    keys = ["lt1"] + [str(i) for i in range(1, 20)] + ["20+"]
+    out = {}
+    for k, raw in zip(keys, coefs_list):
+        try:
+            v = float(raw)
+        except Exception:
+            v = 0.0
+        if v < 0 or v > 1:
+            v = 0.0
+        out[k] = float(v)
+    return out
 
 
 IIVTNU_MAX_COEFS_RDL_8_2023_2024 = {
@@ -7041,10 +7078,48 @@ def _iivtnu_upsert_param_set(
     return {"action": "inserted", "id": pid, "vigente_desde": vigente_desde, "vigente_hasta": vigente_hasta}
 
 
-# --- Simuladores fiscales (IRPF: ganancia patrimonial y alquileres) ---
+# --- Simuladores fiscales ---
+#
+# Nota de alcance:
+# - IRPF (residente): calcula una estimación de la cuota sobre la base del ahorro usando la escala estatal+autonómica.
+# - IRNR (no residente, sin EP): para ganancias patrimoniales de transmisión de inmuebles aplica el tipo vigente por devengo
+#   y muestra la retención/ingreso a cuenta (habitualmente 3%) como referencia (no sustituye al modelo 210).
 
 IRPF_BASE_AHORRO_SCALE = {
-    # Ejercicio 2024: 19 / 21 / 23 / 27 / 28 (hasta 300k)
+    # Escala total (estatal + autonómica) para la base liquidable del ahorro.
+    # 2015 (reforma): 19,5 / 21,5 / 23,5
+    2015: [
+        (0.0, 6000.0, 0.195),
+        (6000.0, 50000.0, 0.215),
+        (50000.0, None, 0.235),
+    ],
+    # 2016–2020: 19 / 21 / 23
+    2016: [(0.0, 6000.0, 0.19), (6000.0, 50000.0, 0.21), (50000.0, None, 0.23)],
+    2017: [(0.0, 6000.0, 0.19), (6000.0, 50000.0, 0.21), (50000.0, None, 0.23)],
+    2018: [(0.0, 6000.0, 0.19), (6000.0, 50000.0, 0.21), (50000.0, None, 0.23)],
+    2019: [(0.0, 6000.0, 0.19), (6000.0, 50000.0, 0.21), (50000.0, None, 0.23)],
+    2020: [(0.0, 6000.0, 0.19), (6000.0, 50000.0, 0.21), (50000.0, None, 0.23)],
+    # 2021–2022: nuevo tramo 26% desde 200k
+    2021: [
+        (0.0, 6000.0, 0.19),
+        (6000.0, 50000.0, 0.21),
+        (50000.0, 200000.0, 0.23),
+        (200000.0, None, 0.26),
+    ],
+    2022: [
+        (0.0, 6000.0, 0.19),
+        (6000.0, 50000.0, 0.21),
+        (50000.0, 200000.0, 0.23),
+        (200000.0, None, 0.26),
+    ],
+    # 2023–2024: 27% desde 200k, 28% desde 300k
+    2023: [
+        (0.0, 6000.0, 0.19),
+        (6000.0, 50000.0, 0.21),
+        (50000.0, 200000.0, 0.23),
+        (200000.0, 300000.0, 0.27),
+        (300000.0, None, 0.28),
+    ],
     2024: [
         (0.0, 6000.0, 0.19),
         (6000.0, 50000.0, 0.21),
@@ -7052,7 +7127,7 @@ IRPF_BASE_AHORRO_SCALE = {
         (200000.0, 300000.0, 0.27),
         (300000.0, None, 0.28),
     ],
-    # Ejercicio 2025+: último tramo 30%
+    # 2025+: último tramo 30%
     2025: [
         (0.0, 6000.0, 0.19),
         (6000.0, 50000.0, 0.21),
@@ -7061,6 +7136,22 @@ IRPF_BASE_AHORRO_SCALE = {
         (300000.0, None, 0.30),
     ],
 }
+
+
+def _irnr_capital_gains_rate_for_devengo(devengo: date) -> float:
+    """
+    IRNR sin EP: tipo para ganancias patrimoniales (transmisiones) según devengo.
+    Referencia AEAT (cambio en 2015 y tipo 19% desde 2016).
+    """
+    if not devengo:
+        return 0.19
+    if devengo.year < 2015:
+        raise ValueError("IRNR: ejercicio anterior a 2015 no soportado en el simulador")
+    if devengo.year == 2015:
+        # Hasta 11/07/2015: 20% · Desde 12/07/2015: 19,5%
+        cutoff = date(2015, 7, 12)
+        return 0.20 if devengo < cutoff else 0.195
+    return 0.19
 
 
 def _irpf_savings_scale_for_year(year):
@@ -7153,14 +7244,47 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
     year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
-    scale_year, brackets, assumed = _irpf_savings_scale_for_year(year)
-    cuota = _irpf_tax_progressive(base_ahorro, brackets)
+
+    regimen = str(payload.get("regimen_fiscal") or payload.get("regimen") or "irpf").strip().lower()
+    if regimen not in ("irpf", "irnr"):
+        regimen = "irpf"
+
+    cuota = 0.0
+    scale_year = ""
+    assumed = 0
+    tipo_gravamen_pct = None
+    retencion_pct = None
+    retencion_importe = None
+    cuota_neta = None
+
+    if regimen == "irnr":
+        rate = _irnr_capital_gains_rate_for_devengo(devengo)
+        cuota = round(base_ahorro * float(rate) + 1e-9, 2)
+        tipo_gravamen_pct = round(float(rate) * 100.0 + 1e-12, 3)
+        # Retención/ingreso a cuenta típico en transmisión de inmuebles por no residente.
+        retencion_pct = parse_optional_float(payload.get("retencion_pct") or payload.get("retencion_pct_override") or 3.0)
+        if retencion_pct is None:
+            retencion_pct = 3.0
+        try:
+            retencion_pct = float(retencion_pct)
+        except Exception:
+            retencion_pct = 3.0
+        retencion_pct = max(0.0, min(100.0, retencion_pct))
+        retencion_importe = round(max(0.0, valor_tx * factor) * (retencion_pct / 100.0) + 1e-9, 2)
+        cuota_neta = round(cuota - retencion_importe + 1e-9, 2)
+    else:
+        scale_year, brackets, assumed = _irpf_savings_scale_for_year(year)
+        cuota = _irpf_tax_progressive(base_ahorro, brackets)
+
     return {
         "ok": True,
         "params": {
             "ejercicio": year,
+            "regimen_fiscal": regimen,
             "escala_ejercicio": scale_year,
             "escala_asumida": 1 if assumed else 0,
+            "tipo_gravamen_pct": tipo_gravamen_pct,
+            "retencion_pct": retencion_pct,
         },
         "result": {
             "participacion_factor": round(factor + 1e-12, 6),
@@ -7171,6 +7295,8 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "exencion_motivo": exencion_motivo,
             "base_ahorro_sujeta": base_ahorro,
             "cuota_ahorro_estimada": cuota,
+            "retencion_importe": retencion_importe,
+            "cuota_neta": cuota_neta,
         },
     }
 
@@ -7184,6 +7310,9 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     ejercicio = params.get("ejercicio")
     escala = params.get("escala_ejercicio")
     assumed = bool(params.get("escala_asumida"))
+    regimen = str(params.get("regimen_fiscal") or payload.get("regimen_fiscal") or "irpf").strip().lower() or "irpf"
+    tipo_gravamen_pct = params.get("tipo_gravamen_pct")
+    retencion_pct = params.get("retencion_pct")
 
     def yn(value: object) -> str:
         return "Sí" if bool(value) else "No"
@@ -7214,6 +7343,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         return str(value or "").strip()
 
     input_lines = [
+        ("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"),
         ("Ejercicio", str(ejercicio or "")),
         ("% participación", pct(payload.get("participacion_pct") or 100)),
         ("Fecha adquisición", date_text(payload.get("fecha_adquisicion"))),
@@ -7230,9 +7360,15 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Importe reinvertido", money(payload.get("importe_reinvertido"))),
         ("Préstamo pendiente", money(payload.get("prestamo_pendiente"))),
     ]
-    output_lines = [
-        ("Escala usada", str(escala or "")),
-        ("Escala asumida", "Sí" if assumed else "No"),
+    output_lines = []
+    if regimen == "irnr":
+        output_lines.append(("Tipo gravamen IRNR", f"{tipo_gravamen_pct:.3f}%" if tipo_gravamen_pct is not None else "—"))
+        output_lines.append(("Retención a cuenta", f"{float(retencion_pct or 0):.2f}%" if retencion_pct is not None else "—"))
+    else:
+        output_lines.append(("Escala usada", str(escala or "")))
+        output_lines.append(("Escala asumida", "Sí" if assumed else "No"))
+    output_lines.extend(
+        [
         ("Valor adquisición (calc.)", money(result.get("valor_adquisicion_calc"))),
         ("Valor transmisión (calc.)", money(result.get("valor_transmision_calc"))),
         ("Ganancia patrimonial", money(result.get("ganancia_patrimonial"))),
@@ -7240,7 +7376,11 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Motivo exención", str(result.get("exencion_motivo") or "—")),
         ("Base ahorro sujeta", money(result.get("base_ahorro_sujeta"))),
         ("Cuota ahorro estimada", money(result.get("cuota_ahorro_estimada"))),
-    ]
+        ]
+    )
+    if regimen == "irnr":
+        output_lines.append(("Retención (importe)", money(result.get("retencion_importe"))))
+        output_lines.append(("Cuota neta (cuota - retención)", money(result.get("cuota_neta"))))
 
     empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
     ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
@@ -7252,11 +7392,11 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
 
     footer = [
         "Estimación determinista generada por el CRM. Revisar antes de presentar/firmar.",
-        "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (coeficientes, abatimiento, etc.).",
+        "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (coeficientes, abatimiento, convenios, etc.).",
     ]
     brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
     pdf_bytes = build_branded_document_pdf(
-        "INFORME IRPF · GANANCIA PATRIMONIAL",
+        "INFORME IRPF/IRNR · GANANCIA PATRIMONIAL",
         subtitle,
         [
             ("Datos de entrada", input_lines),
@@ -36940,20 +37080,21 @@ class Handler(BaseHTTPRequestHandler):
                         source_label = "Ayto Málaga · Ordenanza Nº 5 IIVTNU (DocumentoNormativa688)"
                         source_url = "https://www.malaga.eu/visorcontenido/NRMDocumentDisplayer/688/DocumentoNormativa688"
                 else:
-                    tipo_data = _iivtnu_load_tipo_gravamen_capitales()
-                    years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                    # Fuente prioritaria: Hacienda (ConsultaTipos) con coeficientes y tipo por municipio.
+                    hac = _iivtnu_load_params_spain_hacienda_excel2022()
+                    h_years = (hac.get("years") if isinstance(hac, dict) else {}) or {}
                     year_key = str(devengo.year)
                     available_years = []
                     try:
-                        available_years = sorted([str(y) for y in (years_map.keys() if isinstance(years_map, dict) else [])], reverse=True)
+                        available_years = sorted([str(y) for y in (h_years.keys() if isinstance(h_years, dict) else [])], reverse=True)
                     except Exception:
                         available_years = []
                     candidates = [year_key] + [y for y in available_years if y != year_key]
                     used_year = None
-                    tipo_found = None
+                    entry = None
                     ine_key = str(municipio_ine).zfill(5)
                     for cand_year in candidates:
-                        ymap = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                        ymap = h_years.get(cand_year) if isinstance(h_years, dict) else None
                         if not isinstance(ymap, dict):
                             continue
                         raw = ymap.get(ine_key)
@@ -36964,35 +37105,92 @@ class Handler(BaseHTTPRequestHandler):
                                 raw = None
                         if raw is None:
                             continue
-                        try:
-                            v = float(raw)
-                        except Exception:
-                            continue
-                        if v > 0:
-                            tipo_found = v
-                            used_year = str(cand_year)
-                            break
-                    if tipo_found is not None and tipo_found > 0:
-                        tipo_gravamen_pct = float(tipo_found)
+                        entry = raw
+                        used_year = str(cand_year)
+                        break
+                    if isinstance(entry, list) and entry and parse_optional_float(entry[0] or 0):
+                        tipo_gravamen_pct = float(entry[0])
                         if used_year != year_key:
                             tipo_is_estimated = True
-                        source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
-                        src = source_map.get(used_year or year_key) if isinstance(source_map, dict) else None
-                        if not isinstance(src, dict) and isinstance(source_map, dict):
-                            try:
-                                src = source_map.get(available_years[0]) if available_years else None
-                            except Exception:
-                                src = None
+                        try:
+                            src_map = (hac.get("source") if isinstance(hac, dict) else {}) or {}
+                            src = src_map.get(used_year or year_key) if isinstance(src_map, dict) else None
+                        except Exception:
+                            src = None
                         if isinstance(src, dict):
-                            source_label = str(src.get("label") or "").strip()
+                            source_label = str(src.get("label") or "Hacienda · ConsultaTipos").strip()
                             source_url = str(src.get("url") or "").strip()
                             if used_year and used_year != year_key:
                                 source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
+                        else:
+                            source_label = "Hacienda · ConsultaTipos (ImpuestosExcel2022)"
+                            source_url = ""
+                        # Coeficientes municipales (si difieren del máximo). Schema: [tipo, coefs_list_if_diff, reduccion, reductor]
+                        try:
+                            coefs_list = entry[1] if len(entry) > 1 else None
+                        except Exception:
+                            coefs_list = None
+                        coef_from_hac = _iivtnu_coef_table_from_list(coefs_list)
+                        if coef_from_hac:
+                            coef_table = coef_from_hac
+                            coef_source = {
+                                "source_label": f"{source_label} · Coeficientes municipales",
+                                "source_url": source_url,
+                            }
                     else:
-                        tipo_gravamen_pct = 30.0
-                        tipo_is_estimated = True
-                        source_label = "Tipo no disponible (usa manual)"
-                        source_url = ""
+                        # Fallback: capitales (OTA Málaga) o proxy 30%.
+                        tipo_data = _iivtnu_load_tipo_gravamen_capitales()
+                        years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                        available_years = []
+                        try:
+                            available_years = sorted([str(y) for y in (years_map.keys() if isinstance(years_map, dict) else [])], reverse=True)
+                        except Exception:
+                            available_years = []
+                        candidates = [year_key] + [y for y in available_years if y != year_key]
+                        used_year = None
+                        tipo_found = None
+                        ine_key = str(municipio_ine).zfill(5)
+                        for cand_year in candidates:
+                            ymap = years_map.get(cand_year) if isinstance(years_map, dict) else None
+                            if not isinstance(ymap, dict):
+                                continue
+                            raw = ymap.get(ine_key)
+                            if raw is None and ine_key.isdigit():
+                                try:
+                                    raw = ymap.get(str(int(ine_key)))
+                                except Exception:
+                                    raw = None
+                            if raw is None:
+                                continue
+                            try:
+                                v = float(raw)
+                            except Exception:
+                                continue
+                            if v > 0:
+                                tipo_found = v
+                                used_year = str(cand_year)
+                                break
+                        if tipo_found is not None and tipo_found > 0:
+                            tipo_gravamen_pct = float(tipo_found)
+                            if used_year != year_key:
+                                tipo_is_estimated = True
+                            source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
+                            src = source_map.get(used_year or year_key) if isinstance(source_map, dict) else None
+                            if not isinstance(src, dict) and isinstance(source_map, dict):
+                                try:
+                                    src = source_map.get(available_years[0]) if available_years else None
+                                except Exception:
+                                    src = None
+                            if isinstance(src, dict):
+                                source_label = str(src.get("label") or "").strip()
+                                source_url = str(src.get("url") or "").strip()
+                                if used_year and used_year != year_key:
+                                    source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
+                        else:
+                            tipo_gravamen_pct = 30.0
+                            tipo_is_estimated = True
+                            source_label = "Tipo no disponible (usa manual)"
+                            source_url = ""
 
             if not coef_table:
                 coef_table, coef_source = _iivtnu_max_coefs_for_devengo(devengo)

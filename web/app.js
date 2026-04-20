@@ -6305,31 +6305,44 @@ const ensureIivtnuSimulator = async () => {
   renderIivtnuParsed(null);
 };
 
-const renderIrpfGainResult = (resp = null) => {
-  if (!irpfGainResult) return;
-  if (!resp) {
-    irpfGainResult.innerHTML = "";
-    return;
-  }
-  const params = resp?.params || {};
-  const result = resp?.result || {};
-  const fields = [
-    ["Ejercicio", params.ejercicio ?? ""],
-    ["Escala usada", params.escala_ejercicio ?? ""],
-    ["Escala asumida", params.escala_asumida ? "Sí" : "No"],
-    ["Participación", result.participacion_factor],
-    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-    ["Valor transmisión (calc.)", result.valor_transmision_calc],
-    ["Ganancia patrimonial", result.ganancia_patrimonial],
-    ["Exento", result.exento],
-    ["Motivo exención", result.exencion_motivo || "—"],
-    ["Base ahorro sujeta", result.base_ahorro_sujeta],
-    ["Cuota ahorro estimada", result.cuota_ahorro_estimada],
-  ];
-  irpfGainResult.innerHTML = `
-    <div class="ui-table">
-      <table class="data-table">
-        <tbody>
+	const renderIrpfGainResult = (resp = null) => {
+	  if (!irpfGainResult) return;
+	  if (!resp) {
+	    irpfGainResult.innerHTML = "";
+	    return;
+	  }
+	  const params = resp?.params || {};
+	  const result = resp?.result || {};
+	  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
+	  const fields = [
+	    ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
+	    ["Ejercicio", params.ejercicio ?? ""],
+	  ];
+	  if (regimen === "irnr") {
+	    fields.push(["Tipo gravamen IRNR", params.tipo_gravamen_pct != null ? `${params.tipo_gravamen_pct}%` : "—"]);
+	    fields.push(["Retención %", params.retencion_pct != null ? `${params.retencion_pct}%` : "—"]);
+	  } else {
+	    fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
+	    fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
+	  }
+	  fields.push(
+	    ["Participación", result.participacion_factor],
+	    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+	    ["Valor transmisión (calc.)", result.valor_transmision_calc],
+	    ["Ganancia patrimonial", result.ganancia_patrimonial],
+	    ["Exento", result.exento],
+	    ["Motivo exención", result.exencion_motivo || "—"],
+	    ["Base ahorro sujeta", result.base_ahorro_sujeta],
+	    ["Cuota estimada", result.cuota_ahorro_estimada],
+	  );
+	  if (regimen === "irnr") {
+	    fields.push(["Retención (importe)", result.retencion_importe]);
+	    fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
+	  }
+	  irpfGainResult.innerHTML = `
+	    <div class="ui-table">
+	      <table class="data-table">
+	        <tbody>
           ${fields
             .map(
               ([label, value]) => `
@@ -6613,25 +6626,36 @@ const openIrpfGananciaModal = (options = {}) => {
     modal.id = "irpfGainModal";
     modal.className = "modal hidden";
     modal.innerHTML = `
-      <div class="modal-content" style="max-width: 980px;">
-        <div class="modal-header">
-          <h3>Simulador IRPF · Ganancia patrimonial</h3>
-          <button type="button" class="ghost" data-irpf-close>✕</button>
-        </div>
-        <form class="modal-body form-grid" data-irpf-form>
-          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
+	      <div class="modal-content" style="max-width: 980px;">
+	        <div class="modal-header">
+	          <h3>Simulador IRPF/IRNR · Ganancia patrimonial</h3>
+	          <button type="button" class="ghost" data-irpf-close>✕</button>
+	        </div>
+	        <form class="modal-body form-grid" data-irpf-form>
+	          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
           <label class="span-2">
             Referencia (opcional)
             <input name="referencia" placeholder="Inmueble / expediente / dirección" />
           </label>
-          <label>
-            Ejercicio (opcional)
-            <input name="ejercicio" inputmode="numeric" placeholder="2025" />
-          </label>
-          <label>
-            % participación
-            <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
-          </label>
+	          <label>
+	            Ejercicio (opcional)
+	            <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+	          </label>
+	          <label>
+	            Régimen fiscal
+	            <select name="regimen_fiscal">
+	              <option value="irpf" selected>IRPF (residente)</option>
+	              <option value="irnr">IRNR (no residente)</option>
+	            </select>
+	          </label>
+	          <label>
+	            Retención % (solo IRNR)
+	            <input name="retencion_pct" inputmode="decimal" placeholder="3" />
+	          </label>
+	          <label>
+	            % participación
+	            <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+	          </label>
           <label>
             Fecha adquisición
             <input name="fecha_adquisicion" type="date" required />
@@ -6715,30 +6739,43 @@ const openIrpfGananciaModal = (options = {}) => {
   };
   const readPayload = () => Object.fromEntries(new FormData(form).entries());
 
-  const renderResult = (resp = null) => {
-    if (!resultEl) return;
-    if (!resp) {
-      resultEl.innerHTML = "";
-      return;
-    }
-    const params = resp?.params || {};
-    const result = resp?.result || {};
-    const fields = [
-      ["Ejercicio", params.ejercicio ?? ""],
-      ["Escala usada", params.escala_ejercicio ?? ""],
-      ["Escala asumida", params.escala_asumida ? "Sí" : "No"],
-      ["Participación", result.participacion_factor],
-      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-      ["Valor transmisión (calc.)", result.valor_transmision_calc],
-      ["Ganancia patrimonial", result.ganancia_patrimonial],
-      ["Exento", result.exento],
-      ["Motivo exención", result.exencion_motivo || "—"],
-      ["Base ahorro sujeta", result.base_ahorro_sujeta],
-      ["Cuota ahorro estimada", result.cuota_ahorro_estimada],
-    ];
-    resultEl.innerHTML = `
-      <div class="ui-table">
-        <table class="data-table">
+	  const renderResult = (resp = null) => {
+	    if (!resultEl) return;
+	    if (!resp) {
+	      resultEl.innerHTML = "";
+	      return;
+	    }
+	    const params = resp?.params || {};
+	    const result = resp?.result || {};
+	    const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
+	    const fields = [
+	      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
+	      ["Ejercicio", params.ejercicio ?? ""],
+	    ];
+	    if (regimen === "irnr") {
+	      fields.push(["Tipo gravamen IRNR", params.tipo_gravamen_pct != null ? `${params.tipo_gravamen_pct}%` : "—"]);
+	      fields.push(["Retención %", params.retencion_pct != null ? `${params.retencion_pct}%` : "—"]);
+	    } else {
+	      fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
+	      fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
+	    }
+	    fields.push(
+	      ["Participación", result.participacion_factor],
+	      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+	      ["Valor transmisión (calc.)", result.valor_transmision_calc],
+	      ["Ganancia patrimonial", result.ganancia_patrimonial],
+	      ["Exento", result.exento],
+	      ["Motivo exención", result.exencion_motivo || "—"],
+	      ["Base ahorro sujeta", result.base_ahorro_sujeta],
+	      ["Cuota estimada", result.cuota_ahorro_estimada],
+	    );
+	    if (regimen === "irnr") {
+	      fields.push(["Retención (importe)", result.retencion_importe]);
+	      fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
+	    }
+	    resultEl.innerHTML = `
+	      <div class="ui-table">
+	        <table class="data-table">
           <tbody>
             ${fields
               .map(
@@ -6760,9 +6797,11 @@ const openIrpfGananciaModal = (options = {}) => {
   try {
     form?.reset();
   } catch {}
-  setValue("referencia", prefill.referencia || "");
-  setValue("ejercicio", prefill.ejercicio || "");
-  setValue("participacion_pct", prefill.participacion_pct || "100");
+	  setValue("referencia", prefill.referencia || "");
+	  setValue("ejercicio", prefill.ejercicio || "");
+	  setValue("regimen_fiscal", prefill.regimen_fiscal || "irpf");
+	  setValue("retencion_pct", prefill.retencion_pct || "");
+	  setValue("participacion_pct", prefill.participacion_pct || "100");
   setValue("fecha_adquisicion", prefill.fecha_adquisicion || "");
   setValue("fecha_transmision", prefill.fecha_transmision || "");
   setValue("valor_adquisicion", prefill.valor_adquisicion || "");
