@@ -41778,6 +41778,7 @@ const resolveCrmAgendaAmbitoLabel = (row = {}) => {
 };
 
 const initCrmAgendaPrefsIfNeeded = () => {
+  const DEFAULT_PRESET = "citas_7dias";
   if (!state.crmAgendaView) {
     let view = "list";
     let day = formatAgendaDate(new Date());
@@ -41802,6 +41803,18 @@ const initCrmAgendaPrefsIfNeeded = () => {
   if (state.crmAgendaAmbito === undefined || state.crmAgendaAmbito === null) {
     state.crmAgendaAmbito = "";
   }
+  if (crmAgendaPreset) {
+    let preset = DEFAULT_PRESET;
+    try {
+      const stored = String(localStorage.getItem("crm.agenda.preset") || "").trim();
+      if (stored) preset = stored;
+    } catch {}
+    const allowed = new Set(Array.from(crmAgendaPreset.options || []).map((opt) => String(opt.value || "").trim()));
+    if (!allowed.has(preset)) preset = DEFAULT_PRESET;
+    if (!crmAgendaPreset.value || crmAgendaPreset.value !== preset) {
+      crmAgendaPreset.value = preset;
+    }
+  }
   if (crmAgendaDay) {
     crmAgendaDay.value = String(state.crmAgendaAnchorDay || "").trim();
   }
@@ -41818,6 +41831,9 @@ const persistCrmAgendaPrefs = () => {
     localStorage.setItem("crm.agenda.view", String(state.crmAgendaView || "week"));
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
     localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
+    if (crmAgendaPreset) {
+      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias"));
+    }
   } catch {}
 };
 
@@ -42645,7 +42661,7 @@ const loadCrmAgenda = () => {
     const qRaw = String(crmAgendaSearch?.value || "").trim();
     const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
     const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-		  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_caducadas") || "citas_caducadas";
+		  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
 		  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
 		  state.crmAgendaAmbito = ambitoFilter;
 		  persistCrmAgendaPrefs();

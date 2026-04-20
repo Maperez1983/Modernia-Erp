@@ -3430,15 +3430,15 @@
 				                <div class="tc-listview">
 				                  <div class="tc-listhead">
 				                    <div class="tc-listleft">
-						                      <select id="crmAgendaPreset" title="Act./Citas">
-						                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
-						                        <option value="citas_hoy">Citas Personales (hoy)</option>
-						                        <option value="citas_7dias">Citas Personales (7 días)</option>
-						                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
-						                        <option value="citas">Citas Personales</option>
-						                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
-						                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
-						                      </select>
+							                      <select id="crmAgendaPreset" title="Act./Citas">
+							                        <option value="citas_hoy">Citas Personales (hoy)</option>
+							                        <option value="citas_7dias" selected>Citas Personales (7 días)</option>
+							                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
+							                        <option value="citas">Citas Personales</option>
+							                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
+							                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
+							                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
+							                      </select>
 						                      <select id="crmAgendaAmbitoFilter" title="Ámbito">
 						                        <option value="">Ámbito (todos)</option>
 						                        <option value="pedidos">Pedidos</option>
@@ -9416,11 +9416,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=589"></script>
+				    <script src="app.js?v=590"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=202";
+				        const TARGET_SW = "/sw.js?v=203";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
