@@ -9065,10 +9065,18 @@
             Hora
             <input id="actionModalHora" type="time" />
           </label>
-          <label>
-            Tipo
-            <input id="actionModalTipo" />
-          </label>
+	          <label>
+	            Tipo
+	            <input id="actionModalTipo" list="actionModalTipoList" placeholder="Cita / Llamada / Tarea..." autocomplete="off" />
+	            <datalist id="actionModalTipoList">
+	              <option value="Cita"></option>
+	              <option value="Llamada"></option>
+	              <option value="Tarea"></option>
+	              <option value="WhatsApp"></option>
+	              <option value="Email"></option>
+	              <option value="Visita"></option>
+	            </datalist>
+	          </label>
           <label>
             Responsable
             <select id="actionModalResponsable"></select>
@@ -9417,11 +9425,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=592"></script>
+				    <script src="app.js?v=593"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=205";
+				        const TARGET_SW = "/sw.js?v=206";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
