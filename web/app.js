@@ -45373,8 +45373,15 @@ const loadGestoriaCrm = async () => {
       estado,
       limit: String(Math.max(200, Number(limit || 0) || 50)),
     });
-    const rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
-    if (!rentaData) return;
+    let rentaData = null;
+    try {
+      rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
+    } catch (err) {
+      if (gestoriaCrmInfo) {
+        gestoriaCrmInfo.textContent = (err && err.message) ? String(err.message) : "No se pudo cargar Renta.";
+      }
+      return;
+    }
     const rentaRows = rentaData.rows || [];
     state.gestoriaRentaCardsCache = {
       empresaId: empresa.id,
