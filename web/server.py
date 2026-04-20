@@ -31472,6 +31472,116 @@ def _merge_template_with_overlay_acroform(template_bytes, overlay_bytes):
     return out.getvalue()
 
 
+def _pdf_fix_acroform_preview_overlap(pdf_bytes):
+    """
+    Normaliza PDFs con formularios AcroForm para evitar solapes en macOS Preview:
+    - elimina /AP y /AS de los widgets (Preview puede dibujar "doble")
+    - fuerza /NeedAppearances (mejor compatibilidad de render)
+    - si el documento no trae /AcroForm (fallback), lo reconstruye a partir de /Annots
+    """
+    if not pdf_bytes or PdfReader is None or PdfWriter is None or NameObject is None:
+        return pdf_bytes
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+    except Exception:
+        return pdf_bytes
+
+    writer = PdfWriter()
+    cloned_root = False
+    try:
+        writer.clone_document_from_reader(reader)
+        cloned_root = True
+    except Exception:
+        # Fallback: al menos copiamos páginas (puede perder root objects como /AcroForm).
+        try:
+            for page in reader.pages:
+                writer.add_page(page)
+        except Exception:
+            return pdf_bytes
+
+    # Strip widget appearances on writer pages.
+    widget_annots = 0
+    try:
+        for page in writer.pages:
+            annots = page.get("/Annots")
+            if not annots:
+                continue
+            for aref in list(annots):
+                try:
+                    aobj = aref.get_object()
+                except Exception:
+                    aobj = None
+                if not aobj:
+                    continue
+                try:
+                    if str(aobj.get("/Subtype")) == "/Widget":
+                        widget_annots += 1
+                        if "/AP" in aobj:
+                            del aobj["/AP"]
+                        if "/AS" in aobj:
+                            del aobj["/AS"]
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # Force NeedAppearances if AcroForm exists.
+    try:
+        acro = writer._root_object.get("/AcroForm")
+        if acro:
+            try:
+                acro = acro.get_object()
+            except Exception:
+                pass
+            try:
+                acro[NameObject("/NeedAppearances")] = BooleanObject(True)
+            except Exception:
+                pass
+    except Exception:
+        acro = None
+
+    # If we couldn't clone the root and we have widgets, rebuild a minimal AcroForm.
+    try:
+        if (not cloned_root) and widget_annots and (not writer._root_object.get("/AcroForm")):
+            fields = ArrayObject()
+            seen = set()
+            for page in writer.pages:
+                annots = page.get("/Annots")
+                if not annots:
+                    continue
+                for a in annots:
+                    try:
+                        obj = a.get_object()
+                    except Exception:
+                        obj = None
+                    if not obj or not obj.get("/FT"):
+                        continue
+                    try:
+                        key = (getattr(a, "idnum", None), getattr(a, "generation", None))
+                    except Exception:
+                        key = None
+                    if not key or key == (None, None):
+                        key = repr(a)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    fields.append(a)
+            if fields:
+                acro = DictionaryObject()
+                acro[NameObject("/Fields")] = fields
+                acro[NameObject("/NeedAppearances")] = BooleanObject(True)
+                writer._root_object.update({NameObject("/AcroForm"): writer._add_object(acro)})
+    except Exception:
+        pass
+
+    out = BytesIO()
+    try:
+        writer.write(out)
+    except Exception:
+        return pdf_bytes
+    return out.getvalue()
+
+
 def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owners, extra=None):
     """
     Nota de encargo basada en PDF plantilla (Modernia) con campos rellenables.
@@ -31709,7 +31819,7 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
     merged = _merge_template_with_overlay_acroform(template_bytes, overlay_bytes)
     if not merged:
         return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
-    return merged
+    return _pdf_fix_acroform_preview_overlap(merged)
 
 
 def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, extra=None):
@@ -33043,7 +33153,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     c.drawString(margin, 22, "Documento generado por Verifika² · Revisar antes de firma · No constituye asesoramiento jurídico.")
 
     c.save()
-    return buf.getvalue()
+    return _pdf_fix_acroform_preview_overlap(buf.getvalue())
 
 
 def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
