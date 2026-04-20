@@ -53578,6 +53578,8 @@ class Handler(BaseHTTPRequestHandler):
                 # para que el botón "Ver" funcione.
                 renta_doc_by_doc_id = {}
                 renta_doc_by_ref_id = {}
+                renta_doc_ids = []
+                renta_ref_ids = []
                 try:
                     cg_row = conn.execute(
                         "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
@@ -53588,6 +53590,12 @@ class Handler(BaseHTTPRequestHandler):
                     for entry in entries:
                         entry_id = str(entry.get("id") or "").strip()
                         ejercicio = str(entry.get("ejercicio") or "").strip()
+                        if entry_id and ejercicio:
+                            renta_ref_ids.append(f"renta-{ejercicio}-{entry_id}")
+                        for field in ("doc_borrador_id", "doc_presentada_id"):
+                            doc_id = str(entry.get(field) or "").strip()
+                            if doc_id:
+                                renta_doc_ids.append(doc_id)
                         doc_key = _normalize_doc_key_for_ui(entry.get("doc_key") or "")
                         doc_url = str(entry.get("doc_url") or "").strip()
                         if not doc_key and not _is_public_doc_url(doc_url):
@@ -53602,6 +53610,11 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     renta_doc_by_doc_id = {}
                     renta_doc_by_ref_id = {}
+                    renta_doc_ids = []
+                    renta_ref_ids = []
+
+                renta_doc_ids = [d for d in dict.fromkeys(renta_doc_ids) if d]
+                renta_ref_ids = [r for r in dict.fromkeys(renta_ref_ids) if r]
 
                 where = ["cliente_id = ?"]
                 values = [cliente_id]
@@ -53661,6 +53674,21 @@ class Handler(BaseHTTPRequestHandler):
                             "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
                         )
                         values.extend([service, service])
+                else:
+                    # Sin filtro de servicio: incluimos también documentos de renta referenciados por campañas
+                    # aunque estén mal vinculados (cliente_id NULL).
+                    extra_clause_parts = []
+                    extra_values = []
+                    if renta_doc_ids:
+                        extra_clause_parts.append(f"id IN ({','.join(['?'] * len(renta_doc_ids))})")
+                        extra_values.extend(renta_doc_ids)
+                    if renta_ref_ids:
+                        extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(renta_ref_ids))})")
+                        extra_values.extend(renta_ref_ids)
+                    if extra_clause_parts:
+                        extra_clause = " OR ".join(extra_clause_parts)
+                        where = [f"(cliente_id = ? OR ({extra_clause}))"]
+                        values = [cliente_id, *extra_values]
 
                 where_clause = " AND ".join(where)
                 rows = conn.execute(
