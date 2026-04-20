@@ -42268,17 +42268,17 @@ const renderCrmAgendaCalendar = (rows = []) => {
     const mm = String(Math.floor(clamped % 60)).padStart(2, "0");
     openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue, default_tipo: "Cita" });
   };
-  const resolveGridClickMinutes = (event, colEl, bounds) => {
-    if (!event || !colEl || !bounds) return null;
-    const rect = colEl.getBoundingClientRect();
-    const scroll = colEl.closest(".tc-weektime-scroll,.tc-dayone-scroll");
-    const scrollTop = scroll ? Number(scroll.scrollTop || 0) : 0;
-    const y = Number(event.clientY || 0) - rect.top + scrollTop;
-    if (!Number.isFinite(y)) return null;
-    const slotIndex = Math.floor(y / SLOT_H);
-    const minutes = Number(bounds.startMin || 0) + slotIndex * SLOT_MIN;
-    return minutes;
-  };
+	  const resolveGridClickMinutes = (event, colEl, bounds) => {
+	    if (!event || !colEl || !bounds) return null;
+	    const rect = colEl.getBoundingClientRect();
+	    const scroll = colEl.closest(".tc-weektime-scroll,.tc-dayone-scroll");
+	    const scrollTop = scroll ? Number(scroll.scrollTop || 0) : 0;
+	    const y = Number(event.clientY || 0) - rect.top + scrollTop;
+	    if (!Number.isFinite(y)) return null;
+	    const slotIndex = Math.floor(y / SLOT_H);
+	    const minutes = Number(bounds.startHour || 0) * 60 + slotIndex * SLOT_MIN;
+	    return minutes;
+	  };
   const shouldIgnoreGridClick = (event) => {
     const target = event?.target;
     if (!target || !(target instanceof Element)) return false;
@@ -42525,13 +42525,19 @@ const renderCrmAgendaCalendar = (rows = []) => {
       corner.className = "tc-dayone-corner";
       grid.appendChild(corner);
 
-      const head = document.createElement("div");
-      head.className = "tc-dayone-head";
-      head.textContent = anchor.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long" });
-      grid.appendChild(head);
+	      const head = document.createElement("div");
+	      head.className = "tc-dayone-head";
+	      head.textContent = anchor.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long" });
+	      grid.appendChild(head);
 
-      const axis = axisBase.cloneNode(true);
-      grid.appendChild(axis);
+	      const axis = axisBase.cloneNode(true);
+	      axis.addEventListener("click", (event) => {
+	        const row = closestFromEvent(event, ".tc-time-row");
+	        if (!row) return;
+	        const minutes = parseTimeToMinutes(row.textContent);
+	        openNewFromGrid(dayKey, minutes, "inmobiliaria");
+	      });
+	      grid.appendChild(axis);
 
       const col = document.createElement("div");
       col.className = "tc-dayone-col";
