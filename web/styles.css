@@ -4899,9 +4899,9 @@ body.tc-resizing {
   z-index: 11010;
   display: block;
   padding: 0;
-  /* En modo anclado debe sentirse como un desplegable (sin oscurecer ni “pisar” visualmente la ficha). */
-  background: transparent;
-  backdrop-filter: none;
+  /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
+  background: rgba(11, 29, 51, 0.22);
+  backdrop-filter: blur(1px);
 }
 
 .crm-insert-modal--anchored .crm-insert-card {
@@ -8341,7 +8341,8 @@ body.crm-context-inmo .crm-resumen-compact-note {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  /* Debe quedar por encima de cualquier header/tabla sticky del CRM. */
+  z-index: 20050;
   padding:
     calc(18px + var(--safe-top))
     calc(18px + var(--safe-right))

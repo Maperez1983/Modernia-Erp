@@ -4861,14 +4861,16 @@ const renderAgendaCalendar = (container, events, label = "") => {
         state.day = dateKey;
         agendaStates.set(container, state);
         renderAgendaCalendar(container, events, label);
-        if (!readOnly) {
+      });
+      if (!readOnly) {
+        cell.addEventListener("dblclick", () => {
           const serviceValue =
             state.serviceFilter && state.serviceFilter !== "all"
               ? state.serviceFilter
               : inferredService;
           openActionCreator(dateKey, "", serviceValue);
-        }
-      });
+        });
+      }
       if (!readOnly) {
         cell.addEventListener("dragover", (event) => event.preventDefault());
         cell.addEventListener("drop", (event) => {
@@ -4959,7 +4961,9 @@ const renderAgendaCalendar = (container, events, label = "") => {
             const id = event.dataTransfer.getData("text/plain");
             updateActionDate(id, dayKey, `${String(hour).padStart(2, "0")}:00`);
           });
-          slot.addEventListener("dblclick", () => {
+          slot.addEventListener("click", (event) => {
+            // Si pulsas sobre una cita existente, no abras “nuevo”.
+            if (event?.target?.closest?.(".agenda-event")) return;
             const serviceValue =
               state.serviceFilter && state.serviceFilter !== "all"
                 ? state.serviceFilter
@@ -5010,6 +5014,14 @@ const renderAgendaCalendar = (container, events, label = "") => {
           event.preventDefault();
           const id = event.dataTransfer.getData("text/plain");
           updateActionDate(id, state.day, `${String(hour).padStart(2, "0")}:00`);
+        });
+        slot.addEventListener("click", (event) => {
+          if (event?.target?.closest?.(".agenda-event")) return;
+          const serviceValue =
+            state.serviceFilter && state.serviceFilter !== "all"
+              ? state.serviceFilter
+              : inferredService;
+          openActionCreator(state.day, `${String(hour).padStart(2, "0")}:00`, serviceValue);
         });
       }
       const slotEvents = dayEvents.filter((ev) => {
