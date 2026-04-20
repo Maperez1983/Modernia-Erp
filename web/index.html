@@ -868,17 +868,79 @@
 	        </div>
 		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="simuladores">
 		          <div class="form-card">
-	            <div class="section-head">
-	              <div>
-	                <h3>Simuladores</h3>
-	                <p class="muted">Cálculo determinista (sin IA) y validación con autoliquidaciones.</p>
-	              </div>
-	            </div>
-		            <form id="iivtnuSimulatorForm" class="form-grid">
-		              <label class="span-2">
-		                Municipio
-		                <div class="inline-row">
-		                  <input id="iivtnuMunicipioCp" placeholder="CP (autoselección)" inputmode="numeric" autocomplete="postal-code" />
+		            <div class="section-head">
+		              <div>
+		                <h3>Simuladores</h3>
+		                <p class="muted">Cálculo determinista (sin IA) y validación con autoliquidaciones.</p>
+		              </div>
+		            </div>
+		            <div class="form-card">
+		              <div class="section-head">
+		                <div>
+		                  <h3>Wizard fiscal · Inmuebles</h3>
+		                  <p class="muted">Entrada por operación. Genera informe corporativo (PDF). (Venta disponible; el resto se irá ampliando.)</p>
+		                </div>
+		              </div>
+		              <form id="fiscalWizardForm" class="form-grid">
+		                <label>
+		                  Operación
+		                  <select name="operacion">
+		                    <option value="venta" selected>Venta (IRPF/IRNR + IIVTNU)</option>
+		                    <option value="herencia">Herencia (ISD + IIVTNU)</option>
+		                    <option value="donacion">Donación (IRPF/IRNR + ISD + IIVTNU)</option>
+		                    <option value="extincion_condominio">Extinción de condominio (ITP/AJD + ajustes)</option>
+		                  </select>
+		                </label>
+		                <label>
+		                  CCAA (por defecto)
+		                  <select name="ccaa">
+		                    <option value="AN" selected>Andalucía</option>
+		                    <option value="AR">Aragón</option>
+		                    <option value="AS">Asturias</option>
+		                    <option value="IB">Illes Balears</option>
+		                    <option value="CN">Canarias</option>
+		                    <option value="CB">Cantabria</option>
+		                    <option value="CM">Castilla-La Mancha</option>
+		                    <option value="CL">Castilla y León</option>
+		                    <option value="CT">Cataluña</option>
+		                    <option value="VC">Comunitat Valenciana</option>
+		                    <option value="EX">Extremadura</option>
+		                    <option value="GA">Galicia</option>
+		                    <option value="MD">Comunidad de Madrid</option>
+		                    <option value="MC">Región de Murcia</option>
+		                    <option value="NC">Navarra</option>
+		                    <option value="PV">País Vasco</option>
+		                    <option value="RI">La Rioja</option>
+		                    <option value="CE">Ceuta</option>
+		                    <option value="ML">Melilla</option>
+		                  </select>
+		                </label>
+		                <label class="fiscal-pv-territorio hidden">
+		                  Territorio (País Vasco)
+		                  <select name="pv_territorio">
+		                    <option value="BI" selected>Bizkaia</option>
+		                    <option value="GI">Gipuzkoa</option>
+		                    <option value="AL">Álava</option>
+		                  </select>
+		                </label>
+		                <label class="span-2">
+		                  Referencia (opcional)
+		                  <input name="referencia" placeholder="Inmueble / expediente / dirección" />
+		                </label>
+		                <div class="form-actions span-2">
+		                  <button type="button" class="secondary ghost" id="fiscalWizardOpenIrpfBtn">Abrir IRPF/IRNR</button>
+		                  <button type="button" class="secondary ghost" id="fiscalWizardOpenIivtnuBtn">Abrir plusvalía (IIVTNU)</button>
+		                  <button type="button" class="secondary" id="fiscalWizardPdfBtn">Informe fiscal (PDF)</button>
+		                  <span id="fiscalWizardStatus" class="muted"></span>
+		                </div>
+		              </form>
+		              <div id="fiscalWizardResult"></div>
+		            </div>
+			            <form id="iivtnuSimulatorForm" class="form-grid">
+			              <label class="span-2">
+			                Municipio
+			                <div class="inline-row">
+			                  <input id="iivtnuMunicipioCp" placeholder="CP (autoselección)" inputmode="numeric" autocomplete="postal-code" />
 		                  <select id="iivtnuMunicipioSelect" required></select>
 		                </div>
 		              </label>

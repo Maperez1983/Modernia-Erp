@@ -20534,6 +20534,16 @@ def sanitize_renta_entries(entries):
 
 
 def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50):
+    def renta_ref_id_for_entry(ejercicio: object, entry_id: object) -> str:
+        ejercicio_s = str(ejercicio or "").strip()
+        entry_s = str(entry_id or "").strip()
+        if not entry_s:
+            return ""
+        # Compat: en algunas versiones `entry.id` ya viene como "renta-YYYY-<...>".
+        if entry_s.lower().startswith("renta-"):
+            return entry_s
+        return f"renta-{ejercicio_s}-{entry_s}" if ejercicio_s else entry_s
+
     q_norm = str(q or "").strip().lower()
     estado_norm = normalize_lookup_text(estado or "")
     try:
@@ -20632,8 +20642,9 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             try:
                 entry_id = str(entry.get("id") or "").strip()
                 ejercicio = str(entry.get("ejercicio") or "").strip()
-                if entry_id and ejercicio:
-                    renta_ref_owner[f"renta-{ejercicio}-{entry_id}"] = cliente_id
+                ref_id = renta_ref_id_for_entry(ejercicio, entry_id)
+                if ref_id:
+                    renta_ref_owner[ref_id.lower()] = cliente_id
                 for field in ("doc_borrador_id", "doc_presentada_id"):
                     doc_id = str(entry.get(field) or "").strip()
                     if doc_id:
@@ -20684,8 +20695,8 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     ref_id_clause = "1=0"
     ref_id_values = []
     if ref_ids:
-        ref_id_clause = f"referencia_id IN ({','.join(['?'] * len(ref_ids))})"
-        ref_id_values = ref_ids
+        ref_id_clause = f"LOWER(COALESCE(referencia_id,'')) IN ({','.join(['?'] * len(ref_ids))})"
+        ref_id_values = [str(r or "").strip().lower() for r in ref_ids]
     renta_filter = """
       (
         LOWER(COALESCE(referencia_tipo, '')) = 'renta'
@@ -20723,7 +20734,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         if cid not in selected_set:
             cid = ""
         if not cid:
-            ref_id = str(doc_dict.get("referencia_id") or "").strip()
+            ref_id = str(doc_dict.get("referencia_id") or "").strip().lower()
             doc_id = str(doc_dict.get("id") or "").strip()
             cid = renta_ref_owner.get(ref_id) or renta_doc_id_owner.get(doc_id) or ""
         if not cid:
@@ -20755,7 +20766,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 "doc_key": doc_key,
                 "doc_url": doc_url,
                 "referencia_tipo": "renta",
-                "referencia_id": f"renta-{ejercicio}-{entry_id}" if ejercicio and entry_id else "",
+                "referencia_id": renta_ref_id_for_entry(ejercicio, entry_id),
             }
         else:
             item["doc_count"] = 0
@@ -55270,6 +55281,15 @@ class Handler(BaseHTTPRequestHandler):
                 # Enriquecimiento: si hay campañas de renta con doc_key/doc_url, pero el registro `gestoria_docs`
                 # quedó con `notas` (ruta local) y sin enlaces públicos, inyectamos el enlace desde la campaña
                 # para que el botón "Ver" funcione.
+                def renta_ref_id_for_entry(ejercicio: object, entry_id: object) -> str:
+                    ejercicio_s = str(ejercicio or "").strip()
+                    entry_s = str(entry_id or "").strip()
+                    if not entry_s:
+                        return ""
+                    if entry_s.lower().startswith("renta-"):
+                        return entry_s
+                    return f"renta-{ejercicio_s}-{entry_s}" if ejercicio_s else entry_s
+
                 renta_doc_by_doc_id = {}
                 renta_doc_by_ref_id = {}
                 renta_doc_ids = []
@@ -55284,8 +55304,9 @@ class Handler(BaseHTTPRequestHandler):
                     for entry in entries:
                         entry_id = str(entry.get("id") or "").strip()
                         ejercicio = str(entry.get("ejercicio") or "").strip()
-                        if entry_id and ejercicio:
-                            renta_ref_ids.append(f"renta-{ejercicio}-{entry_id}")
+                        ref_id = renta_ref_id_for_entry(ejercicio, entry_id)
+                        if ref_id:
+                            renta_ref_ids.append(ref_id.lower())
                         for field in ("doc_borrador_id", "doc_presentada_id"):
                             doc_id = str(entry.get(field) or "").strip()
                             if doc_id:
@@ -55295,8 +55316,9 @@ class Handler(BaseHTTPRequestHandler):
                         if not doc_key and not _is_public_doc_url(doc_url):
                             continue
                         ref_id = f"renta-{ejercicio}-{entry_id}" if ejercicio and entry_id else ""
+                        ref_id = renta_ref_id_for_entry(ejercicio, entry_id)
                         if ref_id:
-                            renta_doc_by_ref_id[ref_id] = (doc_key, doc_url)
+                            renta_doc_by_ref_id[ref_id.lower()] = (doc_key, doc_url)
                         for field in ("doc_borrador_id", "doc_presentada_id"):
                             doc_id = str(entry.get(field) or "").strip()
                             if doc_id:
@@ -55336,8 +55358,9 @@ class Handler(BaseHTTPRequestHandler):
                             for entry in entries:
                                 entry_id = str(entry.get("id") or "").strip()
                                 ejercicio = str(entry.get("ejercicio") or "").strip()
-                                if entry_id and ejercicio:
-                                    ref_ids.append(f"renta-{ejercicio}-{entry_id}")
+                                ref_id = renta_ref_id_for_entry(ejercicio, entry_id)
+                                if ref_id:
+                                    ref_ids.append(ref_id.lower())
                                 for field in ("doc_borrador_id", "doc_presentada_id"):
                                     doc_id = str(entry.get(field) or "").strip()
                                     if doc_id:
@@ -55354,7 +55377,9 @@ class Handler(BaseHTTPRequestHandler):
                             extra_clause_parts.append(f"id IN ({','.join(['?'] * len(doc_ids))})")
                             extra_values.extend(doc_ids)
                         if ref_ids:
-                            extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(ref_ids))})")
+                            extra_clause_parts.append(
+                                f"LOWER(COALESCE(referencia_id,'')) IN ({','.join(['?'] * len(ref_ids))})"
+                            )
                             extra_values.extend(ref_ids)
                         if extra_clause_parts:
                             extra_clause = " OR ".join(extra_clause_parts)
@@ -55377,7 +55402,7 @@ class Handler(BaseHTTPRequestHandler):
                         extra_clause_parts.append(f"id IN ({','.join(['?'] * len(renta_doc_ids))})")
                         extra_values.extend(renta_doc_ids)
                     if renta_ref_ids:
-                        extra_clause_parts.append(f"referencia_id IN ({','.join(['?'] * len(renta_ref_ids))})")
+                        extra_clause_parts.append(f"LOWER(COALESCE(referencia_id,'')) IN ({','.join(['?'] * len(renta_ref_ids))})")
                         extra_values.extend(renta_ref_ids)
                     if extra_clause_parts:
                         extra_clause = " OR ".join(extra_clause_parts)
@@ -55404,7 +55429,7 @@ class Handler(BaseHTTPRequestHandler):
                     # Evitamos enseñar botón "Ver" si no hay un enlace abrible desde el navegador.
                     try:
                         rid = str(payload.get("id") or "").strip()
-                        ref_id = str(payload.get("referencia_id") or "").strip()
+                        ref_id = str(payload.get("referencia_id") or "").strip().lower()
                         injected = renta_doc_by_doc_id.get(rid) or renta_doc_by_ref_id.get(ref_id)
                         if injected:
                             injected_key, injected_url = injected

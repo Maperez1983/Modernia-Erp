@@ -1923,10 +1923,16 @@ const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
 		const irpfGainForm = document.getElementById("irpfGainForm");
 		const irpfGainStatus = document.getElementById("irpfGainStatus");
 		const irpfGainResult = document.getElementById("irpfGainResult");
-		const irpfGainPdfBtn = document.getElementById("irpfGainPdfBtn");
-		const irpfRentalForm = document.getElementById("irpfRentalForm");
-		const irpfRentalStatus = document.getElementById("irpfRentalStatus");
-		const irpfRentalResult = document.getElementById("irpfRentalResult");
+			const irpfGainPdfBtn = document.getElementById("irpfGainPdfBtn");
+			const irpfRentalForm = document.getElementById("irpfRentalForm");
+			const irpfRentalStatus = document.getElementById("irpfRentalStatus");
+			const irpfRentalResult = document.getElementById("irpfRentalResult");
+			const fiscalWizardForm = document.getElementById("fiscalWizardForm");
+			const fiscalWizardOpenIrpfBtn = document.getElementById("fiscalWizardOpenIrpfBtn");
+			const fiscalWizardOpenIivtnuBtn = document.getElementById("fiscalWizardOpenIivtnuBtn");
+			const fiscalWizardPdfBtn = document.getElementById("fiscalWizardPdfBtn");
+			const fiscalWizardStatus = document.getElementById("fiscalWizardStatus");
+			const fiscalWizardResult = document.getElementById("fiscalWizardResult");
 	const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
@@ -2771,18 +2777,6 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmCaptacionCreateDuplicates = document.getElementById("crmCaptacionCreateDuplicates");
 			const crmCaptacionCatastroOpen = document.getElementById("crmCaptacionCatastroOpen");
 		  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
-
-const portalCrmOverlayModalsToBody = () => {
-  try {
-    const root = document.body;
-    [crmInsertModal, crmClienteModal, crmCaptacionModal].forEach((el) => {
-      if (!el || !root) return;
-      if (el.parentElement !== root) root.appendChild(el);
-    });
-  } catch {}
-};
-portalCrmOverlayModalsToBody();
-
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
@@ -6041,6 +6035,96 @@ let iivtnuMunicipiosCache = null;
 let iivtnuLastParsed = null;
 
 const normalizePostalCode = (value = "") => String(value || "").replace(/[^0-9]/g, "").slice(0, 5);
+
+const buildIivtnuPayloadFromForm = () => {
+  if (!iivtnuSimulatorForm) return {};
+  const formData = new FormData(iivtnuSimulatorForm);
+  return {
+    municipio_ine: String(iivtnuMunicipioSelect?.value || "").trim(),
+    codigo_postal: normalizePostalCode(iivtnuMunicipioCp?.value || ""),
+    tipo_transmision: String(formData.get("tipo_transmision") || "").trim(),
+    situacion_especial: String(formData.get("situacion_especial") || "").trim(),
+    situacion_motivo: String(formData.get("situacion_motivo") || "").trim(),
+    fecha_adquisicion: String(formData.get("fecha_adquisicion") || "").trim(),
+    fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
+    valor_suelo: String(formData.get("valor_suelo") || "").trim(),
+    valor_suelo_reducido: String(formData.get("valor_suelo_reducido") || "").trim(),
+    coef_reduccion: String(formData.get("coef_reduccion") || "").trim(),
+    derecho_tipo: String(formData.get("derecho_tipo") || "").trim(),
+    usufructo_duracion_anios: String(formData.get("usufructo_duracion_anios") || "").trim(),
+    usufructuario_edad: String(formData.get("usufructuario_edad") || "").trim(),
+    derecho_factor_pct_manual: String(formData.get("derecho_factor_pct_manual") || "").trim(),
+    participacion_pct: String(formData.get("participacion_pct") || "").trim(),
+    bonificacion_mode: String(formData.get("bonificacion_mode") || "").trim(),
+    bonificacion_pct: String(formData.get("bonificacion_pct") || "").trim(),
+    vivienda_habitual_causante: String(formData.get("vivienda_habitual_causante") || "").trim(),
+    convivencia_2_anios: String(formData.get("convivencia_2_anios") || "").trim(),
+    mantener_2_anios: String(formData.get("mantener_2_anios") || "").trim(),
+    condicion_beneficiario: String(formData.get("condicion_beneficiario") || "").trim(),
+    ingresos_unidad: String(formData.get("ingresos_unidad") || "").trim(),
+    iprem_14_anual: String(formData.get("iprem_14_anual") || "").trim(),
+    tipo_gravamen_pct_manual: String(formData.get("tipo_gravamen_pct_manual") || "").trim(),
+    valor_catastral_total: String(formData.get("valor_catastral_total") || "").trim(),
+    porcentaje_suelo: String(formData.get("porcentaje_suelo") || "").trim(),
+    valor_adquisicion: String(formData.get("valor_adquisicion") || "").trim(),
+    gastos_adquisicion: String(formData.get("gastos_adquisicion") || "").trim(),
+    valor_transmision: String(formData.get("valor_transmision") || "").trim(),
+    gastos_transmision: String(formData.get("gastos_transmision") || "").trim(),
+  };
+};
+
+const buildIrpfPayloadFromForm = () => {
+  if (!irpfGainForm) return {};
+  const formData = new FormData(irpfGainForm);
+  const payload = Object.fromEntries(formData.entries());
+  payload.brand_logo_url = payload.brand_logo_url || "/assets/grupo_modernia_logo.png";
+  if (!payload.empresa_nombre) {
+    payload.empresa_nombre =
+      resolveCrmInmoEmpresaNombre() || resolveCrmGestoriaEmpresaNombre() || state.currentWorkspaceCompanyName || "";
+  }
+  return payload;
+};
+
+const syncFiscalWizardPvVisibility = () => {
+  if (!fiscalWizardForm) return;
+  const ccaa = String(new FormData(fiscalWizardForm).get("ccaa") || "AN").toUpperCase();
+  fiscalWizardForm.querySelectorAll(".fiscal-pv-territorio").forEach((el) => {
+    el.classList.toggle("hidden", ccaa !== "PV");
+  });
+};
+
+const renderFiscalWizardResult = (data = null) => {
+  if (!fiscalWizardResult) return;
+  if (!data) {
+    fiscalWizardResult.innerHTML = "";
+    return;
+  }
+  const irpf = data?.irpf?.result || {};
+  const iiv = data?.iivtnu?.result || {};
+  const fields = [
+    ["IRPF/IRNR · Cuota estimada", irpf.cuota_ahorro_estimada ?? ""],
+    ["IIVTNU · Cuota recomendada", iiv.cuota_recomendada ?? ""],
+    ["IIVTNU · Método", iiv.metodo_recomendado ?? ""],
+  ];
+  fiscalWizardResult.innerHTML = `
+    <div class="ui-table">
+      <table class="data-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th>${escapeHtml(label)}</th>
+                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
 
 const ensureIivtnuMunicipios = async () => {
   if (!iivtnuMunicipioSelect) return [];
@@ -18709,7 +18793,10 @@ const positionCrmInsertModal = (anchorEl) => {
 const syncCrmModalOpenState = () => {
   try {
     const open =
-      (crmInsertModal && !crmInsertModal.classList.contains("hidden") && !crmInsertModal.classList.contains("crm-insert-modal--dropdown")) ||
+      (crmInsertModal &&
+        !crmInsertModal.classList.contains("hidden") &&
+        !crmInsertModal.classList.contains("crm-insert-modal--dropdown") &&
+        !crmInsertModal.classList.contains("crm-insert-modal--anchored")) ||
       (crmClienteModal && !crmClienteModal.classList.contains("hidden")) ||
       (crmCaptacionModal && !crmCaptacionModal.classList.contains("hidden")) ||
       (actionModal && !actionModal.classList.contains("hidden"));
@@ -59807,39 +59894,7 @@ if (iivtnuSimulatorForm) {
     renderIivtnuSimulatorResult(null);
     if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "Simulando...";
     try {
-	      const formData = new FormData(iivtnuSimulatorForm);
-		      const payload = {
-		        municipio_ine: String(iivtnuMunicipioSelect?.value || "").trim(),
-		        codigo_postal: normalizePostalCode(iivtnuMunicipioCp?.value || ""),
-		        tipo_transmision: String(formData.get("tipo_transmision") || "").trim(),
-		        situacion_especial: String(formData.get("situacion_especial") || "").trim(),
-		        situacion_motivo: String(formData.get("situacion_motivo") || "").trim(),
-		        fecha_adquisicion: String(formData.get("fecha_adquisicion") || "").trim(),
-		        fecha_transmision: String(formData.get("fecha_transmision") || "").trim(),
-		        valor_suelo: String(formData.get("valor_suelo") || "").trim(),
-		        valor_suelo_reducido: String(formData.get("valor_suelo_reducido") || "").trim(),
-		        coef_reduccion: String(formData.get("coef_reduccion") || "").trim(),
-		        derecho_tipo: String(formData.get("derecho_tipo") || "").trim(),
-		        usufructo_duracion_anios: String(formData.get("usufructo_duracion_anios") || "").trim(),
-		        usufructuario_edad: String(formData.get("usufructuario_edad") || "").trim(),
-		        derecho_factor_pct_manual: String(formData.get("derecho_factor_pct_manual") || "").trim(),
-		        participacion_pct: String(formData.get("participacion_pct") || "").trim(),
-		        bonificacion_mode: String(formData.get("bonificacion_mode") || "").trim(),
-		        bonificacion_pct: String(formData.get("bonificacion_pct") || "").trim(),
-		        vivienda_habitual_causante: String(formData.get("vivienda_habitual_causante") || "").trim(),
-		        convivencia_2_anios: String(formData.get("convivencia_2_anios") || "").trim(),
-		        mantener_2_anios: String(formData.get("mantener_2_anios") || "").trim(),
-		        condicion_beneficiario: String(formData.get("condicion_beneficiario") || "").trim(),
-		        ingresos_unidad: String(formData.get("ingresos_unidad") || "").trim(),
-		        iprem_14_anual: String(formData.get("iprem_14_anual") || "").trim(),
-		        tipo_gravamen_pct_manual: String(formData.get("tipo_gravamen_pct_manual") || "").trim(),
-		        valor_catastral_total: String(formData.get("valor_catastral_total") || "").trim(),
-		        porcentaje_suelo: String(formData.get("porcentaje_suelo") || "").trim(),
-		        valor_adquisicion: String(formData.get("valor_adquisicion") || "").trim(),
-        gastos_adquisicion: String(formData.get("gastos_adquisicion") || "").trim(),
-        valor_transmision: String(formData.get("valor_transmision") || "").trim(),
-        gastos_transmision: String(formData.get("gastos_transmision") || "").trim(),
-      };
+      const payload = buildIivtnuPayloadFromForm();
       const resp = await postJsonWithDbRetry("/api/iivtnu_simulate", payload, { timeoutMs: 30000 });
       renderIivtnuSimulatorResult(resp);
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "OK.";
@@ -59847,6 +59902,92 @@ if (iivtnuSimulatorForm) {
       if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = err.message || "No se pudo simular.";
     }
   });
+}
+
+if (fiscalWizardForm) {
+  // Defaults.
+  try {
+    const prevCcaa = String(localStorage.getItem("crm.fiscalWizard.ccaa") || "").trim().toUpperCase();
+    const prevOp = String(localStorage.getItem("crm.fiscalWizard.operacion") || "").trim().toLowerCase();
+    const prevPv = String(localStorage.getItem("crm.fiscalWizard.pv") || "").trim().toUpperCase();
+    if (prevCcaa && fiscalWizardForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(prevCcaa)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="ccaa"]').value = prevCcaa;
+    }
+    if (prevOp && fiscalWizardForm.querySelector(`select[name="operacion"] option[value="${CSS.escape(prevOp)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="operacion"]').value = prevOp;
+    }
+    if (prevPv && fiscalWizardForm.querySelector(`select[name="pv_territorio"] option[value="${CSS.escape(prevPv)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="pv_territorio"]').value = prevPv;
+    }
+  } catch {}
+  syncFiscalWizardPvVisibility();
+  fiscalWizardForm.addEventListener("change", () => {
+    syncFiscalWizardPvVisibility();
+    try {
+      const data = new FormData(fiscalWizardForm);
+      localStorage.setItem("crm.fiscalWizard.ccaa", String(data.get("ccaa") || "AN").toUpperCase());
+      localStorage.setItem("crm.fiscalWizard.operacion", String(data.get("operacion") || "venta").toLowerCase());
+      localStorage.setItem("crm.fiscalWizard.pv", String(data.get("pv_territorio") || "BI").toUpperCase());
+    } catch {}
+  });
+
+  if (fiscalWizardOpenIrpfBtn) {
+    fiscalWizardOpenIrpfBtn.addEventListener("click", () => {
+      if (irpfGainForm && typeof irpfGainForm.scrollIntoView === "function") {
+        irpfGainForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
+  if (fiscalWizardOpenIivtnuBtn) {
+    fiscalWizardOpenIivtnuBtn.addEventListener("click", () => {
+      if (iivtnuSimulatorForm && typeof iivtnuSimulatorForm.scrollIntoView === "function") {
+        iivtnuSimulatorForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
+  if (fiscalWizardPdfBtn) {
+    fiscalWizardPdfBtn.addEventListener("click", async () => {
+      renderFiscalWizardResult(null);
+      if (fiscalWizardStatus) fiscalWizardStatus.textContent = "Calculando...";
+      try {
+        const wizard = Object.fromEntries(new FormData(fiscalWizardForm).entries());
+        const operacion = String(wizard.operacion || "venta").toLowerCase();
+        if (operacion !== "venta") {
+          if (fiscalWizardStatus) fiscalWizardStatus.textContent = "Solo disponible para Venta por ahora.";
+          return;
+        }
+        const irpfPayload = buildIrpfPayloadFromForm();
+        const iivtnuPayload = buildIivtnuPayloadFromForm();
+        // Propaga CCAA/referencia al IRPF para trazabilidad en PDF.
+        if (wizard.ccaa && !irpfPayload.ccaa) irpfPayload.ccaa = wizard.ccaa;
+        if (wizard.referencia && !irpfPayload.referencia) irpfPayload.referencia = wizard.referencia;
+        if (wizard.referencia && !iivtnuPayload.referencia) iivtnuPayload.referencia = wizard.referencia;
+
+        const irpfResp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", irpfPayload, { timeoutMs: 30000 });
+        const iivtnuResp = await postJsonWithDbRetry("/api/iivtnu_simulate", iivtnuPayload, { timeoutMs: 30000 });
+        renderIrpfGainResult(irpfResp);
+        renderIivtnuSimulatorResult(iivtnuResp);
+        renderFiscalWizardResult({ irpf: irpfResp, iivtnu: iivtnuResp });
+
+        const pdfPayload = {
+          brand_logo_url: "/assets/grupo_modernia_logo.png",
+          empresa_nombre:
+            resolveCrmInmoEmpresaNombre() || resolveCrmGestoriaEmpresaNombre() || state.currentWorkspaceCompanyName || "",
+          referencia: String(wizard.referencia || irpfPayload.referencia || "").trim(),
+          ccaa: String(wizard.ccaa || irpfPayload.ccaa || "AN").toUpperCase(),
+          pv_territorio: String(wizard.pv_territorio || "").toUpperCase(),
+          irpf_payload: irpfPayload,
+          irpf_result: irpfResp,
+          iivtnu_payload: iivtnuPayload,
+          iivtnu_result: iivtnuResp,
+        };
+        await downloadPdfFromApi("/api/fiscal_venta_pdf", pdfPayload, { filenameFallback: "informe_fiscal_venta.pdf" });
+        if (fiscalWizardStatus) fiscalWizardStatus.textContent = "PDF generado.";
+      } catch (err) {
+        if (fiscalWizardStatus) fiscalWizardStatus.textContent = err?.message || "No se pudo generar el PDF.";
+      }
+    });
+  }
 }
 
 if (iivtnuPdfParseForm) {
