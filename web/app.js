@@ -42221,6 +42221,39 @@ const renderCrmAgendaCalendar = (rows = []) => {
   const SLOT_MIN = 30;
   const SLOT_H = 26;
   const GRID_HEAD_H = 44;
+  const openNewFromGrid = (dateKey, minutes, serviceValue = "inmobiliaria") => {
+    const min = Number(minutes);
+    if (!Number.isFinite(min)) {
+      openActionCreator(dateKey, "", serviceValue, { lock_service: true, servicio: serviceValue });
+      return;
+    }
+    const clamped = clamp(min, 0, 24 * 60 - 1);
+    const hh = String(Math.floor(clamped / 60)).padStart(2, "0");
+    const mm = String(Math.floor(clamped % 60)).padStart(2, "0");
+    openActionCreator(dateKey, `${hh}:${mm}`, serviceValue, { lock_service: true, servicio: serviceValue });
+  };
+  const resolveGridClickMinutes = (event, colEl, bounds) => {
+    if (!event || !colEl || !bounds) return null;
+    const rect = colEl.getBoundingClientRect();
+    const scroll = colEl.closest(".tc-weektime-scroll,.tc-dayone-scroll");
+    const scrollTop = scroll ? Number(scroll.scrollTop || 0) : 0;
+    const y = Number(event.clientY || 0) - rect.top + scrollTop;
+    if (!Number.isFinite(y)) return null;
+    const slotIndex = Math.floor(y / SLOT_H);
+    const minutes = Number(bounds.startMin || 0) + slotIndex * SLOT_MIN;
+    return minutes;
+  };
+  const shouldIgnoreGridClick = (event) => {
+    const target = event?.target;
+    if (!target || !(target instanceof Element)) return false;
+    if (target.closest("button")) return true;
+    if (target.closest("a")) return true;
+    if (target.closest("input,select,textarea,label")) return true;
+    if (target.closest(".tc-weektime-head,.tc-dayone-head,.tc-weektime-corner,.tc-dayone-corner")) return true;
+    if (target.closest(".tc-time-axis,.tc-time-row")) return true;
+    if (target.closest(".tc-agenda-user-title,.tc-agenda-people,.tc-agenda-mini")) return true;
+    return false;
+  };
 
   const computeTimeBounds = (events, { defaultStart = 8, defaultEnd = 20 } = {}) => {
     const mins = [];
@@ -42400,6 +42433,12 @@ const renderCrmAgendaCalendar = (rows = []) => {
         const col = document.createElement("div");
         col.className = "tc-weektime-col";
         col.style.height = `${bodyHeight}px`;
+        col.addEventListener("click", (event) => {
+          if (shouldIgnoreGridClick(event)) return;
+          const minutes = resolveGridClickMinutes(event, col, bounds);
+          const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+          openNewFromGrid(key, snapped, "inmobiliaria");
+        });
         const dayEvents = rangeEvents
           .filter((row) => String(row?.fecha || "").slice(0, 10) === key)
           .filter((row) => sameUser(row, userName))
@@ -42461,6 +42500,12 @@ const renderCrmAgendaCalendar = (rows = []) => {
       const col = document.createElement("div");
       col.className = "tc-dayone-col";
       col.style.height = `${bodyHeight}px`;
+      col.addEventListener("click", (event) => {
+        if (shouldIgnoreGridClick(event)) return;
+        const minutes = resolveGridClickMinutes(event, col, bounds);
+        const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+        openNewFromGrid(dayKey, snapped, "inmobiliaria");
+      });
       const events = dayRows.filter((row) => sameUser(row, userName));
       const placed = layoutOverlaps(events, bounds);
       placed.forEach(({ row, lane, laneCount }) => {
