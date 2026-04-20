@@ -27175,6 +27175,62 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
     return True, ""
 
 
+def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
+    """
+    Enforce that the authenticated user belongs to at least one workspace linked
+    to the given empresa (when APP_WORKSPACE_MEMBERSHIP_ENFORCE is enabled).
+
+    This closes a common gap for endpoints that only receive `empresa_id`
+    (e.g. PDF generators) and not an explicit `workspace_id`.
+    """
+    if not WORKSPACE_MEMBERSHIP_ENFORCE:
+        return True, ""
+    if workspace_actor_is_privileged(conn, session):
+        return True, ""
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return False, "No autorizado"
+    try:
+        ws_rows = conn.execute(
+            """
+            SELECT workspace_id
+            FROM workspace_empresas
+            WHERE empresa_id = ?
+            """,
+            (eid,),
+        ).fetchall()
+    except Exception:
+        ws_rows = []
+    workspace_ids = [
+        str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+        for r in (ws_rows or [])
+        if str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+    ]
+    if not workspace_ids:
+        # Legacy safety: if there is a single workspace, treat it as the implicit container.
+        try:
+            ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+            ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
+        except Exception:
+            ws_total = 0
+        if ws_total == 1:
+            try:
+                one = conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()
+                only_id = str(row_value(one, "id") or row_value(one, 0) or "").strip()
+            except Exception:
+                only_id = ""
+            if only_id:
+                return enforce_workspace_membership(conn, session, only_id, write=write)
+        return False, "Empresa sin workspace vinculado"
+    last_err = ""
+    for ws_id in workspace_ids:
+        ok, err = enforce_workspace_membership(conn, session, ws_id, write=write)
+        if ok:
+            return True, ""
+        last_err = err or last_err
+    return False, last_err or "No autorizado"
+
+
 def infer_workspace_id_for_empresa(conn, session, empresa_id):
     """
     Devuelve el workspace_id más probable para una empresa, a partir del usuario autenticado.
@@ -31301,6 +31357,65 @@ def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Hel
     buffer = BytesIO()
     first_size = pagesize_list[0] if pagesize_list else (595, 842)
     c = rl_canvas.Canvas(buffer, pagesize=first_size)
+
+    def _safe_string_width(text, fs):
+        try:
+            return float(c.stringWidth(str(text or ""), font_name, float(fs)))
+        except Exception:
+            try:
+                return float(c.stringWidth(str(text or ""), "Helvetica", float(fs)))
+            except Exception:
+                return float(len(str(text or "")) * (float(fs) * 0.55))
+
+    def _truncate_to_width(text, max_width, fs, ellipsis="…"):
+        raw = str(text or "")
+        if max_width <= 0:
+            return raw
+        if _safe_string_width(raw, fs) <= max_width:
+            return raw
+        if _safe_string_width(ellipsis, fs) > max_width:
+            return ""
+        lo, hi = 0, len(raw)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            candidate = raw[:mid] + ellipsis
+            if _safe_string_width(candidate, fs) <= max_width:
+                lo = mid
+            else:
+                hi = mid - 1
+        return (raw[:lo] + ellipsis) if lo > 0 else ellipsis
+
+    def _fit_single_line(text, max_width, fs, min_fs=6.0):
+        raw = str(text or "")
+        if max_width <= 0 or not raw:
+            return raw, fs
+        fs_try = float(fs)
+        while fs_try > float(min_fs) and _safe_string_width(raw, fs_try) > max_width:
+            fs_try -= 0.5
+        if _safe_string_width(raw, fs_try) > max_width:
+            raw = _truncate_to_width(raw, max_width, fs_try)
+        return raw, fs_try
+
+    def _with_clip_rect(x, y, w, h):
+        if w <= 0 or h <= 0:
+            return False
+        try:
+            path = c.beginPath()
+            path.rect(x, y, w, h)
+            c.saveState()
+            c.clipPath(path, stroke=0, fill=0)
+            return True
+        except Exception:
+            return False
+
+    def _end_clip(active):
+        if not active:
+            return
+        try:
+            c.restoreState()
+        except Exception:
+            pass
+
     try:
         c.setFillColor(rl_colors.black)
     except Exception:
@@ -31331,12 +31446,28 @@ def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Hel
                     lines = [line for line in str(value).replace("\r", "").split("\n") if line is not None]
                     cursor_y = y + max(0.0, h - fs)
                     max_lines = int(max(1, (h / lead))) if h else len(lines)
-                    for line in lines[:max_lines]:
-                        c.drawString(x + 1.0, cursor_y, str(line))
-                        cursor_y -= lead
+                    clip_active = _with_clip_rect(x, y, w, h)
+                    try:
+                        max_width = max(0.0, w - 2.0)
+                        for line in lines[:max_lines]:
+                            safe_line = _truncate_to_width(str(line), max_width, fs)
+                            c.drawString(x + 1.0, cursor_y, safe_line)
+                            cursor_y -= lead
+                    finally:
+                        _end_clip(clip_active)
                 else:
                     # Alineación simple dentro del bbox.
-                    c.drawString(x + 1.0, y + 3.0, str(value))
+                    max_width = max(0.0, w - 2.0)
+                    safe_value, fs_fit = _fit_single_line(str(value), max_width, fs)
+                    try:
+                        c.setFont(font_name, fs_fit)
+                    except Exception:
+                        c.setFont("Helvetica", fs_fit)
+                    clip_active = _with_clip_rect(x, y, w, h)
+                    try:
+                        c.drawString(x + 1.0, y + 3.0, safe_value)
+                    finally:
+                        _end_clip(clip_active)
             except Exception:
                 continue
         if idx < len(pagesize_list) - 1:
@@ -55469,6 +55600,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
             inmueble = dict(inmueble_row)
+            ok, err = enforce_empresa_membership(conn, session, inmueble.get("empresa_id"))
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             empresa_row = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
                 (inmueble.get("empresa_id"),),
@@ -55645,6 +55780,10 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             empresa = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
                 (inmueble["empresa_id"],),
@@ -55730,6 +55869,10 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             empresa = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
                 (inmueble["empresa_id"],),
@@ -55785,6 +55928,10 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             empresa = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
@@ -55851,6 +55998,10 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             empresa = conn.execute(
                 "SELECT * FROM empresas WHERE id = ? LIMIT 1",
