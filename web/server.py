@@ -31294,6 +31294,7 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                     font_size = float(font_size)
                 except Exception:
                     font_size = 10
+                font_name = str(field.get("fontName") or field.get("font_name") or "Helvetica").strip() or "Helvetica"
                 flags = 4096 if multiline else 0  # Multiline
                 form.textfield(
                     name=name,
@@ -31307,7 +31308,7 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                     borderColor=None,
                     fillColor=None,
                     textColor=text_color,
-                    fontName="Helvetica",
+                    fontName=font_name,
                     fontSize=font_size,
                     fieldFlags=flags,
                 )
@@ -31756,12 +31757,17 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         provincia_clean = ""
     direccion_full = ", ".join([part for part in [direccion, locality, provincia_clean] if part]).strip() or direccion
 
-    ref_catastral = _pdf_form_value(inmueble.get("referencia_catastral"), "")
-    datos_registrales = _pdf_form_value(extra.get("datos_registrales"), "")
-    m2_construidos = _pdf_form_value(inmueble.get("m2"), "")
-    m2_utiles = _pdf_form_value(extra.get("m2_utiles"), "")
-    otros = _pdf_form_value(extra.get("otros"), "")
-    cargas = _pdf_form_value(extra.get("cargas"), "NADA")
+    def _style_value(value):
+        raw = _pdf_form_value(value, "")
+        return raw.upper() if raw else raw
+
+    direccion_full = _style_value(direccion_full)
+    ref_catastral = _style_value(inmueble.get("referencia_catastral"))
+    datos_registrales = _style_value(extra.get("datos_registrales"))
+    m2_construidos = _style_value(inmueble.get("m2"))
+    m2_utiles = _style_value(extra.get("m2_utiles"))
+    otros = _style_value(extra.get("otros"))
+    cargas = _style_value(extra.get("cargas") or "NADA")
 
     owner1 = owners[0] if len(owners) > 0 else {}
     owner2 = owners[1] if len(owners) > 1 else {}
@@ -31770,11 +31776,11 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         if not owner:
             return ""
         parts = []
-        nombre = _pdf_form_value(owner.get("nombre"), "")
-        nif = _pdf_form_value(owner.get("nif"), "")
-        dom = _pdf_form_value(owner.get("direccion") or owner.get("domicilio"), "")
-        tel = _pdf_form_value(owner.get("telefono"), "")
-        email_val = _pdf_form_value(owner.get("email"), "")
+        nombre = _style_value(owner.get("nombre"))
+        nif = _style_value(owner.get("nif"))
+        dom = _style_value(owner.get("direccion") or owner.get("domicilio"))
+        tel = _style_value(owner.get("telefono"))
+        email_val = _style_value(owner.get("email"))
         if nombre:
             parts.append(nombre)
         # Compactamos para que encaje en las cajas del template (evita solaparse).
@@ -31866,20 +31872,20 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         }
 
     if tipo_operacion == "alquiler":
-        precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
-        honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
-        plazo = _pdf_form_value(extra.get("plazo_arrendamiento"), "")
+        precio = _style_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"))
+        honorarios = _style_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"))
+        plazo = _style_value(extra.get("plazo_arrendamiento"))
     else:
-        precio = _pdf_form_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"), "")
-        honorarios = _pdf_form_value(extra.get("honorarios_text") or extra.get("honorarios_pct"), "")
+        precio = _style_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"))
+        honorarios = _style_value(extra.get("honorarios_text") or extra.get("honorarios_pct"))
         plazo = ""
 
-    fecha_venta_desde = _pdf_form_value(extra.get("fecha_venta_desde"), "")
-    fecha_venta_antes = _pdf_form_value(extra.get("fecha_venta_antes"), "")
-    fecha_inicio = _pdf_form_value(extra.get("fecha_inicio"), "")
-    fecha_fin = _pdf_form_value(extra.get("fecha_fin"), "")
-    lugar_firma = _pdf_form_value(extra.get("lugar_firma") or poblacion or provincia, "")
-    fecha_firma = _pdf_form_value(extra.get("fecha_firma"), "")
+    fecha_venta_desde = _style_value(extra.get("fecha_venta_desde"))
+    fecha_venta_antes = _style_value(extra.get("fecha_venta_antes"))
+    fecha_inicio = _style_value(extra.get("fecha_inicio"))
+    fecha_fin = _style_value(extra.get("fecha_fin"))
+    lugar_firma = _style_value(extra.get("lugar_firma") or poblacion or provincia)
+    fecha_firma = _style_value(extra.get("fecha_firma"))
 
     fields = {}
 
@@ -31887,27 +31893,27 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         w, h = pagesizes[0]
         # Coordenadas calculadas sobre plantilla Modernia venta (A4) usando bbox.
         fields[0] = [
-            {"name": "direccion", "x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full},
-            {"name": "datos_registrales", "x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales},
-            {"name": "ref_catastral", "x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral},
-            {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles},
-            {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos},
-            {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros},
-            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text, "multiline": True, "fontSize": 9},
-            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text, "multiline": True, "fontSize": 9},
-            {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas},
-            {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio},
-            {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde},
-            {"name": "fecha_venta_antes", "x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes},
-            {"name": "honorarios", "x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios},
-            {"name": "fecha_inicio", "x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio},
-            {"name": "fecha_fin", "x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin},
+            {"name": "direccion", "x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full, "fontName": "Helvetica-Bold"},
+            {"name": "datos_registrales", "x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales, "fontName": "Helvetica-Bold"},
+            {"name": "ref_catastral", "x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral, "fontName": "Helvetica-Bold"},
+            {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles, "fontName": "Helvetica-Bold"},
+            {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos, "fontName": "Helvetica-Bold"},
+            {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros, "fontName": "Helvetica-Bold"},
+            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text.upper(), "multiline": True, "fontSize": 9, "fontName": "Helvetica-Bold"},
+            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text.upper(), "multiline": True, "fontSize": 9, "fontName": "Helvetica-Bold"},
+            {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas, "fontName": "Helvetica-Bold"},
+            {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio, "fontName": "Helvetica-Bold"},
+            {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde, "fontName": "Helvetica-Bold"},
+            {"name": "fecha_venta_antes", "x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes, "fontName": "Helvetica-Bold"},
+            {"name": "honorarios", "x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios, "fontName": "Helvetica-Bold"},
+            {"name": "fecha_inicio", "x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio, "fontName": "Helvetica-Bold"},
+            {"name": "fecha_fin", "x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin, "fontName": "Helvetica-Bold"},
         ]
         if len(pagesizes) > 1:
             w2, h2 = pagesizes[1]
             fields[1] = [
-                {"name": "lugar_firma", "x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma},
-                {"name": "fecha_firma", "x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma},
+                {"name": "lugar_firma", "x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma, "fontName": "Helvetica-Bold"},
+                {"name": "fecha_firma", "x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma, "fontName": "Helvetica-Bold"},
             ]
     else:
         w, h = pagesizes[0]
@@ -31996,12 +32002,17 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
         provincia_clean = ""
     direccion_full = ", ".join([part for part in [direccion, locality, provincia_clean] if part]).strip() or direccion
 
-    ref_catastral = _pdf_form_value(inmueble.get("referencia_catastral"), "")
-    datos_registrales = _pdf_form_value(extra.get("datos_registrales"), "")
-    m2_construidos = _pdf_form_value(inmueble.get("m2"), "")
-    m2_utiles = _pdf_form_value(extra.get("m2_utiles"), "")
-    otros = _pdf_form_value(extra.get("otros"), "")
-    cargas = _pdf_form_value(extra.get("cargas"), "NADA")
+    def _style_value(value):
+        raw = _pdf_form_value(value, "")
+        return raw.upper() if raw else raw
+
+    direccion_full = _style_value(direccion_full)
+    ref_catastral = _style_value(inmueble.get("referencia_catastral"))
+    datos_registrales = _style_value(extra.get("datos_registrales"))
+    m2_construidos = _style_value(inmueble.get("m2"))
+    m2_utiles = _style_value(extra.get("m2_utiles"))
+    otros = _style_value(extra.get("otros"))
+    cargas = _style_value(extra.get("cargas") or "NADA")
 
     owner1 = owners[0] if len(owners) > 0 else {}
     owner2 = owners[1] if len(owners) > 1 else {}
@@ -32010,11 +32021,11 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
         if not owner:
             return ""
         parts = []
-        nombre = _pdf_form_value(owner.get("nombre"), "")
-        nif = _pdf_form_value(owner.get("nif"), "")
-        dom = _pdf_form_value(owner.get("direccion") or owner.get("domicilio"), "")
-        tel = _pdf_form_value(owner.get("telefono"), "")
-        email_val = _pdf_form_value(owner.get("email"), "")
+        nombre = _style_value(owner.get("nombre"))
+        nif = _style_value(owner.get("nif"))
+        dom = _style_value(owner.get("direccion") or owner.get("domicilio"))
+        tel = _style_value(owner.get("telefono"))
+        email_val = _style_value(owner.get("email"))
         if nombre:
             parts.append(nombre)
         if dom:
@@ -32104,20 +32115,20 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
         }
 
     if tipo_operacion == "alquiler":
-        precio = _pdf_form_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"), "")
-        honorarios = _pdf_form_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"), "")
-        plazo = _pdf_form_value(extra.get("plazo_arrendamiento"), "")
+        precio = _style_value(extra.get("renta_mensual") or extra.get("precio_alquiler") or captacion.get("precio_objetivo") or inmueble.get("precio_objetivo"))
+        honorarios = _style_value(extra.get("honorarios_mensualidades") or extra.get("honorarios_text"))
+        plazo = _style_value(extra.get("plazo_arrendamiento"))
     else:
-        precio = _pdf_form_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"), "")
-        honorarios = _pdf_form_value(extra.get("honorarios_text") or extra.get("honorarios_pct"), "")
+        precio = _style_value(extra.get("precio_venta") or inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo"))
+        honorarios = _style_value(extra.get("honorarios_text") or extra.get("honorarios_pct"))
         plazo = ""
 
-    fecha_venta_desde = _pdf_form_value(extra.get("fecha_venta_desde"), "")
-    fecha_venta_antes = _pdf_form_value(extra.get("fecha_venta_antes"), "")
-    fecha_inicio = _pdf_form_value(extra.get("fecha_inicio"), "")
-    fecha_fin = _pdf_form_value(extra.get("fecha_fin"), "")
-    lugar_firma = _pdf_form_value(extra.get("lugar_firma") or poblacion or provincia, "")
-    fecha_firma = _pdf_form_value(extra.get("fecha_firma"), "")
+    fecha_venta_desde = _style_value(extra.get("fecha_venta_desde"))
+    fecha_venta_antes = _style_value(extra.get("fecha_venta_antes"))
+    fecha_inicio = _style_value(extra.get("fecha_inicio"))
+    fecha_fin = _style_value(extra.get("fecha_fin"))
+    lugar_firma = _style_value(extra.get("lugar_firma") or poblacion or provincia)
+    fecha_firma = _style_value(extra.get("fecha_firma"))
 
     fields = {}
     if tipo_operacion == "venta":
@@ -32178,7 +32189,7 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
             {"x": 305, "y": 531, "width": 220, "height": 12, "value": o2["nif"], "fontSize": 9},
         ]
 
-    overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields)
+    overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold")
     if not overlay_bytes:
         return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
     merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
