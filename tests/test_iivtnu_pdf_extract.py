@@ -1,6 +1,6 @@
 import unittest
 
-from web.server import _iivtnu_extract_from_text
+from web.server import _iivtnu_extract_from_text, _iivtnu_load_tipo_gravamen_andalucia
 
 
 class IivtnuPdfExtractTests(unittest.TestCase):
@@ -204,3 +204,13 @@ class IivtnuPdfExtractTests(unittest.TestCase):
         self.assertAlmostEqual(float(out.get("tipo_gravamen_pct") or 0), 21.5, places=2)
         self.assertAlmostEqual(float(out.get("cuota_tributaria") or 0), 743.09, places=2)
         self.assertAlmostEqual(float(out.get("importe_total") or 0), 743.09, places=2)
+
+    def test_andalucia_tipo_catalog_loaded(self):
+        data = _iivtnu_load_tipo_gravamen_andalucia() or {}
+        self.assertTrue(isinstance(data, dict))
+        years = data.get("years") or {}
+        self.assertTrue(isinstance(years, dict))
+        self.assertTrue(bool(years))
+        ymap = next(iter(years.values())) or {}
+        self.assertTrue(isinstance(ymap, dict))
+        self.assertGreater(len(ymap), 100)

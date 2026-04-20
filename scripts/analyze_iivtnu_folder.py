@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 from web.server import (
     _iivtnu_extract_from_pdf,
-    _iivtnu_load_tipo_gravamen_malaga,
+    _iivtnu_load_tipo_gravamen_andalucia,
     _iivtnu_max_coefs_for_devengo,
     _iivtnu_objective_coef,
     PdfReader,
@@ -82,19 +82,21 @@ def derecho_factor(parsed):
     return 1.0, "pleno(unknown)"
 
 
-def tipo_malaga_por_ine(ine: str, devengo: date):
-    if not ine or not str(ine).zfill(5).startswith("29"):
+def tipo_andalucia_por_ine(ine: str, devengo: date):
+    if not ine:
         return None, "", ""
-    data = _iivtnu_load_tipo_gravamen_malaga() or {}
+    data = _iivtnu_load_tipo_gravamen_andalucia() or {}
     years = data.get("years") if isinstance(data, dict) else {}
     src_map = data.get("source") if isinstance(data, dict) else {}
     year_key = str(int(getattr(devengo, "year", 0) or 0))
     used_year = year_key
     cand_years = [year_key]
-    if year_key == "2025":
-        cand_years.append("2024")
-    if year_key == "2024":
-        cand_years.append("2025")
+    # fallback: último año disponible
+    try:
+        available = sorted([str(y) for y in (years.keys() if isinstance(years, dict) else [])], reverse=True)
+    except Exception:
+        available = []
+    cand_years.extend([y for y in available if y != year_key])
     tipo = None
     for y in cand_years:
         ymap = years.get(y) if isinstance(years, dict) else None
@@ -183,7 +185,7 @@ def calc_objetivo(parsed):
     tipo = money_or_none(parsed.get("tipo_gravamen_pct"))
     tipo_note = "tipo_from_pdf"
     if tipo is None and dev:
-        tipo2, label, _url = tipo_malaga_por_ine(str(parsed.get("municipio_ine") or ""), dev)
+        tipo2, label, _url = tipo_andalucia_por_ine(str(parsed.get("municipio_ine") or ""), dev)
         if tipo2 is not None:
             tipo = float(tipo2)
             tipo_note = f"tipo_catalog({label})" if label else "tipo_catalog"

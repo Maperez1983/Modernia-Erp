@@ -105,6 +105,8 @@ TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 NOTARIAS_MALAGA_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "notarias_malaga.txt"
 IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_malaga.min.json"
+IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH = ROOT.parent / "data" / "catalogos" / "iivtnu_tipo_gravamen_andalucia.min.json"
+INE_MUNICIPIOS_2026_PATH = ROOT.parent / "data" / "catalogos" / "ine_municipios_ine_2026.csv"
 ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
@@ -5240,6 +5242,9 @@ def load_postal_catalog(conn):
 _IIVTNU_POSTAL_CACHE_LOCK = threading.Lock()
 _IIVTNU_POSTAL_CACHE = None  # {"cp_to": {cp: ine}, "ine_to": {ine: name}, "prov_to": {ine: provincia}}
 _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_malaga.min.json`
+_IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = None  # contents of `data/catalogos/iivtnu_tipo_gravamen_andalucia.min.json`
+_IIVTNU_INE_MUNICIPIOS_CACHE_LOCK = threading.Lock()
+_IIVTNU_INE_MUNICIPIOS_CACHE = None  # {"ine_to":{}, "prov_to":{}, "nameprov_to":{}}
 
 
 def ensure_iivtnu_schema(conn):
@@ -5289,6 +5294,7 @@ def _iivtnu_norm_text(value):
     raw = unicodedata.normalize("NFD", raw)
     raw = "".join(ch for ch in raw if unicodedata.category(ch) != "Mn")
     raw = raw.replace("’", "").replace("'", "")
+    raw = raw.replace("-", " ")
     raw = re.sub(r"\s+", " ", raw)
     return raw.strip()
 
@@ -5374,6 +5380,62 @@ def _iivtnu_load_tipo_gravamen_malaga():
         data = {}
     _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE = data
     return _IIVTNU_TIPO_GRAVAMEN_MALAGA_CACHE
+
+
+def _iivtnu_load_ine_municipios_cache():
+    global _IIVTNU_INE_MUNICIPIOS_CACHE
+    if _IIVTNU_INE_MUNICIPIOS_CACHE is not None:
+        return _IIVTNU_INE_MUNICIPIOS_CACHE
+    with _IIVTNU_INE_MUNICIPIOS_CACHE_LOCK:
+        if _IIVTNU_INE_MUNICIPIOS_CACHE is not None:
+            return _IIVTNU_INE_MUNICIPIOS_CACHE
+        cache = {"ine_to": {}, "prov_to": {}, "nameprov_to": {}}
+        try:
+            if not INE_MUNICIPIOS_2026_PATH.exists():
+                _IIVTNU_INE_MUNICIPIOS_CACHE = cache
+                return _IIVTNU_INE_MUNICIPIOS_CACHE
+            with INE_MUNICIPIOS_2026_PATH.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    ine = str(row.get("municipio_id") or "").strip().zfill(5)
+                    nombre = str(row.get("nombre") or "").strip()
+                    provincia = str(row.get("provincia_nombre") or row.get("provincia") or "").strip()
+                    if not ine or not nombre:
+                        continue
+                    if not provincia:
+                        prov_id = str(row.get("provincia_id") or "").strip().zfill(2)
+                        provincia = POSTAL_PROVINCES.get(prov_id, "") if prov_id else ""
+                    cache["ine_to"][ine] = nombre
+                    cache["prov_to"][ine] = provincia or ""
+                    key = (_iivtnu_norm_text(nombre), _iivtnu_norm_text(provincia))
+                    if key[0] and key[1] and key not in cache["nameprov_to"]:
+                        cache["nameprov_to"][key] = ine
+                    # Variantes “Apellido, Artículo” → “Artículo Apellido”.
+                    for v in _iivtnu_postal_variants(nombre):
+                        k2 = (_iivtnu_norm_text(v), _iivtnu_norm_text(provincia))
+                        if k2[0] and k2[1] and k2 not in cache["nameprov_to"]:
+                            cache["nameprov_to"][k2] = ine
+        except Exception:
+            pass
+        _IIVTNU_INE_MUNICIPIOS_CACHE = cache
+        return _IIVTNU_INE_MUNICIPIOS_CACHE
+
+
+def _iivtnu_load_tipo_gravamen_andalucia():
+    global _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE
+    if _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE is not None:
+        return _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE
+    try:
+        if not IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH.exists():
+            _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = {}
+            return _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE
+        data = json.loads(IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE = data
+    return _IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_CACHE
 
 
 IIVTNU_MAX_COEFS_RDL_8_2023_2024 = {
@@ -5554,11 +5616,12 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
     if seeded_count >= 50:
         return
 
-    postal = _iivtnu_load_postal_cache()
-    ine_to = postal.get("ine_to") or {}
-    prov_to = postal.get("prov_to") or {}
+    ine_cache = _iivtnu_load_ine_municipios_cache()
+    ine_to = ine_cache.get("ine_to") or {}
+    prov_to = ine_cache.get("prov_to") or {}
     malaga_ines = []
     for ine, nombre in sorted(ine_to.items()):
+        ine = str(ine).zfill(5)
         if not str(ine).startswith("29") or (prov_to.get(ine) or "") != "Málaga":
             continue
         malaga_ines.append(str(ine))
@@ -5713,11 +5776,11 @@ def _iivtnu_seed_andalucia(conn, now_iso=None):
     if existing:
         return
 
-    postal = _iivtnu_load_postal_cache()
-    ine_to = postal.get("ine_to") or {}
-    prov_to = postal.get("prov_to") or {}
+    ine_cache = _iivtnu_load_ine_municipios_cache()
+    ine_to = ine_cache.get("ine_to") or {}
+    prov_to = ine_cache.get("prov_to") or {}
     for ine, nombre in sorted(ine_to.items()):
-        provincia = prov_to.get(ine) or ""
+        provincia = prov_to.get(str(ine).zfill(5)) or ""
         if not _iivtnu_is_andalucia_province(provincia):
             continue
         es_capital = 1 if _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
@@ -5727,7 +5790,7 @@ def _iivtnu_seed_andalucia(conn, now_iso=None):
                 INSERT INTO iivtnu_municipios (ine, nombre, provincia, comunidad, es_capital, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (str(ine), str(nombre), str(provincia), "Andalucía", es_capital, now_iso, now_iso),
+                (str(ine).zfill(5), str(nombre), str(provincia), "Andalucía", es_capital, now_iso, now_iso),
             )
         except Exception:
             pass
@@ -6474,16 +6537,29 @@ def _iivtnu_extract_from_text(text: str, filename: str = "") -> dict:
         provincia = ""
     if not municipio_ine and municipio:
         try:
-            postal = _iivtnu_load_postal_cache()
             target = _iivtnu_norm_text(municipio)
-            for ine, nombre in (postal.get("ine_to") or {}).items():
-                for cand in _iivtnu_postal_variants(nombre):
-                    if _iivtnu_norm_text(cand) == target:
-                        municipio_ine = str(ine)
-                        provincia = str((postal.get("prov_to") or {}).get(ine) or "").strip()
+            ine_cache = _iivtnu_load_ine_municipios_cache()
+            found = (ine_cache.get("nameprov_to") or {}).get((target, _iivtnu_norm_text(provincia))) if provincia else ""
+            if not found:
+                # Si no tenemos provincia, intentamos match por nombre exacto dentro de Andalucía (suficiente para este motor).
+                for (name_norm, prov_norm), ine in (ine_cache.get("nameprov_to") or {}).items():
+                    if name_norm == target and prov_norm in _IIVTNU_ANDALUCIA_PROVINCES_NORM:
+                        found = ine
                         break
-                if municipio_ine:
-                    break
+            if found:
+                municipio_ine = str(found).zfill(5)
+                provincia = str((ine_cache.get("prov_to") or {}).get(municipio_ine) or "").strip()
+            else:
+                # Fallback legacy: catálogo postal (puede estar incompleto).
+                postal = _iivtnu_load_postal_cache()
+                for ine, nombre in (postal.get("ine_to") or {}).items():
+                    for cand in _iivtnu_postal_variants(nombre):
+                        if _iivtnu_norm_text(cand) == target:
+                            municipio_ine = str(ine).zfill(5)
+                            provincia = str((postal.get("prov_to") or {}).get(ine) or "").strip()
+                            break
+                    if municipio_ine:
+                        break
         except Exception:
             pass
 
@@ -19952,7 +20028,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
           )
         )
         ORDER BY cliente_id ASC,
-                 COALESCE(NULLIF(TRIM(COALESCE(fecha, '')), ''), '0001-01-01') DESC,
+                 COALESCE(NULLIF(TRIM(COALESCE(CAST(fecha AS TEXT), '')), ''), '0001-01-01') DESC,
                  updated_at DESC
         """,
         tuple(doc_id_values + selected_cliente_ids + ref_id_values),
@@ -33793,7 +33869,7 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                     Handler._record_api_error(self.path, exc)
-                    json_response(self, {"error": "API error"}, status=500)
+                    json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
             return
 
         if parsed.path == "/kiosk":
@@ -34831,16 +34907,16 @@ class Handler(BaseHTTPRequestHandler):
                         }
                     )
             else:
-                # Fallback: si no hay seed en DB (o falla la tabla), devolvemos del catálogo postal.
-                postal = _iivtnu_load_postal_cache()
-                ine_to = postal.get("ine_to") or {}
-                prov_to = postal.get("prov_to") or {}
+                # Fallback: si no hay seed en DB (o falla la tabla), devolvemos del catálogo INE (completo).
+                ine_cache = _iivtnu_load_ine_municipios_cache()
+                ine_to = ine_cache.get("ine_to") or {}
+                prov_to = ine_cache.get("prov_to") or {}
                 for ine, nombre in sorted(ine_to.items(), key=lambda kv: _iivtnu_norm_text(kv[1])):
-                    provincia = prov_to.get(ine) or ""
+                    provincia = prov_to.get(str(ine).zfill(5)) or ""
                     if not _iivtnu_is_andalucia_province(provincia):
                         continue
                     es_capital = 1 if _iivtnu_norm_text(nombre) == _iivtnu_norm_text(provincia) else 0
-                    items.append({"ine": str(ine), "nombre": str(nombre), "provincia": str(provincia), "comunidad": "Andalucía", "es_capital": es_capital})
+                    items.append({"ine": str(ine).zfill(5), "nombre": str(nombre), "provincia": str(provincia), "comunidad": "Andalucía", "es_capital": es_capital})
             json_response(self, {"ok": True, "items": items})
             return
 
@@ -35072,9 +35148,33 @@ class Handler(BaseHTTPRequestHandler):
                 source_label = "Manual"
                 source_url = ""
             if tipo_gravamen_pct is None:
-                if str(municipio_ine).startswith("29"):
-                    tipo_data = _iivtnu_load_tipo_gravamen_malaga()
+                prov_for_tipo = ""
+                try:
+                    prow = conn.execute("SELECT provincia FROM iivtnu_municipios WHERE ine = ? LIMIT 1", (str(municipio_ine).zfill(5),)).fetchone()
+                    if prow:
+                        if isinstance(prow, dict):
+                            prov_for_tipo = str(prow.get("provincia") or "").strip()
+                        else:
+                            prov_for_tipo = str(prow[0] or "").strip()
+                except Exception:
+                    prov_for_tipo = ""
+                if not prov_for_tipo:
+                    try:
+                        ine_cache = _iivtnu_load_ine_municipios_cache()
+                        prov_for_tipo = str((ine_cache.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+                    except Exception:
+                        prov_for_tipo = ""
+                if not prov_for_tipo:
+                    try:
+                        postal = _iivtnu_load_postal_cache()
+                        prov_for_tipo = str((postal.get("prov_to") or {}).get(str(municipio_ine).zfill(5)) or "").strip()
+                    except Exception:
+                        prov_for_tipo = ""
+
+                if _iivtnu_is_andalucia_province(prov_for_tipo):
+                    tipo_data = _iivtnu_load_tipo_gravamen_andalucia()
                     years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
+                    missing_tipo_map = (tipo_data.get("missing_tipo") if isinstance(tipo_data, dict) else {}) or {}
                     year_key = str(devengo.year)
                     available_years = []
                     try:
@@ -35084,14 +35184,15 @@ class Handler(BaseHTTPRequestHandler):
                     candidates = [year_key] + [y for y in available_years if y != year_key]
                     used_year = None
                     tipo_found = None
+                    ine_key = str(municipio_ine).zfill(5)
                     for cand_year in candidates:
                         ymap = years_map.get(cand_year) if isinstance(years_map, dict) else None
                         if not isinstance(ymap, dict):
                             continue
-                        raw = ymap.get(str(municipio_ine).zfill(5))
-                        if raw is None:
+                        raw = ymap.get(ine_key)
+                        if raw is None and ine_key.isdigit():
                             try:
-                                raw = ymap.get(str(int(str(municipio_ine))))
+                                raw = ymap.get(str(int(ine_key)))
                             except Exception:
                                 raw = None
                         if raw is None:
@@ -35109,13 +35210,16 @@ class Handler(BaseHTTPRequestHandler):
                         if used_year != year_key:
                             tipo_is_estimated = True
                     else:
+                        # Si el INE está marcado como “sin dato” en OTA, informamos y dejamos 30% como proxy.
+                        miss_list = missing_tipo_map.get(year_key) if isinstance(missing_tipo_map, dict) else None
+                        if isinstance(miss_list, list) and ine_key in {str(x).zfill(5) for x in miss_list}:
+                            source_label = "OTA Málaga: sin dato (usa manual o proxy)"
                         tipo_gravamen_pct = 30.0
                         tipo_is_estimated = True
 
                     source_map = (tipo_data.get("source") if isinstance(tipo_data, dict) else {}) or {}
                     src = source_map.get(used_year or year_key) if isinstance(source_map, dict) else None
                     if not isinstance(src, dict) and isinstance(source_map, dict):
-                        # fallback razonable (último año publicado)
                         try:
                             src = source_map.get(available_years[0]) if available_years else None
                         except Exception:
@@ -35125,6 +35229,9 @@ class Handler(BaseHTTPRequestHandler):
                         source_url = str(src.get("url") or "").strip()
                         if used_year and used_year != year_key:
                             source_label = f"{source_label} (proxy para {year_key}; sin dato {year_key})".strip()
+                    if str(municipio_ine).zfill(5) == "29067":
+                        source_label = "Ayto Málaga · Ordenanza Nº 5 IIVTNU (DocumentoNormativa688)"
+                        source_url = "https://www.malaga.eu/visorcontenido/NRMDocumentDisplayer/688/DocumentoNormativa688"
                 else:
                     tipo_gravamen_pct = 30.0
                     tipo_is_estimated = True
