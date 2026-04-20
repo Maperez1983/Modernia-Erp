@@ -4459,6 +4459,56 @@ const getWeekStart = (date) => {
   return day;
 };
 
+const hashHue = (value) => {
+  const text = String(value || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash % 360;
+};
+
+const agendaColorVarsForResponsible = (responsable) => {
+  const raw = String(responsable || "").trim();
+  if (!raw) {
+    return { bg: "rgba(248, 250, 252, 0.95)", border: "rgba(15, 23, 42, 0.18)" };
+  }
+  const hue = hashHue(normalizeSimple(raw));
+  return {
+    bg: `hsla(${hue}, 80%, 90%, 0.96)`,
+    border: `hsla(${hue}, 65%, 40%, 0.90)`,
+  };
+};
+
+const resolveAgendaTipoBadge = (tipoRaw) => {
+  const tipo = normalizeSimple(tipoRaw || "");
+  if (!tipo) return "CITA";
+  if (tipo.includes("cita")) return "CITA";
+  if (tipo.includes("llamada") || tipo.includes("call")) return "LLAM.";
+  if (tipo.includes("whatsapp") || tipo === "wa") return "WA";
+  if (tipo.includes("email") || tipo.includes("mail") || tipo.includes("correo")) return "MAIL";
+  if (tipo.includes("tarea")) return "TAREA";
+  return "ACT.";
+};
+
+const resolveAgendaTipoKey = (tipoRaw) => {
+  const tipo = normalizeSimple(tipoRaw || "");
+  if (!tipo) return "cita";
+  if (tipo.includes("cita")) return "cita";
+  if (
+    tipo.includes("llamada") ||
+    tipo.includes("call") ||
+    tipo.includes("whatsapp") ||
+    tipo.includes("email") ||
+    tipo.includes("mail") ||
+    tipo.includes("correo")
+  ) {
+    return "tarea";
+  }
+  if (tipo.includes("tarea")) return "tarea";
+  return "actividad";
+};
+
 const buildAgendaEvents = (rows = [], serviceId = "", serviceLabel = "") => {
   return rows
     .map((row) => {
@@ -41736,6 +41786,7 @@ const normalizeCrmAgendaView = (raw) => {
   if (value === "list" || value === "lista") return "list";
   if (value === "day" || value === "dia" || value === "d\u00eda") return "day";
   if (value === "week" || value === "semana") return "week";
+  if (value === "month" || value === "mes" || value === "meses") return "month";
   return "week";
 };
 
@@ -42427,17 +42478,24 @@ const renderCrmAgendaCalendar = (rows = []) => {
 	    return placed;
 	  };
 
-  const buildAgendaEventButton = (row, { className = "" } = {}) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = `${className} tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`.trim();
-    const asunto = String(row.asunto || row.tipo || "Cita").trim();
-    const cliente = String(row.cliente || "").trim();
-    const when = String(row.hora || "").trim() || "—";
-    btn.innerHTML = `<div class="tc-agenda-event-time">${escapeHtml(when)}</div><div class="tc-agenda-event-title">${escapeHtml(asunto)}</div>${cliente ? `<div class="tc-agenda-event-meta">${escapeHtml(cliente)}</div>` : ""}`;
-    btn.addEventListener("click", () => openCrmAgendaEditModal(row));
-    return btn;
-  };
+	  const buildAgendaEventButton = (row, { className = "" } = {}) => {
+	    const btn = document.createElement("button");
+	    btn.type = "button";
+	    const tipoKey = resolveAgendaTipoKey(row?.tipo || row?.asunto || "");
+	    btn.className = `${className} tc-agenda-event--${tipoKey} tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`.trim();
+	    const asunto = String(row.asunto || row.tipo || "Cita").trim();
+	    const cliente = String(row.cliente || "").trim();
+	    const when = String(row.hora || "").trim() || "—";
+	    const responsable = String(row.responsable || "").trim();
+	    const meta = cliente || responsable;
+	    const badge = resolveAgendaTipoBadge(row?.tipo || row?.asunto || "");
+	    const colors = agendaColorVarsForResponsible(responsable);
+	    btn.style.setProperty("--tc-ev-bg", colors.bg);
+	    btn.style.setProperty("--tc-ev-border", colors.border);
+	    btn.innerHTML = `<div class="tc-agenda-event-time">${escapeHtml(when)}${badge ? ` <span class="tc-agenda-event-badge">${escapeHtml(badge)}</span>` : ""}</div><div class="tc-agenda-event-title">${escapeHtml(asunto)}</div>${meta ? `<div class="tc-agenda-event-meta">${escapeHtml(meta)}</div>` : ""}`;
+	    btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+	    return btn;
+	  };
 
 	  const buildUserSectionTitle = (name, count) => {
 	    const h = document.createElement("div");
@@ -42458,12 +42516,65 @@ const renderCrmAgendaCalendar = (rows = []) => {
 	    return `${cap} ${day}`.trim();
 	  };
 
-  const sameUser = (row, userName) => normalizeResponsibleKey(row) === normalizePersonKey(userName);
+  const calendarWrap = document.createElement("div");
+  calendarWrap.className = "tc-agenda-users";
 
-  const usersWrap = document.createElement("div");
-  usersWrap.className = "tc-agenda-users";
+  if (view === "month") {
+    const monthStart = new Date(anchor);
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const gridStart = getWeekStart(monthStart);
+    const monthGrid = document.createElement("div");
+    monthGrid.className = "tc-month-grid";
+    const dows = ["L", "M", "X", "J", "V", "S", "D"];
+    dows.forEach((label) => {
+      const head = document.createElement("div");
+      head.className = "tc-month-head";
+      head.textContent = label;
+      monthGrid.appendChild(head);
+    });
+    for (let i = 0; i < 42; i += 1) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      const dateKey = formatAgendaDate(d);
+      const inMonth = d.getMonth() === anchor.getMonth();
+      const cell = document.createElement("div");
+      cell.className = `tc-month-cell${inMonth ? "" : " outside"}`.trim();
+      const dayBtn = document.createElement("button");
+      dayBtn.type = "button";
+      dayBtn.className = "tc-month-day";
+      dayBtn.textContent = String(d.getDate());
+      dayBtn.addEventListener("click", () => {
+        setCrmAgendaAnchorDay(dateKey);
+        setCrmAgendaView("day");
+      });
+      cell.appendChild(dayBtn);
 
-  if (view === "week") {
+      const dayEvents = baseFiltered
+        .filter((row) => String(row?.fecha || "").slice(0, 10) === dateKey)
+        .slice()
+        .sort((a, b) => String(a.hora || "").localeCompare(String(b.hora || "")));
+      const list = document.createElement("div");
+      list.className = "tc-month-events";
+      dayEvents.slice(0, 3).forEach((row) => {
+        const btn = buildAgendaEventButton(row, { className: "tc-month-event" });
+        list.appendChild(btn);
+      });
+      if (dayEvents.length > 3) {
+        const more = document.createElement("div");
+        more.className = "tc-month-more";
+        more.textContent = `+${dayEvents.length - 3}`;
+        list.appendChild(more);
+      }
+      cell.appendChild(list);
+      cell.addEventListener("dblclick", (event) => {
+        if (event.target && event.target.closest && event.target.closest("button")) return;
+        openNewFromGrid(dateKey, 9 * 60, "inmobiliaria");
+      });
+      monthGrid.appendChild(cell);
+    }
+    calendarWrap.appendChild(monthGrid);
+  } else if (view === "week") {
     const weekStart = getWeekStart(anchor);
     const dayKeys = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
@@ -42477,67 +42588,61 @@ const renderCrmAgendaCalendar = (rows = []) => {
     const bounds = computeTimeBounds(rangeEvents);
     const { axis: axisBase, bodyHeight } = buildTimeAxis(bounds);
 
-    peopleSafe.forEach((userName) => {
-      const section = document.createElement("div");
-      section.className = "tc-agenda-user-section";
-	      const userCount = rangeEvents.filter((row) => sameUser(row, userName)).length;
-	      section.appendChild(buildUserSectionTitle(userName, userCount));
+    const section = document.createElement("div");
+    section.className = "tc-agenda-user-section";
+    const scroll = document.createElement("div");
+    scroll.className = "tc-weektime-scroll";
 
-      const scroll = document.createElement("div");
-      scroll.className = "tc-weektime-scroll";
+    const grid = document.createElement("div");
+    grid.className = "tc-weektime-grid";
+    grid.style.gridTemplateColumns = "72px repeat(7, minmax(0, 1fr))";
+    grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
 
-      const grid = document.createElement("div");
-      grid.className = "tc-weektime-grid";
-      grid.style.gridTemplateColumns = "72px repeat(7, minmax(0, 1fr))";
-      grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
+    const corner = document.createElement("div");
+    corner.className = "tc-weektime-corner";
+    grid.appendChild(corner);
 
-      const corner = document.createElement("div");
-      corner.className = "tc-weektime-corner";
-      grid.appendChild(corner);
-
-	      dayKeys.forEach(({ date: day }) => {
-	        const head = document.createElement("div");
-	        head.className = "tc-weektime-head";
-	        head.textContent = compactWeekHead(day);
-	        grid.appendChild(head);
-	      });
-
-      const axis = axisBase.cloneNode(true);
-      grid.appendChild(axis);
-
-      dayKeys.forEach(({ key }) => {
-        const col = document.createElement("div");
-        col.className = "tc-weektime-col";
-        col.style.height = `${bodyHeight}px`;
-        col.addEventListener("click", (event) => {
-          if (shouldIgnoreGridClick(event)) return;
-          const minutes = resolveGridClickMinutes(event, col, bounds);
-          const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
-          openNewFromGrid(key, snapped, "inmobiliaria");
-        });
-        const dayEvents = rangeEvents
-          .filter((row) => String(row?.fecha || "").slice(0, 10) === key)
-          .filter((row) => sameUser(row, userName))
-          .slice()
-          .sort((a, b) => String(a.hora || "").localeCompare(String(b.hora || "")));
-        const placed = layoutOverlaps(dayEvents, bounds);
-        placed.forEach(({ row, lane, laneCount }) => {
-          const { top, height } = computeEventBox(row, bounds);
-          const btn = buildAgendaEventButton(row, { className: "tc-weektime-event" });
-          const w = 100 / laneCount;
-          btn.style.left = `calc(${(lane * w).toFixed(4)}% + 4px)`;
-          btn.style.width = `calc(${w.toFixed(4)}% - 8px)`;
-          btn.style.top = `${top}px`;
-          btn.style.height = `${height}px`;
-          col.appendChild(btn);
-        });
-        grid.appendChild(col);
-      });
-
-      scroll.appendChild(grid);
-      section.appendChild(scroll);
-      usersWrap.appendChild(section);
+    dayKeys.forEach(({ date: day }) => {
+      const head = document.createElement("div");
+      head.className = "tc-weektime-head";
+      head.textContent = compactWeekHead(day);
+      grid.appendChild(head);
     });
+
+    const axis = axisBase.cloneNode(true);
+    grid.appendChild(axis);
+
+    dayKeys.forEach(({ key }) => {
+      const col = document.createElement("div");
+      col.className = "tc-weektime-col";
+      col.style.height = `${bodyHeight}px`;
+      col.addEventListener("click", (event) => {
+        if (shouldIgnoreGridClick(event)) return;
+        const minutes = resolveGridClickMinutes(event, col, bounds);
+        const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+        openNewFromGrid(key, snapped, "inmobiliaria");
+      });
+      const dayEvents = rangeEvents
+        .filter((row) => String(row?.fecha || "").slice(0, 10) === key)
+        .slice()
+        .sort((a, b) => String(a.hora || "").localeCompare(String(b.hora || "")));
+      const placed = layoutOverlaps(dayEvents, bounds);
+      placed.forEach(({ row, lane, laneCount }) => {
+        const { top, height } = computeEventBox(row, bounds);
+        const btn = buildAgendaEventButton(row, { className: "tc-weektime-event" });
+        const w = 100 / laneCount;
+        btn.style.left = `calc(${(lane * w).toFixed(4)}% + 4px)`;
+        btn.style.width = `calc(${w.toFixed(4)}% - 8px)`;
+        btn.style.top = `${top}px`;
+        btn.style.height = `${height}px`;
+        col.appendChild(btn);
+      });
+      grid.appendChild(col);
+    });
+
+    scroll.appendChild(grid);
+    section.appendChild(scroll);
+    calendarWrap.appendChild(section);
   } else {
     const dayKey = formatAgendaDate(anchor);
     const dayRows = baseFiltered
@@ -42547,68 +42652,62 @@ const renderCrmAgendaCalendar = (rows = []) => {
     const bounds = computeTimeBounds(dayRows);
     const { axis: axisBase, bodyHeight } = buildTimeAxis(bounds);
 
-    peopleSafe.forEach((userName) => {
-      const section = document.createElement("div");
-      section.className = "tc-agenda-user-section";
-	      const userCount = dayRows.filter((row) => sameUser(row, userName)).length;
-	      section.appendChild(buildUserSectionTitle(userName, userCount));
+    const section = document.createElement("div");
+    section.className = "tc-agenda-user-section";
+    const scroll = document.createElement("div");
+    scroll.className = "tc-dayone-scroll";
 
-      const scroll = document.createElement("div");
-      scroll.className = "tc-dayone-scroll";
+    const grid = document.createElement("div");
+    grid.className = "tc-dayone-grid";
+    grid.style.gridTemplateColumns = "72px minmax(0, 1fr)";
+    grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
 
-      const grid = document.createElement("div");
-      grid.className = "tc-dayone-grid";
-      grid.style.gridTemplateColumns = "72px minmax(0, 1fr)";
-      grid.style.gridTemplateRows = `${GRID_HEAD_H}px auto`;
+    const corner = document.createElement("div");
+    corner.className = "tc-dayone-corner";
+    grid.appendChild(corner);
 
-      const corner = document.createElement("div");
-      corner.className = "tc-dayone-corner";
-      grid.appendChild(corner);
+    const head = document.createElement("div");
+    head.className = "tc-dayone-head";
+    head.textContent = anchor.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long" });
+    grid.appendChild(head);
 
-	      const head = document.createElement("div");
-	      head.className = "tc-dayone-head";
-	      head.textContent = anchor.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long" });
-	      grid.appendChild(head);
-
-	      const axis = axisBase.cloneNode(true);
-	      axis.addEventListener("click", (event) => {
-	        const row = closestFromEvent(event, ".tc-time-row");
-	        if (!row) return;
-	        const minutes = parseTimeToMinutes(row.textContent);
-	        openNewFromGrid(dayKey, minutes, "inmobiliaria");
-	      });
-	      grid.appendChild(axis);
-
-      const col = document.createElement("div");
-      col.className = "tc-dayone-col";
-      col.style.height = `${bodyHeight}px`;
-      col.addEventListener("click", (event) => {
-        if (shouldIgnoreGridClick(event)) return;
-        const minutes = resolveGridClickMinutes(event, col, bounds);
-        const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
-        openNewFromGrid(dayKey, snapped, "inmobiliaria");
-      });
-      const events = dayRows.filter((row) => sameUser(row, userName));
-      const placed = layoutOverlaps(events, bounds);
-      placed.forEach(({ row, lane, laneCount }) => {
-        const { top, height } = computeEventBox(row, bounds);
-        const btn = buildAgendaEventButton(row, { className: "tc-dayone-event" });
-        const w = 100 / laneCount;
-        btn.style.left = `calc(${(lane * w).toFixed(4)}% + 4px)`;
-        btn.style.width = `calc(${w.toFixed(4)}% - 8px)`;
-        btn.style.top = `${top}px`;
-        btn.style.height = `${height}px`;
-        col.appendChild(btn);
-      });
-      grid.appendChild(col);
-
-      scroll.appendChild(grid);
-      section.appendChild(scroll);
-      usersWrap.appendChild(section);
+    const axis = axisBase.cloneNode(true);
+    axis.addEventListener("click", (event) => {
+      const row = closestFromEvent(event, ".tc-time-row");
+      if (!row) return;
+      const minutes = parseTimeToMinutes(row.textContent);
+      openNewFromGrid(dayKey, minutes, "inmobiliaria");
     });
+    grid.appendChild(axis);
+
+    const col = document.createElement("div");
+    col.className = "tc-dayone-col";
+    col.style.height = `${bodyHeight}px`;
+    col.addEventListener("click", (event) => {
+      if (shouldIgnoreGridClick(event)) return;
+      const minutes = resolveGridClickMinutes(event, col, bounds);
+      const snapped = minutes === null ? null : Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+      openNewFromGrid(dayKey, snapped, "inmobiliaria");
+    });
+    const placed = layoutOverlaps(dayRows, bounds);
+    placed.forEach(({ row, lane, laneCount }) => {
+      const { top, height } = computeEventBox(row, bounds);
+      const btn = buildAgendaEventButton(row, { className: "tc-dayone-event" });
+      const w = 100 / laneCount;
+      btn.style.left = `calc(${(lane * w).toFixed(4)}% + 4px)`;
+      btn.style.width = `calc(${w.toFixed(4)}% - 8px)`;
+      btn.style.top = `${top}px`;
+      btn.style.height = `${height}px`;
+      col.appendChild(btn);
+    });
+    grid.appendChild(col);
+
+    scroll.appendChild(grid);
+    section.appendChild(scroll);
+    calendarWrap.appendChild(section);
   }
 
-  right.appendChild(usersWrap);
+  right.appendChild(calendarWrap);
 
   shell.appendChild(right);
   crmAgendaCalendar.appendChild(shell);

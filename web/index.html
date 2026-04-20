@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=210" />
+				    <link rel="stylesheet" href="styles.css?v=211" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3447,11 +3447,12 @@
 						                        <option value="financiacion">Financiación</option>
 						                        <option value="otros">Otros</option>
 						                      </select>
-						                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
-						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="list">Lista</button>
-						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
-						                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
-						                      </div>
+							                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
+							                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="list">Lista</button>
+							                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
+							                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
+							                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="month">Mes</button>
+							                      </div>
 				                      <div class="tc-agenda-nav hidden" id="crmAgendaNav" aria-label="Navegación agenda">
 				                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
 				                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>
@@ -9416,11 +9417,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=590"></script>
+				    <script src="app.js?v=592"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=203";
+				        const TARGET_SW = "/sw.js?v=205";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
