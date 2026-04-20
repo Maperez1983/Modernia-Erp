@@ -54,8 +54,10 @@ def main() -> int:
     sys.path.insert(0, str(root))
 
     from web.server import (  # pylint: disable=import-error
+        build_inmueble_catastro_sheet_pdf,
         build_inmueble_consumo_sale_price_note_pdf,
         build_inmueble_consumo_sale_sheet_pdf,
+        build_inmueble_consumo_rental_dia_pdf,
         build_inmueble_honorarios_ack_pdf_editable,
         build_inmueble_negotiation_offer_pdf,
         build_inmueble_nota_encargo_pdf_editable,
@@ -173,6 +175,28 @@ def main() -> int:
     jobs.append(("05_nota_precio_forma_pago.pdf", build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion)))
     jobs.append(("06_nota_encargo_venta_editable.pdf", build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owners, extra=extra_encargo)))
     jobs.append(("07_nota_encargo_venta_final.pdf", build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, extra=extra_encargo)))
+    jobs.append(("08_dia_alquiler.pdf", build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs)))
+    jobs.append(
+        (
+            "09_ficha_catastral.pdf",
+            build_inmueble_catastro_sheet_pdf(
+                company,
+                inmueble,
+                {
+                    "referencia_catastral": inmueble.get("referencia_catastral"),
+                    "localizacion": inmueble.get("direccion"),
+                    "superficie_construida_m2": inmueble.get("m2"),
+                    "superficie_grafica_m2": "120",
+                    "anio_construccion": "1998",
+                    "coef_participacion": "2.34%",
+                    "uso": "Residencial",
+                    "referencia_parcela": str(inmueble.get("referencia_catastral") or "")[:14],
+                    "tipo_parcela": "Urbana",
+                    "localizacion_parcela": inmueble.get("poblacion") or "",
+                },
+            ),
+        )
+    )
 
     created: list[Path] = []
     for filename, pdf_bytes in jobs:
@@ -192,4 +216,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

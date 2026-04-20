@@ -32633,6 +32633,128 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
     return buffer.getvalue()
 
 
+def _company_uses_modernia_pdf_brand(company):
+    company = company or {}
+    name = str(company.get("nombre") or "").strip().lower()
+    logo_url = str(company.get("logo_url") or "").strip().lower()
+    return ("modernia" in name) or ("modernia" in logo_url) or ("grupo_modernia" in logo_url)
+
+
+def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
+    """
+    Variante de `build_branded_document_pdf` con estética Modernia (logo + banda dorada con título).
+    Se usa para documentos generados (no basados en plantilla) para mantener consistencia visual.
+    """
+    footer_lines = footer_lines or []
+    company = company or {}
+
+    page_width, page_height = 1240, 1754
+    margin_x, top_margin, bottom_margin = 90, 60, 90
+    content_width = page_width - (margin_x * 2)
+    logo_url = brand_logo_url or company.get("logo_url") or "/assets/grupo_modernia_logo.png"
+    # El logo del template Modernia es relativamente compacto; limitamos ancho para evitar solapes.
+    logo = _load_brand_logo(logo_url, max_width=340)
+
+    # Paleta aproximada del template Modernia.
+    gold = (200, 162, 74)
+    olive = (116, 125, 106)
+    ink = (25, 28, 31)
+    muted = (110, 116, 120)
+    bg = "white"
+
+    font_title = _document_font(30, bold=True)
+    font_subtitle = _document_font(16, bold=False)
+    font_section = _document_font(22, bold=True)
+    font_body = _document_font(17, bold=False)
+    font_footer = _document_font(15, bold=False)
+    font_header_small = _document_font(14, bold=False)
+
+    company_head = str(company.get("razon_social") or company.get("nombre") or "").strip()
+    company_nif = str(company.get("nif") or company.get("cif") or "").strip()
+    company_addr = str(company.get("direccion_fiscal") or company.get("direccion") or "").strip()
+    company_tel = str(company.get("telefono") or "").strip()
+    company_meta_parts = []
+    if company_head:
+        company_meta_parts.append(company_head)
+    if company_nif:
+        company_meta_parts.append(f"CIF: {company_nif}")
+    if company_addr:
+        company_meta_parts.append(company_addr)
+    if company_tel:
+        company_meta_parts.append(f"Tlf: {company_tel}")
+
+    pages = []
+
+    def new_page():
+        image = Image.new("RGB", (page_width, page_height), bg)
+        draw = ImageDraw.Draw(image)
+        y = top_margin
+
+        # Header: logo + meta derecha
+        logo_bottom = y
+        if logo:
+            image.paste(logo, (margin_x, y), logo)
+            logo_bottom = y + logo.height
+        if company_meta_parts:
+            right_x = page_width - margin_x
+            meta_text = " · ".join([p for p in company_meta_parts if p])
+            draw.text((right_x, y + 12), meta_text, fill=muted, font=font_header_small, anchor="ra")
+
+        y = max(logo_bottom + 26, y + 110)
+
+        # Banda título (dorado) + remate oliva como en plantilla.
+        band_h = 62
+        draw.rectangle((0, y, page_width * 0.74, y + band_h), fill=gold)
+        draw.rectangle((page_width * 0.74, y, page_width, y + band_h), fill=olive)
+        draw.text((page_width / 2, y + 16), str(title or "").upper(), fill="white", font=font_title, anchor="mm")
+
+        y += band_h + 34
+
+        if subtitle:
+            subtitle_lines, _sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=96, line_gap=6)
+            draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=muted, font=font_subtitle, spacing=6)
+            y += sub_height + 18
+
+        return image, draw, y
+
+    image, draw, y = new_page()
+    usable_bottom = page_height - bottom_margin
+
+    def ensure_space(required_height):
+        nonlocal image, draw, y
+        if y + required_height <= usable_bottom:
+            return
+        pages.append(image)
+        image, draw, y = new_page()
+
+    for heading, lines in sections:
+        heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
+        ensure_space((heading_box[3] - heading_box[1]) + 20)
+        draw.text((margin_x, y), heading, fill=ink, font=font_section)
+        y = heading_box[3] + 12
+        for line in lines:
+            raw = f"{line[0]}: {line[1]}" if isinstance(line, (list, tuple)) and len(line) == 2 else str(line or "")
+            wrapped, _line_height, total_height = _pil_multiline(draw, raw, font_body, width=96, line_gap=6)
+            ensure_space(total_height + 6)
+            draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=ink, font=font_body, spacing=6)
+            y += total_height + 6
+        y += 14
+
+    for line in footer_lines:
+        wrapped, _line_height, total_height = _pil_multiline(draw, line, font_footer, width=100, line_gap=5)
+        ensure_space(total_height + 4)
+        draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=muted, font=font_footer, spacing=5)
+        y += total_height + 4
+
+    pages.append(image)
+    buffer = BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format="PDF", resolution=150.0)
+    else:
+        pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
+
+
 def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=None, brand_logo_url=None):
     footer_lines = footer_lines or []
     body_lines = body_lines or []
@@ -33428,12 +33550,11 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
     footer = [
         "Documento orientado al Documento Informativo Abreviado para arrendamiento de vivienda previsto en el Decreto 218/2005 de la Junta de Andalucía.",
     ]
-    return build_branded_document_pdf(
-        "DOCUMENTO INFORMATIVO ABREVIADO · ARRENDAMIENTO",
-        "Modelo adaptado para alquiler de vivienda",
-        sections,
-        footer,
-    )
+    title = "DOCUMENTO INFORMATIVO ABREVIADO · ARRENDAMIENTO"
+    subtitle = "Modelo adaptado para alquiler de vivienda"
+    if _company_uses_modernia_pdf_brand(company):
+        return build_modernia_branded_document_pdf(title, subtitle, sections, footer, company=company)
+    return build_branded_document_pdf(title, subtitle, sections, footer, brand_logo_url=company.get("logo_url"))
 
 
 def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
@@ -33919,12 +34040,11 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
         f"Documento generado automáticamente por {company.get('nombre') or 'Verifika²'} a partir de la ficha pública del Catastro.",
         "Los datos catastrales deben revisarse dentro del expediente antes de usarlos contractualmente.",
     ]
-    return build_branded_document_pdf(
-        "FICHA CATASTRAL",
-        "Resumen operativo del inmueble obtenido desde la Sede Electrónica del Catastro",
-        sections,
-        footer,
-    )
+    title = "FICHA CATASTRAL"
+    subtitle = "Resumen operativo del inmueble obtenido desde la Sede Electrónica del Catastro"
+    if _company_uses_modernia_pdf_brand(company):
+        return build_modernia_branded_document_pdf(title, subtitle, sections, footer, company=company)
+    return build_branded_document_pdf(title, subtitle, sections, footer, brand_logo_url=company.get("logo_url"))
 
 
 def send_file(handler, path):
