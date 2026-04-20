@@ -14,7 +14,15 @@ class GestoriaRentaCardsRegressionTests(unittest.TestCase):
         server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
         self.assertIn("CAST(fecha AS TEXT)", server_py)
 
+    def test_gestoria_renta_cards_docs_where_uses_boolean_false_clause(self):
+        """
+        Regression: en Postgres, `OR 0` falla (0 no es boolean).
+        Usamos `1=0` como condición siempre falsa portable.
+        """
+        server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
+        self.assertIn('doc_id_clause = "1=0"', server_py)
+        self.assertIn('ref_id_clause = "1=0"', server_py)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -19993,12 +19993,14 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
     doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
     ref_ids = [ref_id for ref_id in renta_ref_owner.keys() if ref_id]
-    doc_id_clause = "0"
+    # En SQLite, "0" funciona como falso en expresiones booleanas, pero en Postgres OR exige boolean.
+    # Usamos una condición siempre falsa portable.
+    doc_id_clause = "1=0"
     doc_id_values = []
     if doc_ids:
         doc_id_clause = f"id IN ({','.join(['?'] * len(doc_ids))})"
         doc_id_values = doc_ids
-    ref_id_clause = "0"
+    ref_id_clause = "1=0"
     ref_id_values = []
     if ref_ids:
         ref_id_clause = f"referencia_id IN ({','.join(['?'] * len(ref_ids))})"
