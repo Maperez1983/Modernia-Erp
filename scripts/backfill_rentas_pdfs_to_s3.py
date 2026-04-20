@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,6 +102,70 @@ def _looks_like_real_key(doc_key: str) -> bool:
         return False
     return ("/" in text) or ("." in text)
 
+def _norm_filename(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower()
+    # Normaliza separadores y espacios para tolerar "dobles espacios" y variantes.
+    text = re.sub(r"[_-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _build_pdf_index(roots: list[Path]) -> dict[str, Path]:
+    index: dict[str, Path] = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for pdf in root.rglob("*.pdf"):
+            # Evita artefactos de macOS.
+            if pdf.name.startswith("._"):
+                continue
+            key = _norm_filename(pdf.name)
+            if not key:
+                continue
+            # Conserva el primero (orden estable) para evitar sobrecoste; suele ser suficiente.
+            index.setdefault(key, pdf)
+    return index
+
+
+def _resolve_missing_pdf(src: Path, *, index: dict[str, Path] | None, roots: list[Path]) -> Path | None:
+    # 1) Si el directorio existe, intenta match exacto por normalización (espacios/acentos) en esa carpeta.
+    try:
+        parent = src.parent
+        if parent.exists():
+            want = _norm_filename(src.name)
+            if want:
+                for cand in parent.glob("*.pdf"):
+                    if _norm_filename(cand.name) == want:
+                        return cand
+    except Exception:
+        pass
+    # 2) Index global (si se ha generado).
+    if index is not None:
+        want = _norm_filename(src.name)
+        if want:
+            hit = index.get(want)
+            if hit and hit.exists():
+                return hit
+    # 3) Si no hay index pero hay roots, intentamos una búsqueda acotada por nombre normalizado.
+    want = _norm_filename(src.name)
+    if want and roots:
+        try:
+            # Búsqueda rápida por basename: en la práctica suele estar en el root principal.
+            for root in roots:
+                if not root.exists():
+                    continue
+                for cand in root.glob("*.pdf"):
+                    if _norm_filename(cand.name) == want:
+                        return cand
+        except Exception:
+            pass
+    return None
+
 
 def _iter_target_rows_sqlite(conn: sqlite3.Connection, empresa_id: str | None):
     where_empresa = ""
@@ -164,6 +229,14 @@ def main() -> None:
     parser.add_argument("--prefix", default="gestoria/rentas", help="Prefijo S3 para los PDFs subidos.")
     parser.add_argument("--s3-bucket", default="", help="Bucket S3 (si vacío usa AWS_S3_BUCKET/S3_BUCKET).")
     parser.add_argument("--aws-region", default="", help="Región AWS (si vacío usa AWS_REGION/AWS_DEFAULT_REGION).")
+    default_root = Path.home() / "Library" / "CloudStorage" / "OneDrive-TERESARAMOSRUEDA" / "0000 RENTAS 2024"
+    parser.add_argument(
+        "--search-root",
+        action="append",
+        default=[str(default_root)],
+        help="Carpeta(s) donde buscar PDFs si `notas` no existe (se puede repetir).",
+    )
+    parser.add_argument("--index-search-root", action="store_true", help="Indexa recursivamente `--search-root` (más lento, pero arregla rutas mal guardadas).")
     parser.add_argument("--limit", type=int, default=0, help="Máximo de documentos a procesar (0 = sin límite).")
     parser.add_argument("--dry-run", action="store_true", help="No sube ni actualiza, solo muestra qué haría.")
     args = parser.parse_args()
@@ -186,6 +259,21 @@ def main() -> None:
         bucket = bucket or "<AWS_S3_BUCKET>"
 
     empresa_id = str(args.empresa_id or "").strip() or None
+
+    search_roots = []
+    try:
+        for raw in (args.search_root or []):
+            root = Path(str(raw)).expanduser()
+            if root not in search_roots:
+                search_roots.append(root)
+    except Exception:
+        search_roots = []
+    pdf_index: dict[str, Path] | None = None
+    if args.index_search_root and search_roots:
+        try:
+            pdf_index = _build_pdf_index(search_roots)
+        except Exception:
+            pdf_index = None
 
     pg_conn = None
     sqlite_conn = None
@@ -231,8 +319,12 @@ def main() -> None:
                 continue
             src = Path(notas).expanduser()
             if not src.exists():
-                missing += 1
-                continue
+                alt = _resolve_missing_pdf(src, index=pdf_index, roots=search_roots)
+                if alt:
+                    src = alt
+                else:
+                    missing += 1
+                    continue
 
             key = build_s3_key(args.prefix, row["nombre"] or src.name)
             if args.dry_run:
