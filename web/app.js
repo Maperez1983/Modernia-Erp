@@ -2083,13 +2083,14 @@ const estudioAltaCompraventa = document.getElementById("estudioAltaCompraventa")
 const estudioAltaDemanda = document.getElementById("estudioAltaDemanda");
 const captacionForm = document.getElementById("captacionForm");
 const captacionFormStatus = document.getElementById("captacionFormStatus");
-const compraventaForm = document.getElementById("compraventaForm");
-const compraventaFormStatus = document.getElementById("compraventaFormStatus");
-const compraventaCerrarBtn = document.getElementById("compraventaCerrarBtn");
-const compraventaOpenIrpfBtn = document.getElementById("compraventaOpenIrpfBtn");
-const demandaForm = document.getElementById("demandaForm");
-const demandaFormStatus = document.getElementById("demandaFormStatus");
-const demandaCliente = document.getElementById("demandaCliente");
+	const compraventaForm = document.getElementById("compraventaForm");
+	const compraventaFormStatus = document.getElementById("compraventaFormStatus");
+	const compraventaCerrarBtn = document.getElementById("compraventaCerrarBtn");
+	const compraventaOpenIrpfBtn = document.getElementById("compraventaOpenIrpfBtn");
+	const compraventaOpenFiscalWizardBtn = document.getElementById("compraventaOpenFiscalWizardBtn");
+	const demandaForm = document.getElementById("demandaForm");
+	const demandaFormStatus = document.getElementById("demandaFormStatus");
+	const demandaCliente = document.getElementById("demandaCliente");
 const clientesAltaSection = document.getElementById("clientesAltaSection");
 const clientesForm = document.getElementById("clientesForm");
 const clientesFormStatus = document.getElementById("clientesFormStatus");
@@ -3003,11 +3004,12 @@ const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfB
 const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
 const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
-const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
-const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
-	const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
-	const inmuebleTabs = document.getElementById("inmuebleTabs");
-	const inmuebleNoticiaTabBtn = document.getElementById("inmuebleNoticiaTabBtn");
+	const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
+	const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
+	const inmuebleFiscalWizardBtn = document.getElementById("inmuebleFiscalWizardBtn");
+		const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
+		const inmuebleTabs = document.getElementById("inmuebleTabs");
+		const inmuebleNoticiaTabBtn = document.getElementById("inmuebleNoticiaTabBtn");
 	const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
 const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
@@ -6725,6 +6727,163 @@ const openWorkspaceIrpfSimulator = () => {
   window.setTimeout(() => {
     const options = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
     focusWorkspaceEngine("simuladores", irpfGainForm, options).catch(() => {});
+  }, 220);
+};
+
+const inferFiscalTerritoryFromProvincia = (provinciaRaw = "") => {
+  const provincia = normalizeLookupText(provinciaRaw);
+  if (!provincia) return { ccaa: "", pv_territorio: "" };
+  const map = new Map([
+    // Andalucía
+    ["almeria", { ccaa: "AN" }],
+    ["cadiz", { ccaa: "AN" }],
+    ["cordoba", { ccaa: "AN" }],
+    ["granada", { ccaa: "AN" }],
+    ["huelva", { ccaa: "AN" }],
+    ["jaen", { ccaa: "AN" }],
+    ["malaga", { ccaa: "AN" }],
+    ["sevilla", { ccaa: "AN" }],
+    // Aragón
+    ["huesca", { ccaa: "AR" }],
+    ["teruel", { ccaa: "AR" }],
+    ["zaragoza", { ccaa: "AR" }],
+    // Asturias
+    ["asturias", { ccaa: "AS" }],
+    // Illes Balears
+    ["illes balears", { ccaa: "IB" }],
+    ["islas baleares", { ccaa: "IB" }],
+    // Canarias
+    ["las palmas", { ccaa: "CN" }],
+    ["santa cruz de tenerife", { ccaa: "CN" }],
+    // Cantabria
+    ["cantabria", { ccaa: "CB" }],
+    // Castilla-La Mancha
+    ["albacete", { ccaa: "CM" }],
+    ["ciudad real", { ccaa: "CM" }],
+    ["cuenca", { ccaa: "CM" }],
+    ["guadalajara", { ccaa: "CM" }],
+    ["toledo", { ccaa: "CM" }],
+    // Castilla y León
+    ["avila", { ccaa: "CL" }],
+    ["burgos", { ccaa: "CL" }],
+    ["leon", { ccaa: "CL" }],
+    ["palencia", { ccaa: "CL" }],
+    ["salamanca", { ccaa: "CL" }],
+    ["segovia", { ccaa: "CL" }],
+    ["soria", { ccaa: "CL" }],
+    ["valladolid", { ccaa: "CL" }],
+    ["zamora", { ccaa: "CL" }],
+    // Cataluña
+    ["barcelona", { ccaa: "CT" }],
+    ["girona", { ccaa: "CT" }],
+    ["lleida", { ccaa: "CT" }],
+    ["tarragona", { ccaa: "CT" }],
+    // Comunitat Valenciana
+    ["alicante", { ccaa: "VC" }],
+    ["castellon", { ccaa: "VC" }],
+    ["valencia", { ccaa: "VC" }],
+    // Extremadura
+    ["badajoz", { ccaa: "EX" }],
+    ["caceres", { ccaa: "EX" }],
+    // Galicia
+    ["a coruna", { ccaa: "GA" }],
+    ["coruna", { ccaa: "GA" }],
+    ["lugo", { ccaa: "GA" }],
+    ["ourense", { ccaa: "GA" }],
+    ["pontevedra", { ccaa: "GA" }],
+    // Madrid
+    ["madrid", { ccaa: "MD" }],
+    // Murcia
+    ["murcia", { ccaa: "MC" }],
+    // Navarra
+    ["navarra", { ccaa: "NC" }],
+    // País Vasco (foral)
+    ["alava", { ccaa: "PV", pv_territorio: "AL" }],
+    ["araba", { ccaa: "PV", pv_territorio: "AL" }],
+    ["guipuzcoa", { ccaa: "PV", pv_territorio: "GI" }],
+    ["gipuzkoa", { ccaa: "PV", pv_territorio: "GI" }],
+    ["vizcaya", { ccaa: "PV", pv_territorio: "BI" }],
+    ["bizkaia", { ccaa: "PV", pv_territorio: "BI" }],
+    // La Rioja
+    ["la rioja", { ccaa: "RI" }],
+    ["rioja", { ccaa: "RI" }],
+    // Ceuta / Melilla
+    ["ceuta", { ccaa: "CE" }],
+    ["melilla", { ccaa: "ML" }],
+  ]);
+  return map.get(provincia) || { ccaa: "", pv_territorio: "" };
+};
+
+const applyFiscalWizardPrefill = (prefill = {}) => {
+  if (!prefill || typeof prefill !== "object") return;
+  const referencia = String(prefill.referencia || "").trim();
+  const operacion = String(prefill.operacion || "").trim().toLowerCase();
+  const ccaa = String(prefill.ccaa || "").trim().toUpperCase();
+  const pv = String(prefill.pv_territorio || "").trim().toUpperCase();
+  const codigoPostal = normalizePostalCode(prefill.codigo_postal || prefill.codigoPostal || "");
+
+  if (fiscalWizardForm) {
+    if (operacion && fiscalWizardForm.querySelector(`select[name="operacion"] option[value="${CSS.escape(operacion)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="operacion"]').value = operacion;
+    }
+    if (ccaa && fiscalWizardForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(ccaa)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="ccaa"]').value = ccaa;
+    }
+    if (pv && fiscalWizardForm.querySelector(`select[name="pv_territorio"] option[value="${CSS.escape(pv)}"]`)) {
+      fiscalWizardForm.querySelector('select[name="pv_territorio"]').value = pv;
+    }
+    if (referencia) {
+      const refInput = fiscalWizardForm.querySelector('input[name="referencia"]');
+      if (refInput) refInput.value = referencia;
+    }
+    try {
+      syncFiscalWizardPvVisibility();
+    } catch {}
+    try {
+      fiscalWizardForm.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch {}
+  }
+
+  if (irpfGainForm) {
+    if (ccaa && irpfGainForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(ccaa)}"]`)) {
+      irpfGainForm.querySelector('select[name="ccaa"]').value = ccaa;
+    }
+    const fechaTx = String(prefill.fecha_transmision || prefill.fechaTx || "").trim();
+    const valorTx = String(prefill.valor_transmision || prefill.valorTx || "").trim();
+    if (fechaTx) {
+      const el = irpfGainForm.querySelector('input[name="fecha_transmision"]');
+      if (el) el.value = fechaTx;
+    }
+    if (valorTx) {
+      const el = irpfGainForm.querySelector('input[name="valor_transmision"]');
+      if (el) el.value = valorTx;
+    }
+  }
+
+  if (iivtnuSimulatorForm) {
+    const fechaTx = String(prefill.fecha_transmision || prefill.fechaTx || "").trim();
+    if (fechaTx) {
+      const el = iivtnuSimulatorForm.querySelector('input[name="fecha_transmision"]');
+      if (el) el.value = fechaTx;
+    }
+  }
+
+  if (iivtnuMunicipioCp && codigoPostal && codigoPostal.length === 5) {
+    iivtnuMunicipioCp.value = codigoPostal;
+    try {
+      iivtnuMunicipioCp.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch {}
+  }
+};
+
+const openWorkspaceFiscalWizard = (prefill = {}) => {
+  const user = getAuthScopeUser();
+  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
+  openHolding({ mode });
+  window.setTimeout(() => {
+    const options = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
+    focusWorkspaceEngine("simuladores", fiscalWizardForm, options).catch(() => {});
+    window.setTimeout(() => applyFiscalWizardPrefill(prefill), 60);
   }, 220);
 };
 
@@ -52542,6 +52701,21 @@ const renderGestoriaRentaDetail = (entry = {}) => {
   subtitle.textContent = formatNombreCliente(entry.cliente_nombre || "");
   detail.appendChild(subtitle);
 
+  const rentaDireccion = String(entry.direccion || entry?.patrimonio?.direccion_inmueble_principal || "").trim();
+  if (rentaDireccion) {
+    const actions = document.createElement("div");
+    actions.className = "form-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary";
+    btn.textContent = "Simulador fiscal inmueble";
+    btn.addEventListener("click", () => {
+      openWorkspaceFiscalWizard({ operacion: "venta", referencia: rentaDireccion });
+    });
+    actions.appendChild(btn);
+    detail.appendChild(actions);
+  }
+
   const result = formatRentaResult(entry.resultado_declaracion);
   const dniMeta = getRentaDniMeta(entry);
   const summary = document.createElement("div");
@@ -65517,6 +65691,21 @@ if (compraventaForm) {
       openIrpfGananciaModal(prefill);
     });
   }
+  if (compraventaOpenFiscalWizardBtn) {
+    compraventaOpenFiscalWizardBtn.addEventListener("click", () => {
+      let prefill = { operacion: "venta" };
+      try {
+        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
+        prefill = {
+          ...prefill,
+          referencia: payload.direccion || payload.id || "",
+          fecha_transmision: payload.fecha_escritura || payload.fecha_operacion || "",
+          valor_transmision: payload.precio_escritura || payload.precio_contrato || payload.precio_propuesta || "",
+        };
+      } catch {}
+      openWorkspaceFiscalWizard(prefill);
+    });
+  }
   compraventaForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (compraventaFormStatus) {
@@ -65625,6 +65814,24 @@ if (demandaForm) {
           demandaFormStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (inmuebleFiscalWizardBtn) {
+  inmuebleFiscalWizardBtn.addEventListener("click", () => {
+    const ctx = state.currentInmuebleContext || {};
+    const inmueble = ctx.inmueble || state.currentInmueble || {};
+    const captacion = ctx.captacion || {};
+    const provincia = inmueble.provincia || captacion.provincia || "";
+    const inferred = inferFiscalTerritoryFromProvincia(provincia);
+    const ccaa = inferred.ccaa || String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
+    const pv = inferred.pv_territorio || "";
+    const referencia = [inmueble.direccion || captacion.direccion || "", inmueble.referencia_catastral || ""]
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)
+      .join(" · ");
+    const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
+    openWorkspaceFiscalWizard({ operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal });
   });
 }
 
