@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
+import sys
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -88,6 +90,42 @@ def best_client_match(name_tokens: set[str], clients: list[dict]) -> Match | Non
     return best
 
 
+def env_first(*keys: str) -> str:
+    for key in keys:
+        value = os.environ.get(key) or ""
+        if value.strip():
+            return value.strip()
+    return ""
+
+
+def s3_client():
+    try:
+        import boto3
+    except Exception:
+        return None
+    region = env_first("AWS_REGION", "AWS_DEFAULT_REGION")
+    return boto3.client("s3", region_name=region) if region else boto3.client("s3")
+
+
+def s3_bucket() -> str:
+    return env_first("AWS_S3_BUCKET", "S3_BUCKET")
+
+
+def safe_filename(name: str) -> str:
+    base = os.path.basename(str(name or "archivo.pdf"))
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", base)
+    return cleaned or "archivo.pdf"
+
+
+def build_s3_key(prefix: str, filename: str) -> str:
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    rand = os.urandom(4).hex()
+    pref = (prefix or "gestoria/rentas").strip().strip("/")
+    return f"{pref}/{stamp}_{rand}_{safe_filename(filename)}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Importa TODOS los PDFs de una carpeta como gestoria_docs (renta), enlazando por similitud de nombre."
@@ -99,6 +137,13 @@ def main() -> None:
     parser.add_argument("--ejercicio", default="2024", help="Ejercicio fiscal a escribir en el nombre del doc")
     parser.add_argument("--estado", default="Presentada", choices=("Borrador", "Presentada"), help="Estado del doc")
     parser.add_argument("--min-score", type=float, default=0.72, help="Umbral mínimo de match por nombre (Jaccard)")
+    parser.add_argument(
+        "--s3",
+        default="auto",
+        choices=("auto", "yes", "no"),
+        help="Sube el PDF a S3 y guarda doc_key real (auto=si hay AWS_S3_BUCKET).",
+    )
+    parser.add_argument("--s3-prefix", default="gestoria/rentas", help="Prefijo S3 para los PDFs de renta.")
     parser.add_argument("--dry-run", action="store_true", help="No escribe en BD, solo reporta")
     parser.add_argument("--out-review", default="reports/renta_docs_name_match_review.json", help="Salida JSON con casos dudosos")
     args = parser.parse_args()
@@ -115,6 +160,21 @@ def main() -> None:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
+        bucket = s3_bucket()
+        s3 = s3_client() if bucket else None
+        want_s3 = str(args.s3 or "auto").strip().lower()
+        s3_enabled = False
+        if want_s3 == "yes":
+            if not bucket:
+                raise SystemExit("S3 activado (--s3 yes) pero falta AWS_S3_BUCKET.")
+            if not s3:
+                raise SystemExit("S3 activado (--s3 yes) pero falta boto3.")
+            s3_enabled = True
+        elif want_s3 == "auto":
+            s3_enabled = bool(bucket and s3)
+        else:
+            s3_enabled = False
+
         empresa_id = compact_spaces(args.empresa_id)
         if not empresa_id:
             row = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (args.empresa_nombre,)).fetchone()
@@ -183,6 +243,24 @@ def main() -> None:
                 inserted += 1
                 continue
 
+            doc_key = uuid.uuid4().hex
+            if s3_enabled:
+                key = build_s3_key(args.s3_prefix, doc_name or pdf.name)
+                try:
+                    s3.upload_file(
+                        str(pdf),
+                        bucket,
+                        key,
+                        ExtraArgs={"ContentType": "application/pdf"},
+                    )
+                    doc_key = key
+                except Exception as exc:
+                    print(f"[warn] no se pudo subir a S3 ({type(exc).__name__}): {exc}", file=sys.stderr)
+            else:
+                # Importante: si no subimos a S3, el CRM en producción NO podrá abrir rutas locales.
+                if want_s3 in {"auto", "yes"}:
+                    print("[warn] S3 no configurado; el botón PDF en producción dará 'Archivo no encontrado'.", file=sys.stderr)
+
             now = "datetime('now')"
             conn.execute(
                 """
@@ -204,13 +282,15 @@ def main() -> None:
                     f"Renta {estado}",
                     estado,
                     str(pdf),
-                    uuid.uuid4().hex,
+                    doc_key,
                     json.dumps(
                         {
                             "match_score": match.score,
                             "match_cliente_nombre": match.cliente_nombre,
                             "match_cliente_nif": match.cliente_nif,
                             "source_dir": str(source_dir),
+                            "s3_bucket": bucket or "",
+                            "s3_prefix": str(args.s3_prefix or ""),
                         },
                         ensure_ascii=False,
                     ),

@@ -77,6 +77,40 @@ RENTA_OUTLIER_RATIO = 50.0
 RENTA_MAJOR_AMOUNT_FLOOR = 1000.0
 
 
+def env_first(*keys: str) -> str:
+    for key in keys:
+        value = os.environ.get(key) or ""
+        if value.strip():
+            return value.strip()
+    return ""
+
+
+def s3_client():
+    try:
+        import boto3
+    except Exception:
+        return None
+    region = env_first("AWS_REGION", "AWS_DEFAULT_REGION")
+    return boto3.client("s3", region_name=region) if region else boto3.client("s3")
+
+
+def s3_bucket() -> str:
+    return env_first("AWS_S3_BUCKET", "S3_BUCKET")
+
+
+def safe_filename(name: str) -> str:
+    base = os.path.basename(str(name or "archivo.pdf"))
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", base)
+    return cleaned or "archivo.pdf"
+
+
+def build_s3_key(prefix: str, filename: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    rand = os.urandom(4).hex()
+    pref = (prefix or "gestoria/rentas").strip().strip("/")
+    return f"{pref}/{stamp}_{rand}_{safe_filename(filename)}"
+
+
 def norm_text(value: object) -> str:
     text = str(value or "").strip()
     text = unicodedata.normalize("NFKD", text)
@@ -2174,6 +2208,10 @@ def ensure_gestoria_renta_docs(
     now: str,
     ejercicio: str | None = None,
     estado_presentacion: str | None = None,
+    *,
+    s3_bucket_name: str = "",
+    s3: object | None = None,
+    s3_prefix: str = "gestoria/rentas",
 ) -> None:
     docs_table = conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'gestoria_docs'"
@@ -2191,6 +2229,22 @@ def ensure_gestoria_renta_docs(
             continue
         doc_name = f"Renta {ejercicio} · {estado_presentacion} · {Path(source_text).name}"
         source_url = source_text if source_text.startswith("/uploads/") or source_text.startswith("http") else ""
+        uploaded_key = ""
+        if not source_url and source_text.lower().endswith(".pdf") and (source_text.startswith("/") or re.match(r"^[A-Za-z]:\\\\", source_text) is not None):
+            if s3_bucket_name and s3:
+                src_path = Path(source_text).expanduser()
+                if src_path.exists():
+                    uploaded_key = build_s3_key(s3_prefix, doc_name or src_path.name)
+                    try:
+                        s3.upload_file(
+                            str(src_path),
+                            s3_bucket_name,
+                            uploaded_key,
+                            ExtraArgs={"ContentType": "application/pdf"},
+                        )
+                    except Exception as exc:
+                        uploaded_key = ""
+                        print(f"[warn] S3 upload falló ({type(exc).__name__}): {exc}", file=sys.stderr)
         if source_url:
             existing = conn.execute(
                 """
@@ -2227,6 +2281,7 @@ def ensure_gestoria_renta_docs(
                     fecha = COALESCE(NULLIF(?, ''), fecha),
                     estado = ?,
                     notas = COALESCE(NULLIF(?, ''), notas),
+                    doc_key = COALESCE(NULLIF(?, ''), doc_key),
                     doc_url = COALESCE(NULLIF(?, ''), doc_url),
                     updated_at = datetime(?)
                 WHERE id = ?
@@ -2237,6 +2292,7 @@ def ensure_gestoria_renta_docs(
                     presentacion_fecha,
                     estado_presentacion,
                     source_text,
+                    uploaded_key,
                     source_url,
                     now,
                     existing["id"],
@@ -2250,7 +2306,7 @@ def ensure_gestoria_renta_docs(
               nombre, tipo, fecha, estado, notas, doc_key, doc_url,
               calidad_ocr, campos_ocr, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -2263,6 +2319,7 @@ def ensure_gestoria_renta_docs(
                 presentacion_fecha,
                 estado_presentacion,
                 source_text or estado_presentacion,
+                uploaded_key or None,
                 source_url or None,
                 record.get("text_source") or "",
                 ",".join(sorted(k for k, v in record.items() if v not in (None, "", [], {}))),
@@ -2409,6 +2466,9 @@ def apply_to_db(
     company_name: str,
     ejercicio: str | None = None,
     estado_presentacion: str = "Presentada",
+    *,
+    s3_mode: str = "auto",
+    s3_prefix: str = "gestoria/rentas",
 ) -> dict:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -2420,6 +2480,20 @@ def apply_to_db(
             pass
         company_id = ensure_company_id(conn, company_name)
         now = datetime.now(timezone.utc).isoformat()
+        bucket = s3_bucket()
+        s3 = s3_client() if bucket else None
+        want_s3 = str(s3_mode or "auto").strip().lower()
+        s3_enabled = False
+        if want_s3 == "yes":
+            if not bucket:
+                raise SystemExit("S3 activado (--s3 yes) pero falta AWS_S3_BUCKET.")
+            if not s3:
+                raise SystemExit("S3 activado (--s3 yes) pero falta boto3.")
+            s3_enabled = True
+        elif want_s3 == "auto":
+            s3_enabled = bool(bucket and s3)
+        else:
+            s3_enabled = False
         created_or_updated = 0
         linked_spouses = 0
         skipped_for_review = 0
@@ -2456,6 +2530,9 @@ def apply_to_db(
                 now,
                 ejercicio=record["ejercicio"],
                 estado_presentacion=record["estado_presentacion"],
+                s3_bucket_name=bucket if s3_enabled else "",
+                s3=s3 if s3_enabled else None,
+                s3_prefix=s3_prefix,
             )
             ensure_gestoria_renta_trabajo(
                 conn,
@@ -2489,6 +2566,8 @@ def main() -> None:
     parser.add_argument("--ejercicio", default=DEFAULT_EJERCICIO, help="Ejercicio fiscal a cargar. En 2026, normalmente será 2025.")
     parser.add_argument("--estado-presentacion", default="Presentada", choices=("Borrador", "Presentada"), help="Estado documental de la renta importada.")
     parser.add_argument("--limit", type=int, default=0, help="Limita el número de PDFs procesados.")
+    parser.add_argument("--s3", default="auto", choices=("auto", "yes", "no"), help="Sube el Modelo 100 a S3 para que sea visible en producción.")
+    parser.add_argument("--s3-prefix", default="gestoria/rentas", help="Prefijo S3 para los PDFs de renta.")
     parser.add_argument("--apply", action="store_true", help="Aplica los cambios en SQLite.")
     args = parser.parse_args()
 
@@ -2516,6 +2595,8 @@ def main() -> None:
             args.company,
             ejercicio=str(args.ejercicio or DEFAULT_EJERCICIO),
             estado_presentacion=str(args.estado_presentacion or "Presentada"),
+            s3_mode=str(args.s3 or "auto"),
+            s3_prefix=str(args.s3_prefix or "gestoria/rentas"),
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
