@@ -5915,7 +5915,7 @@ const ensureIivtnuMunicipios = async () => {
   if (Array.isArray(iivtnuMunicipiosCache) && iivtnuMunicipiosCache.length) return iivtnuMunicipiosCache;
   iivtnuMunicipioSelect.innerHTML = "<option value=\"\">Cargando...</option>";
   try {
-    const data = await postJsonWithDbRetry("/api/iivtnu_municipios", {});
+    const data = await postJsonWithDbRetry("/api/iivtnu_municipios", { scope: "all" });
     const items = Array.isArray(data?.items) ? data.items : [];
     iivtnuMunicipiosCache = items;
   } catch (err) {
@@ -6094,11 +6094,15 @@ const ensureIivtnuSimulator = async () => {
   await ensureIivtnuMunicipios();
   if (iivtnuMunicipioCp) {
     iivtnuMunicipioCp.addEventListener("change", async () => {
-      const municipios = await ensureIivtnuMunicipios();
-      const inferred = inferIivtnuMunicipioByCp(iivtnuMunicipioCp.value, municipios);
-      if (inferred && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(inferred)}"]`)) {
-        iivtnuMunicipioSelect.value = inferred;
-      }
+      const cp = normalizePostalCode(iivtnuMunicipioCp.value);
+      if (!cp || cp.length !== 5) return;
+      try {
+        const resp = await postJsonWithDbRetry("/api/iivtnu_cp_lookup", { codigo_postal: cp }, { timeoutMs: 20000 });
+        const ine = String(resp?.ine || "").trim();
+        if (ine && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(ine)}"]`)) {
+          iivtnuMunicipioSelect.value = ine;
+        }
+      } catch {}
     });
   }
   iivtnuMunicipioSelect.addEventListener("change", () => {
