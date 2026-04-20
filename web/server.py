@@ -339,6 +339,31 @@ def _normalize_s3_key(key):
     raw = str(key or "").strip().replace("\\", "/")
     return raw.lstrip("/")
 
+def _iter_s3_legacy_key_candidates(key: str):
+    safe = _normalize_s3_key(key)
+    if not safe:
+        return []
+    candidates = [safe]
+    # Legacy compatibility: algunos flujos antiguos guardaban solo un hash/uuid (32 hex)
+    # sin prefijo ni extensión, pero el objeto en S3 podía estar bajo `docs/` o `renta(s)/`
+    # o tener `.pdf`. Probamos variantes conservadoras.
+    if re.fullmatch(r"[0-9a-fA-F]{32}", safe) and "/" not in safe:
+        prefixes = ["docs", "renta", "rentas"]
+        suffixes = ["", ".pdf"]
+        for pref in prefixes:
+            for suf in suffixes:
+                candidates.append(f"{pref}/{safe}{suf}")
+        for suf in [".pdf"]:
+            candidates.append(f"{safe}{suf}")
+    # De-dup preservando orden.
+    seen = set()
+    out = []
+    for item in candidates:
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
 
 def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):
     if not session:
@@ -51546,30 +51571,38 @@ class Handler(BaseHTTPRequestHandler):
                 return
             bucket, _region = s3_config()
             # Evita redirigir/firmar objetos inexistentes (acaban mostrando XML NoSuchKey en el navegador).
-            try:
-                client.head_object(Bucket=bucket, Key=key)
-            except Exception as exc:
-                code = ""
+            resolved_key = ""
+            last_exc = None
+            for candidate in _iter_s3_legacy_key_candidates(key):
                 try:
-                    code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
-                except Exception:
+                    client.head_object(Bucket=bucket, Key=candidate)
+                    resolved_key = candidate
+                    break
+                except Exception as exc:
+                    last_exc = exc
                     code = ""
-                msg = str(exc or "")
-                if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
-                    json_response(self, {"error": "Archivo no encontrado"}, status=404)
+                    try:
+                        code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
+                    except Exception:
+                        code = ""
+                    msg = str(exc or "")
+                    if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
+                        continue
+                    json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
                     return
-                json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
+            if not resolved_key:
+                json_response(self, {"error": "Archivo no encontrado"}, status=404)
                 return
             try:
                 url = client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": bucket, "Key": key},
+                    Params={"Bucket": bucket, "Key": resolved_key},
                     ExpiresIn=3600,
                 )
             except Exception:
                 json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
                 return
-            json_response(self, {"url": url})
+            json_response(self, {"url": url, "key": resolved_key})
             return
         if path == "/api/s3_redirect":
             key = params.get("key", [""])[0]
@@ -51596,24 +51629,30 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
             bucket, _region = s3_config()
-            try:
-                client.head_object(Bucket=bucket, Key=key)
-            except Exception as exc:
-                code = ""
+            resolved_key = ""
+            for candidate in _iter_s3_legacy_key_candidates(key):
                 try:
-                    code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
-                except Exception:
+                    client.head_object(Bucket=bucket, Key=candidate)
+                    resolved_key = candidate
+                    break
+                except Exception as exc:
                     code = ""
-                msg = str(exc or "")
-                if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
-                    json_response(self, {"error": "Archivo no encontrado"}, status=404)
+                    try:
+                        code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
+                    except Exception:
+                        code = ""
+                    msg = str(exc or "")
+                    if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
+                        continue
+                    json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
                     return
-                json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
+            if not resolved_key:
+                json_response(self, {"error": "Archivo no encontrado"}, status=404)
                 return
             try:
                 url = client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": bucket, "Key": key},
+                    Params={"Bucket": bucket, "Key": resolved_key},
                     ExpiresIn=3600,
                 )
             except Exception:

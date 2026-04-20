@@ -1400,28 +1400,67 @@ const openS3File = async (key, fallbackUrl) => {
     // Abrimos primero para evitar bloqueo de popups tras await.
     popup = window.open("", "_blank", "noopener");
   } catch {}
-  if (key) {
-    const data = await api(`/api/s3_url?key=${encodeURIComponent(key)}`);
-    if (data && data.url) {
-      if (popup) {
-        popup.location.href = data.url;
-      } else {
-        window.open(data.url, "_blank", "noopener");
+  const normalizeS3Key = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("s3://")) return raw.slice(5).replace(/^\/+/, "");
+    return raw.replace(/^\/+/, "");
+  };
+  const normalizedKey = normalizeS3Key(key);
+  const normalizedFallbackKey = fallbackUrl && String(fallbackUrl || "").trim().startsWith("s3://")
+    ? normalizeS3Key(fallbackUrl)
+    : "";
+  const openUrl = (url) => {
+    if (!url) return false;
+    if (popup) {
+      popup.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+    return true;
+  };
+  const closePopup = () => {
+    try {
+      if (popup) popup.close();
+    } catch {}
+  };
+  const fail = (message) => {
+    closePopup();
+    try {
+      alert(message || "No se pudo abrir el archivo.");
+    } catch {}
+  };
+
+  if (normalizedKey) {
+    try {
+      const data = await api(`/api/s3_url?key=${encodeURIComponent(normalizedKey)}`);
+      if (data && data.url && openUrl(data.url)) return;
+    } catch (err) {
+      // Si hay un fallback URL válido, intentamos abrirlo (p.ej. /uploads/... o http...).
+      if (fallbackUrl && !String(fallbackUrl).trim().startsWith("s3://") && openUrl(fallbackUrl)) return;
+      if (normalizedFallbackKey) {
+        try {
+          const data2 = await api(`/api/s3_url?key=${encodeURIComponent(normalizedFallbackKey)}`);
+          if (data2 && data2.url && openUrl(data2.url)) return;
+        } catch {}
       }
+      fail(err?.message || "Archivo no encontrado.");
       return;
     }
   }
-  if (fallbackUrl) {
-    if (popup) {
-      popup.location.href = fallbackUrl;
-    } else {
-      window.open(fallbackUrl, "_blank", "noopener");
+
+  if (normalizedFallbackKey) {
+    try {
+      const data = await api(`/api/s3_url?key=${encodeURIComponent(normalizedFallbackKey)}`);
+      if (data && data.url && openUrl(data.url)) return;
+    } catch (err) {
+      fail(err?.message || "Archivo no encontrado.");
+      return;
     }
-    return;
   }
-  if (popup) {
-    popup.close();
-  }
+
+  if (fallbackUrl && openUrl(fallbackUrl)) return;
+  closePopup();
 };
 
 const getCurrentUser = () => {
