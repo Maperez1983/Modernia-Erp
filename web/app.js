@@ -3047,13 +3047,14 @@ const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPd
 	const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 	const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
 	const inmuebleFiscalWizardBtn = document.getElementById("inmuebleFiscalWizardBtn");
-		const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
-		const inmuebleTabs = document.getElementById("inmuebleTabs");
-		const inmuebleNoticiaTabBtn = document.getElementById("inmuebleNoticiaTabBtn");
-	const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
-const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
-const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
-const inmuebleTecnoStages = document.getElementById("inmuebleTecnoStages");
+			const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
+			const inmuebleTabs = document.getElementById("inmuebleTabs");
+			const inmuebleNoticiaTabBtn = document.getElementById("inmuebleNoticiaTabBtn");
+			const inmuebleValoracionTabBtn = document.getElementById("inmuebleValoracionTabBtn");
+		const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
+	const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
+	const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
+	const inmuebleTecnoStages = document.getElementById("inmuebleTecnoStages");
 const inmuebleTecnoEmailBtn = document.getElementById("inmuebleTecnoEmailBtn");
 const inmuebleTecnoPosBtn = document.getElementById("inmuebleTecnoPosBtn");
 const inmuebleTecnoPrintBtn = document.getElementById("inmuebleTecnoPrintBtn");
@@ -3080,10 +3081,12 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
 		const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
 		const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
 		const inmuebleTecnoSideServiciosCount = document.getElementById("inmuebleTecnoSideServiciosCount");
-		const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
-		const inmuebleTabNoticia = document.getElementById("inmuebleTabNoticia");
-		const inmuebleNoticiaGrid = document.getElementById("inmuebleNoticiaGrid");
-	const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
+			const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
+			const inmuebleTabNoticia = document.getElementById("inmuebleTabNoticia");
+			const inmuebleNoticiaGrid = document.getElementById("inmuebleNoticiaGrid");
+			const inmuebleTabValoracion = document.getElementById("inmuebleTabValoracion");
+			const inmuebleValoracionGrid = document.getElementById("inmuebleValoracionGrid");
+		const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
 	const inmuebleTabVisitas = document.getElementById("inmuebleTabVisitas");
 	const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
@@ -44559,6 +44562,7 @@ const normalizeInmuebleTabKey = (tab) => {
 const resolveInmuebleTopTabKey = (tabKey = "") => {
   const key = normalizeInmuebleTabKey(tabKey);
   if (key === "noticia") return "datos";
+  if (key === "valoracion") return "datos";
   if (key === "fiscal") return "datos";
   if (["datos", "evolucion", "imagenes", "adjuntos"].includes(key)) return key;
   if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado"].includes(key)) {
@@ -44704,6 +44708,7 @@ const setInmuebleTab = (tab) => {
   // Tabs Tecnocloud-like (4): Información / Evolución / Imágenes / Adjuntos.
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
   if (inmuebleTabNoticia) inmuebleTabNoticia.classList.toggle("hidden", key !== "noticia");
+  if (inmuebleTabValoracion) inmuebleTabValoracion.classList.toggle("hidden", key !== "valoracion");
   if (inmuebleTabEvolucion) inmuebleTabEvolucion.classList.toggle("hidden", key !== "evolucion");
   if (inmuebleTabFiscal) inmuebleTabFiscal.classList.toggle("hidden", key !== "fiscal");
   if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", !(key === "evolucion" || key === "historial"));
@@ -44747,6 +44752,270 @@ const syncInmuebleNoticiaTab = (inmueble = {}, captacion = {}) => {
       setInmuebleTab("datos");
     }
   }
+};
+
+const parseInmuebleValoracionJson = (raw) => {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw || {};
+  try {
+    const parsed = JSON.parse(String(raw || ""));
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {}
+  return {};
+};
+
+const renderInmuebleValoracionTab = (inmueble = {}) => {
+  if (!inmuebleValoracionGrid) return;
+  const existing = parseInmuebleValoracionJson(inmueble.valoracion_json);
+  inmuebleValoracionGrid.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Fuentes</h3>
+          <p class="muted">Para rangos (mín/máx) se usa el punto medio. Se recomienda al menos 2 fuentes.</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          Idealista · Mín
+          <input type="text" class="inline-input" data-val-source="idealista" data-val-field="min" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label>
+          Idealista · Máx
+          <input type="text" class="inline-input" data-val-source="idealista" data-val-field="max" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label class="span-2">
+          Idealista · URL/nota
+          <input type="text" class="inline-input" data-val-source="idealista" data-val-field="url" placeholder="Enlace o comentario" />
+        </label>
+        <label>
+          Idealista · Fecha
+          <input type="date" class="inline-input" data-val-source="idealista" data-val-field="fecha" />
+        </label>
+        <div></div>
+
+        <label>
+          Fotocasa · Mín
+          <input type="text" class="inline-input" data-val-source="fotocasa" data-val-field="min" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label>
+          Fotocasa · Máx
+          <input type="text" class="inline-input" data-val-source="fotocasa" data-val-field="max" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label class="span-2">
+          Fotocasa · URL/nota
+          <input type="text" class="inline-input" data-val-source="fotocasa" data-val-field="url" placeholder="Enlace o comentario" />
+        </label>
+        <label>
+          Fotocasa · Fecha
+          <input type="date" class="inline-input" data-val-source="fotocasa" data-val-field="fecha" />
+        </label>
+        <div></div>
+
+        <label>
+          Casafari · Mín
+          <input type="text" class="inline-input" data-val-source="casafari" data-val-field="min" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label>
+          Casafari · Máx
+          <input type="text" class="inline-input" data-val-source="casafari" data-val-field="max" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label class="span-2">
+          Casafari · URL/nota
+          <input type="text" class="inline-input" data-val-source="casafari" data-val-field="url" placeholder="Enlace o comentario" />
+        </label>
+        <label>
+          Casafari · Fecha
+          <input type="date" class="inline-input" data-val-source="casafari" data-val-field="fecha" />
+        </label>
+        <div></div>
+
+        <label>
+          Registradores · €/m²
+          <input type="text" class="inline-input" data-val-source="registradores" data-val-field="eur_m2" inputmode="decimal" placeholder="0,00" />
+        </label>
+        <label>
+          Registradores · Valor (EUR)
+          <input type="text" class="inline-input" data-val-source="registradores" data-val-field="valor" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label>
+          Registradores · Periodo
+          <input type="text" class="inline-input" data-val-source="registradores" data-val-field="periodo" placeholder="Ej. 2026T1" />
+        </label>
+        <label>
+          Registradores · Ámbito
+          <input type="text" class="inline-input" data-val-source="registradores" data-val-field="ambito" placeholder="Municipio / distrito" />
+        </label>
+        <label class="span-2">
+          Registradores · URL/nota
+          <input type="text" class="inline-input" data-val-source="registradores" data-val-field="url" placeholder="Enlace o comentario" />
+        </label>
+        <label>
+          Registradores · Fecha
+          <input type="date" class="inline-input" data-val-source="registradores" data-val-field="fecha" />
+        </label>
+        <div></div>
+
+        <label>
+          Otra fuente · Nombre
+          <input type="text" class="inline-input" data-val-source="otros" data-val-field="nombre" placeholder="Ej. MITMA / INE / agencia" />
+        </label>
+        <label>
+          Otra fuente · Valor (EUR)
+          <input type="text" class="inline-input" data-val-source="otros" data-val-field="valor" inputmode="decimal" placeholder="0,00 €" />
+        </label>
+        <label class="span-2">
+          Otra fuente · URL/nota
+          <input type="text" class="inline-input" data-val-source="otros" data-val-field="url" placeholder="Enlace o comentario" />
+        </label>
+        <label>
+          Otra fuente · Fecha
+          <input type="date" class="inline-input" data-val-source="otros" data-val-field="fecha" />
+        </label>
+
+        <label class="span-2">
+          Observaciones
+          <input type="text" class="inline-input" data-val-source="meta" data-val-field="observaciones" placeholder="Particularidades de la valoración" />
+        </label>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Resultado</h3>
+          <p class="muted">Se guarda como “Precio valoración” al pulsar Guardar.</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          Valoración media (auto)
+          <input type="text" class="inline-input inline-input--readonly" data-val-result="media" disabled />
+        </label>
+        <label>
+          Fuentes usadas
+          <input type="text" class="inline-input inline-input--readonly" data-val-result="count" disabled />
+        </label>
+      </div>
+      <div class="muted" id="inmuebleValoracionStatus"></div>
+    </div>
+  `;
+
+  const scope = inmuebleValoracionGrid;
+  const status = scope.querySelector("#inmuebleValoracionStatus");
+  const resultMedia = scope.querySelector('[data-val-result="media"]');
+  const resultCount = scope.querySelector('[data-val-result="count"]');
+
+  const getInput = (source, field) =>
+    scope.querySelector(`[data-val-source="${CSS.escape(source)}"][data-val-field="${CSS.escape(field)}"]`);
+
+  const setVal = (source, field, value) => {
+    const el = getInput(source, field);
+    if (!el) return;
+    if (field === "min" || field === "max" || field === "valor") {
+      const n = toNumber(value);
+      el.value = n === null ? "" : formatMoneyInputValue(n);
+      return;
+    }
+    if (field === "eur_m2") {
+      const n = toNumber(value);
+      el.value = n === null ? "" : String(n).replace(".", ",");
+      return;
+    }
+    el.value = value == null ? "" : String(value);
+  };
+
+  ["idealista", "fotocasa", "casafari", "registradores", "otros", "meta"].forEach((src) => {
+    const srcMap = existing?.[src] && typeof existing[src] === "object" ? existing[src] : {};
+    Object.entries(srcMap).forEach(([key, value]) => setVal(src, key, value));
+  });
+
+  const computeSourceValue = (srcKey, srcMap) => {
+    if (!srcMap || typeof srcMap !== "object") return null;
+    const min = toNumber(srcMap.min);
+    const max = toNumber(srcMap.max);
+    const valor = toNumber(srcMap.valor);
+    if (min !== null && max !== null) return (min + max) / 2;
+    if (valor !== null) return valor;
+    if (min !== null) return min;
+    if (max !== null) return max;
+    if (srcKey === "registradores") {
+      const eurM2 = toNumber(srcMap.eur_m2);
+      const m2 = Number(inmueble.m2 || 0);
+      if (eurM2 !== null && m2) return eurM2 * m2;
+    }
+    return null;
+  };
+
+  const readState = () => {
+    const out = {};
+    scope.querySelectorAll("[data-val-source][data-val-field]").forEach((el) => {
+      const src = String(el.dataset.valSource || "").trim();
+      const field = String(el.dataset.valField || "").trim();
+      if (!src || !field) return;
+      out[src] ||= {};
+      out[src][field] = String(el.value || "").trim();
+    });
+    return out;
+  };
+
+  const refresh = (opts = {}) => {
+    const stateMap = readState();
+    const values = [];
+    ["idealista", "fotocasa", "casafari", "registradores", "otros"].forEach((src) => {
+      const val = computeSourceValue(src, stateMap[src] || {});
+      if (val !== null && isFinite(val) && val > 0) values.push(val);
+    });
+    const avg = values.length ? values.reduce((acc, item) => acc + item, 0) / values.length : null;
+    if (resultMedia) resultMedia.value = avg === null ? "" : formatMoneyInputValue(Math.round(avg * 100) / 100);
+    if (resultCount) resultCount.value = values.length ? `${values.length}` : "0";
+
+    if (status) {
+      const notes = [];
+      if (values.length < 2) notes.push("Recomendación: usa al menos 2 fuentes.");
+      if (!(Number(inmueble.m2 || 0) > 0)) notes.push("Falta m²: no se podrá calcular desde €/m².");
+      status.textContent = notes.join(" ");
+    }
+
+    if (opts?.mark) {
+      try {
+        const payload = {
+          idealista: stateMap.idealista || {},
+          fotocasa: stateMap.fotocasa || {},
+          casafari: stateMap.casafari || {},
+          registradores: stateMap.registradores || {},
+          otros: stateMap.otros || {},
+          meta: stateMap.meta || {},
+        };
+        markPendingInlineEdit("inmueble", "valoracion_json", JSON.stringify(payload));
+        if (avg !== null && isFinite(avg)) {
+          markPendingInlineEdit("inmueble", "precio_valoracion", String(Math.round(avg * 100) / 100));
+          if (!opts?.skipFecha) {
+            markPendingInlineEdit("inmueble", "fecha_valoracion", new Date().toISOString().slice(0, 10));
+          }
+        }
+      } catch {}
+    }
+  };
+
+  const bindMoneyBlur = (el) => {
+    if (!el) return;
+    el.addEventListener("blur", () => {
+      const parsed = toNumber(el.value);
+      if (parsed !== null) {
+        el.value = formatMoneyInputValue(parsed);
+      }
+    });
+  };
+
+  scope.querySelectorAll("[data-val-source][data-val-field]").forEach((el) => {
+    const field = String(el.dataset.valField || "").trim();
+    if (["min", "max", "valor"].includes(field)) bindMoneyBlur(el);
+    el.addEventListener("input", () => refresh({ mark: true }));
+    el.addEventListener("change", () => refresh({ mark: true }));
+  });
+
+  refresh({ mark: false, skipFecha: true });
 };
 
 const showUiError = (title, detail = "") => {
@@ -45320,14 +45589,17 @@ const openInmuebleDetail = (id, originView = "") => {
             .join("");
         }
       }
-      if (inmuebleEstadoInfo) {
-        inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
-      }
-      refreshCurrentInmuebleProfile();
-      refreshInmuebleVisitSheetButton();
-      loadInmuebleDemandas(id);
-      loadInmuebleCompradores(id);
-      loadInmuebleVisitas(id, empresaId);
+	      if (inmuebleEstadoInfo) {
+	        inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
+	      }
+	      refreshCurrentInmuebleProfile();
+	      try {
+	        renderInmuebleValoracionTab(inmueble || {});
+	      } catch {}
+	      refreshInmuebleVisitSheetButton();
+	      loadInmuebleDemandas(id);
+	      loadInmuebleCompradores(id);
+	      loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
       loadInmuebleDocs(id);
       if (crmWorkspaceShell) {

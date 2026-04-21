@@ -1023,6 +1023,7 @@ CREATE TABLE IF NOT EXISTS inmuebles (
   estado TEXT,
   lat REAL,
   lon REAL,
+  valoracion_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)

@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=225" />
+				    <link rel="stylesheet" href="styles.css?v=226" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -4222,14 +4222,15 @@
 	              </div>
 	              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
 	            </div>
-			            <div class="tabs" id="inmuebleTabs">
-			              <button class="tab active" type="button" data-tab="datos">Información</button>
-			              <button class="tab hidden" type="button" data-tab="noticia" id="inmuebleNoticiaTabBtn">Noticia</button>
-			              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
-			              <button class="tab" type="button" data-tab="fiscal">Simulador fiscal</button>
-			              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
-			              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
-			            </div>
+				            <div class="tabs" id="inmuebleTabs">
+				              <button class="tab active" type="button" data-tab="datos">Información</button>
+				              <button class="tab hidden" type="button" data-tab="noticia" id="inmuebleNoticiaTabBtn">Noticia</button>
+				              <button class="tab" type="button" data-tab="valoracion" id="inmuebleValoracionTabBtn">Valoración</button>
+				              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+				              <button class="tab" type="button" data-tab="fiscal">Simulador fiscal</button>
+				              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
+				              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
+				            </div>
 		            <div class="inmueble-tecno-grid">
 		              <div class="inmueble-tecno-main">
 		            <div id="inmuebleTabDatos">
@@ -4263,24 +4264,35 @@
                 </div>
               </div>
 		            </div>
-			            <div id="inmuebleTabNoticia" class="hidden">
-			              <div class="form-card">
-			                <div class="section-head">
-			                  <div>
-			                    <h3>Datos de la noticia</h3>
-			                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
-			                  </div>
+				            <div id="inmuebleTabNoticia" class="hidden">
+				              <div class="form-card">
+				                <div class="section-head">
+				                  <div>
+				                    <h3>Datos de la noticia</h3>
+				                    <p class="muted">Valoración, desviación y datos propios de la fase Noticia (sin mezclar con la ficha del inmueble).</p>
+				                  </div>
 				                  <div class="form-actions">
 				                    <button type="button" class="secondary hidden" id="inmuebleEncargoModalOpenBtn">Hoja de encargo</button>
 				                    <button type="button" class="secondary ghost" id="inmuebleNoticiaOpenIrpfBtn">Simulación fiscal</button>
 				                  </div>
 				                </div>
 				                <div class="grid" id="inmuebleNoticiaGrid" data-layout="tecno" data-context="noticia"></div>
-				              </div>
+					              </div>
+				            </div>
+			            <div id="inmuebleTabValoracion" class="hidden">
+			              <div class="form-card">
+			                <div class="section-head">
+			                  <div>
+			                    <h3>Valoración</h3>
+			                    <p class="muted">Introduce valoraciones por fuente (Idealista, Fotocasa, Casafari, Registradores, etc.) y el sistema calcula la media automáticamente.</p>
+			                  </div>
+			                </div>
+			                <div id="inmuebleValoracionGrid"></div>
+			              </div>
 			            </div>
-		            <div id="inmuebleTabDemandas" class="hidden">
-	              <div class="form-card">
-	                <h3>Iteración con compradores</h3>
+			            <div id="inmuebleTabDemandas" class="hidden">
+		              <div class="form-card">
+		                <h3>Iteración con compradores</h3>
 	                <p class="muted">Lista operativa de compradores para este inmueble (contacto, próxima acción, notas).</p>
 	                <div id="inmuebleCompradoresTable"></div>
                 <div class="footer" id="inmuebleCompradoresInfo"></div>
@@ -9794,7 +9806,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=635"></script>
+					    <script src="app.js?v=636"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

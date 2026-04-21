@@ -23516,6 +23516,11 @@ def ensure_tables(db_path):
                 ensure_column(conn, table_name, col_name, col_sql)
             except Exception:
                 pass
+    # Inmuebles: almacenamiento flexible de valoraciones (fuentes + enlaces).
+    try:
+        ensure_column(conn, "inmuebles", "valoracion_json", "valoracion_json TEXT")
+    except Exception:
+        pass
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
@@ -35190,20 +35195,33 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                     return int(round(y1 - frac * chart_h))
 
                 n = len(parsed_steps)
-                gap = 16
-                bar_w = int((chart_w - gap * (n - 1)) / n) if n > 1 else chart_w
-                bar_w = max(44, bar_w)
+                gap = 18
+                bar_min = 72
+                bar_max = 160
+                if n <= 1:
+                    bar_w = chart_w
+                else:
+                    raw_bar = int((chart_w - gap * (n - 1)) / n)
+                    bar_w = max(bar_min, min(bar_max, raw_bar))
+                total_w = (bar_w * n) + (gap * (n - 1) if n > 1 else 0)
+                x_start = x0 + max(0, int(round((chart_w - total_w) / 2)))
                 palette_pos = gold
-                palette_neg = (210, 104, 104)
+                # Ajuste a paleta Modernia (evitamos rojo saturado).
+                palette_neg = (33, 48, 67)
 
                 cum_prev = 0.0
                 for idx, (lab, val) in enumerate(parsed_steps):
-                    x = x0 + idx * (bar_w + gap)
+                    x = x_start + idx * (bar_w + gap)
                     cum_next = cum_prev + val
                     y_prev = y_map(cum_prev)
                     y_next = y_map(cum_next)
                     top = min(y_prev, y_next)
                     bot = max(y_prev, y_next)
+                    # Si el delta es pequeño vs. rango, forzamos una altura mínima para que no “desaparezca”.
+                    if abs(val) > 1e-9 and (bot - top) < 6:
+                        mid = y_next
+                        top = max(y0, mid - 3)
+                        bot = min(y1, mid + 3)
                     color = palette_pos if val >= 0 else palette_neg
                     draw.rectangle((x, top, x + bar_w, bot), fill=color)
                     # connector
@@ -51696,6 +51714,7 @@ class Handler(BaseHTTPRequestHandler):
                 "estado",
                 "lat",
                 "lon",
+                "valoracion_json",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
