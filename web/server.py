@@ -2228,14 +2228,17 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
     exclude_sin_seguro = f"({compania_expr} != 'sin seguro')"
 
     def _money_sql(expr):
-        # Intenta normalizar importes en formato texto (ej: "7.397,96 €") a REAL.
-        # En Postgres, COALESCE exige tipos compatibles; castear a TEXT evita errores
-        # cuando la columna ya es numérica.
+        # Normaliza importes almacenados como:
+        # - REAL/NUMERIC (ej: 1234.56)
+        # - Texto con formato ES (ej: "7.397,96 €")
+        # Mantiene el '.' decimal cuando no hay ',' en el valor (caso numérico / "1234.56").
+        # Si hay ',', asumimos formato ES y eliminamos puntos de miles.
         base = f"COALESCE(CAST({expr} AS TEXT), '')"
-        cleaned = (
-            f"REPLACE(REPLACE(REPLACE(REPLACE({base}, '€', ''), ' ', ''), '.', ''), ',', '.')"
-        )
-        return f"CAST(NULLIF({cleaned}, '') AS REAL)"
+        stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
+        eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
+        us = f"REPLACE({stripped}, ',', '')"
+        normalized = f"CASE WHEN {stripped} LIKE '%,%' THEN {eu} ELSE {us} END"
+        return f"CAST(NULLIF({normalized}, '') AS REAL)"
 
     def _count_buckets(where_extra_sql, params_extra):
         return conn.execute(
@@ -60822,14 +60825,16 @@ class Handler(BaseHTTPRequestHandler):
                 uploaded_clause=uploaded_clause_probe,
             )
 
-            # Normaliza importes almacenados como texto (ej: "7.397,96 €") a REAL.
-            base_money = "COALESCE(CAST(s.prima_total AS TEXT), '')"
-            cleaned_money = (
-                "REPLACE(REPLACE(REPLACE(REPLACE("
-                + base_money
-                + ", '€', ''), ' ', ''), '.', ''), ',', '.')"
-            )
-            prima_total_sql = f"CAST(NULLIF({cleaned_money}, '') AS REAL)"
+            # Normaliza importes (REAL o texto ES "7.397,96 €") a REAL.
+            def _money_sql(expr):
+                base = f"COALESCE(CAST({expr} AS TEXT), '')"
+                stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
+                eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
+                us = f"REPLACE({stripped}, ',', '')"
+                normalized = f"CASE WHEN {stripped} LIKE '%,%' THEN {eu} ELSE {us} END"
+                return f"CAST(NULLIF({normalized}, '') AS REAL)"
+
+            prima_total_sql = _money_sql("s.prima_total")
 
             poliza_strict_expr = "NULLIF(TRIM(s.poliza_numero), '')"
             poliza_key_expr = f"COALESCE({poliza_strict_expr}, s.id)"
