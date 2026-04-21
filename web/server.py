@@ -8199,6 +8199,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             reinv_total += float(reinversion)
         if reinversion_comprometida is not None and reinversion_comprometida > 0:
             reinv_total += float(reinversion_comprometida)
+        importe_obtenido = 0.0
         if reinv_total > 0:
             # AEAT: "importe total obtenido" = valor transmisión (en los términos del art. 35 LIRPF) - principal pendiente.
             importe_obtenido = max(0.0, (valor_tx - gastos_tx - plusvalia - prestamo_pendiente) * factor)
