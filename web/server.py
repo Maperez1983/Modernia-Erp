@@ -8426,6 +8426,12 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     tipo_gravamen_pct = params.get("tipo_gravamen_pct")
     retencion_pct = params.get("retencion_pct")
 
+    def _money_float(value: object) -> float:
+        try:
+            return float(parse_money_value(value or 0) or 0.0)
+        except Exception:
+            return 0.0
+
     def yn(value: object) -> str:
         return "Sí" if bool(value) else "No"
 
@@ -8467,6 +8473,111 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
             {"label": "Exenta", "value": money(result.get("exento"))},
             {"label": "Sujeta", "value": money(result.get("ganancia_sujeta"))},
             {"label": "Importe a pagar (estimado)", "value": money(importe_a_pagar), "accent": True},
+        ],
+    }
+
+    # Gráficos (2): puente de cálculo + barra exenta vs sujeta.
+    participacion_pct = parse_optional_float(payload.get("participacion_pct") or 100.0)
+    if participacion_pct is None:
+        participacion_pct = 100.0
+    try:
+        participacion_pct = float(participacion_pct)
+    except Exception:
+        participacion_pct = 100.0
+    participacion_pct = max(0.0, min(100.0, participacion_pct))
+    factor = participacion_pct / 100.0
+
+    def _sum_money(keys: list[str]) -> float:
+        total = 0.0
+        for k in keys:
+            total += _money_float(payload.get(k))
+        return round(max(0.0, total) + 1e-9, 2)
+
+    # Totales coherentes con el simulador (si el modo es "desglose", suma conceptos).
+    gastos_adq_total = _money_float(payload.get("gastos_adquisicion"))
+    gastos_tx_total = _money_float(payload.get("gastos_transmision"))
+    mejoras = _money_float(payload.get("inversiones_mejoras"))
+    amort = _money_float(payload.get("amortizacion_deducida")) or float(result.get("amortizacion_deducida_aplicada") or 0.0)
+    plusvalia = _money_float(payload.get("plusvalia_municipal"))
+    valor_adq = _money_float(payload.get("valor_adquisicion"))
+    valor_tx = _money_float(payload.get("valor_transmision"))
+
+    adq_impuestos_total = _sum_money(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"])
+    if adq_impuestos_total <= 0:
+        adq_impuestos_total = _money_float(payload.get("gastos_adq_itp_iva_ajd"))
+    adq_desglose_total = _sum_money(
+        [
+            "gastos_adq_agencia",
+            "gastos_adq_abogado",
+            "gastos_adq_tasacion",
+            "gastos_adq_notaria",
+            "gastos_adq_registro",
+            "gastos_adq_notaria_registro",
+            "gastos_adq_gestoria",
+            "gastos_adq_hipoteca",
+            "gastos_adq_otros",
+        ]
+    )
+    adq_desglose_total = round(max(0.0, adq_desglose_total + adq_impuestos_total) + 1e-9, 2)
+    tx_desglose_total = _sum_money(
+        [
+            "gastos_tx_agencia",
+            "gastos_tx_abogado",
+            "gastos_tx_cert_energetico",
+            "gastos_tx_notaria",
+            "gastos_tx_registro",
+            "gastos_tx_notaria_registro",
+            "gastos_tx_cancelacion",
+            "gastos_tx_cancelacion_registral",
+            "gastos_tx_hipoteca",
+            "gastos_tx_otros",
+        ]
+    )
+    adq_mode = str(payload.get("gastos_adquisicion_mode") or "").strip().lower()
+    tx_mode = str(payload.get("gastos_transmision_mode") or "").strip().lower()
+    if adq_mode == "desglose" and adq_desglose_total > 0:
+        gastos_adq_total = adq_desglose_total
+    if tx_mode == "desglose" and tx_desglose_total > 0:
+        gastos_tx_total = tx_desglose_total
+
+    waterfall_steps: list[dict] = []
+
+    def _push_step(label: str, value: float) -> None:
+        if not label:
+            return
+        try:
+            v = float(value)
+        except Exception:
+            v = 0.0
+        if abs(v) < 1e-9:
+            return
+        waterfall_steps.append({"label": label, "value": round(v + 1e-9, 2)})
+
+    # Puente: suma aditiva que aproxima la fórmula del simulador.
+    _push_step("Valor transm.", +(valor_tx * factor))
+    _push_step("Gastos transm.", -(gastos_tx_total * factor))
+    _push_step("Plusvalía", -(plusvalia * factor))
+    _push_step("Valor adq.", -(valor_adq * factor))
+    _push_step("Gastos adq.", -(gastos_adq_total * factor))
+    _push_step("Mejoras", -(mejoras * factor))
+    _push_step("Amortiz.", +(amort * factor))
+
+    waterfall_label = "Puente de cálculo (ganancia bruta)"
+    if abs(participacion_pct - 100.0) > 1e-6:
+        try:
+            waterfall_label += f" · participación {participacion_pct:.0f}%"
+        except Exception:
+            pass
+    waterfall_chart = {"kind": "waterfall", "label": waterfall_label, "steps": waterfall_steps}
+
+    exento_val = _money_float(result.get("exento"))
+    sujeta_val = _money_float(result.get("ganancia_sujeta"))
+    split_bar = {
+        "kind": "split_bar",
+        "label": "Exenta vs sujeta",
+        "items": [
+            {"label": "Exenta", "value": round(max(0.0, exento_val) + 1e-9, 2)},
+            {"label": "Sujeta", "value": round(max(0.0, sujeta_val) + 1e-9, 2)},
         ],
     }
 
@@ -8573,14 +8684,22 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (mejoras por fecha, valores cotizados especiales, convenios, etc.).",
     ]
     brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
+    sections = [("Resumen", resumen_cards)]
+    # Solo añadimos gráficos si hay datos suficientes.
+    if waterfall_steps:
+        sections.append(("Gráfico · Ganancia", waterfall_chart))
+    if (exento_val + sujeta_val) > 0:
+        sections.append(("Gráfico · Exención", split_bar))
+    sections.extend(
+        [
+            ("Datos de entrada", input_lines),
+            ("Resultado", output_lines),
+        ]
+    )
     pdf_bytes = build_modernia_branded_document_pdf(
         "Informe IRPF/IRNR · Ganancia patrimonial",
         subtitle,
-        [
-            ("Resumen", resumen_cards),
-            ("Datos de entrada", input_lines),
-            ("Resultado", output_lines),
-        ],
+        sections,
         footer_lines=footer,
         company={},
         brand_logo_url=brand,
@@ -34896,6 +35015,185 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             if used_rows <= 0:
                 used_rows = 1
             y += used_rows * card_h + (used_rows - 1) * gap + 10
+        elif kind == "split_bar":
+            # Horizontal split bar (e.g. Exenta vs Sujeta)
+            label = str(lines.get("label") or "").strip()
+            items = lines.get("items") or []
+            segments = []
+            for item in items:
+                if isinstance(item, dict):
+                    seg_label = str(item.get("label") or "").strip()
+                    try:
+                        seg_value = float(item.get("value") or 0.0)
+                    except Exception:
+                        seg_value = 0.0
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    seg_label = str(item[0] or "").strip()
+                    try:
+                        seg_value = float(item[1] or 0.0)
+                    except Exception:
+                        seg_value = 0.0
+                else:
+                    continue
+                if not seg_label:
+                    continue
+                segments.append((seg_label, max(0.0, seg_value)))
+
+            total = sum(v for _, v in segments)
+            if total <= 0:
+                # Nothing to draw; show a muted placeholder line.
+                ensure_space(28)
+                if label:
+                    draw.text((margin_x, y), label, fill=muted, font=font_body)
+                    y += 24
+                draw.text((margin_x, y), "—", fill=muted, font=font_body)
+                y += 20
+            else:
+                bar_h = 28
+                bar_w = content_width
+                gap = 14
+                if label:
+                    ensure_space(28 + bar_h + 52)
+                    draw.text((margin_x, y), label, fill=muted, font=font_body)
+                    y += 26
+                else:
+                    ensure_space(bar_h + 52)
+                x0 = margin_x
+                y0 = y
+                x1 = x0 + bar_w
+                y1 = y0 + bar_h
+
+                # background
+                try:
+                    draw.rounded_rectangle((x0, y0, x1, y1), radius=14, fill=(240, 241, 243))
+                except Exception:
+                    draw.rectangle((x0, y0, x1, y1), fill=(240, 241, 243))
+
+                palette = [gold, olive, (88, 94, 98), (160, 160, 160)]
+                x = x0
+                for idx, (_lab, val) in enumerate(segments):
+                    if val <= 0:
+                        continue
+                    w = int(round((val / total) * bar_w))
+                    if idx == len(segments) - 1:
+                        w = x1 - x
+                    if w <= 0:
+                        continue
+                    draw.rectangle((x, y0, min(x1, x + w), y1), fill=palette[idx % len(palette)])
+                    x += w
+
+                # legend
+                y = y1 + 12
+                cursor_x = margin_x
+                for idx, (lab, val) in enumerate(segments):
+                    if val <= 0:
+                        continue
+                    swatch = palette[idx % len(palette)]
+                    draw.rectangle((cursor_x, y + 6, cursor_x + 14, y + 20), fill=swatch)
+                    t = f"{lab}: {format_eur(val)}"
+                    draw.text((cursor_x + 20, y), t, fill=ink, font=font_body)
+                    try:
+                        t_w = draw.textlength(t, font=font_body)
+                    except Exception:
+                        t_w = len(t) * 9
+                    cursor_x += 20 + int(t_w) + 28
+                    if cursor_x > page_width - margin_x - 200:
+                        cursor_x = margin_x
+                        y += 28
+                y += 34
+        elif kind == "waterfall":
+            # Minimal waterfall-like chart for monetary deltas.
+            title = str(lines.get("label") or "").strip()
+            steps = lines.get("steps") or []
+            parsed_steps = []
+            for step in steps:
+                if isinstance(step, dict):
+                    lab = str(step.get("label") or "").strip()
+                    try:
+                        val = float(step.get("value") or 0.0)
+                    except Exception:
+                        val = 0.0
+                    if lab:
+                        parsed_steps.append((lab, val))
+                elif isinstance(step, (list, tuple)) and len(step) >= 2:
+                    lab = str(step[0] or "").strip()
+                    try:
+                        val = float(step[1] or 0.0)
+                    except Exception:
+                        val = 0.0
+                    if lab:
+                        parsed_steps.append((lab, val))
+
+            if not parsed_steps:
+                ensure_space(24)
+                if title:
+                    draw.text((margin_x, y), title, fill=muted, font=font_body)
+                    y += 24
+                draw.text((margin_x, y), "—", fill=muted, font=font_body)
+                y += 20
+            else:
+                chart_h = 220
+                chart_w = content_width
+                top_pad = 28 if title else 0
+                ensure_space(top_pad + chart_h + 70)
+                if title:
+                    draw.text((margin_x, y), title, fill=muted, font=font_body)
+                    y += 24
+
+                x0 = margin_x
+                y0 = y
+                x1 = x0 + chart_w
+                y1 = y0 + chart_h
+                # axis baseline at bottom
+                draw.line((x0, y1, x1, y1), fill=(210, 214, 218), width=2)
+
+                cumulative = 0.0
+                min_y = 0.0
+                max_y = 0.0
+                for _lab, val in parsed_steps:
+                    cumulative += val
+                    min_y = min(min_y, cumulative)
+                    max_y = max(max_y, cumulative)
+                # include 0
+                min_y = min(min_y, 0.0)
+                max_y = max(max_y, 0.0)
+                if abs(max_y - min_y) < 1e-9:
+                    max_y = min_y + 1.0
+
+                def y_map(v: float) -> int:
+                    # v in [min_y, max_y] -> pixel y in [y1, y0]
+                    frac = (v - min_y) / (max_y - min_y)
+                    return int(round(y1 - frac * chart_h))
+
+                n = len(parsed_steps)
+                gap = 16
+                bar_w = int((chart_w - gap * (n - 1)) / n) if n > 1 else chart_w
+                bar_w = max(44, bar_w)
+                palette_pos = gold
+                palette_neg = (210, 104, 104)
+
+                cum_prev = 0.0
+                for idx, (lab, val) in enumerate(parsed_steps):
+                    x = x0 + idx * (bar_w + gap)
+                    cum_next = cum_prev + val
+                    y_prev = y_map(cum_prev)
+                    y_next = y_map(cum_next)
+                    top = min(y_prev, y_next)
+                    bot = max(y_prev, y_next)
+                    color = palette_pos if val >= 0 else palette_neg
+                    draw.rectangle((x, top, x + bar_w, bot), fill=color)
+                    # connector
+                    if idx < n - 1:
+                        draw.line((x + bar_w, y_next, x + bar_w + gap, y_next), fill=(180, 186, 192), width=2)
+                    # label (short)
+                    short = lab if len(lab) <= 14 else (lab[:13] + "…")
+                    draw.text((x + bar_w / 2, y1 + 8), short, fill=muted, font=font_header_small, anchor="mt")
+                    cum_prev = cum_next
+
+                # Final value line
+                final_val = cum_prev
+                draw.text((x0, y0 - 2), f"Resultado: {format_eur(final_val)}", fill=ink, font=font_body_bold)
+                y = y1 + 46
         else:
             lines_iter = lines if isinstance(lines, list) else []
             for line in lines_iter:
