@@ -61394,6 +61394,19 @@ if (irpfGainForm) {
   };
 
   const getScenarioClientId = () => String(irpfClienteIdInput?.value || "").trim();
+  const resolveScenarioClientId = () => getScenarioClientId() || String(state.currentClienteId || "").trim();
+
+  // Fallback: si venimos de una ficha de cliente, suele existir `state.currentClienteId`.
+  // Así los escenarios funcionan aunque el simulador no se haya abierto “con prefill”.
+  try {
+    const fallbackClienteId = String(state.currentClienteId || "").trim();
+    if (fallbackClienteId && irpfClienteIdInput && !String(irpfClienteIdInput.value || "").trim()) {
+      irpfClienteIdInput.value = fallbackClienteId;
+      try {
+        irpfClienteIdInput.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch {}
+    }
+  } catch {}
 
   const setScenarioStatus = (text = "") => {
     if (irpfScenarioStatus) irpfScenarioStatus.textContent = String(text || "");
@@ -61447,7 +61460,7 @@ if (irpfGainForm) {
   };
 
   const loadIrpfScenarios = async (opts = {}) => {
-    const clienteId = getScenarioClientId();
+    const clienteId = resolveScenarioClientId();
     const empresaId = resolveScenarioEmpresaId();
     const silent = Boolean(opts.silent);
     if (!clienteId) {
@@ -61586,7 +61599,7 @@ if (irpfGainForm) {
 
   if (irpfScenarioNewBtn) {
     irpfScenarioNewBtn.addEventListener("click", async () => {
-      const clienteId = getScenarioClientId();
+      const clienteId = resolveScenarioClientId();
       if (!clienteId) {
         setScenarioStatus("Selecciona un cliente.");
         return;
@@ -61605,7 +61618,7 @@ if (irpfGainForm) {
 
   if (irpfScenarioSaveBtn) {
     irpfScenarioSaveBtn.addEventListener("click", async () => {
-      const clienteId = getScenarioClientId();
+      const clienteId = resolveScenarioClientId();
       const empresaId = resolveScenarioEmpresaId();
       if (!clienteId) {
         setScenarioStatus("Selecciona un cliente.");
@@ -61693,7 +61706,7 @@ if (irpfGainForm) {
 
   if (irpfClienteIdInput) {
     irpfClienteIdInput.addEventListener("change", () => {
-      const next = getScenarioClientId();
+      const next = resolveScenarioClientId();
       if (next && next !== irpfScenarioCurrentClientId) {
         irpfScenarioCurrentClientId = next;
         irpfScenarioCurrentId = "";
