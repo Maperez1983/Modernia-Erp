@@ -489,6 +489,15 @@ textarea:focus {
   display: none !important;
 }
 
+/* Evita mezclar verticales: si no estás en el contexto del vertical, su UI debe permanecer oculta. */
+body:not(.crm-context-fin) #hipotecaSection {
+  display: none !important;
+}
+
+body:not(.crm-context-seguros) #segurosCrmSection {
+  display: none !important;
+}
+
 body.page-empresa #homeSection {
   display: none;
 }
