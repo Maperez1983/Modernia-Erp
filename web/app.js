@@ -8543,7 +8543,7 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
                 <strong>${row.label || "Sin compañía"}</strong>
                 <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
               </div>
-              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.prima_total || 0))}</span></div>
+	              <div class="workspace-billing-meta"><span>${formatEuros(parseMoneyValue(row.prima_total))}</span></div>
             </div>
           `,
           "Sin distribución por compañía."
@@ -8559,7 +8559,7 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
                 <strong>${row.label || "Sin ramo"}</strong>
                 <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
               </div>
-              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.prima_total || 0))}</span></div>
+	              <div class="workspace-billing-meta"><span>${formatEuros(parseMoneyValue(row.prima_total))}</span></div>
             </div>
           `,
           "Sin distribución por ramo."
@@ -49025,7 +49025,7 @@ const renderSegurosPresupuestos = (data) => {
     const tomador = row[tomadorIndex] || "Cliente";
     const compania = row[companiaIndex] || "-";
     const ramo = row[ramoIndex] || "-";
-    const prima = row[primaIndex] ? euroFormatter.format(Number(row[primaIndex]) || 0) : "-";
+    const prima = row[primaIndex] ? euroFormatter.format(parseMoneyValue(row[primaIndex])) : "-";
     const poliza = row[polizaIndex] || "-";
     const main = document.createElement("strong");
     main.textContent = tomador;
@@ -54645,7 +54645,7 @@ const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
       row.fecha_efecto || "-",
       computed.vencimiento || "-",
       computed.estado || "-",
-      row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
+      row.prima_total ? euroFormatter.format(parseMoneyValue(row.prima_total)) : "-",
     ];
     values.forEach((value) => {
       const td = document.createElement("td");
@@ -55720,11 +55720,11 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       ["Estado", computed.estado || "-"],
       ["Fecha efecto", row.fecha_efecto || "-"],
       ["Fecha vencimiento", vencimiento],
-      ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
-      ["Prima total", row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-"],
+      ["Prima neta", row.prima_neta ? euroFormatter.format(parseMoneyValue(row.prima_neta)) : "-"],
+      ["Prima total", row.prima_total ? euroFormatter.format(parseMoneyValue(row.prima_total)) : "-"],
       ["Comisión", Number.isFinite(effectiveCommission) ? euroFormatter.format(effectiveCommission) : "-"],
       ["Porcentaje comisión", Number.isFinite(pctToShow) ? formatPercent(pctToShow) : "-"],
-      ["Producción", row.produccion ? euroFormatter.format(Number(row.produccion) || 0) : "-"],
+      ["Producción", row.produccion ? euroFormatter.format(parseMoneyValue(row.produccion)) : "-"],
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
       ["Nueva poliza", row.nueva_poliza_ref || "-"],
@@ -56319,7 +56319,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
           row.fecha_efecto || "-",
           computed.vencimiento || "-",
           computed.estado || "-",
-          row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
+          row.prima_total ? euroFormatter.format(parseMoneyValue(row.prima_total)) : "-",
         ];
         const cols = ["poliza", "compania", "ramo", "efecto", "vencimiento", "estado", "prima"];
         values.forEach((value, idx) => {
