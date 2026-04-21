@@ -61215,6 +61215,9 @@ if (simHubVerTodoBtn) {
 }
 
 if (irpfGainForm) {
+  try {
+    bindMoneyPlainInputs(irpfGainForm);
+  } catch {}
   const syncIrpfGainExtras = () => {
     const data = new FormData(irpfGainForm);
     const adqMode = normalizeSimple(data.get("gastos_adquisicion_mode") || "");
@@ -61262,18 +61265,21 @@ if (irpfGainForm) {
         });
       }
     }
-    if (txTotalInput) {
-      txTotalInput.readOnly = showTx;
-      if (showTx) {
-        const total = sumInputs([
-          "gastos_tx_agencia",
-          "gastos_tx_notaria",
-          "gastos_tx_registro",
-          "gastos_tx_notaria_registro",
-          "gastos_tx_cancelacion",
-          "gastos_tx_hipoteca",
-          "gastos_tx_otros",
-        ]);
+	    if (txTotalInput) {
+	      txTotalInput.readOnly = showTx;
+	      if (showTx) {
+	        const total = sumInputs([
+	          "gastos_tx_agencia",
+	          "gastos_tx_abogado",
+	          "gastos_tx_cert_energetico",
+	          "gastos_tx_notaria",
+	          "gastos_tx_registro",
+	          "gastos_tx_notaria_registro",
+	          "gastos_tx_cancelacion",
+	          "gastos_tx_cancelacion_registral",
+	          "gastos_tx_hipoteca",
+	          "gastos_tx_otros",
+	        ]);
         txTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
