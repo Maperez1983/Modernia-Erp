@@ -2236,11 +2236,23 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         # - Texto con formato ES (ej: "7.397,96 €")
         # Mantiene el '.' decimal cuando no hay ',' en el valor (caso numérico / "1234.56").
         # Si hay ',', asumimos formato ES y eliminamos puntos de miles.
+        # Si no hay ',' pero hay '.' en grupos de miles (ej: "20.000"), eliminamos esos puntos.
         base = f"COALESCE(CAST({expr} AS TEXT), '')"
         stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
         eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
         us = f"REPLACE({stripped}, ',', '')"
-        normalized = f"CASE WHEN {stripped} LIKE '%,%' THEN {eu} ELSE {us} END"
+        dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
+        looks_like_dot_thousands = (
+            f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+            f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+        )
+        dot_thousands = f"REPLACE({stripped}, '.', '')"
+        normalized = (
+            f"CASE "
+            f"WHEN {stripped} LIKE '%,%' THEN {eu} "
+            f"WHEN {looks_like_dot_thousands} THEN {dot_thousands} "
+            f"ELSE {us} END"
+        )
         return f"CAST(NULLIF({normalized}, '') AS REAL)"
 
     def _count_buckets(where_extra_sql, params_extra):
@@ -8609,6 +8621,7 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Gastos adquisición · Registro", money(irpf_payload.get("gastos_adq_registro"))),
         ("Gastos adquisición · Notaría/Registro (legacy)", money(irpf_payload.get("gastos_adq_notaria_registro"))),
         ("Gastos adquisición · Gestoría", money(irpf_payload.get("gastos_adq_gestoria"))),
+        ("Gastos adquisición · Hipoteca", money(irpf_payload.get("gastos_adq_hipoteca"))),
         ("Gastos adquisición · Otros", money(irpf_payload.get("gastos_adq_otros"))),
         ("Mejoras / inversiones", money(irpf_payload.get("inversiones_mejoras"))),
         ("Fecha mejoras/inversiones", text(irpf_payload.get("fecha_mejoras"))),
@@ -8620,7 +8633,8 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Gastos transmisión · Notaría", money(irpf_payload.get("gastos_tx_notaria"))),
         ("Gastos transmisión · Registro", money(irpf_payload.get("gastos_tx_registro"))),
         ("Gastos transmisión · Notaría/Registro (legacy)", money(irpf_payload.get("gastos_tx_notaria_registro"))),
-        ("Gastos transmisión · Cancelación hipoteca", money(irpf_payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Gestoría / cancelación", money(irpf_payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Hipoteca", money(irpf_payload.get("gastos_tx_hipoteca"))),
         ("Gastos transmisión · Otros", money(irpf_payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada (IRPF)", money(irpf_payload.get("plusvalia_municipal"))),
         ("Vivienda habitual", yn(irpf_payload.get("vivienda_habitual"))),
@@ -61407,7 +61421,18 @@ class Handler(BaseHTTPRequestHandler):
                 stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
                 eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
                 us = f"REPLACE({stripped}, ',', '')"
-                normalized = f"CASE WHEN {stripped} LIKE '%,%' THEN {eu} ELSE {us} END"
+                dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
+                looks_like_dot_thousands = (
+                    f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                    f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+                )
+                dot_thousands = f"REPLACE({stripped}, '.', '')"
+                normalized = (
+                    f"CASE "
+                    f"WHEN {stripped} LIKE '%,%' THEN {eu} "
+                    f"WHEN {looks_like_dot_thousands} THEN {dot_thousands} "
+                    f"ELSE {us} END"
+                )
                 return f"CAST(NULLIF({normalized}, '') AS REAL)"
 
             prima_total_sql = _money_sql("s.prima_total")

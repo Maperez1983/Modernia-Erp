@@ -1039,6 +1039,20 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 10px;
 }
 
+.form-grid .span-all {
+  grid-column: 1 / -1;
+}
+
+.form-grid .form-grid-section {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(217, 211, 199, 0.8);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .form-grid.inmo-grid {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }

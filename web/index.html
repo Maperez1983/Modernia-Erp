@@ -1154,6 +1154,7 @@
 		              </div>
 		            </div>
 			            <form id="irpfGainForm" class="form-grid">
+			              <div class="form-grid-section">Identificación</div>
 			              <label class="span-2">
 			                Referencia (opcional)
 			                <input name="referencia" placeholder="Inmueble / expediente / dirección" />
@@ -1213,6 +1214,7 @@
 			                % participación transmitida
 			                <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
 			              </label>
+			              <div class="form-grid-section">Fechas</div>
 		              <label>
 		                Fecha adquisición
 		                <input name="fecha_adquisicion" type="date" required />
@@ -1221,6 +1223,7 @@
 		                Fecha transmisión (devengo)
 		                <input name="fecha_transmision" type="date" required />
 		              </label>
+			              <div class="form-grid-section">Adquisición</div>
 		              <label>
 		                Valor adquisición
 		                <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
@@ -1256,6 +1259,7 @@
 		                Otros (compra)
 		                <input name="gastos_adq_otros" inputmode="decimal" placeholder="0,00" />
 		              </label>
+			              <div class="form-grid-section">Mejoras y amortización</div>
 			              <label>
 			                Mejoras / inversiones
 			                <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
@@ -1307,6 +1311,7 @@
 			                Fin alquiler/afección (opcional)
 			                <input name="fecha_fin_alquiler" type="date" />
 			              </label>
+			              <div class="form-grid-section">Transmisión</div>
 		              <label>
 		                Valor transmisión
 		                <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
@@ -1338,6 +1343,7 @@
 		                Otros (venta)
 		                <input name="gastos_tx_otros" inputmode="decimal" placeholder="0,00" />
 		              </label>
+			              <div class="form-grid-section">Exenciones</div>
 		              <label>
 		                Plusvalía municipal pagada (opcional)
 		                <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
@@ -1360,6 +1366,7 @@
 		                Préstamo pendiente (opcional)
 		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
 		              </label>
+			              <div class="form-grid-section">Avanzado</div>
 			              <label>
 			                Abatimiento (DT 9ª)
 			                <select name="abatimiento_mode">
@@ -9715,7 +9722,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=618"></script>
+					    <script src="app.js?v=619"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
