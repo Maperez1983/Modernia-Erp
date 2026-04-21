@@ -7057,14 +7057,22 @@ const openIrpfGananciaModal = (options = {}) => {
             Gastos adquisición (opcional)
             <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
           </label>
-          <label>
-            Mejoras / inversiones (opcional)
-            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
-          </label>
-          <label>
-            Amortización deducida (opcional)
-            <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
-          </label>
+	          <label>
+	            Mejoras / inversiones (opcional)
+	            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+	          </label>
+	          <label>
+	            Fecha mejoras/inversiones (opcional)
+	            <input name="fecha_mejoras" type="date" />
+	          </label>
+	          <label>
+	            Valor transmisión imputable a mejoras (opcional)
+	            <input name="valor_transmision_mejoras" inputmode="decimal" placeholder="0,00" />
+	          </label>
+	          <label>
+	            Amortización deducida (opcional)
+	            <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
+	          </label>
           <label>
             Valor transmisión
             <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
@@ -18817,16 +18825,12 @@ const resolveCrmTecnocloudVertical = () => {
   } catch {
     crmContext = "";
   }
-  if (currentTab === "seguros-crm" || crmContext === "seguros") return "seguros";
-  if (
-    currentTab === "fin-crm" ||
-    currentTab === "fin-sim" ||
-    crmContext === "fin" ||
-    crmContext === "financiaciones" ||
-    crmContext === "hipotecas"
-  ) {
-    return "fin";
-  }
+  // Tab explícito tiene prioridad sobre querystring (evita "mezclas" por URLs antiguas).
+  if (currentTab === "seguros-crm") return "seguros";
+  if (currentTab === "fin-crm" || currentTab === "fin-sim") return "fin";
+  if (currentTab === "crm") return "inmo";
+  if (crmContext === "seguros") return "seguros";
+  if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") return "fin";
   return "inmo";
 };
 
@@ -30549,16 +30553,21 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	};
 
 const mountCrmVerticalViews = () => {
+  const vertical = resolveCrmTecnocloudVertical();
   try {
     if (crmSegurosMount && segurosCrmSection && segurosCrmSection.parentElement !== crmSegurosMount) {
       crmSegurosMount.appendChild(segurosCrmSection);
-      segurosCrmSection.classList.remove("hidden");
+    }
+    if (segurosCrmSection) {
+      segurosCrmSection.classList.toggle("hidden", vertical !== "seguros");
     }
   } catch {}
   try {
     if (crmFinMount && hipotecaSection && hipotecaSection.parentElement !== crmFinMount) {
       crmFinMount.appendChild(hipotecaSection);
-      hipotecaSection.classList.remove("hidden");
+    }
+    if (hipotecaSection) {
+      hipotecaSection.classList.toggle("hidden", vertical !== "fin");
     }
   } catch {}
 };
