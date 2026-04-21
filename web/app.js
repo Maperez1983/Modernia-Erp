@@ -2800,11 +2800,30 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
 const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
-		const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
-		const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
-		const crmViewResumen = document.getElementById("crmViewResumen");
-		const crmInicioBoard = document.getElementById("crmInicioBoard");
-		const crmInicioContactarBtn = document.getElementById("crmInicioContactarBtn");
+			const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
+			const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
+
+      const ensureCrmOverlayPortal = () => {
+        try {
+          const portalId = "crmOverlayPortal";
+          let portal = document.getElementById(portalId);
+          if (!portal) {
+            portal = document.createElement("div");
+            portal.id = portalId;
+            document.body.appendChild(portal);
+          }
+          [crmInsertModal, crmClienteModal, crmCaptacionModal].forEach((el) => {
+            if (!el) return;
+            if (el.parentElement === portal) return;
+            portal.appendChild(el);
+          });
+        } catch {}
+      };
+
+      ensureCrmOverlayPortal();
+			const crmViewResumen = document.getElementById("crmViewResumen");
+			const crmInicioBoard = document.getElementById("crmInicioBoard");
+			const crmInicioContactarBtn = document.getElementById("crmInicioContactarBtn");
 		const crmInicioObjetivosBtn = document.getElementById("crmInicioObjetivosBtn");
 		const crmInicioMapaBtn = document.getElementById("crmInicioMapaBtn");
 		const crmInicioPanelBtn = document.getElementById("crmInicioPanelBtn");
@@ -7161,6 +7180,14 @@ const openIrpfGananciaModal = (options = {}) => {
                     <input name="gastos_adq_agencia" inputmode="decimal" placeholder="0,00" />
                   </label>
                   <label>
+                    Abogado/asesoría
+                    <input name="gastos_adq_abogado" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Tasación
+                    <input name="gastos_adq_tasacion" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
                     ITP/IVA y AJD
                     <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
                   </label>
@@ -7220,12 +7247,24 @@ const openIrpfGananciaModal = (options = {}) => {
                     <input name="gastos_tx_agencia" inputmode="decimal" placeholder="0,00" />
                   </label>
                   <label>
+                    Abogado/asesoría
+                    <input name="gastos_tx_abogado" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Certificado energético
+                    <input name="gastos_tx_cert_energetico" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
                     Notaría y Registro
                     <input name="gastos_tx_notaria_registro" inputmode="decimal" placeholder="0,00" />
                   </label>
                   <label>
                     Cancelación hipoteca (gastos)
                     <input name="gastos_tx_cancelacion" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Cancelación registral/cargas
+                    <input name="gastos_tx_cancelacion_registral" inputmode="decimal" placeholder="0,00" />
                   </label>
                   <label>
                     Otros
@@ -7356,12 +7395,22 @@ const openIrpfGananciaModal = (options = {}) => {
     const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
     const adqDesglose = sum([
       "gastos_adq_agencia",
+      "gastos_adq_abogado",
+      "gastos_adq_tasacion",
       "gastos_adq_itp_iva_ajd",
       "gastos_adq_notaria_registro",
       "gastos_adq_gestoria",
       "gastos_adq_otros",
     ]);
-    const txDesglose = sum(["gastos_tx_agencia", "gastos_tx_notaria_registro", "gastos_tx_cancelacion", "gastos_tx_otros"]);
+    const txDesglose = sum([
+      "gastos_tx_agencia",
+      "gastos_tx_abogado",
+      "gastos_tx_cert_energetico",
+      "gastos_tx_notaria_registro",
+      "gastos_tx_cancelacion",
+      "gastos_tx_cancelacion_registral",
+      "gastos_tx_otros",
+    ]);
     const adqMode = String(payload.gastos_adquisicion_mode || "manual").toLowerCase();
     const txMode = String(payload.gastos_transmision_mode || "manual").toLowerCase();
     if (adqMode === "desglose") payload.gastos_adquisicion = adqDesglose ? String(adqDesglose) : String(parseMoneyValue(payload.gastos_adquisicion || 0));
@@ -7446,6 +7495,8 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("gastos_adquisicion", prefill.gastos_adquisicion || "");
   setValue("gastos_adquisicion_mode", prefill.gastos_adquisicion_mode || "manual");
   setValue("gastos_adq_agencia", prefill.gastos_adq_agencia || "");
+  setValue("gastos_adq_abogado", prefill.gastos_adq_abogado || "");
+  setValue("gastos_adq_tasacion", prefill.gastos_adq_tasacion || "");
   setValue("gastos_adq_itp_iva_ajd", prefill.gastos_adq_itp_iva_ajd || "");
   setValue("gastos_adq_notaria_registro", prefill.gastos_adq_notaria_registro || "");
   setValue("gastos_adq_gestoria", prefill.gastos_adq_gestoria || "");
@@ -7456,8 +7507,11 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("gastos_transmision", prefill.gastos_transmision || "");
   setValue("gastos_transmision_mode", prefill.gastos_transmision_mode || "manual");
   setValue("gastos_tx_agencia", prefill.gastos_tx_agencia || "");
+  setValue("gastos_tx_abogado", prefill.gastos_tx_abogado || "");
+  setValue("gastos_tx_cert_energetico", prefill.gastos_tx_cert_energetico || "");
   setValue("gastos_tx_notaria_registro", prefill.gastos_tx_notaria_registro || "");
   setValue("gastos_tx_cancelacion", prefill.gastos_tx_cancelacion || "");
+  setValue("gastos_tx_cancelacion_registral", prefill.gastos_tx_cancelacion_registral || "");
   setValue("gastos_tx_otros", prefill.gastos_tx_otros || "");
   setValue("plusvalia_municipal", prefill.plusvalia_municipal || "");
   setValue("importe_reinvertido", prefill.importe_reinvertido || "");
