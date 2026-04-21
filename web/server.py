@@ -37069,6 +37069,62 @@ class Handler(BaseHTTPRequestHandler):
                     cookies=[self._build_session_cookie("", max_age=0)],
                 )
                 return
+            # Best-effort: si la DB ya está lista, refrescamos nombre/rol/servicio para evitar sesiones desfasadas
+            # (p.ej. cuando un admin cambia "Servicios visibles" en RRHH).
+            if Handler._db_ready:
+                try:
+                    conn = get_db(self.db_path)
+                    self._track_conn(conn)
+                    user = conn.execute(
+                        """
+                        SELECT id, nombre, apellido, usuario, email, servicio, rol
+                        FROM usuarios
+                        WHERE id = ? AND activo = 1
+                        """,
+                        (session.get("user_id"),),
+                    ).fetchone()
+                    if user:
+                        refreshed_session = dict(session)
+                        refreshed_session.update(
+                            {
+                                "nombre": user["nombre"] or "",
+                                "apellido": user["apellido"] or "",
+                                "usuario": user["usuario"] or "",
+                                "email": user["email"] or "",
+                                "servicio": user["servicio"] or "",
+                                "rol": user["rol"] or "",
+                            }
+                        )
+                        with AUTH_SESSIONS_LOCK:
+                            if token in AUTH_SESSIONS:
+                                AUTH_SESSIONS[token].update(refreshed_session)
+                        try:
+                            auth_conn = open_auth_store_conn(with_row_factory=False)
+                            try:
+                                auth_conn.execute(
+                                    """
+                                    UPDATE auth_sessions
+                                    SET usuario = ?, nombre = ?, apellido = ?, rol = ?, email = ?, servicio = ?
+                                    WHERE token = ?
+                                    """,
+                                    [
+                                        refreshed_session.get("usuario") or "",
+                                        refreshed_session.get("nombre") or "",
+                                        refreshed_session.get("apellido") or "",
+                                        refreshed_session.get("rol") or "",
+                                        refreshed_session.get("email") or "",
+                                        refreshed_session.get("servicio") or "",
+                                        token,
+                                    ],
+                                )
+                                auth_conn.commit()
+                            finally:
+                                auth_conn.close()
+                        except Exception:
+                            pass
+                        session = refreshed_session
+                except Exception:
+                    pass
             json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
             return
         if parsed.path.startswith("/api/"):
@@ -40059,6 +40115,69 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "usuario ya en uso"}, status=409)
                 return
             conn.commit()
+            # Mantén las sesiones alineadas con el usuario actualizado (servicios/rol/etc.).
+            # Sin esto, `/api/me` puede devolver datos antiguos (porque lee del auth store),
+            # y el usuario no ve sus módulos hasta cerrar y abrir sesión.
+            try:
+                touch_fields = {"servicio", "rol", "email", "usuario", "nombre", "apellido", "activo"}
+                if any((k in payload) for k in touch_fields):
+                    row = conn.execute(
+                        "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo FROM usuarios WHERE id = ? LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
+                    if row:
+                        is_active = int(row["activo"] or 0) == 1
+                        session_update = {
+                            "user_id": str(row["id"]),
+                            "usuario": row["usuario"] or "",
+                            "nombre": row["nombre"] or "",
+                            "apellido": row["apellido"] or "",
+                            "rol": row["rol"] or "",
+                            "email": row["email"] or "",
+                            "servicio": row["servicio"] or "",
+                        }
+
+                        # Persistido (DB auth_sessions).
+                        try:
+                            auth_conn = open_auth_store_conn(with_row_factory=False)
+                            try:
+                                if is_active:
+                                    auth_conn.execute(
+                                        """
+                                        UPDATE auth_sessions
+                                        SET usuario = ?, nombre = ?, apellido = ?, rol = ?, email = ?, servicio = ?
+                                        WHERE user_id = ?
+                                        """,
+                                        [
+                                            session_update["usuario"],
+                                            session_update["nombre"],
+                                            session_update["apellido"],
+                                            session_update["rol"],
+                                            session_update["email"],
+                                            session_update["servicio"],
+                                            str(user_id),
+                                        ],
+                                    )
+                                else:
+                                    auth_conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", [str(user_id)])
+                                auth_conn.commit()
+                            finally:
+                                auth_conn.close()
+                        except Exception:
+                            pass
+
+                        # En memoria (AUTH_SESSIONS).
+                        with AUTH_SESSIONS_LOCK:
+                            tokens = [t for t, s in AUTH_SESSIONS.items() if str(s.get("user_id") or "") == str(user_id)]
+                            if is_active:
+                                for t in tokens:
+                                    AUTH_SESSIONS[t].update(session_update)
+                            else:
+                                for t in tokens:
+                                    AUTH_SESSIONS.pop(t, None)
+                                    AUTH_SESSION_DB_REFRESH_AT.pop(t, None)
+            except Exception:
+                pass
             json_response(self, {"ok": True, "id": user_id})
             return
         elif parsed.path == "/api/usuarios_delete":
