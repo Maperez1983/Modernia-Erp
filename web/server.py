@@ -3170,8 +3170,26 @@ def parse_money_value(value):
     text = str(value).strip()
     if not text:
         return 0.0
-    text = text.replace(".", "").replace(",", ".")
-    text = re.sub(r"[^0-9.\-]+", "", text)
+    text = re.sub(r"[^0-9,\.\-]+", "", text)
+    if not text or text in ("-", ".", ","):
+        return 0.0
+    has_comma = "," in text
+    has_dot = "." in text
+    if has_comma and has_dot:
+        # es-ES: dots thousands, comma decimals (ej: 20.000,50)
+        text = text.replace(".", "").replace(",", ".")
+    elif has_comma:
+        # Coma como decimal (ej: 20000,50)
+        text = text.replace(",", ".")
+    elif has_dot:
+        # Si los puntos parecen miles (ej: 20.000), los eliminamos.
+        parts = text.split(".")
+        if len(parts) > 1:
+            last = parts[-1]
+            groups_ok = all(len(p) == 3 for p in parts[1:])
+            if groups_ok and len(last) == 3:
+                text = "".join(parts)
+        # Si no, mantenemos el punto como decimal (ej: 20000.50)
     if not text or text in ("-", "."):
         return 0.0
     try:
@@ -3188,8 +3206,22 @@ def parse_optional_float(value):
     text = str(value).strip()
     if not text:
         return None
-    text = text.replace(".", "").replace(",", ".")
-    text = re.sub(r"[^0-9.\-]+", "", text)
+    text = re.sub(r"[^0-9,\.\-]+", "", text)
+    if not text or text in ("-", ".", ","):
+        return None
+    has_comma = "," in text
+    has_dot = "." in text
+    if has_comma and has_dot:
+        text = text.replace(".", "").replace(",", ".")
+    elif has_comma:
+        text = text.replace(",", ".")
+    elif has_dot:
+        parts = text.split(".")
+        if len(parts) > 1:
+            last = parts[-1]
+            groups_ok = all(len(p) == 3 for p in parts[1:])
+            if groups_ok and len(last) == 3:
+                text = "".join(parts)
     if not text or text in ("-", "."):
         return None
     try:
@@ -8024,16 +8056,22 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
         [
             "gastos_adq_agencia",
             "gastos_adq_itp_iva_ajd",
+            "gastos_adq_notaria",
+            "gastos_adq_registro",
             "gastos_adq_notaria_registro",
             "gastos_adq_gestoria",
+            "gastos_adq_hipoteca",
             "gastos_adq_otros",
         ]
     )
     tx_desglose_total = _sum_money(
         [
             "gastos_tx_agencia",
+            "gastos_tx_notaria",
+            "gastos_tx_registro",
             "gastos_tx_notaria_registro",
             "gastos_tx_cancelacion",
+            "gastos_tx_hipoteca",
             "gastos_tx_otros",
         ]
     )
@@ -8419,8 +8457,11 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
         ("Gastos adquisición · Agencia", money(payload.get("gastos_adq_agencia"))),
         ("Gastos adquisición · ITP/IVA+AJD", money(payload.get("gastos_adq_itp_iva_ajd"))),
-        ("Gastos adquisición · Notaría/Registro", money(payload.get("gastos_adq_notaria_registro"))),
+        ("Gastos adquisición · Notaría", money(payload.get("gastos_adq_notaria"))),
+        ("Gastos adquisición · Registro", money(payload.get("gastos_adq_registro"))),
+        ("Gastos adquisición · Notaría/Registro (legacy)", money(payload.get("gastos_adq_notaria_registro"))),
         ("Gastos adquisición · Gestoría", money(payload.get("gastos_adq_gestoria"))),
+        ("Gastos adquisición · Hipoteca", money(payload.get("gastos_adq_hipoteca"))),
         ("Gastos adquisición · Otros", money(payload.get("gastos_adq_otros"))),
         ("Mejoras / inversiones", money(payload.get("inversiones_mejoras"))),
         ("Fecha mejoras/inversiones", date_text(payload.get("fecha_mejoras"))),
@@ -8437,8 +8478,11 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
         ("Gastos transmisión · Agencia", money(payload.get("gastos_tx_agencia"))),
-        ("Gastos transmisión · Notaría/Registro", money(payload.get("gastos_tx_notaria_registro"))),
-        ("Gastos transmisión · Cancelación hipoteca", money(payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Notaría", money(payload.get("gastos_tx_notaria"))),
+        ("Gastos transmisión · Registro", money(payload.get("gastos_tx_registro"))),
+        ("Gastos transmisión · Notaría/Registro (legacy)", money(payload.get("gastos_tx_notaria_registro"))),
+        ("Gastos transmisión · Gestoría / cancelación", money(payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Hipoteca", money(payload.get("gastos_tx_hipoteca"))),
         ("Gastos transmisión · Otros", money(payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada", money(payload.get("plusvalia_municipal"))),
         ("Vivienda habitual", yn(payload.get("vivienda_habitual"))),
@@ -8561,7 +8605,9 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
         ("Gastos adquisición · Agencia", money(irpf_payload.get("gastos_adq_agencia"))),
         ("Gastos adquisición · ITP/IVA+AJD", money(irpf_payload.get("gastos_adq_itp_iva_ajd"))),
-        ("Gastos adquisición · Notaría/Registro", money(irpf_payload.get("gastos_adq_notaria_registro"))),
+        ("Gastos adquisición · Notaría", money(irpf_payload.get("gastos_adq_notaria"))),
+        ("Gastos adquisición · Registro", money(irpf_payload.get("gastos_adq_registro"))),
+        ("Gastos adquisición · Notaría/Registro (legacy)", money(irpf_payload.get("gastos_adq_notaria_registro"))),
         ("Gastos adquisición · Gestoría", money(irpf_payload.get("gastos_adq_gestoria"))),
         ("Gastos adquisición · Otros", money(irpf_payload.get("gastos_adq_otros"))),
         ("Mejoras / inversiones", money(irpf_payload.get("inversiones_mejoras"))),
@@ -8571,7 +8617,9 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Valor transmisión", money(irpf_payload.get("valor_transmision"))),
         ("Gastos transmisión", money(irpf_payload.get("gastos_transmision"))),
         ("Gastos transmisión · Agencia", money(irpf_payload.get("gastos_tx_agencia"))),
-        ("Gastos transmisión · Notaría/Registro", money(irpf_payload.get("gastos_tx_notaria_registro"))),
+        ("Gastos transmisión · Notaría", money(irpf_payload.get("gastos_tx_notaria"))),
+        ("Gastos transmisión · Registro", money(irpf_payload.get("gastos_tx_registro"))),
+        ("Gastos transmisión · Notaría/Registro (legacy)", money(irpf_payload.get("gastos_tx_notaria_registro"))),
         ("Gastos transmisión · Cancelación hipoteca", money(irpf_payload.get("gastos_tx_cancelacion"))),
         ("Gastos transmisión · Otros", money(irpf_payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada (IRPF)", money(irpf_payload.get("plusvalia_municipal"))),

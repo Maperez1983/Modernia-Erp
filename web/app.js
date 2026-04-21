@@ -3703,7 +3703,28 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
 });
 
 const formatEuros = (value) => {
-  const num = Number(value);
+  if (value === null || value === undefined || value === "") return euroFormatter.format(0);
+  if (typeof value === "number") return euroFormatter.format(Number.isFinite(value) ? value : 0);
+  let text = String(value).trim();
+  if (!text) return euroFormatter.format(0);
+  text = text.replace(/[^\d.,-]/g, "");
+  const hasComma = text.includes(",");
+  const hasDot = text.includes(".");
+  if (hasComma && hasDot) {
+    // es-ES: dots for thousands, comma for decimals
+    text = text.replace(/\./g, "").replace(",", ".");
+  } else if (hasComma) {
+    text = text.replace(",", ".");
+  } else if (hasDot) {
+    // If dots look like thousands separators (e.g. 20.000), remove them
+    const parts = text.split(".");
+    const last = parts[parts.length - 1];
+    const allGroupsAre3 = parts.slice(1).every((p) => p.length === 3);
+    if (allGroupsAre3 && last.length === 3) {
+      text = parts.join("");
+    }
+  }
+  const num = Number(text);
   return euroFormatter.format(Number.isFinite(num) ? num : 0);
 };
 
@@ -54303,13 +54324,7 @@ const loadAgendaGeneral = () => {
 };
 
 const parseMoneyValue = (value) => {
-  const direct = Number(value);
-  if (Number.isFinite(direct)) return direct;
-  const normalized = String(value || "")
-    .replace(/[€\s]/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-  const parsed = Number(normalized);
+  const parsed = toNumber(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
@@ -61062,12 +61077,15 @@ if (irpfGainForm) {
 
     if (adqTotalInput) {
       adqTotalInput.readOnly = showAdq;
-      if (showAdq) {
+    if (showAdq) {
         const total = sumInputs([
           "gastos_adq_agencia",
           "gastos_adq_itp_iva_ajd",
+          "gastos_adq_notaria",
+          "gastos_adq_registro",
           "gastos_adq_notaria_registro",
           "gastos_adq_gestoria",
+          "gastos_adq_hipoteca",
           "gastos_adq_otros",
         ]);
         adqTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
@@ -61078,11 +61096,14 @@ if (irpfGainForm) {
     }
     if (txTotalInput) {
       txTotalInput.readOnly = showTx;
-      if (showTx) {
+    if (showTx) {
         const total = sumInputs([
           "gastos_tx_agencia",
+          "gastos_tx_notaria",
+          "gastos_tx_registro",
           "gastos_tx_notaria_registro",
           "gastos_tx_cancelacion",
+          "gastos_tx_hipoteca",
           "gastos_tx_otros",
         ]);
         txTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
