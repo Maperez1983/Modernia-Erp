@@ -8025,40 +8025,40 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     if regimen == "irpf" and ganancia_sujeta > 0:
         ab_mode = str(payload.get("abatimiento_mode") or payload.get("abatimiento") or "auto").strip().lower()
-	        if ab_mode in ("0", "no", "off", "false", "n", "disabled"):
-	            abatimiento_detail = {"aplicable": 0, "motivo": "Desactivado"}
-	        else:
-	            tipo_elemento = str(
-	                payload.get("abatimiento_tipo")
-	                or payload.get("abatimiento_tipo_bien")
-	                or payload.get("tipo_elemento")
-	                or "inmueble"
-	            ).strip().lower()
-	            vt1 = parse_optional_float(payload.get("abatimiento_vt1_acumulado_2015") or payload.get("abatimiento_vt1") or 0.0)
-	            if vt1 is None:
-	                vt1 = 0.0
-	            try:
-	                vt1 = float(vt1)
-	            except Exception:
-	                vt1 = 0.0
-	            vt2_override = parse_optional_float(payload.get("abatimiento_vt2_override") or payload.get("abatimiento_vt2") or None)
-	            if vt2_override is not None:
-	                try:
-	                    vt2_override = float(vt2_override)
-	                except Exception:
-	                    vt2_override = None
-	            force = ab_mode in ("force", "si", "yes", "on", "true", "1")
-	            ganancia_computable, abatimiento_detail = _irpf_apply_abatimiento_dt9(
-	                acq=acq,
-	                devengo=devengo,
-	                ganancia_total=ganancia,
-	                ganancia_sujeta=ganancia_sujeta,
-	                valor_transmision_calc=valor_transmision_calc,
-	                vt2_override=vt2_override,
-	                vt1_acumulado_2015=vt1,
-	                tipo_elemento=tipo_elemento,
-	                force=force,
-	            )
+        if ab_mode in ("0", "no", "off", "false", "n", "disabled"):
+            abatimiento_detail = {"aplicable": 0, "motivo": "Desactivado"}
+        else:
+            tipo_elemento = str(
+                payload.get("abatimiento_tipo")
+                or payload.get("abatimiento_tipo_bien")
+                or payload.get("tipo_elemento")
+                or "inmueble"
+            ).strip().lower()
+            vt1 = parse_optional_float(payload.get("abatimiento_vt1_acumulado_2015") or payload.get("abatimiento_vt1") or 0.0)
+            if vt1 is None:
+                vt1 = 0.0
+            try:
+                vt1 = float(vt1)
+            except Exception:
+                vt1 = 0.0
+            vt2_override = parse_optional_float(payload.get("abatimiento_vt2_override") or payload.get("abatimiento_vt2") or None)
+            if vt2_override is not None:
+                try:
+                    vt2_override = float(vt2_override)
+                except Exception:
+                    vt2_override = None
+            force = ab_mode in ("force", "si", "yes", "on", "true", "1")
+            ganancia_computable, abatimiento_detail = _irpf_apply_abatimiento_dt9(
+                acq=acq,
+                devengo=devengo,
+                ganancia_total=ganancia,
+                ganancia_sujeta=ganancia_sujeta,
+                valor_transmision_calc=valor_transmision_calc,
+                vt2_override=vt2_override,
+                vt1_acumulado_2015=vt1,
+                tipo_elemento=tipo_elemento,
+                force=force,
+            )
 
     base_ahorro = round(max(0.0, ganancia_computable) + 1e-9, 2)
 
@@ -19387,6 +19387,35 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
             ("Convertido", now, row["id"]),
         )
         return existing["id"]
+    precio_inmueble = None
+    inmueble_id = ""
+    try:
+        inmueble_id = str(row["inmueble_id"] or "").strip()
+    except Exception:
+        inmueble_id = str(getattr(row, "get", lambda *_: None)("inmueble_id") or "").strip()
+    if inmueble_id:
+        inm = None
+        try:
+            inm = conn.execute(
+                """
+                SELECT precio_objetivo, precio_encargo, precio_pedido_cliente, precio_valoracion
+                FROM inmuebles
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+        except Exception:
+            inm = None
+        if inm:
+            for key in ("precio_objetivo", "precio_encargo", "precio_pedido_cliente", "precio_valoracion"):
+                try:
+                    val = inm[key]
+                except Exception:
+                    val = None
+                if val not in (None, "", 0, 0.0):
+                    precio_inmueble = val
+                    break
     cliente_nombre = row["cliente1_nombre"] or ""
     if row["cliente2_nombre"]:
         cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
@@ -19413,7 +19442,7 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
             cliente_nombre,
             row["cliente1_id"],
             None,
-            None,
+            precio_inmueble,
             None,
             None,
             None,
@@ -22090,19 +22119,44 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
 def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
     if not nombre:
         return None
-    nombre = str(nombre).strip()
-    nif = (nif or "").strip()
+    try:
+        ensure_column(conn, "clientes", "empresa_id", "empresa_id TEXT")
+    except Exception:
+        pass
+    empresa_id = str(empresa_id or "").strip()
+    nombre = normalize_person_name(nombre or "")
+    nif = normalize_nif(nif or "")
     extra = extra or {}
     cliente = None
     if nif:
         cliente = conn.execute(
-            "SELECT id FROM clientes WHERE nif = ?",
-            (nif,),
+            """
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'financiaciones'
+            WHERE c.nif = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            LIMIT 1
+            """,
+            (empresa_id, nif, empresa_id),
         ).fetchone()
     if not cliente:
         cliente = conn.execute(
-            "SELECT id FROM clientes WHERE nombre = ?",
-            (nombre,),
+            """
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'financiaciones'
+            WHERE LOWER(TRIM(COALESCE(c.nombre, ''))) = LOWER(TRIM(?))
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            LIMIT 1
+            """,
+            (empresa_id, nombre, empresa_id),
         ).fetchone()
     if not cliente:
         tipo_persona = None
@@ -22115,13 +22169,14 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
         conn.execute(
             """
             INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion, estado, created_at, updated_at
+              id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion, estado, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
                 cliente_id,
+                empresa_id or None,
                 nombre,
                 tipo_persona,
                 nif or None,
@@ -22137,6 +22192,19 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
     else:
         cliente_id = cliente["id"]
         updates = {}
+        if empresa_id:
+            try:
+                conn.execute(
+                    """
+                    UPDATE clientes
+                    SET empresa_id = COALESCE(NULLIF(TRIM(COALESCE(empresa_id, '')), ''), ?),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (empresa_id, now, cliente_id),
+                )
+            except Exception:
+                pass
         if nif:
             updates["nif"] = nif
         for key in ("telefono", "email", "fecha_nacimiento", "direccion"):
@@ -46290,6 +46358,76 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": f"{json_field} no es JSON válido"}, status=400)
                     return
                 updates[json_field] = raw
+
+            # Sync best-effort desde los JSONs (evita perder datos si se rellenan solo en Liquidación/Detalle).
+            try:
+                effective_empresa_id_sync = str(updates.get("empresa_id") or row_empresa_id or req_empresa_id or "").strip()
+                current_liquidacion_raw = ""
+                current_detalle_raw = ""
+                try:
+                    current_liquidacion_raw = current_row["liquidacion_json"] or ""
+                except Exception:
+                    current_liquidacion_raw = ""
+                try:
+                    current_detalle_raw = current_row["hipoteca_detalle_json"] or ""
+                except Exception:
+                    current_detalle_raw = ""
+
+                liquidacion_obj = _safe_json_object(
+                    str(updates.get("liquidacion_json") if "liquidacion_json" in updates else current_liquidacion_raw or "{}")
+                )
+                detalle_obj = _safe_json_object(
+                    str(updates.get("hipoteca_detalle_json") if "hipoteca_detalle_json" in updates else current_detalle_raw or "{}")
+                )
+                comprador = liquidacion_obj.get("comprador") if isinstance(liquidacion_obj.get("comprador"), dict) else {}
+
+                # Cliente principal
+                incoming_cliente_id = str(updates.get("cliente_id") or "").strip() if "cliente_id" in updates else ""
+                current_cliente_id = str(current_row["cliente_id"] or "").strip() if current_row else ""
+                if effective_empresa_id_sync and (not incoming_cliente_id) and (not current_cliente_id):
+                    comprador_nombre = str(
+                        comprador.get("nombre") or comprador.get("nombre_completo") or comprador.get("cliente") or ""
+                    ).strip()
+                    comprador_nif = str(comprador.get("nif") or comprador.get("dni") or "").strip()
+                    if comprador_nombre:
+                        linked_cliente_id = ensure_cliente_for_financiacion(
+                            conn,
+                            effective_empresa_id_sync,
+                            comprador_nombre,
+                            comprador_nif,
+                            now,
+                            extra={
+                                "telefono": str(comprador.get("telefono") or comprador.get("tel") or "").strip() or None,
+                                "email": str(comprador.get("email") or "").strip() or None,
+                            },
+                        )
+                        if linked_cliente_id:
+                            updates["cliente_id"] = linked_cliente_id
+
+                # Precio compra vivienda
+                if ("precio" not in updates) or (updates.get("precio") in (None, "")):
+                    if current_row["precio"] in (None, "", 0, 0.0):
+                        liq_precio = parse_optional_float(comprador.get("precio_compra") or comprador.get("escriturado"))
+                        if liq_precio is not None:
+                            updates["precio"] = liq_precio
+
+                # Capital hipoteca
+                if ("importe_hipoteca" not in updates) or (updates.get("importe_hipoteca") in (None, "")):
+                    if current_row["importe_hipoteca"] in (None, "", 0, 0.0):
+                        hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
+                        liq_cap = parse_optional_float(hip.get("capital"))
+                        if liq_cap is not None:
+                            updates["importe_hipoteca"] = liq_cap
+
+                # Tipo de interés -> tipo_hipoteca (legacy)
+                if not str(updates.get("tipo_hipoteca") or "").strip():
+                    if not str(current_row["tipo_hipoteca"] or "").strip():
+                        pref = detalle_obj.get("preferencias") if isinstance(detalle_obj.get("preferencias"), dict) else {}
+                        tipo_interes = str(pref.get("tipo_interes") or "").strip()
+                        if tipo_interes:
+                            updates["tipo_hipoteca"] = tipo_interes
+            except Exception:
+                pass
 
             effective_comision = (
                 updates.get("comision")

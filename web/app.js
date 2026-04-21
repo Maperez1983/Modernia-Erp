@@ -33284,6 +33284,23 @@ const saveHipotecaFicha = (event) => {
   payload.cliente_inmueble_json = JSON.stringify(clienteInmueble || {}, null, 0);
   payload.hipoteca_detalle_json = JSON.stringify(hipotecaDetalle || {}, null, 0);
   payload.liquidacion_json = JSON.stringify(liquidacion || {}, null, 0);
+  // Sync: si rellenan el precio de compra/capital en Liquidación, reflejarlo en columnas principales.
+  // Esto evita reabrir fichas con `precio` vacío aunque el JSON esté completo.
+  if ((payload.precio ?? "") === "") {
+    const liqPrecio = toNumber(
+      getNestedValue(liquidacion, "comprador.precio_compra") ?? getNestedValue(liquidacion, "comprador.escriturado")
+    );
+    if (liqPrecio !== null) payload.precio = liqPrecio;
+  }
+  if ((payload.importe_hipoteca ?? "") === "") {
+    const liqCapital = toNumber(getNestedValue(liquidacion, "comprador.hipoteca.capital"));
+    if (liqCapital !== null) payload.importe_hipoteca = liqCapital;
+  }
+  // Sync: reflejar tipo de interés en `tipo_hipoteca` para listados/filtros legacy.
+  if (!String(payload.tipo_hipoteca || "").trim()) {
+    const tipoInteres = String(getNestedValue(hipotecaDetalle, "preferencias.tipo_interes") || "").trim();
+    if (tipoInteres) payload.tipo_hipoteca = tipoInteres;
+  }
   fetch("/api/hipotecas_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
