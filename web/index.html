@@ -1191,14 +1191,22 @@
 		                Gastos adquisición
 		                <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
 		              </label>
-		              <label>
-		                Mejoras / inversiones
-		                <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label>
-		                Amortización deducida (si alquilado)
-		                <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
-		              </label>
+			              <label>
+			                Mejoras / inversiones
+			                <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+			              </label>
+			              <label>
+			                Fecha mejoras/inversiones (opcional)
+			                <input name="fecha_mejoras" type="date" />
+			              </label>
+			              <label>
+			                Valor transmisión imputable a mejoras (opcional)
+			                <input name="valor_transmision_mejoras" inputmode="decimal" placeholder="0,00" />
+			              </label>
+			              <label>
+			                Amortización deducida (si alquilado)
+			                <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
+			              </label>
 		              <label>
 		                Valor transmisión
 		                <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
@@ -9580,11 +9588,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=605"></script>
+					    <script src="app.js?v=606"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=208";
+				        const TARGET_SW = "/sw.js?v=209";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

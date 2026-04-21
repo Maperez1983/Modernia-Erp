@@ -7760,7 +7760,8 @@ def _irpf_days_inclusive(start: date, end: date) -> int:
         return 0
     if end < start:
         return 0
-    return (end - start).days + 1
+    # AEAT: "días transcurridos" suele ser diferencia de fechas (excluye el día inicial).
+    return (end - start).days
 
 
 def _safe_calendar_date(year: int, month: int, day: int) -> date:
@@ -7877,7 +7878,9 @@ def _irpf_apply_abatimiento_dt9(
 
     # Parte de la ganancia generada antes de 20-01-2006: reparto lineal por días (19-01-2006 inclusive)
     pre_end = min(date(2006, 1, 19), devengo)
-    days_total = _irpf_days_inclusive(acq, devengo)
+    # Denominador: días transcurridos entre adquisición y transmisión sin contar ninguno de los dos días.
+    days_total = max(0, _irpf_days_inclusive(acq, devengo) - 1)
+    # Numerador: días transcurridos entre adquisición y 19-01-2006 (excluye adquisición, incluye 19/01/2006).
     days_pre = _irpf_days_inclusive(acq, pre_end)
     if days_total <= 0 or days_pre <= 0:
         detail["motivo"] = "Sin tramo pre-20/01/2006"
@@ -8051,17 +8054,86 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
                 except Exception:
                     vt2_override = None
             force = ab_mode in ("force", "si", "yes", "on", "true", "1")
-            ganancia_computable, abatimiento_detail = _irpf_apply_abatimiento_dt9(
-                acq=acq,
-                devengo=devengo,
-                ganancia_total=ganancia,
-                ganancia_sujeta=ganancia_sujeta,
-                valor_transmision_calc=valor_transmision_calc,
-                vt2_override=vt2_override,
-                vt1_acumulado_2015=vt1,
-                tipo_elemento=tipo_elemento,
-                force=force,
-            )
+
+            mejoras_fecha = parse_iso_date(payload.get("fecha_mejoras") or payload.get("mejoras_fecha") or "")
+            valor_tx_mejoras = _money("valor_transmision_mejoras")
+            use_mejoras_split = bool(mejoras_fecha and valor_tx_mejoras > 0 and mejoras > 0 and mejoras_fecha != acq)
+
+            if use_mejoras_split:
+                valor_tx_mejoras = min(valor_tx_mejoras, max(0.0, valor_tx))
+                valor_tx_principal = max(0.0, valor_tx - valor_tx_mejoras)
+
+                valor_transmision_principal_calc = max(0.0, (valor_tx_principal - gastos_tx - plusvalia) * factor)
+                valor_transmision_mejoras_calc = max(0.0, valor_tx_mejoras * factor)
+
+                valor_adquisicion_principal_calc = max(0.0, (valor_adq + gastos_adq - amort) * factor)
+                valor_adquisicion_mejoras_calc = max(0.0, mejoras * factor)
+
+                ganancia_principal = round(valor_transmision_principal_calc - valor_adquisicion_principal_calc + 1e-9, 2)
+                ganancia_mejoras = round(valor_transmision_mejoras_calc - valor_adquisicion_mejoras_calc + 1e-9, 2)
+
+                ratio_sujeta_total = 0.0
+                if ganancia > 0:
+                    ratio_sujeta_total = max(0.0, min(1.0, ganancia_sujeta / float(ganancia)))
+
+                ganancia_principal_sujeta = round(max(0.0, ganancia_principal) * ratio_sujeta_total + 1e-9, 2)
+                ganancia_mejoras_sujeta = round(max(0.0, ganancia_mejoras) * ratio_sujeta_total + 1e-9, 2)
+
+                comp_principal, det_principal = _irpf_apply_abatimiento_dt9(
+                    acq=acq,
+                    devengo=devengo,
+                    ganancia_total=ganancia_principal,
+                    ganancia_sujeta=ganancia_principal_sujeta,
+                    valor_transmision_calc=valor_transmision_principal_calc,
+                    vt2_override=vt2_override,
+                    vt1_acumulado_2015=vt1,
+                    tipo_elemento=tipo_elemento,
+                    force=force,
+                )
+                comp_mejoras, det_mejoras = _irpf_apply_abatimiento_dt9(
+                    acq=mejoras_fecha,
+                    devengo=devengo,
+                    ganancia_total=ganancia_mejoras,
+                    ganancia_sujeta=ganancia_mejoras_sujeta,
+                    valor_transmision_calc=valor_transmision_mejoras_calc,
+                    vt2_override=None,
+                    vt1_acumulado_2015=0.0,
+                    tipo_elemento=tipo_elemento,
+                    force=force,
+                )
+
+                ganancia_computable = round(max(0.0, comp_principal + comp_mejoras) + 1e-9, 2)
+                reduccion_total = round(
+                    float((det_principal or {}).get("reduccion_importe") or 0.0)
+                    + float((det_mejoras or {}).get("reduccion_importe") or 0.0)
+                    + 1e-9,
+                    2,
+                )
+                abatimiento_detail = {
+                    "aplicable": 1 if reduccion_total > 0 else 0,
+                    "motivo": "OK" if reduccion_total > 0 else "Sin reducción",
+                    "split_mejoras": 1,
+                    "fecha_mejoras": str(mejoras_fecha or ""),
+                    "valor_transmision_mejoras_calc": round(float(valor_transmision_mejoras_calc or 0.0) + 1e-9, 2),
+                    "reduccion_importe": reduccion_total,
+                    "ganancia_computable": ganancia_computable,
+                    "componentes": [
+                        {"id": "principal", "abatimiento": det_principal},
+                        {"id": "mejoras", "abatimiento": det_mejoras},
+                    ],
+                }
+            else:
+                ganancia_computable, abatimiento_detail = _irpf_apply_abatimiento_dt9(
+                    acq=acq,
+                    devengo=devengo,
+                    ganancia_total=ganancia,
+                    ganancia_sujeta=ganancia_sujeta,
+                    valor_transmision_calc=valor_transmision_calc,
+                    vt2_override=vt2_override,
+                    vt1_acumulado_2015=vt1,
+                    tipo_elemento=tipo_elemento,
+                    force=force,
+                )
 
     base_ahorro = round(max(0.0, ganancia_computable) + 1e-9, 2)
 
@@ -8177,6 +8249,8 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Valor adquisición", money(payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
         ("Mejoras / inversiones", money(payload.get("inversiones_mejoras"))),
+        ("Fecha mejoras/inversiones", date_text(payload.get("fecha_mejoras"))),
+        ("Valor tx mejoras (opcional)", money(payload.get("valor_transmision_mejoras"))),
         ("Amortización deducida", money(payload.get("amortizacion_deducida"))),
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
@@ -8295,6 +8369,8 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Valor adquisición", money(irpf_payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
         ("Mejoras / inversiones", money(irpf_payload.get("inversiones_mejoras"))),
+        ("Fecha mejoras/inversiones", text(irpf_payload.get("fecha_mejoras"))),
+        ("Valor tx mejoras (opcional)", money(irpf_payload.get("valor_transmision_mejoras"))),
         ("Amortización deducida", money(irpf_payload.get("amortizacion_deducida"))),
         ("Valor transmisión", money(irpf_payload.get("valor_transmision"))),
         ("Gastos transmisión", money(irpf_payload.get("gastos_transmision"))),

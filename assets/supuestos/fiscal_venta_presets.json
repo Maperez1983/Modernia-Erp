@@ -599,6 +599,55 @@
         "tipo_gravamen_pct_manual": "30",
         "bonificacion_pct": "0"
       }
+    },
+    {
+      "id": "venta_irpf_abatimiento_dt9_mejoras",
+      "title": "Venta (IRPF) · Abatimiento (DT 9ª) con mejoras",
+      "description": "Venta con adquisición previa a 31/12/1994 y mejora posterior (se separa el componente de mejora para no aplicar abatimiento a la ganancia de la mejora).",
+      "dgt_refs": ["V0603-17", "V0499-17"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Chalet con mejoras (DT 9ª) (ejemplo)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "1992-10-10",
+        "fecha_transmision": "2025-02-03",
+        "valor_adquisicion": "100000",
+        "gastos_adquisicion": "8000",
+        "inversiones_mejoras": "75000",
+        "fecha_mejoras": "2012-07-01",
+        "valor_transmision_mejoras": "150000",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "500000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "15000",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false,
+        "abatimiento_mode": "auto",
+        "abatimiento_tipo": "inmueble",
+        "abatimiento_vt1_acumulado_2015": "0"
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "1992-10-10",
+        "fecha_transmision": "2025-02-03",
+        "valor_suelo": "60000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "ganancia_patrimonial": 302000.0,
+          "ganancia_patrimonial_computable": 270917.14,
+          "base_ahorro_sujeta": 270917.14
+        }
+      }
     }
   ]
 }
