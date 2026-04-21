@@ -932,6 +932,14 @@
 			                  <div class="muted" id="fiscalWizardPresetStatus"></div>
 			                </label>
 			                <label class="span-2">
+			                  Consultas vinculantes (DGT)
+			                  <div class="inline-row">
+			                    <input id="fiscalWizardDgtInput" placeholder="V0525-22" />
+			                    <button type="button" class="secondary ghost" id="fiscalWizardDgtAddBtn">Añadir</button>
+			                  </div>
+			                  <div class="muted" id="fiscalWizardDgtList"></div>
+			                </label>
+			                <label class="span-2">
 			                  Referencia (opcional)
 			                  <input name="referencia" placeholder="Inmueble / expediente / dirección" />
 			                </label>
@@ -9536,7 +9544,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=598"></script>
+				    <script src="app.js?v=599"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

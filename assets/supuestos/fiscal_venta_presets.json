@@ -36,6 +36,7 @@
       "id": "venta_irpf_basica_2026_malaga",
       "title": "Venta (IRPF) · Básica · Málaga · Devengo 2026",
       "description": "Ganancia simple con datos mínimos. Sirve para validar fórmula (valor transmisión - adquisición) y que 2026 use escala 2025 como asumida.",
+      "dgt_refs": ["V0858-13", "V0954-25"],
       "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Málaga · Piso urbano (supuesto básico)" },
       "irpf": {
         "ejercicio": "2026",
@@ -72,6 +73,7 @@
       "id": "venta_irpf_tramo_30pct_2025",
       "title": "Venta (IRPF) · Tramo >300k (30%) · Ejercicio 2025",
       "description": "Fuerza base ahorro 400.000€ para validar el último tramo (30% total) y la cuota (101.880€).",
+      "dgt_refs": ["V0858-13"],
       "wizard": { "operacion": "venta", "ccaa": "MD", "referencia": "Madrid · Ganancia grande (tramo 30%)" },
       "irpf": {
         "ejercicio": "2025",
@@ -160,6 +162,7 @@
       "id": "venta_irpf_exencion_mayor65_viv_habitual",
       "title": "Venta (IRPF) · Exención >65 · Vivienda habitual",
       "description": "Marca vivienda habitual + exención >65 para que la ganancia quede exenta al 100%.",
+      "dgt_refs": ["V0525-22"],
       "wizard": { "operacion": "venta", "ccaa": "GA", "referencia": "Galicia · >65 vivienda habitual (exento)" },
       "irpf": {
         "ejercicio": "2025",
@@ -203,6 +206,7 @@
       "id": "venta_irpf_reinversion_parcial",
       "title": "Venta (IRPF) · Reinversión parcial · Vivienda habitual",
       "description": "Reinversión proporcional: exento = ganancia × reinversión / importe obtenido (neto préstamo).",
+      "dgt_refs": ["V0030-21"],
       "wizard": { "operacion": "venta", "ccaa": "CT", "referencia": "Cataluña · Reinversión parcial (proporcional)" },
       "irpf": {
         "ejercicio": "2025",
@@ -241,6 +245,7 @@
       "id": "venta_irpf_copropiedad_50pct",
       "title": "Venta (IRPF) · Copropiedad 50% · Ajuste participación",
       "description": "Valida que adquisición/transmisión y retención (si IRNR) se prorratean por participación.",
+      "dgt_refs": ["V0030-21"],
       "wizard": { "operacion": "venta", "ccaa": "PV", "pv_territorio": "BI", "referencia": "Bizkaia · Copropiedad 50% (IRPF)" },
       "irpf": {
         "ejercicio": "2025",
@@ -277,6 +282,7 @@
       "id": "venta_irpf_con_amortizacion",
       "title": "Venta (IRPF) · Inmueble alquilado (amortización deducida)",
       "description": "La amortización deducida reduce el valor de adquisición y aumenta la ganancia.",
+      "dgt_refs": ["V2421-23"],
       "wizard": { "operacion": "venta", "ccaa": "NC", "referencia": "Navarra · Alquilado (amortización) · IRPF" },
       "irpf": {
         "ejercicio": "2025",
@@ -313,6 +319,7 @@
       "id": "iivtnu_usufructo_vitalicio",
       "title": "IIVTNU · Usufructo vitalicio (factor automático)",
       "description": "Valida el factor del derecho (usufructo vitalicio) según edad.",
+      "dgt_refs": ["V0597-23", "V0105-23"],
       "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Málaga · Usufructo vitalicio (IIVTNU) · Venta" },
       "irpf": {
         "ejercicio": "2025",
@@ -350,6 +357,7 @@
       "id": "venta_irpf_mejoras_y_gastos",
       "title": "Venta (IRPF) · Con mejoras + gastos adquisición/transmisión",
       "description": "Valida que mejoras y gastos suman/restan correctamente en los valores de adquisición/transmisión.",
+      "dgt_refs": ["V0858-13", "V0954-25"],
       "wizard": { "operacion": "venta", "ccaa": "CM", "referencia": "Castilla-La Mancha · Mejoras + gastos" },
       "irpf": {
         "ejercicio": "2025",
@@ -428,6 +436,7 @@
       "id": "iivtnu_no_sujeto_forzado",
       "title": "IIVTNU · No sujeción (forzado por situación especial)",
       "description": "Valida que si se marca no sujeto, la cuota recomendada se fuerza a 0.",
+      "dgt_refs": ["V2035-16", "V0239-16", "V1702-16"],
       "wizard": { "operacion": "venta", "ccaa": "CE", "referencia": "Ceuta · IIVTNU no sujeto (forzado)" },
       "irpf": {
         "ejercicio": "2025",
@@ -553,7 +562,43 @@
           "cuota_ahorro_estimada": 10000.0
         }
       }
+    },
+    {
+      "id": "venta_irpf_inmueble_heredado_valor_adquisicion",
+      "title": "Venta (IRPF) · Inmueble heredado (valor adquisición heredado)",
+      "description": "Ejemplo orientativo: venta posterior de inmueble heredado. El valor de adquisición suele venir del ISD + gastos asociados (aquí se reflejan como gastos adquisición).",
+      "dgt_refs": ["V1463-25"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Venta de inmueble heredado (ejemplo)" },
+      "irpf": {
+        "ejercicio": "2026",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2018-03-12",
+        "fecha_transmision": "2026-04-21",
+        "valor_adquisicion": "180000",
+        "gastos_adquisicion": "12000",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "240000",
+        "gastos_transmision": "8000",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "Ejemplo: adquisición por herencia (no simula ISD).",
+        "fecha_adquisicion": "2018-03-12",
+        "fecha_transmision": "2026-04-21",
+        "valor_suelo": "65000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
     }
   ]
 }
-

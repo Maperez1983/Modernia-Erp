@@ -8084,21 +8084,66 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Fuente coeficientes", text(iiv_params.get("coef_source_label") or iiv_params.get("coef_source_url") or "—")),
     ]
 
+    sources_lines = []
+    preset_id = str(payload.get("preset_id") or "").strip()
+    preset_title = str(payload.get("preset_title") or "").strip()
+    if preset_id or preset_title:
+        label = preset_title or preset_id
+        if preset_title and preset_id:
+            label = f"{preset_title} ({preset_id})"
+        sources_lines.append(("Supuesto aplicado", label))
+
+    dgt_refs = payload.get("dgt_refs") or payload.get("dgt") or []
+    if isinstance(dgt_refs, str):
+        dgt_refs = [item.strip() for item in dgt_refs.split(",") if item.strip()]
+    normalized_dgt = []
+    seen = set()
+    for item in list(dgt_refs or []):
+        ref = normalize_dgt_reference(item)
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        normalized_dgt.append(ref)
+    for ref in normalized_dgt:
+        url = build_dgt_consulta_url(ref)
+        sources_lines.append((f"Consulta DGT {ref}", url or ""))
+
+    sources_global = payload.get("sources_global") or payload.get("sources") or []
+    if isinstance(sources_global, dict):
+        sources_global = [sources_global]
+    for item in list(sources_global or []):
+        if isinstance(item, dict):
+            label = str(item.get("label") or item.get("title") or item.get("name") or "").strip()
+            url = str(item.get("url") or item.get("href") or "").strip()
+            if label and url:
+                sources_lines.append((label, url))
+            elif label:
+                sources_lines.append((label, ""))
+            elif url:
+                sources_lines.append(("Fuente", url))
+        elif isinstance(item, str):
+            raw = item.strip()
+            if raw:
+                sources_lines.append((raw, ""))
+
     footer = [
         "Informe determinista generado por el CRM (sin IA). Revisar antes de presentar/firmar.",
         "IRPF/IRNR: estimación de la cuota sobre base del ahorro según escala/tipo configurado.",
         "IIVTNU: cálculo sujeto a ordenanza municipal, bonificaciones y datos catastrales; validar con la autoliquidación.",
     ]
     brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
+    sections = [
+        ("Datos de entrada", input_lines),
+        ("IRPF/IRNR · Ganancia patrimonial", irpf_lines),
+        ("IIVTNU · Plusvalía municipal", iivtnu_lines),
+    ]
+    if sources_lines:
+        sections.append(("Fuentes y consultas", sources_lines))
     return (
         build_branded_document_pdf(
             "INFORME FISCAL · VENTA INMUEBLE",
             subtitle,
-            [
-                ("Datos de entrada", input_lines),
-                ("IRPF/IRNR · Ganancia patrimonial", irpf_lines),
-                ("IIVTNU · Plusvalía municipal", iivtnu_lines),
-            ],
+            sections,
             footer_lines=footer,
             brand_logo_url=brand,
         )
