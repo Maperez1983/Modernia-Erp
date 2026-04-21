@@ -1255,10 +1255,18 @@
 			                Gastos hipoteca (constitución)
 			                <input name="gastos_adq_hipoteca" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
-			              <label class="irpf-gastos-adq-desglose hidden">
-			                ITP / IVA / AJD (compra)
-			                <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
-			              </label>
+				              <label class="irpf-gastos-adq-desglose hidden">
+				                ITP (compra)
+				                <input name="gastos_adq_itp" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
+				              <label class="irpf-gastos-adq-desglose hidden">
+				                IVA (compra, si aplica)
+				                <input name="gastos_adq_iva" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
+				              <label class="irpf-gastos-adq-desglose hidden">
+				                AJD (compra)
+				                <input name="gastos_adq_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
 		              <label class="irpf-gastos-adq-desglose hidden">
 		                Notaría (compra)
 		                <input name="gastos_adq_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
@@ -9766,7 +9774,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=625"></script>
+					    <script src="app.js?v=626"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

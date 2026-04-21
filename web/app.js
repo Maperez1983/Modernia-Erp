@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v238";
+const APP_SW_VERSION = "v239";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -3859,6 +3859,9 @@ function scrollToSimuladoresPane(pane = "") {
 function openWorkspaceSimuladores(opts = {}) {
   const pane = opts?.pane || "";
   const prefill = opts?.prefill && typeof opts.prefill === "object" ? opts.prefill : {};
+  if (openEmbeddedFiscalWizard({ pane: pane || "", prefill })) {
+    return;
+  }
   // Los simuladores viven en el workspace tenant. En modo plataforma (admin) no existe la vista `motores`.
   let workspace = "";
   try {
@@ -7207,6 +7210,9 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
 };
 
 const openWorkspaceFiscalWizard = (prefill = {}) => {
+  if (openEmbeddedFiscalWizard({ pane: "informe", prefill })) {
+    return;
+  }
   fiscalWizardActivePreset = null;
   setFiscalWizardDgtRefs([], { replace: true });
   let workspace = "";
@@ -7348,10 +7354,18 @@ const openIrpfGananciaModal = (options = {}) => {
 		                    Gastos hipoteca (constitución)
 		                    <input name="gastos_adq_hipoteca" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 		                  </label>
-		                  <label>
-		                    ITP/IVA y AJD
-		                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
-		                  </label>
+			                  <label>
+			                    ITP (compra)
+			                    <input name="gastos_adq_itp" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			                  </label>
+			                  <label>
+			                    IVA (compra, si aplica)
+			                    <input name="gastos_adq_iva" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			                  </label>
+			                  <label>
+			                    AJD (compra)
+			                    <input name="gastos_adq_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			                  </label>
 	                  <label>
 	                    Notaría
 	                    <input name="gastos_adq_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
