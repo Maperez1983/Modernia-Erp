@@ -6813,6 +6813,13 @@ const ensureIrpfSimulators = () => {
 const setWorkspaceEngineView = (engine = "documental") => {
   const normalized = normalizeWorkspaceEngineKey(engine);
   state.currentWorkspaceEngineView = normalized;
+  // Asegura que "Motores" sea la vista activa cuando se selecciona un engine
+  // (evita mezclas visuales si el estado estaba en otra vista).
+  if (normalizeSimple(state.currentWorkspaceView || "") !== "motores") {
+    try {
+      setWorkspaceView("motores", { forceTenantView: true });
+    } catch {}
+  }
   workspaceEngineButtons.forEach((button) => {
     button.classList.toggle("active", (button.dataset.workspaceEngineTab || "") === normalized);
   });
@@ -6864,6 +6871,17 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+
+  // En vista distinta de "Motores", forzamos a ocultar todos los paneles de engine.
+  // Esto evita que queden "pegados" (por re-tags temporales, errores de estado o restores)
+  // y aparezcan debajo de Operativa/Configuración, como en la captura del usuario.
+  if (normalized !== "motores") {
+    workspaceEnginePanels.forEach((panel) => {
+      panel.classList.add("hidden");
+      panel.hidden = true;
+    });
+  }
+
   if (normalized === "tenant") {
     let desired = "general";
     try {
@@ -7153,6 +7171,7 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
   const ccaa = String(prefill.ccaa || "").trim().toUpperCase();
   const pv = String(prefill.pv_territorio || "").trim().toUpperCase();
   const codigoPostal = normalizePostalCode(prefill.codigo_postal || prefill.codigoPostal || "");
+  const clienteId = String(prefill.cliente_id || prefill.clienteId || prefill.cliente || "").trim();
 
   if (fiscalWizardForm) {
     if (operacion && fiscalWizardForm.querySelector(`select[name="operacion"] option[value="${CSS.escape(operacion)}"]`)) {
@@ -7177,6 +7196,15 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
   }
 
   if (irpfGainForm) {
+    if (clienteId) {
+      const el = irpfGainForm.querySelector('input[name="cliente_id"]');
+      if (el) {
+        el.value = clienteId;
+        try {
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch {}
+      }
+    }
     if (ccaa && irpfGainForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(ccaa)}"]`)) {
       irpfGainForm.querySelector('select[name="ccaa"]').value = ccaa;
     }
@@ -53614,7 +53642,7 @@ const renderGestoriaRentaDetail = (entry = {}) => {
     btn.className = "secondary";
     btn.textContent = "Simulador fiscal inmueble";
     btn.addEventListener("click", () => {
-      openWorkspaceFiscalWizard({ operacion: "venta", referencia: rentaDireccion });
+      openWorkspaceFiscalWizard({ operacion: "venta", referencia: rentaDireccion, cliente_id: state.currentClienteId });
     });
     actions.appendChild(btn);
     detail.appendChild(actions);
@@ -61310,6 +61338,342 @@ if (irpfGainForm) {
   try {
     bindMoneyPlainInputs(irpfGainForm);
   } catch {}
+
+  // Escenarios (por cliente) para comparar precio transmisión vs impuesto.
+  const irpfScenarioSelect = document.getElementById("irpfScenarioSelect");
+  const irpfScenarioNewBtn = document.getElementById("irpfScenarioNewBtn");
+  const irpfScenarioSaveBtn = document.getElementById("irpfScenarioSaveBtn");
+  const irpfScenarioCompareBtn = document.getElementById("irpfScenarioCompareBtn");
+  const irpfScenarioDeleteBtn = document.getElementById("irpfScenarioDeleteBtn");
+  const irpfScenarioStatus = document.getElementById("irpfScenarioStatus");
+  const irpfClienteIdInput = irpfGainForm.querySelector('input[name="cliente_id"]');
+
+  let irpfScenarioRows = [];
+  let irpfScenarioLoading = null;
+  let irpfScenarioCurrentId = "";
+  let irpfLastSimResp = null;
+  let irpfScenarioCurrentClientId = "";
+
+  const resolveScenarioEmpresaId = () => {
+    try {
+      const gest = resolveCrmGestoriaEmpresa();
+      if (gest && gest.id) return String(gest.id || "").trim();
+    } catch {}
+    try {
+      const inmo = resolveCrmInmoEmpresa();
+      if (inmo && inmo.id) return String(inmo.id || "").trim();
+    } catch {}
+    return String(state.currentWorkspaceCompanyId || "").trim();
+  };
+
+  const getScenarioClientId = () => String(irpfClienteIdInput?.value || "").trim();
+
+  const setScenarioStatus = (text = "") => {
+    if (irpfScenarioStatus) irpfScenarioStatus.textContent = String(text || "");
+  };
+
+  const setScenarioControlsEnabled = (enabled) => {
+    [irpfScenarioSelect, irpfScenarioNewBtn, irpfScenarioSaveBtn, irpfScenarioCompareBtn, irpfScenarioDeleteBtn].forEach(
+      (el) => {
+        if (!el) return;
+        el.disabled = !enabled;
+      }
+    );
+  };
+
+  const refreshScenarioSelect = () => {
+    if (!irpfScenarioSelect) return;
+    const current = String(irpfScenarioCurrentId || "").trim();
+    irpfScenarioSelect.innerHTML = `<option value="">—</option>`;
+    (Array.isArray(irpfScenarioRows) ? irpfScenarioRows : []).forEach((row) => {
+      const id = String(row?.id || "").trim();
+      if (!id) return;
+      const nombre = String(row?.nombre || "").trim() || `Escenario ${id.slice(0, 6)}`;
+      const valor = row?.valor_transmision;
+      const extra =
+        valor != null && !Number.isNaN(Number(valor))
+          ? ` · ${euroFormatter.format(Number(valor))}`
+          : "";
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = `${nombre}${extra}`;
+      if (id === current) option.selected = true;
+      irpfScenarioSelect.appendChild(option);
+    });
+  };
+
+  const loadScenarioIntoForm = (row) => {
+    if (!row || typeof row !== "object") return;
+    let payload = null;
+    try {
+      payload = typeof row.payload_json === "string" ? JSON.parse(row.payload_json || "{}") : row.payload_json;
+    } catch {
+      payload = null;
+    }
+    if (!payload || typeof payload !== "object") payload = {};
+    // No pisar el cliente actual.
+    delete payload.cliente_id;
+    Object.entries(payload).forEach(([k, v]) => setFormFieldValue(irpfGainForm, k, v));
+    try {
+      syncIrpfGainExtras();
+    } catch {}
+  };
+
+  const loadIrpfScenarios = async (opts = {}) => {
+    const clienteId = getScenarioClientId();
+    const empresaId = resolveScenarioEmpresaId();
+    const silent = Boolean(opts.silent);
+    if (!clienteId) {
+      irpfScenarioRows = [];
+      irpfScenarioCurrentId = "";
+      refreshScenarioSelect();
+      if (!silent) setScenarioStatus("Abre el simulador desde la ficha del cliente para guardar escenarios.");
+      setScenarioControlsEnabled(false);
+      return;
+    }
+    if (!empresaId) {
+      if (!silent) setScenarioStatus("Empresa no seleccionada.");
+      setScenarioControlsEnabled(false);
+      return;
+    }
+    setScenarioControlsEnabled(true);
+    if (!silent) setScenarioStatus("Cargando escenarios...");
+    irpfScenarioLoading = (async () => {
+      const data = await postJsonWithDbRetry("/api/fiscal_scenarios_list", {
+        empresa_id: empresaId,
+        cliente_id: clienteId,
+        kind: "irpf_ganancia",
+      });
+      if (data?.error) throw new Error(data.error);
+      irpfScenarioRows = Array.isArray(data?.rows) ? data.rows : [];
+      refreshScenarioSelect();
+      if (!silent) setScenarioStatus(irpfScenarioRows.length ? `${irpfScenarioRows.length} escenarios.` : "Sin escenarios.");
+    })();
+    try {
+      await irpfScenarioLoading;
+    } catch (err) {
+      if (!silent) setScenarioStatus(err?.message || "No se pudieron cargar escenarios.");
+    } finally {
+      irpfScenarioLoading = null;
+    }
+  };
+
+  const ensureCompareModal = () => {
+    let modal = document.getElementById("irpfScenarioCompareModal");
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.id = "irpfScenarioCompareModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 980px;">
+        <div class="modal-header">
+          <h3>Comparar escenarios (IRPF/IRNR)</h3>
+          <button type="button" class="ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="irpfScenarioCompareBody"></div>
+          <div class="muted" style="margin-top: 10px;">Pulsa un escenario para cargarlo en el simulador.</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+    };
+    modal.querySelector("[data-close]")?.addEventListener("click", close);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) close();
+    });
+    return modal;
+  };
+
+  const openCompareModal = () => {
+    const modal = ensureCompareModal();
+    const body = modal.querySelector("#irpfScenarioCompareBody");
+    if (!body) return;
+    const rows = Array.isArray(irpfScenarioRows) ? irpfScenarioRows : [];
+    if (!rows.length) {
+      body.innerHTML = "<div class='muted'>Sin escenarios.</div>";
+    } else {
+      const table = document.createElement("table");
+      table.className = "data-table";
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Escenario</th>
+            <th>Precio transmisión</th>
+            <th>Impuesto a pagar</th>
+            <th>Actualizado</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      `;
+      const tbody = table.querySelector("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        const nombre = String(row?.nombre || "").trim() || `Escenario ${String(row?.id || "").slice(0, 6)}`;
+        const precio = row?.valor_transmision != null ? euroFormatter.format(Number(row.valor_transmision || 0)) : "—";
+        const impuesto =
+          row?.importe_a_pagar != null ? euroFormatter.format(Number(row.importe_a_pagar || 0)) : "—";
+        const updated = String(row?.updated_at || "").trim() || "—";
+        tr.innerHTML = `
+          <td>${escapeHtml(nombre)}</td>
+          <td>${escapeHtml(precio)}</td>
+          <td><strong>${escapeHtml(impuesto)}</strong></td>
+          <td class="muted">${escapeHtml(updated)}</td>
+        `;
+        tr.addEventListener("click", () => {
+          irpfScenarioCurrentId = String(row?.id || "").trim();
+          refreshScenarioSelect();
+          loadScenarioIntoForm(row);
+          modal.classList.add("hidden");
+          modal.classList.remove("open");
+          setScenarioStatus(`Cargado: ${nombre}`);
+        });
+        tbody?.appendChild(tr);
+      });
+      body.innerHTML = "";
+      body.appendChild(table);
+    }
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+  };
+
+  if (irpfScenarioSelect) {
+    irpfScenarioSelect.addEventListener("change", () => {
+      const id = String(irpfScenarioSelect.value || "").trim();
+      irpfScenarioCurrentId = id;
+      if (!id) {
+        setScenarioStatus("");
+        return;
+      }
+      const row = (Array.isArray(irpfScenarioRows) ? irpfScenarioRows : []).find((r) => String(r?.id || "").trim() === id) || null;
+      if (!row) return;
+      const nombre = String(row?.nombre || "").trim() || "Escenario";
+      loadScenarioIntoForm(row);
+      setScenarioStatus(`Cargado: ${nombre}`);
+    });
+  }
+
+  if (irpfScenarioNewBtn) {
+    irpfScenarioNewBtn.addEventListener("click", async () => {
+      const clienteId = getScenarioClientId();
+      if (!clienteId) {
+        setScenarioStatus("Selecciona un cliente.");
+        return;
+      }
+      const nombre = String(window.prompt("Nombre del escenario:", "Venta (precio real)") || "").trim();
+      if (!nombre) return;
+      irpfScenarioCurrentId = "";
+      refreshScenarioSelect();
+      setScenarioStatus(`Nuevo escenario: ${nombre}. Simula y pulsa Guardar.`);
+      // Guardamos el nombre temporalmente en el propio select (sin persistir) para usarlo en Guardar.
+      try {
+        irpfScenarioSelect?.setAttribute("data-draft-name", nombre);
+      } catch {}
+    });
+  }
+
+  if (irpfScenarioSaveBtn) {
+    irpfScenarioSaveBtn.addEventListener("click", async () => {
+      const clienteId = getScenarioClientId();
+      const empresaId = resolveScenarioEmpresaId();
+      if (!clienteId) {
+        setScenarioStatus("Selecciona un cliente.");
+        return;
+      }
+      if (!empresaId) {
+        setScenarioStatus("Empresa no seleccionada.");
+        return;
+      }
+      let nombre = "";
+      const currentRow =
+        irpfScenarioCurrentId &&
+        (Array.isArray(irpfScenarioRows) ? irpfScenarioRows : []).find((r) => String(r?.id || "").trim() === irpfScenarioCurrentId);
+      if (currentRow) nombre = String(currentRow?.nombre || "").trim();
+      if (!nombre) {
+        try {
+          nombre = String(irpfScenarioSelect?.getAttribute("data-draft-name") || "").trim();
+        } catch {}
+      }
+      if (!nombre) {
+        nombre = String(window.prompt("Nombre del escenario:", "Escenario") || "").trim();
+      }
+      if (!nombre) return;
+      if (!irpfLastSimResp) {
+        setScenarioStatus("Simula antes de guardar (para guardar el impuesto a pagar).");
+        return;
+      }
+      setScenarioStatus("Guardando...");
+      try {
+        const formData = new FormData(irpfGainForm);
+        const payload = Object.fromEntries(formData.entries());
+        delete payload.cliente_id;
+        const resp = await postJsonWithDbRetry("/api/fiscal_scenario_upsert", {
+          id: irpfScenarioCurrentId || "",
+          empresa_id: empresaId,
+          cliente_id: clienteId,
+          kind: "irpf_ganancia",
+          nombre,
+          payload,
+          simulate_out: irpfLastSimResp,
+          created_by: getCurrentUser(),
+        });
+        if (resp?.error) throw new Error(resp.error);
+        irpfScenarioCurrentId = String(resp?.id || "").trim() || irpfScenarioCurrentId;
+        // Limpia draft name.
+        try {
+          irpfScenarioSelect?.removeAttribute("data-draft-name");
+        } catch {}
+        await loadIrpfScenarios({ silent: true });
+        refreshScenarioSelect();
+        setScenarioStatus("Guardado.");
+      } catch (err) {
+        setScenarioStatus(err?.message || "No se pudo guardar.");
+      }
+    });
+  }
+
+  if (irpfScenarioDeleteBtn) {
+    irpfScenarioDeleteBtn.addEventListener("click", async () => {
+      const id = String(irpfScenarioCurrentId || "").trim();
+      if (!id) {
+        setScenarioStatus("Selecciona un escenario.");
+        return;
+      }
+      if (!window.confirm("¿Borrar este escenario?")) return;
+      setScenarioStatus("Borrando...");
+      try {
+        const resp = await postJsonWithDbRetry("/api/fiscal_scenario_delete", { id });
+        if (resp?.error) throw new Error(resp.error);
+        irpfScenarioCurrentId = "";
+        await loadIrpfScenarios({ silent: true });
+        refreshScenarioSelect();
+        setScenarioStatus("Borrado.");
+      } catch (err) {
+        setScenarioStatus(err?.message || "No se pudo borrar.");
+      }
+    });
+  }
+
+  if (irpfScenarioCompareBtn) {
+    irpfScenarioCompareBtn.addEventListener("click", () => {
+      openCompareModal();
+    });
+  }
+
+  if (irpfClienteIdInput) {
+    irpfClienteIdInput.addEventListener("change", () => {
+      const next = getScenarioClientId();
+      if (next && next !== irpfScenarioCurrentClientId) {
+        irpfScenarioCurrentClientId = next;
+        irpfScenarioCurrentId = "";
+        loadIrpfScenarios();
+      }
+    });
+  }
   const syncIrpfGainExtras = () => {
     const data = new FormData(irpfGainForm);
     const adqMode = normalizeSimple(data.get("gastos_adquisicion_mode") || "");
@@ -61437,6 +61801,7 @@ if (irpfGainForm) {
       const formData = new FormData(irpfGainForm);
       const payload = Object.fromEntries(formData.entries());
       const resp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", payload, { timeoutMs: 30000 });
+      irpfLastSimResp = resp;
       renderIrpfGainResult(resp);
       if (irpfGainStatus) irpfGainStatus.textContent = "OK.";
     } catch (err) {

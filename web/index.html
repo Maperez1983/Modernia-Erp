@@ -1161,6 +1161,20 @@
 			            </div>
 			            <form id="irpfGainForm" class="form-grid fiscal-grid" data-money-euro="1">
 			              <div class="form-grid-section">Identificación</div>
+			              <input type="hidden" name="cliente_id" />
+			              <label class="span-2">
+			                Escenarios (cliente)
+			                <div class="field-row">
+			                  <select id="irpfScenarioSelect">
+			                    <option value="" selected>—</option>
+			                  </select>
+			                  <button type="button" id="irpfScenarioNewBtn" class="secondary ghost">Nuevo</button>
+			                  <button type="button" id="irpfScenarioSaveBtn" class="secondary">Guardar</button>
+			                  <button type="button" id="irpfScenarioCompareBtn" class="secondary ghost">Comparar</button>
+			                  <button type="button" id="irpfScenarioDeleteBtn" class="secondary ghost">Borrar</button>
+			                </div>
+			                <div id="irpfScenarioStatus" class="muted"></div>
+			              </label>
 			              <label class="span-2">
 			                Referencia (opcional)
 			                <input name="referencia" placeholder="Inmueble / expediente / dirección" />
@@ -9780,7 +9794,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=631"></script>
+					    <script src="app.js?v=632"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

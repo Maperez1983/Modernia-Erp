@@ -23671,6 +23671,30 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS fiscal_scenarios (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          cliente_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          nombre TEXT,
+          valor_transmision REAL,
+          importe_a_pagar REAL,
+          payload_json TEXT,
+          result_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fiscal_scenarios_cliente_kind ON fiscal_scenarios (empresa_id, cliente_id, kind, updated_at)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS cliente_gestoria (
           id TEXT PRIMARY KEY,
           cliente_id TEXT UNIQUE,
@@ -38116,6 +38140,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/irpf_ganancia_simulate",
             "/api/irpf_alquiler_simulate",
             "/api/irpf_ganancia_pdf",
+            "/api/fiscal_scenarios_list",
+            "/api/fiscal_scenario_upsert",
+            "/api/fiscal_scenario_delete",
             "/api/fiscal_venta_pdf",
             "/api/s3_presign",
             "/api/s3_multipart_start",
@@ -39642,6 +39669,188 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": str(exc)}, status=400)
                 return
             json_response(self, out)
+            return
+
+        if parsed.path == "/api/fiscal_scenarios_list":
+            empresa_id = str(payload.get("empresa_id") or payload.get("id_empresa") or "").strip()
+            if not empresa_id:
+                try:
+                    empresa_id = str((empresa or {}).get("id") or "").strip()
+                except Exception:
+                    empresa_id = ""
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            kind = str(payload.get("kind") or "irpf_ganancia").strip().lower() or "irpf_ganancia"
+            if not empresa_id or not cliente_id:
+                json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
+                return
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT id, empresa_id, cliente_id, kind, nombre,
+                           valor_transmision, importe_a_pagar,
+                           payload_json, result_json,
+                           created_at, updated_at, created_by
+                    FROM fiscal_scenarios
+                    WHERE empresa_id = ? AND cliente_id = ? AND kind = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 100
+                    """,
+                    (empresa_id, cliente_id, kind),
+                ).fetchall()
+            except Exception as exc:
+                json_response(self, {"error": "No se pudieron cargar escenarios", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            json_response(self, {"ok": True, "rows": [dict(row) for row in (rows or [])]})
+            return
+
+        if parsed.path == "/api/fiscal_scenario_upsert":
+            empresa_id = str(payload.get("empresa_id") or payload.get("id_empresa") or "").strip()
+            if not empresa_id:
+                try:
+                    empresa_id = str((empresa or {}).get("id") or "").strip()
+                except Exception:
+                    empresa_id = ""
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            kind = str(payload.get("kind") or "irpf_ganancia").strip().lower() or "irpf_ganancia"
+            if not empresa_id or not cliente_id:
+                json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
+                return
+            scenario_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            nombre = str(payload.get("nombre") or payload.get("title") or "").strip()
+            created_by = str(payload.get("created_by") or payload.get("usuario") or "").strip()
+
+            raw_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else None
+            if raw_payload is None and isinstance(payload.get("payload_json"), str):
+                try:
+                    raw_payload = json.loads(payload.get("payload_json") or "{}")
+                except Exception:
+                    raw_payload = {}
+            if raw_payload is None:
+                raw_payload = {}
+
+            raw_result = payload.get("result") if isinstance(payload.get("result"), dict) else None
+            if raw_result is None and isinstance(payload.get("simulate_out"), dict):
+                raw_result = payload.get("simulate_out")
+            if raw_result is None and isinstance(payload.get("result_json"), str):
+                try:
+                    raw_result = json.loads(payload.get("result_json") or "{}")
+                except Exception:
+                    raw_result = {}
+            if raw_result is None:
+                raw_result = {}
+
+            valor_transmision = None
+            try:
+                valor_transmision = float(parse_money_value((raw_payload or {}).get("valor_transmision") or 0) or 0.0)
+            except Exception:
+                valor_transmision = None
+
+            # Importe a pagar: preferimos calcularlo del resultado si viene un simulate_out completo.
+            importe_a_pagar = None
+            try:
+                params_out = raw_result.get("params") or {}
+                res_out = raw_result.get("result") or {}
+                regimen = str(params_out.get("regimen_fiscal") or "").strip().lower()
+                if regimen == "irnr":
+                    importe_a_pagar = res_out.get("cuota_neta")
+                else:
+                    importe_a_pagar = res_out.get("cuota_ahorro_estimada")
+            except Exception:
+                importe_a_pagar = None
+            if importe_a_pagar is None:
+                try:
+                    importe_a_pagar = raw_result.get("importe_a_pagar")
+                except Exception:
+                    importe_a_pagar = None
+            try:
+                if importe_a_pagar is not None:
+                    importe_a_pagar = float(parse_money_value(importe_a_pagar) or 0.0)
+            except Exception:
+                importe_a_pagar = None
+
+            try:
+                payload_json = json.dumps(raw_payload or {}, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                payload_json = "{}"
+            try:
+                result_json = json.dumps(raw_result or {}, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                result_json = "{}"
+
+            now_expr = "sqlite_datetime('now')" if db_is_postgres_enabled() else "datetime('now','localtime')"
+            try:
+                exists = conn.execute("SELECT 1 FROM fiscal_scenarios WHERE id = ? LIMIT 1", (scenario_id,)).fetchone()
+            except Exception:
+                exists = None
+            try:
+                if exists:
+                    conn.execute(
+                        f"""
+                        UPDATE fiscal_scenarios
+                        SET nombre = ?,
+                            valor_transmision = ?,
+                            importe_a_pagar = ?,
+                            payload_json = ?,
+                            result_json = ?,
+                            updated_at = {now_expr}
+                        WHERE id = ?
+                        """,
+                        (
+                            nombre,
+                            valor_transmision,
+                            importe_a_pagar,
+                            payload_json,
+                            result_json,
+                            scenario_id,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        f"""
+                        INSERT INTO fiscal_scenarios (
+                          id, empresa_id, cliente_id, kind, nombre,
+                          valor_transmision, importe_a_pagar,
+                          payload_json, result_json,
+                          created_at, updated_at, created_by
+                        ) VALUES (
+                          ?, ?, ?, ?, ?,
+                          ?, ?,
+                          ?, ?,
+                          {now_expr}, {now_expr}, ?
+                        )
+                        """,
+                        (
+                            scenario_id,
+                            empresa_id,
+                            cliente_id,
+                            kind,
+                            nombre,
+                            valor_transmision,
+                            importe_a_pagar,
+                            payload_json,
+                            result_json,
+                            created_by,
+                        ),
+                    )
+                conn.commit()
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo guardar el escenario", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            json_response(self, {"ok": True, "id": scenario_id})
+            return
+
+        if parsed.path == "/api/fiscal_scenario_delete":
+            scenario_id = str(payload.get("id") or "").strip()
+            if not scenario_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            try:
+                conn.execute("DELETE FROM fiscal_scenarios WHERE id = ?", (scenario_id,))
+                conn.commit()
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo borrar el escenario", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            json_response(self, {"ok": True})
             return
 
         if parsed.path == "/api/irpf_ganancia_pdf":
