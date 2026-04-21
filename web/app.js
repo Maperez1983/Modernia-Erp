@@ -7062,30 +7062,42 @@ const openIrpfGananciaModal = (options = {}) => {
 	          <h3>Simulador IRPF/IRNR · Ganancia patrimonial</h3>
 	          <button type="button" class="ghost" data-irpf-close>✕</button>
 	        </div>
-	        <form class="modal-body form-grid" data-irpf-form>
-	          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
-          <label class="span-2">
-            Referencia (opcional)
-            <input name="referencia" placeholder="Inmueble / expediente / dirección" />
-          </label>
-	          <label>
-	            Ejercicio (opcional)
-	            <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+		        <form class="modal-body form-grid" data-irpf-form>
+		          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
+	          <label class="span-2">
+	            Referencia (opcional)
+	            <input name="referencia" placeholder="Inmueble / expediente / dirección" />
 	          </label>
-	          <label>
-	            Régimen fiscal
-	            <select name="regimen_fiscal">
-	              <option value="irpf" selected>IRPF (residente)</option>
-	              <option value="irnr">IRNR (no residente)</option>
-	            </select>
-	          </label>
-	          <label>
-	            CCAA aplicable
-	            <select name="ccaa">
-	              <option value="AN" selected>Andalucía</option>
-	              <option value="AR">Aragón</option>
-	              <option value="AS">Asturias</option>
-	              <option value="IB">Illes Balears</option>
+		          <label>
+		            Ejercicio (opcional)
+		            <input name="ejercicio" inputmode="numeric" placeholder="2025" />
+		          </label>
+		          <label>
+		            Régimen fiscal
+		            <select name="regimen_fiscal">
+		              <option value="irpf" selected>IRPF (residente)</option>
+		              <option value="irnr">IRNR (no residente)</option>
+		            </select>
+		          </label>
+              <label>
+                Fecha nacimiento (opcional)
+                <input name="fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Dependencia (opcional)
+                <select name="dependencia_grado">
+                  <option value="" selected>—</option>
+                  <option value="severa">Dependencia severa</option>
+                  <option value="gran">Gran dependencia</option>
+                </select>
+              </label>
+		          <label>
+		            CCAA aplicable
+		            <select name="ccaa">
+		              <option value="AN" selected>Andalucía</option>
+		              <option value="AR">Aragón</option>
+		              <option value="AS">Asturias</option>
+		              <option value="IB">Illes Balears</option>
 	              <option value="CN">Canarias</option>
 	              <option value="CB">Cantabria</option>
 	              <option value="CM">Castilla-La Mancha</option>
@@ -7107,30 +7119,61 @@ const openIrpfGananciaModal = (options = {}) => {
 	            Retención % (solo IRNR)
 	            <input name="retencion_pct" inputmode="decimal" placeholder="3" />
 	          </label>
+		          <label>
+		            % participación
+		            <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+		          </label>
 	          <label>
-	            % participación
-	            <input name="participacion_pct" inputmode="decimal" placeholder="100" value="100" />
+	            Fecha adquisición
+	            <input name="fecha_adquisicion" type="date" required />
 	          </label>
-          <label>
-            Fecha adquisición
-            <input name="fecha_adquisicion" type="date" required />
-          </label>
-          <label>
-            Fecha transmisión (devengo)
-            <input name="fecha_transmision" type="date" required />
-          </label>
-          <label>
-            Valor adquisición
-            <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
-          </label>
-          <label>
-            Gastos adquisición (opcional)
-            <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
-          </label>
 	          <label>
-	            Mejoras / inversiones (opcional)
-	            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+	            Fecha transmisión (devengo)
+	            <input name="fecha_transmision" type="date" required />
 	          </label>
+	          <label>
+	            Valor adquisición
+	            <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
+	          </label>
+              <label>
+                Gastos adquisición (total)
+                <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
+              </label>
+              <label>
+                Gastos adquisición (modo)
+                <select name="gastos_adquisicion_mode">
+                  <option value="manual" selected>Total manual</option>
+                  <option value="desglose">Desglose (suma)</option>
+                </select>
+              </label>
+              <details class="span-2" data-irpf-adq-breakdown style="margin-top:-6px;">
+                <summary class="muted" style="cursor:pointer;">Desglose gastos de adquisición (opcional)</summary>
+                <div class="form-grid" style="margin-top:10px;">
+                  <label>
+                    ITP/IVA y AJD
+                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Notaría y Registro
+                    <input name="gastos_adq_notaria_registro" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Gestoría
+                    <input name="gastos_adq_gestoria" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Otros
+                    <input name="gastos_adq_otros" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <div class="span-2 muted">
+                    Si eliges “Desglose (suma)”, el CRM recalcula el total con estos importes (sin borrar el total manual).
+                  </div>
+                </div>
+              </details>
+		          <label>
+		            Mejoras / inversiones (opcional)
+		            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
+		          </label>
 	          <label>
 	            Fecha mejoras/inversiones (opcional)
 	            <input name="fecha_mejoras" type="date" />
@@ -7143,33 +7186,68 @@ const openIrpfGananciaModal = (options = {}) => {
 	            Amortización deducida (opcional)
 	            <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
 	          </label>
-          <label>
-            Valor transmisión
-            <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
-          </label>
-          <label>
-            Gastos transmisión (opcional)
-            <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
-          </label>
-          <label>
-            Plusvalía municipal pagada (opcional)
-            <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
-          </label>
-          <label class="span-2">
-            <div class="inline-row">
-              <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
-              <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención &gt;65 (si aplica)</label>
-            </div>
-          </label>
-          <label>
-            Importe reinvertido (opcional)
-            <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
-          </label>
 	          <label>
-	            Préstamo pendiente (opcional)
-	            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+	            Valor transmisión
+	            <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
+	          </label>
+              <label>
+                Gastos transmisión (total)
+                <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
+              </label>
+              <label>
+                Gastos transmisión (modo)
+                <select name="gastos_transmision_mode">
+                  <option value="manual" selected>Total manual</option>
+                  <option value="desglose">Desglose (suma)</option>
+                </select>
+              </label>
+              <details class="span-2" data-irpf-tx-breakdown style="margin-top:-6px;">
+                <summary class="muted" style="cursor:pointer;">Desglose gastos de transmisión (opcional)</summary>
+                <div class="form-grid" style="margin-top:10px;">
+                  <label>
+                    Agencia/comisión
+                    <input name="gastos_tx_agencia" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Notaría y Registro
+                    <input name="gastos_tx_notaria_registro" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Cancelación hipoteca (gastos)
+                    <input name="gastos_tx_cancelacion" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    Otros
+                    <input name="gastos_tx_otros" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <div class="span-2 muted">
+                    Si eliges “Desglose (suma)”, el CRM recalcula el total con estos importes.
+                  </div>
+                </div>
+              </details>
+	          <label>
+	            Plusvalía municipal pagada (opcional)
+	            <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
+	          </label>
+	          <label class="span-2">
+	            <div class="inline-row">
+	              <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual (incluye últimos 2 años)</label>
+	              <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención &gt;65 (forzar)</label>
+	            </div>
 	          </label>
 	          <label>
+	            Importe reinvertido (opcional)
+	            <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
+	          </label>
+              <label>
+                Comprometido a reinvertir (opcional)
+                <input name="importe_comprometido_reinvertir" inputmode="decimal" placeholder="0,00" />
+              </label>
+		          <label>
+		            Préstamo pendiente (opcional)
+		            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+		          </label>
+		          <label>
 	            Abatimiento (DT 9ª)
 	            <select name="abatimiento_mode">
 	              <option value="auto" selected>Auto (si adquirido &lt; 31/12/1994)</option>
@@ -7224,7 +7302,17 @@ const openIrpfGananciaModal = (options = {}) => {
     if (!el) return;
     el.checked = Boolean(checked);
   };
-  const readPayload = () => Object.fromEntries(new FormData(form).entries());
+  const readPayload = () => {
+    const payload = Object.fromEntries(new FormData(form).entries());
+    const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
+    const adqDesglose = sum(["gastos_adq_itp_iva_ajd", "gastos_adq_notaria_registro", "gastos_adq_gestoria", "gastos_adq_otros"]);
+    const txDesglose = sum(["gastos_tx_agencia", "gastos_tx_notaria_registro", "gastos_tx_cancelacion", "gastos_tx_otros"]);
+    const adqMode = String(payload.gastos_adquisicion_mode || "manual").toLowerCase();
+    const txMode = String(payload.gastos_transmision_mode || "manual").toLowerCase();
+    if (adqMode === "desglose") payload.gastos_adquisicion = adqDesglose ? String(adqDesglose) : String(parseMoneyValue(payload.gastos_adquisicion || 0));
+    if (txMode === "desglose") payload.gastos_transmision = txDesglose ? String(txDesglose) : String(parseMoneyValue(payload.gastos_transmision || 0));
+    return payload;
+  };
 
 	  const renderResult = (resp = null) => {
 	    if (!resultEl) return;
@@ -7289,22 +7377,35 @@ const openIrpfGananciaModal = (options = {}) => {
   try {
     form?.reset();
   } catch {}
-	  setValue("referencia", prefill.referencia || "");
-	  setValue("ejercicio", prefill.ejercicio || "");
-	  setValue("regimen_fiscal", prefill.regimen_fiscal || "irpf");
-	  setValue("ccaa", prefill.ccaa || "AN");
-	  setValue("retencion_pct", prefill.retencion_pct || "");
-	  setValue("participacion_pct", prefill.participacion_pct || "100");
+		  setValue("referencia", prefill.referencia || "");
+		  setValue("ejercicio", prefill.ejercicio || "");
+		  setValue("regimen_fiscal", prefill.regimen_fiscal || "irpf");
+      setValue("fecha_nacimiento", prefill.fecha_nacimiento || "");
+      setValue("dependencia_grado", prefill.dependencia_grado || "");
+		  setValue("ccaa", prefill.ccaa || "AN");
+		  setValue("retencion_pct", prefill.retencion_pct || "");
+		  setValue("participacion_pct", prefill.participacion_pct || "100");
   setValue("fecha_adquisicion", prefill.fecha_adquisicion || "");
   setValue("fecha_transmision", prefill.fecha_transmision || "");
   setValue("valor_adquisicion", prefill.valor_adquisicion || "");
   setValue("gastos_adquisicion", prefill.gastos_adquisicion || "");
+  setValue("gastos_adquisicion_mode", prefill.gastos_adquisicion_mode || "manual");
+  setValue("gastos_adq_itp_iva_ajd", prefill.gastos_adq_itp_iva_ajd || "");
+  setValue("gastos_adq_notaria_registro", prefill.gastos_adq_notaria_registro || "");
+  setValue("gastos_adq_gestoria", prefill.gastos_adq_gestoria || "");
+  setValue("gastos_adq_otros", prefill.gastos_adq_otros || "");
   setValue("inversiones_mejoras", prefill.inversiones_mejoras || "");
   setValue("amortizacion_deducida", prefill.amortizacion_deducida || "");
   setValue("valor_transmision", prefill.valor_transmision || "");
   setValue("gastos_transmision", prefill.gastos_transmision || "");
+  setValue("gastos_transmision_mode", prefill.gastos_transmision_mode || "manual");
+  setValue("gastos_tx_agencia", prefill.gastos_tx_agencia || "");
+  setValue("gastos_tx_notaria_registro", prefill.gastos_tx_notaria_registro || "");
+  setValue("gastos_tx_cancelacion", prefill.gastos_tx_cancelacion || "");
+  setValue("gastos_tx_otros", prefill.gastos_tx_otros || "");
   setValue("plusvalia_municipal", prefill.plusvalia_municipal || "");
   setValue("importe_reinvertido", prefill.importe_reinvertido || "");
+  setValue("importe_comprometido_reinvertir", prefill.importe_comprometido_reinvertir || "");
   setValue("prestamo_pendiente", prefill.prestamo_pendiente || "");
   setChecked("vivienda_habitual", Boolean(prefill.vivienda_habitual));
   setChecked("exencion_mayor_65", Boolean(prefill.exencion_mayor_65));

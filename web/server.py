@@ -7995,30 +7995,88 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     gastos_tx = _money("gastos_transmision")
     plusvalia = _money("plusvalia_municipal")
 
+    def _sum_money(keys: list[str]) -> float:
+        total = 0.0
+        for k in keys:
+            total += _money(k)
+        return round(max(0.0, total) + 1e-9, 2)
+
+    adq_desglose_total = _sum_money(
+        [
+            "gastos_adq_itp_iva_ajd",
+            "gastos_adq_notaria_registro",
+            "gastos_adq_gestoria",
+            "gastos_adq_otros",
+        ]
+    )
+    tx_desglose_total = _sum_money(
+        [
+            "gastos_tx_agencia",
+            "gastos_tx_notaria_registro",
+            "gastos_tx_cancelacion",
+            "gastos_tx_otros",
+        ]
+    )
+    adq_mode = str(payload.get("gastos_adquisicion_mode") or "").strip().lower()
+    tx_mode = str(payload.get("gastos_transmision_mode") or "").strip().lower()
+    if adq_mode == "desglose" and adq_desglose_total > 0:
+        gastos_adq = adq_desglose_total
+    if tx_mode == "desglose" and tx_desglose_total > 0:
+        gastos_tx = tx_desglose_total
+
     valor_adquisicion_calc = max(0.0, (valor_adq + gastos_adq + mejoras - amort) * factor)
     valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
     ganancia = round(valor_transmision_calc - valor_adquisicion_calc + 1e-9, 2)
 
     vivienda_habitual = bool(payload.get("vivienda_habitual") or False)
     exencion_mayor_65 = bool(payload.get("exencion_mayor_65") or False)
+    dependencia_grado = str(payload.get("dependencia_grado") or "").strip().lower()
     reinversion = parse_optional_float(payload.get("importe_reinvertido") or None)
+    reinversion_comprometida = parse_optional_float(payload.get("importe_comprometido_reinvertir") or None)
     if reinversion is not None:
         try:
             reinversion = float(reinversion)
         except Exception:
             reinversion = None
+    if reinversion_comprometida is not None:
+        try:
+            reinversion_comprometida = float(reinversion_comprometida)
+        except Exception:
+            reinversion_comprometida = None
     prestamo_pendiente = _money("prestamo_pendiente")
 
     exento = 0.0
     exencion_motivo = ""
-    if exencion_mayor_65 and vivienda_habitual and ganancia > 0:
+    # Exención >65 / dependencia (siempre ligada a vivienda habitual).
+    fecha_nacimiento = parse_iso_date(payload.get("fecha_nacimiento") or "")
+    edad = None
+    if fecha_nacimiento:
+        try:
+            edad = int((devengo - fecha_nacimiento).days // 365.2425)
+        except Exception:
+            edad = None
+    es_dependiente = dependencia_grado in ("severa", "gran", "gran_dependencia", "severe", "great")
+    es_mayor_65 = (edad is not None and edad >= 65)
+    if (exencion_mayor_65 or es_mayor_65 or es_dependiente) and vivienda_habitual and ganancia > 0:
         exento = ganancia
-        exencion_motivo = "Exención >65 vivienda habitual (marcado)"
-    elif vivienda_habitual and reinversion is not None and reinversion > 0 and ganancia > 0:
-        importe_obtenido = max(0.0, (valor_tx - gastos_tx - prestamo_pendiente) * factor)
+        if es_dependiente and not (exencion_mayor_65 or es_mayor_65):
+            exencion_motivo = "Exención dependencia (vivienda habitual)"
+        elif es_mayor_65 and not exencion_mayor_65:
+            exencion_motivo = "Exención >65 vivienda habitual (auto por fecha nacimiento)"
+        else:
+            exencion_motivo = "Exención >65 vivienda habitual (forzada)"
+    elif vivienda_habitual and ganancia > 0:
+        reinv_total = 0.0
+        if reinversion is not None and reinversion > 0:
+            reinv_total += float(reinversion)
+        if reinversion_comprometida is not None and reinversion_comprometida > 0:
+            reinv_total += float(reinversion_comprometida)
+        if reinv_total > 0:
+            # AEAT: "importe total obtenido" = valor transmisión (en los términos del art. 35 LIRPF) - principal pendiente.
+            importe_obtenido = max(0.0, (valor_tx - gastos_tx - plusvalia - prestamo_pendiente) * factor)
         ratio = 0.0
         if importe_obtenido > 0:
-            ratio = max(0.0, min(1.0, reinversion / importe_obtenido))
+            ratio = max(0.0, min(1.0, reinv_total / importe_obtenido))
         exento = round(ganancia * ratio + 1e-9, 2)
         exencion_motivo = "Exención reinversión (proporcional)"
 
@@ -8189,6 +8247,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "ganancia_patrimonial_computable": round(ganancia_computable + 1e-9, 2),
             "exento": round(exento + 1e-9, 2),
             "exencion_motivo": exencion_motivo,
+            "edad_transmision": edad,
             "base_ahorro_sujeta": base_ahorro,
             "cuota_ahorro_estimada": cuota,
             "retencion_importe": retencion_importe,
@@ -8247,20 +8306,31 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ),
         ("Ejercicio", str(ejercicio or "")),
         ("% participación", pct(payload.get("participacion_pct") or 100)),
+        ("Fecha nacimiento", date_text(payload.get("fecha_nacimiento"))),
+        ("Dependencia", str(payload.get("dependencia_grado") or "—").strip() or "—"),
         ("Fecha adquisición", date_text(payload.get("fecha_adquisicion"))),
         ("Fecha transmisión (devengo)", date_text(payload.get("fecha_transmision"))),
         ("Valor adquisición", money(payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
+        ("Gastos adquisición · ITP/IVA+AJD", money(payload.get("gastos_adq_itp_iva_ajd"))),
+        ("Gastos adquisición · Notaría/Registro", money(payload.get("gastos_adq_notaria_registro"))),
+        ("Gastos adquisición · Gestoría", money(payload.get("gastos_adq_gestoria"))),
+        ("Gastos adquisición · Otros", money(payload.get("gastos_adq_otros"))),
         ("Mejoras / inversiones", money(payload.get("inversiones_mejoras"))),
         ("Fecha mejoras/inversiones", date_text(payload.get("fecha_mejoras"))),
         ("Valor tx mejoras (opcional)", money(payload.get("valor_transmision_mejoras"))),
         ("Amortización deducida", money(payload.get("amortizacion_deducida"))),
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
+        ("Gastos transmisión · Agencia", money(payload.get("gastos_tx_agencia"))),
+        ("Gastos transmisión · Notaría/Registro", money(payload.get("gastos_tx_notaria_registro"))),
+        ("Gastos transmisión · Cancelación hipoteca", money(payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Otros", money(payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada", money(payload.get("plusvalia_municipal"))),
         ("Vivienda habitual", yn(payload.get("vivienda_habitual"))),
         ("Exención >65", yn(payload.get("exencion_mayor_65"))),
         ("Importe reinvertido", money(payload.get("importe_reinvertido"))),
+        ("Comprometido a reinvertir", money(payload.get("importe_comprometido_reinvertir"))),
         ("Préstamo pendiente", money(payload.get("prestamo_pendiente"))),
     ]
     output_lines = []
@@ -8366,21 +8436,32 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Operación", "Venta de inmueble"),
         ("Régimen fiscal", "IRNR (no residente)" if str(irpf_params.get("regimen_fiscal") or "").lower() == "irnr" else "IRPF (residente)"),
         ("Ejercicio", text(irpf_params.get("ejercicio") or irpf_payload.get("ejercicio"))),
+        ("Fecha nacimiento", text(irpf_payload.get("fecha_nacimiento"))),
+        ("Dependencia", text(irpf_payload.get("dependencia_grado") or "—")),
         ("Fecha adquisición", text(irpf_payload.get("fecha_adquisicion"))),
         ("Fecha transmisión (devengo)", text(irpf_payload.get("fecha_transmision"))),
         ("% participación", text(irpf_payload.get("participacion_pct") or iivtnu_payload.get("participacion_pct") or "100")),
         ("Valor adquisición", money(irpf_payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
+        ("Gastos adquisición · ITP/IVA+AJD", money(irpf_payload.get("gastos_adq_itp_iva_ajd"))),
+        ("Gastos adquisición · Notaría/Registro", money(irpf_payload.get("gastos_adq_notaria_registro"))),
+        ("Gastos adquisición · Gestoría", money(irpf_payload.get("gastos_adq_gestoria"))),
+        ("Gastos adquisición · Otros", money(irpf_payload.get("gastos_adq_otros"))),
         ("Mejoras / inversiones", money(irpf_payload.get("inversiones_mejoras"))),
         ("Fecha mejoras/inversiones", text(irpf_payload.get("fecha_mejoras"))),
         ("Valor tx mejoras (opcional)", money(irpf_payload.get("valor_transmision_mejoras"))),
         ("Amortización deducida", money(irpf_payload.get("amortizacion_deducida"))),
         ("Valor transmisión", money(irpf_payload.get("valor_transmision"))),
         ("Gastos transmisión", money(irpf_payload.get("gastos_transmision"))),
+        ("Gastos transmisión · Agencia", money(irpf_payload.get("gastos_tx_agencia"))),
+        ("Gastos transmisión · Notaría/Registro", money(irpf_payload.get("gastos_tx_notaria_registro"))),
+        ("Gastos transmisión · Cancelación hipoteca", money(irpf_payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Otros", money(irpf_payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada (IRPF)", money(irpf_payload.get("plusvalia_municipal"))),
         ("Vivienda habitual", yn(irpf_payload.get("vivienda_habitual"))),
         ("Exención >65", yn(irpf_payload.get("exencion_mayor_65"))),
         ("Importe reinvertido", money(irpf_payload.get("importe_reinvertido"))),
+        ("Comprometido a reinvertir", money(irpf_payload.get("importe_comprometido_reinvertir"))),
         ("Préstamo pendiente", money(irpf_payload.get("prestamo_pendiente"))),
         ("Municipio (INE)", text(iivtnu_payload.get("municipio_ine"))),
         ("CP (autoselección)", text(iivtnu_payload.get("codigo_postal"))),
