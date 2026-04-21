@@ -4899,10 +4899,9 @@ body.tc-resizing {
   z-index: 11010;
   display: block;
   padding: 0;
-  /* En modo anclado, se comporta como modal: pantalla difuminada y foco en el menú “Nuevo”. */
-  background: rgba(11, 29, 51, 0.48);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
+  background: rgba(11, 29, 51, 0.22);
+  backdrop-filter: blur(1px);
 }
 
 .crm-insert-modal--anchored .crm-insert-card {
