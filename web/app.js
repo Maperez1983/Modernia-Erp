@@ -44583,6 +44583,20 @@ const getWorkspaceSimuladoresEngineNode = () => {
   }
 };
 
+const forceShowEmbeddedSimuladoresPanes = (preferredPane = "") => {
+  const keep = new Set(["simPaneIrpf", "simPanePlusvalia", "simPaneAlquiler"]);
+  keep.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove("hidden");
+    el.hidden = false;
+  });
+  try {
+    const key = normalizeSimple(preferredPane || "");
+    if (key) scrollToSimuladoresPane(key);
+  } catch {}
+};
+
 const mountWorkspaceSimuladoresIntoInmueble = () => {
   if (!inmuebleFiscalEmbed) return;
   const node = getWorkspaceSimuladoresEngineNode();
@@ -44613,14 +44627,14 @@ const mountWorkspaceSimuladoresIntoInmueble = () => {
   node.dataset.simEmbedded = "1";
   inmuebleFiscalEmbed.appendChild(node);
 
-  // En embed (inmueble), evitamos que aparezca "todo" por el estado guardado (Ver todo).
-  // Por defecto mostramos el wizard fiscal, que es la entrada natural del inmueble.
+  // En embed (inmueble), solo mostramos los 3 simuladores (IRPF, Plusvalía, Alquiler).
+  // No tocamos localStorage: forzamos visibilidad solo en este contexto y restauramos al salir.
   try {
-    const current = normalizeSimple(state.simuladoresPane || "");
-    if (!current || current === "all") {
-      setSimuladoresPane("informe");
-    }
-  } catch {}
+    portal.prevPane = normalizeSimple(state.simuladoresPane || "");
+  } catch {
+    portal.prevPane = "";
+  }
+  forceShowEmbeddedSimuladoresPanes(portal.prevPane);
 };
 
 const restoreWorkspaceSimuladoresFromInmueble = () => {
@@ -44640,6 +44654,9 @@ const restoreWorkspaceSimuladoresFromInmueble = () => {
   else delete node.dataset.simEmbedded;
   if (portal.wasHidden) node.classList.add("hidden");
   portal.mounted = false;
+  try {
+    setSimuladoresPane(portal.prevPane || state.simuladoresPane || "");
+  } catch {}
 };
 
 const openEmbeddedFiscalWizard = (options = {}) => {
@@ -44653,7 +44670,7 @@ const openEmbeddedFiscalWizard = (options = {}) => {
   }
   window.setTimeout(() => {
     try {
-      if (pane) setSimuladoresPane(pane);
+      forceShowEmbeddedSimuladoresPanes(pane);
     } catch {}
     try {
       applyFiscalWizardPrefill(prefill);

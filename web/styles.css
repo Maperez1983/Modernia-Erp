@@ -8065,7 +8065,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   display: none;
 }
 
-.simuladores-embedded #simPaneAlquiler,
+.simuladores-embedded #simPaneInforme,
 .simuladores-embedded #simPanePlusvaliaValidate {
   display: none !important;
 }
