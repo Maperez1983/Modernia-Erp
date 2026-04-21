@@ -1927,16 +1927,19 @@ const iivtnuSimulatorResult = document.getElementById("iivtnuSimulatorResult");
 			const irpfRentalForm = document.getElementById("irpfRentalForm");
 			const irpfRentalStatus = document.getElementById("irpfRentalStatus");
 			const irpfRentalResult = document.getElementById("irpfRentalResult");
-				const fiscalWizardForm = document.getElementById("fiscalWizardForm");
-				const fiscalWizardOpenIrpfBtn = document.getElementById("fiscalWizardOpenIrpfBtn");
-				const fiscalWizardOpenIivtnuBtn = document.getElementById("fiscalWizardOpenIivtnuBtn");
-				const fiscalWizardPdfBtn = document.getElementById("fiscalWizardPdfBtn");
-				const fiscalWizardStatus = document.getElementById("fiscalWizardStatus");
-				const fiscalWizardResult = document.getElementById("fiscalWizardResult");
-				const fiscalWizardPresetSelect = document.getElementById("fiscalWizardPresetSelect");
-				const fiscalWizardPresetLoadBtn = document.getElementById("fiscalWizardPresetLoadBtn");
-				const fiscalWizardPresetStatus = document.getElementById("fiscalWizardPresetStatus");
-	const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
+					const fiscalWizardForm = document.getElementById("fiscalWizardForm");
+					const fiscalWizardOpenIrpfBtn = document.getElementById("fiscalWizardOpenIrpfBtn");
+					const fiscalWizardOpenIivtnuBtn = document.getElementById("fiscalWizardOpenIivtnuBtn");
+					const fiscalWizardPdfBtn = document.getElementById("fiscalWizardPdfBtn");
+					const fiscalWizardStatus = document.getElementById("fiscalWizardStatus");
+					const fiscalWizardResult = document.getElementById("fiscalWizardResult");
+					const fiscalWizardPresetSelect = document.getElementById("fiscalWizardPresetSelect");
+					const fiscalWizardPresetLoadBtn = document.getElementById("fiscalWizardPresetLoadBtn");
+					const fiscalWizardPresetStatus = document.getElementById("fiscalWizardPresetStatus");
+					const fiscalWizardDgtInput = document.getElementById("fiscalWizardDgtInput");
+					const fiscalWizardDgtAddBtn = document.getElementById("fiscalWizardDgtAddBtn");
+					const fiscalWizardDgtList = document.getElementById("fiscalWizardDgtList");
+		const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -1987,7 +1990,11 @@ const workspaceFincasCommunityMap = document.getElementById("workspaceFincasComm
 const workspaceFincasCommunityBuildingPhoto = document.getElementById("workspaceFincasCommunityBuildingPhoto");
 const workspaceFincasCommunityBuildingPhotoPreview = document.getElementById("workspaceFincasCommunityBuildingPhotoPreview");
 const workspaceFincasCommunityBuildingPhotoStatus = document.getElementById("workspaceFincasCommunityBuildingPhotoStatus");
-const workspaceFincasTabs = document.getElementById("workspaceFincasTabs");
+	const workspaceFincasTabs = document.getElementById("workspaceFincasTabs");
+
+	let fiscalWizardActivePreset = null;
+	let fiscalWizardDgtRefs = [];
+	const fiscalWizardDgtLookupCache = new Map();
 const workspaceFincasDashboardKpis = document.getElementById("workspaceFincasDashboardKpis");
 const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedgerForm");
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
@@ -6116,6 +6123,69 @@ const syncFiscalWizardPvVisibility = () => {
   fiscalWizardForm.querySelectorAll(".fiscal-pv-territorio").forEach((el) => {
     el.classList.toggle("hidden", ccaa !== "PV");
   });
+};
+
+const normalizeDgtReference = (value = "") => {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  const cleaned = raw.replace(/\s+/g, "").replace(/[._]/g, "");
+  const match = cleaned.match(/^V(\d{4})[-/](\d{2,4})$/);
+  if (!match) return "";
+  const num = match[1];
+  const year = match[2].slice(-2);
+  return `V${num}-${year}`;
+};
+
+const setFiscalWizardDgtRefs = (refs = [], options = {}) => {
+  const { replace = false } = options || {};
+  const incoming = Array.isArray(refs) ? refs : [refs];
+  const current = replace ? [] : Array.isArray(fiscalWizardDgtRefs) ? [...fiscalWizardDgtRefs] : [];
+  const seen = new Set(current);
+  incoming.forEach((item) => {
+    const normalized = normalizeDgtReference(item);
+    if (!normalized) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    current.push(normalized);
+  });
+  fiscalWizardDgtRefs = current;
+  renderFiscalWizardDgtRefs();
+};
+
+// Backward-compat: algunos despliegues usaron el nombre "Dat" por error (setFiscalWizardDatRefs).
+const setFiscalWizardDatRefs = (refs = [], options = {}) => setFiscalWizardDgtRefs(refs, options);
+
+const renderFiscalWizardDgtRefs = () => {
+  if (!fiscalWizardDgtList) return;
+  const refs = Array.isArray(fiscalWizardDgtRefs) ? fiscalWizardDgtRefs : [];
+  if (!refs.length) {
+    fiscalWizardDgtList.innerHTML = "<div class='muted'>Sin referencias.</div>";
+    return;
+  }
+  fiscalWizardDgtList.innerHTML = refs
+    .map((ref) => {
+      const lookup = fiscalWizardDgtLookupCache.get(ref) || null;
+      const title = lookup?.title ? String(lookup.title) : "";
+      const summary = lookup?.page_title ? String(lookup.page_title) : lookup?.summary ? String(lookup.summary) : "";
+      const url = lookup?.url ? String(lookup.url) : "";
+      const subtitle = title || summary ? [title, summary].filter(Boolean).join(" · ") : lookup ? "Consulta preparada." : "Sin consultar.";
+      const urlHtml = url
+        ? ` · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Abrir</a>`
+        : "";
+      return `
+        <div class="crm-focus-link" style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+          <div style="min-width:0;">
+            <strong>${escapeHtml(ref)}</strong>
+            <span>${escapeHtml(subtitle)}${urlHtml}</span>
+          </div>
+          <div style="flex:0 0 auto; display:flex; gap:8px; align-items:center;">
+            <button type="button" class="secondary ghost button-inline" data-dgt-lookup="${escapeHtml(ref)}">Consultar</button>
+            <button type="button" class="danger ghost button-inline" data-dgt-remove="${escapeHtml(ref)}">Quitar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 };
 
 const renderFiscalWizardResult = (data = null) => {
