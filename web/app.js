@@ -27327,9 +27327,10 @@ const CATASTRO_ICON_HTML = `
 const buildCatastroButtonInner = (label) =>
   `<span class="catastro-icon catastro-icon--catastro" aria-hidden="true">${CATASTRO_ICON_HTML}</span><span>${label}</span>`;
 
-const openExternalUrl = (url) => {
+const openExternalUrl = (url, options = {}) => {
   const href = String(url || "").trim();
   if (!href) return;
+  const allowSameTabFallback = options?.allowSameTabFallback !== false;
 
   const isStandalone =
     Boolean(window.navigator && window.navigator.standalone) ||
@@ -27337,6 +27338,7 @@ const openExternalUrl = (url) => {
 
   // iOS PWA/standalone: abrir pestañas suele fallar, mejor navegar en la misma.
   if (isStandalone) {
+    if (!allowSameTabFallback) return;
     try {
       window.location.assign(href);
     } catch {
@@ -27352,28 +27354,14 @@ const openExternalUrl = (url) => {
     win = null;
   }
 
-  window.setTimeout(() => {
-    try {
-      if (!win || win.closed) {
-        window.location.assign(href);
-        return;
-      }
-      // Algunos navegadores devuelven una ventana "about:blank" aunque bloqueen navegación.
-      try {
-        if (win.location && String(win.location.href || "") === "about:blank") {
-          win.location.href = href;
-        }
-      } catch {
-        window.location.assign(href);
-      }
-    } catch {
-      try {
-        window.location.assign(href);
-      } catch {
-        window.location.href = href;
-      }
-    }
-  }, 160);
+  // Si se pudo abrir una pestaña, NUNCA navegamos en la actual (para no perder formularios).
+  if (win) return;
+  if (!allowSameTabFallback) return;
+  try {
+    window.location.assign(href);
+  } catch {
+    window.location.href = href;
+  }
 };
 
 const buildCatastroUrl = (ref, address) => {
@@ -57714,10 +57702,10 @@ if (crmCaptacionCatastroOpen) {
 	      const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
 			      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
 			      const url = buildCatastroUrl("", address);
-			      openExternalUrl(url);
+			      openExternalUrl(url, { allowSameTabFallback: false });
 			    } catch {
 		      const fallback = "https://www.sedecatastro.gob.es/";
-		      openExternalUrl(fallback);
+		      openExternalUrl(fallback, { allowSameTabFallback: false });
 		    }
 		  });
 		}
@@ -62903,17 +62891,17 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    }, 120);
 	  };
 
-		  const openCatastroForCurrent = () => {
-		    try {
-		      const ctx = state.currentInmuebleContext || {};
-		      const inmueble = ctx.inmueble || {};
-		      const address = [inmueble.direccion, inmueble.poblacion, inmueble.provincia, "España"].filter(Boolean).join(", ");
-		      const url = buildCatastroUrl(String(inmueble.referencia_catastral || "").trim(), address);
-		      openExternalUrl(url || "https://www.sedecatastro.gob.es/");
-		    } catch {
-		      openExternalUrl("https://www.sedecatastro.gob.es/");
-		    }
-		  };
+			  const openCatastroForCurrent = () => {
+			    try {
+			      const ctx = state.currentInmuebleContext || {};
+			      const inmueble = ctx.inmueble || {};
+			      const address = [inmueble.direccion, inmueble.poblacion, inmueble.provincia, "España"].filter(Boolean).join(", ");
+			      const url = buildCatastroUrl(String(inmueble.referencia_catastral || "").trim(), address);
+			      openExternalUrl(url || "https://www.sedecatastro.gob.es/", { allowSameTabFallback: false });
+			    } catch {
+			      openExternalUrl("https://www.sedecatastro.gob.es/", { allowSameTabFallback: false });
+			    }
+			  };
 
 	  const renderChecklistPreview = (rows = []) => {
 	    if (!inmuebleGuidedChecklistPreview) return;
