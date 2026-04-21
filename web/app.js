@@ -43399,8 +43399,11 @@ const renderCrmAgendaCalendar = (rows = []) => {
 const renderCrmAgendaWorkspace = () => {
   syncCrmAgendaControls();
   const all = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll : [];
-  const filtered = Array.isArray(state.crmAgendaRowsFiltered) ? state.crmAgendaRowsFiltered : all;
   const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+  const filtered =
+    view === "list"
+      ? (Array.isArray(state.crmAgendaRowsFiltered) ? state.crmAgendaRowsFiltered : all)
+      : (Array.isArray(state.crmAgendaRowsCalendarFiltered) ? state.crmAgendaRowsCalendarFiltered : all);
 
   if (view === "list") {
     if (crmAgendaTable) {
@@ -43526,6 +43529,15 @@ const loadCrmAgenda = () => {
 			    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
 			    return true;
 			  };
+			  const matchPresetCalendar = (row) => {
+			    if (!isMine(row)) return false;
+			    const tipoKey = normalizeTipoKey(row);
+			    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
+			    // así que NO limitamos por “7 días”. El preset solo decide el tipo.
+			    if (preset.startsWith("citas")) return tipoKey === "cita";
+			    if (preset.startsWith("actividades")) return tipoKey !== "cita";
+			    return true;
+			  };
 		  const matchAmbito = (row) => {
 		    if (!ambitoFilter) return true;
 		    const key = resolveCrmAgendaAmbitoKey(row);
@@ -43566,14 +43578,15 @@ const loadCrmAgenda = () => {
 	        relacion: (row) => row?.related_id || row?.inmueble_id || "",
 	      },
 	    });
-	    state.crmAgendaRowsFiltered = rows.filter((row) => {
-	      if (!matchPreset(row)) return false;
+	    const matchCommon = (row) => {
 	      if (!matchAmbito(row)) return false;
 	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
 	      if (!matchQuery(row)) return false;
 	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
 	      return true;
-	    });
+	    };
+	    state.crmAgendaRowsFiltered = rows.filter((row) => matchCommon(row) && matchPreset(row));
+	    state.crmAgendaRowsCalendarFiltered = rows.filter((row) => matchCommon(row) && matchPresetCalendar(row));
     renderCrmAgendaWorkspace();
   });
 };
