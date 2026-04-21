@@ -4401,7 +4401,8 @@ body.tc-resizing {
   border: none;
   background: transparent;
   display: flex;
-  align-items: center;
+  /* Alinea el botón “+ Nuevo” con la primera fila de módulos. */
+  align-items: flex-start;
   flex-wrap: wrap;
   overflow-x: visible;
   overflow-y: hidden;
@@ -4430,6 +4431,20 @@ body.tc-resizing {
 #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn:hover {
   transform: translateY(-1px);
   border-color: rgba(15, 23, 42, 0.22);
+}
+
+#crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
+  display: grid;
+  grid-auto-flow: row;
+  grid-template-columns: repeat(4, 92px);
+  gap: 10px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
+    grid-template-columns: repeat(auto-fit, minmax(92px, 92px));
+  }
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
@@ -5005,8 +5020,21 @@ body.tc-resizing {
 
 #crmSection .crm-insert-list {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+@media (max-width: 720px) {
+  #crmSection .crm-insert-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  #crmSection .crm-insert-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 #crmSection .crm-insert-item {

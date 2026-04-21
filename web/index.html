@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=214" />
+				    <link rel="stylesheet" href="styles.css?v=215" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -1224,6 +1224,30 @@
 		              <label>
 		                Préstamo pendiente (opcional)
 		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                Abatimiento (DT 9ª)
+		                <select name="abatimiento_mode">
+		                  <option value="auto" selected>Auto (si adquirido ≤ 31/12/1994)</option>
+		                  <option value="off">Desactivado</option>
+		                  <option value="force">Forzar</option>
+		                </select>
+		              </label>
+		              <label>
+		                Tipo bien (abatimiento)
+		                <select name="abatimiento_tipo_bien">
+		                  <option value="inmueble" selected>Inmueble / derecho real</option>
+		                  <option value="otros">Otros bienes/derechos</option>
+		                  <option value="acciones_cotizadas">Acciones cotizadas</option>
+		                </select>
+		              </label>
+		              <label>
+		                VT acumulado desde 01/01/2015 (sin este)
+		                <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" placeholder="0,00" />
+		              </label>
+		              <label>
+		                VT (este inmueble) override (opcional)
+		                <input name="abatimiento_vt2_override" inputmode="decimal" placeholder="(por defecto: valor transmisión bruto × participación)" />
 		              </label>
 			              <div class="form-actions span-2">
 			                <button type="submit">Simular ganancia IRPF</button>
@@ -3053,16 +3077,17 @@
 		                  </div>
 		                </div>
 
-				                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú CRM">
-			                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
-			                    + Nuevo
-			                  </button>
-			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Financiaciones</span>
-			                  </button>
+					                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú CRM">
+				                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
+				                    + Nuevo
+				                  </button>
+                          <div class="crm-top-modules" id="crmTopModules">
+				                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
+				                    <span class="tc-mod-ico" aria-hidden="true">
+				                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+				                    </span>
+				                    <span class="tc-mod-label">Financiaciones</span>
+				                  </button>
 			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="seguros" title="Seguros">
 			                    <span class="tc-mod-ico" aria-hidden="true">
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.4 9.4-8 10-4.6-.6-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -3113,13 +3138,14 @@
 			                    </span>
 			                    <span class="tc-mod-label">Act./Citas</span>
 			                  </button>
-			                  <button type="button" class="tab tc-module" data-crm-view="analisis" title="Búsq./Inf.">
-			                    <span class="tc-mod-ico" aria-hidden="true">
-			                      <svg viewBox="0 0 24 24" fill="none"><path d="M10 18a8 8 0 1 1 5.29-14.03A8 8 0 0 1 10 18Z" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-			                    </span>
-			                    <span class="tc-mod-label">Búsq./Inf.</span>
-			                  </button>
-			                </div>
+				                  <button type="button" class="tab tc-module" data-crm-view="analisis" title="Búsq./Inf.">
+				                    <span class="tc-mod-ico" aria-hidden="true">
+				                      <svg viewBox="0 0 24 24" fill="none"><path d="M10 18a8 8 0 1 1 5.29-14.03A8 8 0 0 1 10 18Z" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+				                    </span>
+				                    <span class="tc-mod-label">Búsq./Inf.</span>
+				                  </button>
+                          </div>
+				                </div>
 
 			                <div class="crm-lightning-topbar-right">
 			                  <div class="crm-top-actions" aria-label="Accesos directos">
