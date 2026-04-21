@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=224" />
+				    <link rel="stylesheet" href="styles.css?v=225" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -967,13 +967,16 @@
 		              </form>
 		              <div id="fiscalWizardResult"></div>
 		            </div>
-		            <div class="form-card simuladores-pane" data-sim-pane="plusvalia" id="simPanePlusvalia">
-		              <div class="section-head">
-		                <div>
-		                  <h3>Plusvalía municipal (IIVTNU)</h3>
-		                  <p class="muted">Simulación por municipio y tipo de transmisión.</p>
-		                </div>
-		              </div>
+			            <div class="form-card simuladores-pane" data-sim-pane="plusvalia" id="simPanePlusvalia">
+			              <div class="section-head">
+			                <div>
+			                  <h3>Plusvalía municipal (IIVTNU)</h3>
+			                  <p class="muted">Simulación por municipio y tipo de transmisión.</p>
+			                </div>
+			                <div class="inline-actions">
+			                  <button type="button" class="secondary ghost" data-sim-go="informe">Volver al wizard</button>
+			                </div>
+			              </div>
 			            <form id="iivtnuSimulatorForm" class="form-grid">
 			              <label class="span-2">
 			                Municipio
@@ -1146,13 +1149,16 @@
 	            </form>
 		            <div id="iivtnuPdfParsed"></div>
 		          </div>
-		          <div class="form-card simuladores-pane" data-sim-pane="irpf" id="simPaneIrpf">
-		            <div class="section-head">
-		              <div>
-			                <h3>Ganancia patrimonial (IRPF/IRNR)</h3>
-		                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
-		              </div>
-		            </div>
+			          <div class="form-card simuladores-pane" data-sim-pane="irpf" id="simPaneIrpf">
+			            <div class="section-head">
+			              <div>
+				                <h3>Ganancia patrimonial (IRPF/IRNR)</h3>
+				                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
+			              </div>
+			              <div class="inline-actions">
+			                <button type="button" class="secondary ghost" data-sim-go="informe">Volver al wizard</button>
+			              </div>
+			            </div>
 			            <form id="irpfGainForm" class="form-grid fiscal-grid" data-money-euro="1">
 			              <div class="form-grid-section">Identificación</div>
 			              <label class="span-2">
@@ -9774,7 +9780,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=630"></script>
+					    <script src="app.js?v=631"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

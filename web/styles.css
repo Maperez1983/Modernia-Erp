@@ -8049,6 +8049,15 @@ body.crm-context-inmo .crm-resumen-compact-note {
   justify-content: flex-start;
 }
 
+.simuladores-embedded #simuladoresHub {
+  display: none;
+}
+
+.simuladores-embedded #simPaneAlquiler,
+.simuladores-embedded #simPanePlusvaliaValidate {
+  display: none !important;
+}
+
 .table-tools {
   display: flex;
   justify-content: flex-end;

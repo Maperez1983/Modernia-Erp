@@ -44538,6 +44538,7 @@ const mountWorkspaceSimuladoresIntoInmueble = () => {
       nextSibling: node.nextElementSibling || null,
       mounted: false,
       wasHidden: false,
+      prevEmbedFlag: "",
     };
   }
   const portal = inmuebleFiscalSimuladoresPortal;
@@ -44549,7 +44550,18 @@ const mountWorkspaceSimuladoresIntoInmueble = () => {
   portal.mounted = true;
   node.classList.remove("hidden");
   node.classList.add("simuladores-embedded");
+  portal.prevEmbedFlag = String(node.dataset.simEmbedded || "");
+  node.dataset.simEmbedded = "1";
   inmuebleFiscalEmbed.appendChild(node);
+
+  // En embed (inmueble), evitamos que aparezca "todo" por el estado guardado (Ver todo).
+  // Por defecto mostramos el wizard fiscal, que es la entrada natural del inmueble.
+  try {
+    const current = normalizeSimple(state.simuladoresPane || "");
+    if (!current || current === "all") {
+      setSimuladoresPane("informe");
+    }
+  } catch {}
 };
 
 const restoreWorkspaceSimuladoresFromInmueble = () => {
@@ -44565,6 +44577,8 @@ const restoreWorkspaceSimuladoresFromInmueble = () => {
     }
   }
   node.classList.remove("simuladores-embedded");
+  if (portal.prevEmbedFlag) node.dataset.simEmbedded = portal.prevEmbedFlag;
+  else delete node.dataset.simEmbedded;
   if (portal.wasHidden) node.classList.add("hidden");
   portal.mounted = false;
 };
@@ -61277,6 +61291,20 @@ if (simHubVerTodoBtn) {
     setSimuladoresPane("", { scroll: true });
   });
 }
+
+// Navegación rápida dentro de simuladores (e.g. volver al wizard fiscal).
+document.querySelectorAll("[data-sim-go]").forEach((el) => {
+  if (el.dataset.boundSimGo === "1") return;
+  el.dataset.boundSimGo = "1";
+  el.addEventListener("click", () => {
+    const next = String(el.dataset.simGo || "").trim();
+    if (!next) return;
+    setSimuladoresPane(next, { scroll: true });
+    try {
+      scrollToSimuladoresPane(next);
+    } catch {}
+  });
+});
 
 if (irpfGainForm) {
   try {
