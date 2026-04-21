@@ -64731,6 +64731,8 @@ if (inmuebleNoticiaOpenIrpfBtn) {
     const ctx = state.currentInmuebleContext || {};
     const inmueble = ctx.inmueble || state.currentInmueble || {};
     const captacion = ctx.captacion || {};
+    const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+    const cliente_id = String(propietarios?.[0]?.id || "").trim();
     const provincia = inmueble.provincia || captacion.provincia || "";
     const inferred = inferFiscalTerritoryFromProvincia(provincia);
     const ccaa = inferred.ccaa || String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
@@ -64739,7 +64741,7 @@ if (inmuebleNoticiaOpenIrpfBtn) {
       .filter(Boolean)
       .join(" · ");
     const valor_transmision = inmueble.precio_encargo || inmueble.precio_objetivo || captacion.precio_objetivo || "";
-    openWorkspaceSimuladores({ pane: "", prefill: { ccaa, referencia, valor_transmision } });
+    openWorkspaceSimuladores({ pane: "", prefill: { ccaa, referencia, valor_transmision, cliente_id } });
   });
 }
 
@@ -67681,6 +67683,8 @@ if (inmuebleFiscalWizardBtn) {
     const ctx = state.currentInmuebleContext || {};
     const inmueble = ctx.inmueble || state.currentInmueble || {};
     const captacion = ctx.captacion || {};
+    const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+    const cliente_id = String(propietarios?.[0]?.id || "").trim();
     const provincia = inmueble.provincia || captacion.provincia || "";
     const inferred = inferFiscalTerritoryFromProvincia(provincia);
     const ccaa = inferred.ccaa || String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
@@ -67690,7 +67694,7 @@ if (inmuebleFiscalWizardBtn) {
       .filter(Boolean)
       .join(" · ");
     const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
-    const prefill = { operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal };
+    const prefill = { operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal, cliente_id };
     if (!openEmbeddedFiscalWizard({ pane: "informe", prefill })) {
       openWorkspaceFiscalWizard(prefill);
     }
