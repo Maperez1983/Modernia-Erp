@@ -8067,6 +8067,8 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     adq_desglose_total = _sum_money(
         [
             "gastos_adq_agencia",
+            "gastos_adq_abogado",
+            "gastos_adq_tasacion",
             "gastos_adq_itp_iva_ajd",
             "gastos_adq_notaria",
             "gastos_adq_registro",
@@ -8079,10 +8081,13 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     tx_desglose_total = _sum_money(
         [
             "gastos_tx_agencia",
+            "gastos_tx_abogado",
+            "gastos_tx_cert_energetico",
             "gastos_tx_notaria",
             "gastos_tx_registro",
             "gastos_tx_notaria_registro",
             "gastos_tx_cancelacion",
+            "gastos_tx_cancelacion_registral",
             "gastos_tx_hipoteca",
             "gastos_tx_otros",
         ]
@@ -8469,6 +8474,8 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Valor adquisición", money(payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
         ("Gastos adquisición · Agencia", money(payload.get("gastos_adq_agencia"))),
+        ("Gastos adquisición · Abogado/asesoría", money(payload.get("gastos_adq_abogado"))),
+        ("Gastos adquisición · Tasación", money(payload.get("gastos_adq_tasacion"))),
         ("Gastos adquisición · ITP/IVA+AJD", money(payload.get("gastos_adq_itp_iva_ajd"))),
         ("Gastos adquisición · Notaría", money(payload.get("gastos_adq_notaria"))),
         ("Gastos adquisición · Registro", money(payload.get("gastos_adq_registro"))),
@@ -8491,10 +8498,13 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
         ("Gastos transmisión · Agencia", money(payload.get("gastos_tx_agencia"))),
+        ("Gastos transmisión · Abogado/asesoría", money(payload.get("gastos_tx_abogado"))),
+        ("Gastos transmisión · Certificado energético", money(payload.get("gastos_tx_cert_energetico"))),
         ("Gastos transmisión · Notaría", money(payload.get("gastos_tx_notaria"))),
         ("Gastos transmisión · Registro", money(payload.get("gastos_tx_registro"))),
         ("Gastos transmisión · Notaría/Registro (legacy)", money(payload.get("gastos_tx_notaria_registro"))),
         ("Gastos transmisión · Gestoría / cancelación", money(payload.get("gastos_tx_cancelacion"))),
+        ("Gastos transmisión · Cancelación registral/cargas", money(payload.get("gastos_tx_cancelacion_registral"))),
         ("Gastos transmisión · Hipoteca", money(payload.get("gastos_tx_hipoteca"))),
         ("Gastos transmisión · Otros", money(payload.get("gastos_tx_otros"))),
         ("Plusvalía municipal pagada", money(payload.get("plusvalia_municipal"))),
@@ -26325,6 +26335,8 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
             "alertas_comerciales": [],
             "top_companias": [],
             "top_ramos": [],
+            "entradas_mes": [],
+            "en_vigor_por_mes": {"labels": [], "values": []},
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
     bucket_expr = seguro_estado_bucket_expr("s")
@@ -26336,6 +26348,44 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
     compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
     today = datetime.now().date().isoformat()
     uploaded_clause = uploaded_policy_filter("s")
+    month_start = datetime.now().date().replace(day=1)
+
+    def _add_months(d, delta):
+        base = (d.year * 12 + (d.month - 1)) + int(delta)
+        year = base // 12
+        month = base % 12 + 1
+        return date(year, month, 1)
+
+    def _month_label(d):
+        months = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+        try:
+            return f"{months[int(d.month) - 1]} {int(d.year)}"
+        except Exception:
+            return str(d)
+
+    def _money_sql(expr):
+        # Normaliza importes almacenados como:
+        # - REAL/NUMERIC (ej: 1234.56)
+        # - Texto con formato ES (ej: "7.397,96 €", "20.000")
+        base = f"COALESCE(CAST({expr} AS TEXT), '')"
+        stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
+        eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
+        us = f"REPLACE({stripped}, ',', '')"
+        dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
+        looks_like_dot_thousands = (
+            f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+            f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+        )
+        dot_thousands = f"REPLACE({stripped}, '.', '')"
+        normalized = (
+            f"CASE "
+            f"WHEN {stripped} LIKE '%,%' THEN {eu} "
+            f"WHEN {looks_like_dot_thousands} THEN {dot_thousands} "
+            f"ELSE {us} END"
+        )
+        return f"CAST(NULLIF({normalized}, '') AS REAL)"
+
+    money_total_expr = f"COALESCE({_money_sql('s.prima_total')}, {_money_sql('s.prima_neta')}, 0)"
 
     totals = conn.execute(
         f"""
@@ -26347,7 +26397,7 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
                     AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
                     AND {bucket_expr} IN ('en_vigor', 'contratada')
               THEN 1 ELSE 0 END) AS renovaciones_30d,
-          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+          SUM({money_total_expr}) AS prima_total
         FROM seguros s
         WHERE s.empresa_id IN ({placeholders})
           AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
@@ -26360,7 +26410,7 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
-          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+          SUM({money_total_expr}) AS prima_total
         FROM seguros s
         WHERE s.empresa_id IN ({placeholders})
           AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
@@ -26420,7 +26470,7 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         SELECT
           COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
           COUNT(*) AS total,
-          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+          SUM({money_total_expr}) AS prima_total
         FROM seguros s
         WHERE s.empresa_id IN ({placeholders})
           AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
@@ -26436,7 +26486,7 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         SELECT
           COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
           COUNT(*) AS total,
-          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+          SUM({money_total_expr}) AS prima_total
         FROM seguros s
         WHERE s.empresa_id IN ({placeholders})
           AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
@@ -26446,6 +26496,69 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         """,
         empresa_ids,
     ).fetchall()
+
+    # Entradas del mes (fecha efecto dentro del mes en curso).
+    month_end = _add_months(month_start, 1) - timedelta(days=1)
+    entradas = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
+          NULLIF(TRIM(s.poliza_numero), '') AS poliza_numero,
+          {fecha_efecto_expr} AS fecha_efecto,
+          {bucket_expr} AS estado_bucket,
+          {money_total_expr} AS prima_total
+        FROM seguros s
+        LEFT JOIN clientes c ON c.id = s.cliente_id
+        WHERE s.empresa_id IN ({placeholders})
+          AND {fecha_efecto_expr} IS NOT NULL
+          AND DATE({fecha_efecto_expr}) BETWEEN DATE(?) AND DATE(?)
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+        ORDER BY DATE({fecha_efecto_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, month_start.isoformat(), month_end.isoformat()],
+    ).fetchall()
+
+    # Serie de cartera en vigor por mes (cierre de mes, últimos 12 meses).
+    en_vigor_labels = []
+    en_vigor_values = []
+    polizas_rows = []
+    try:
+        polizas_rows = conn.execute(
+            f"""
+            SELECT
+              s.id,
+              s.estado,
+              s.estado_poliza,
+              {fecha_efecto_expr} AS fecha_efecto,
+              {fecha_venc_expr} AS fecha_vencimiento,
+              s.fecha_baja AS fecha_baja
+            FROM seguros s
+            WHERE s.empresa_id IN ({placeholders})
+              AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            """,
+            empresa_ids,
+        ).fetchall()
+    except Exception:
+        polizas_rows = []
+    polizas = [dict(r) for r in polizas_rows] if polizas_rows else []
+    for pol in polizas:
+        baja = parse_iso_date(pol.get("fecha_baja"))
+        venc = parse_iso_date(pol.get("fecha_vencimiento"))
+        if baja and (not venc or baja < venc):
+            pol["fecha_vencimiento"] = baja.isoformat()
+    months_start = _add_months(month_start, -11)
+    for i in range(12):
+        mstart = _add_months(months_start, i)
+        mend = _add_months(mstart, 1) - timedelta(days=1)
+        en_vigor_labels.append(_month_label(mstart))
+        count = 0
+        for pol in polizas:
+            if seguro_estado_bucket_value(pol, today=mend) == "en_vigor":
+                count += 1
+        en_vigor_values.append(count)
 
     return {
         "counts": {
@@ -26477,6 +26590,19 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
             }
             for row in ramos_rows
         ],
+        "entradas_mes": [
+            {
+                "tomador": r.get("tomador") or "",
+                "compania": r.get("compania") or "",
+                "ramo": r.get("ramo") or "",
+                "poliza_numero": r.get("poliza_numero") or "",
+                "fecha_efecto": r.get("fecha_efecto") or "",
+                "estado": r.get("estado_bucket") or "",
+                "prima_total": round(parse_money_value(r.get("prima_total")), 2),
+            }
+            for r in (dict(x) for x in entradas)
+        ],
+        "en_vigor_por_mes": {"labels": en_vigor_labels, "values": en_vigor_values},
     }
 
 

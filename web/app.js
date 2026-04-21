@@ -7338,14 +7338,18 @@ const openIrpfGananciaModal = (options = {}) => {
                     Abogado/asesoría
                     <input name="gastos_adq_abogado" inputmode="decimal" placeholder="0,00" />
                   </label>
-                  <label>
-                    Tasación
-                    <input name="gastos_adq_tasacion" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    ITP/IVA y AJD
-                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
-                  </label>
+	                  <label>
+	                    Tasación
+	                    <input name="gastos_adq_tasacion" inputmode="decimal" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Gastos hipoteca (constitución)
+	                    <input name="gastos_adq_hipoteca" inputmode="decimal" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    ITP/IVA y AJD
+	                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
+	                  </label>
                   <label>
                     Notaría y Registro
                     <input name="gastos_adq_notaria_registro" inputmode="decimal" placeholder="0,00" />
@@ -7548,15 +7552,16 @@ const openIrpfGananciaModal = (options = {}) => {
   const readPayload = () => {
     const payload = Object.fromEntries(new FormData(form).entries());
     const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
-    const adqDesglose = sum([
-      "gastos_adq_agencia",
-      "gastos_adq_abogado",
-      "gastos_adq_tasacion",
-      "gastos_adq_itp_iva_ajd",
-      "gastos_adq_notaria_registro",
-      "gastos_adq_gestoria",
-      "gastos_adq_otros",
-    ]);
+	    const adqDesglose = sum([
+	      "gastos_adq_agencia",
+	      "gastos_adq_abogado",
+	      "gastos_adq_tasacion",
+	      "gastos_adq_hipoteca",
+	      "gastos_adq_itp_iva_ajd",
+	      "gastos_adq_notaria_registro",
+	      "gastos_adq_gestoria",
+	      "gastos_adq_otros",
+	    ]);
     const txDesglose = sum([
       "gastos_tx_agencia",
       "gastos_tx_abogado",
@@ -8506,6 +8511,10 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
   const alertas = Array.isArray(payload.alertas_comerciales) ? payload.alertas_comerciales : [];
   const companias = Array.isArray(payload.top_companias) ? payload.top_companias : [];
   const ramos = Array.isArray(payload.top_ramos) ? payload.top_ramos : [];
+  const entradasMes = Array.isArray(payload.entradas_mes) ? payload.entradas_mes : [];
+  const enVigorSerie = payload.en_vigor_por_mes && typeof payload.en_vigor_por_mes === "object" ? payload.en_vigor_por_mes : {};
+  const enVigorLabels = Array.isArray(enVigorSerie.labels) ? enVigorSerie.labels : [];
+  const enVigorValues = Array.isArray(enVigorSerie.values) ? enVigorSerie.values : [];
   const listHtml = (rows = [], formatter, emptyText) =>
     rows.length
       ? `<div class="workspace-billing-list">${rows.map((row) => formatter(row)).join("")}</div>`
@@ -8522,6 +8531,29 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
       <div class="workspace-mini-kpi"><span>Alertas abiertas</span><strong>${numberFormatter.format(Number(counts.alertas_abiertas || 0))}</strong></div>
     </div>
     <div class="workspace-gestoria-columns">
+      <div class="workspace-gestoria-card">
+        <h4>Entradas en vigor (mes en curso)</h4>
+        ${listHtml(
+          entradasMes,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.tomador || "-"}</strong>
+                <div class="muted">${row.compania || "Sin compañía"}${row.ramo ? ` · ${row.ramo}` : ""}${row.poliza_numero ? ` · ${row.poliza_numero}` : ""}${row.prima_total ? ` · ${formatEuros(parseMoneyValue(row.prima_total))}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.fecha_efecto || "Sin fecha"}</span></div>
+            </div>
+          `,
+          "Sin entradas este mes."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Pólizas en vigor por mes</h4>
+        <div class="muted">Cierre de mes (últimos 12).</div>
+        <div class="workspace-overview-chart-wrap">
+          ${enVigorLabels.length ? `<canvas class="workspace-overview-chart" data-seguros-chart="en-vigor-por-mes"></canvas>` : `<p class="muted">Sin datos para gráfico.</p>`}
+        </div>
+      </div>
       <div class="workspace-gestoria-card">
         <h4>Renovaciones próximas</h4>
         ${listHtml(
@@ -8588,6 +8620,29 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
       </div>
     </div>
   `;
+
+  const canvas = workspaceSegurosOverview.querySelector('canvas[data-seguros-chart="en-vigor-por-mes"]');
+  if (canvas && enVigorLabels.length && enVigorValues.length) {
+    try {
+      drawBarChart(
+        canvas,
+        enVigorLabels,
+        [
+          {
+            label: "En vigor",
+            values: enVigorValues.map((v) => Number(v) || 0),
+            type: "line",
+            color: "#F2C14E",
+            fill: safeHexWithAlpha("#F2C14E", 0.18),
+            pointRadius: 3,
+            lineWidth: 2,
+            format: (value) => numberFormatter.format(Number(value) || 0),
+          },
+        ],
+        { tooltip: true, legend: false, rotateLabels: true }
+      );
+    } catch {}
+  }
 };
 
 const renderWorkspaceFinOverview = (payload = {}) => {
