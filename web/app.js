@@ -7276,15 +7276,23 @@ const openIrpfGananciaModal = (options = {}) => {
                     <input name="fecha_fin_alquiler" type="date" />
                   </label>
                   <label>
-                    Base amortización (construcción)
+                    Base amortización (construcción, opcional)
                     <input name="amortizacion_base" inputmode="decimal" placeholder="0,00" />
                   </label>
                   <label>
                     % amortización anual
                     <input name="amortizacion_pct" inputmode="decimal" placeholder="3" value="3" />
                   </label>
+                  <label>
+                    Valor catastral total (opcional)
+                    <input name="valor_catastral_total" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    % suelo (Catastro, opcional)
+                    <input name="porcentaje_suelo" inputmode="decimal" placeholder="20" />
+                  </label>
                   <div class="span-2 muted">
-                    Si no indicas “amortización deducida” manual, el CRM estima la amortización deducible prorateada por días con los datos anteriores.
+                    Regla AEAT (alquiler): 3% anual sobre la mayor base entre coste de adquisición (sin suelo) y valor catastral (sin suelo). El “catastral revisado” afecta a la imputación 1,1%/2%, no a esta amortización.
                   </div>
                 </div>
               </details>
@@ -7459,6 +7467,8 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("fecha_fin_alquiler", prefill.fecha_fin_alquiler || "");
   setValue("amortizacion_base", prefill.amortizacion_base || "");
   setValue("amortizacion_pct", prefill.amortizacion_pct || "3");
+  setValue("valor_catastral_total", prefill.valor_catastral_total || "");
+  setValue("porcentaje_suelo", prefill.porcentaje_suelo || "");
   setChecked("vivienda_habitual", Boolean(prefill.vivienda_habitual));
   setChecked("exencion_mayor_65", Boolean(prefill.exencion_mayor_65));
   renderResult(null);

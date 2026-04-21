@@ -8028,7 +8028,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     # Amortización (auto) si el inmueble estuvo alquilado (o afecto) y hay base.
     amort_auto = 0.0
     amort_auto_days = 0
-    amort_auto_base = _money("amortizacion_base")
+    amort_auto_base_manual = _money("amortizacion_base")
     amort_auto_pct = parse_optional_float(payload.get("amortizacion_pct") or 3.0)
     if amort_auto_pct is None:
         amort_auto_pct = 3.0
@@ -8039,6 +8039,35 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     amort_auto_pct = max(0.0, min(10.0, amort_auto_pct))
     alquilado_flag = bool(payload.get("inmueble_alquilado") or False)
     amort_mode = str(payload.get("amortizacion_mode") or "").strip().lower()
+    amort_auto_base_coste = 0.0
+    amort_auto_base_catastral = 0.0
+    amort_auto_base = 0.0
+
+    if (amort_mode == "auto" or alquilado_flag) and amort <= 0 and amort_auto_pct > 0:
+        vc_total = _money("valor_catastral_total")
+        pct_suelo = parse_optional_float(payload.get("porcentaje_suelo") or payload.get("porcentaje_suelo_pct") or None)
+        if pct_suelo is not None:
+            try:
+                pct_suelo = float(pct_suelo)
+            except Exception:
+                pct_suelo = None
+        if pct_suelo is not None:
+            pct_suelo = max(0.0, min(100.0, pct_suelo))
+        constr_factor = None
+        if vc_total > 0 and pct_suelo is not None:
+            constr_factor = max(0.0, min(1.0, 1.0 - (pct_suelo / 100.0)))
+            amort_auto_base_catastral = round(vc_total * constr_factor + 1e-9, 2)
+            coste_total = max(0.0, (valor_adq + gastos_adq + mejoras))
+            amort_auto_base_coste = round(coste_total * constr_factor + 1e-9, 2)
+
+        # Base final (construcción): mayor entre manual, coste (sin suelo) y catastral (sin suelo).
+        bases = [amort_auto_base_manual]
+        if amort_auto_base_coste > 0:
+            bases.append(amort_auto_base_coste)
+        if amort_auto_base_catastral > 0:
+            bases.append(amort_auto_base_catastral)
+        amort_auto_base = round(max(bases) + 1e-9, 2) if bases else 0.0
+
     if (amort_mode == "auto" or alquilado_flag) and amort <= 0 and amort_auto_base > 0 and amort_auto_pct > 0:
         start = parse_iso_date(payload.get("fecha_inicio_alquiler") or "") or acq
         end = parse_iso_date(payload.get("fecha_fin_alquiler") or "") or devengo
@@ -8291,6 +8320,9 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "amortizacion_auto": round(float(amort_auto or 0.0) + 1e-9, 2),
             "amortizacion_auto_days": int(amort_auto_days or 0),
             "amortizacion_auto_base": round(float(amort_auto_base or 0.0) + 1e-9, 2),
+            "amortizacion_auto_base_manual": round(float(amort_auto_base_manual or 0.0) + 1e-9, 2),
+            "amortizacion_auto_base_coste": round(float(amort_auto_base_coste or 0.0) + 1e-9, 2),
+            "amortizacion_auto_base_catastral": round(float(amort_auto_base_catastral or 0.0) + 1e-9, 2),
             "amortizacion_auto_pct": round(float(amort_auto_pct or 0.0) + 1e-12, 6),
             "base_ahorro_sujeta": base_ahorro,
             "cuota_ahorro_estimada": cuota,
@@ -8378,7 +8410,10 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Amortización aplicada (calc.)", money(result.get("amortizacion_deducida_aplicada"))),
         ("Amortización auto (si aplica)", money(result.get("amortizacion_auto"))),
         ("Amortización auto · días", str(result.get("amortizacion_auto_days") or "—")),
-        ("Amortización auto · base", money(result.get("amortizacion_auto_base"))),
+        ("Amortización auto · base final", money(result.get("amortizacion_auto_base"))),
+        ("Amortización auto · base manual", money(result.get("amortizacion_auto_base_manual"))),
+        ("Amortización auto · base coste (sin suelo)", money(result.get("amortizacion_auto_base_coste"))),
+        ("Amortización auto · base catastral (sin suelo)", money(result.get("amortizacion_auto_base_catastral"))),
         ("Amortización auto · %", f"{float(result.get('amortizacion_auto_pct') or 0):.3f}%"),
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
