@@ -19059,21 +19059,38 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
-		  if (next) {
-		    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
-		    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-		    const preferAnchored = viewportW >= 821; // iPad+ / escritorio: menú flotante, móvil: modal completo
-		    const isAnchored = Boolean(anchorEl && preferAnchored);
-		    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
-		    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
-		    if (isAnchored) {
-		      crmInsertAnchorEl = anchorEl;
-		      positionCrmInsertModal(anchorEl);
-		    } else {
-		      crmInsertAnchorEl = null;
-		      crmInsertModal.style.removeProperty("--crm-insert-left");
-		      crmInsertModal.style.removeProperty("--crm-insert-top");
-		    }
+			  if (next) {
+			    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
+			    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+			    const preferAnchored = viewportW >= 821; // iPad+ / escritorio: menú flotante, móvil: modal completo
+			    const isAnchored = Boolean(anchorEl && preferAnchored);
+			    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
+			    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+			    // En modo anclado queremos un “desplegable” limpio (sin oscurecer la ficha)
+			    // y reservar espacio para que no pise el listado.
+			    try {
+			      if (isAnchored) {
+			        crmInsertModal.style.background = "transparent";
+			        crmInsertModal.style.backdropFilter = "none";
+			      } else {
+			        crmInsertModal.style.removeProperty("background");
+			        crmInsertModal.style.removeProperty("backdrop-filter");
+			      }
+			    } catch {}
+			    try {
+			      const needsSpace = Boolean(isAnchored && anchorEl && anchorEl.id === "crmTopNewBtn");
+			      if (crmWorkspaceTabs && crmWorkspaceTabs.classList.contains("crm-lightning-tabs")) {
+			        crmWorkspaceTabs.style.marginBottom = needsSpace ? "320px" : "";
+			      }
+			    } catch {}
+			    if (isAnchored) {
+			      crmInsertAnchorEl = anchorEl;
+			      positionCrmInsertModal(anchorEl);
+			    } else {
+			      crmInsertAnchorEl = null;
+			      crmInsertModal.style.removeProperty("--crm-insert-left");
+			      crmInsertModal.style.removeProperty("--crm-insert-top");
+			    }
 		    setCrmRecentOpen(false);
 		    setCrmClienteModalOpen(false);
 		    setCrmCaptacionModalOpen(false);
@@ -19082,16 +19099,25 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
       setTimeout(() => crmInsertSearch.focus(), 0);
     }
     filterCrmInsertList();
-			  } else {
-			    crmInsertAnchorEl = null;
-			    crmInsertModal.classList.remove("crm-insert-modal--anchored");
-			    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
-			    crmInsertModal.style.removeProperty("--crm-insert-left");
-			    crmInsertModal.style.removeProperty("--crm-insert-top");
-			    crmInsertModal.style.removeProperty("--crm-sidebar-right");
-			  }
-			  syncCrmModalOpenState();
-			};
+				  } else {
+				    crmInsertAnchorEl = null;
+				    crmInsertModal.classList.remove("crm-insert-modal--anchored");
+				    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
+				    crmInsertModal.style.removeProperty("--crm-insert-left");
+				    crmInsertModal.style.removeProperty("--crm-insert-top");
+				    crmInsertModal.style.removeProperty("--crm-sidebar-right");
+				    try {
+				      crmInsertModal.style.removeProperty("background");
+				      crmInsertModal.style.removeProperty("backdrop-filter");
+				    } catch {}
+				    try {
+				      if (crmWorkspaceTabs && crmWorkspaceTabs.classList.contains("crm-lightning-tabs")) {
+				        crmWorkspaceTabs.style.marginBottom = "";
+				      }
+				    } catch {}
+				  }
+				  syncCrmModalOpenState();
+				};
 
 // --- Return-to-form drafts (avoid losing user input when opening other records) ---
 const RETURN_DRAFT_CTX_KEY = "v2:return_draft_ctx";
@@ -43437,16 +43463,38 @@ const loadCrmAgenda = () => {
 		  state.crmAgendaAmbito = ambitoFilter;
 		  persistCrmAgendaPrefs();
 	  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
-	  const meKey = normalizePersonKey(getCurrentUser());
+	  const buildCurrentUserKeys = () => {
+	    const keys = new Set();
+	    const meRaw = getCurrentUser();
+	    const meKey = normalizePersonKey(meRaw);
+	    if (meKey) keys.add(meKey);
+	    const users = Array.isArray(state.usersList) ? state.usersList : [];
+	    const match = users.find((u) => normalizePersonKey(u?.usuario || "") === meKey) || null;
+	    if (match) {
+	      const full = `${match.nombre || ""} ${match.apellido || ""}`.trim();
+	      const fullKey = normalizePersonKey(full);
+	      if (fullKey) keys.add(fullKey);
+	      const emailKey = normalizePersonKey(match.email || "");
+	      if (emailKey) keys.add(emailKey);
+	      const nombreKey = normalizePersonKey(match.nombre || "");
+	      if (nombreKey) keys.add(nombreKey);
+	    }
+	    return keys;
+	  };
+	  const currentUserKeys = buildCurrentUserKeys();
 	  const isMine = (row) => {
-	    if (!meKey) return true;
+	    if (!currentUserKeys.size) return true;
 	    const respKey = normalizePersonKey(row?.responsable || "");
-	    return !respKey || respKey === meKey;
+	    return !respKey || currentUserKeys.has(respKey);
 	  };
 	  const normalizeTipoKey = (row) => {
-	    const tipo = normalizeSimple(row?.tipo || row?.asunto || "");
-	    if (tipo.includes("cita")) return "cita";
-	    if (tipo.includes("actividad")) return "actividad";
+	    const tipoNorm = normalizeSimple(row?.tipo || row?.asunto || "");
+	    if (!tipoNorm) {
+	      const hasHora = Boolean(String(row?.hora || row?.hora_fin || "").trim());
+	      return hasHora ? "cita" : "actividad";
+	    }
+	    if (tipoNorm.includes("cita")) return "cita";
+	    if (tipoNorm.includes("actividad")) return "actividad";
 	    return "actividad";
 	  };
 	  const parseRowTs = (row) => {
