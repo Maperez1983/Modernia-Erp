@@ -6345,7 +6345,10 @@ const renderFiscalWizardResult = (data = null) => {
   const irpf = data?.irpf?.result || {};
   const iiv = data?.iivtnu?.result || {};
   const fields = [
-    ["IRPF/IRNR · Cuota estimada", irpf.cuota_ahorro_estimada ?? ""],
+    [
+      "IRPF/IRNR · Importe a pagar (estimado)",
+      (data?.irpf?.params?.regimen_fiscal || "").toString().toLowerCase() === "irnr" ? (irpf.cuota_neta ?? "") : (irpf.cuota_ahorro_estimada ?? ""),
+    ],
     ["IIVTNU · Cuota recomendada", iiv.cuota_recomendada ?? ""],
     ["IIVTNU · Método", iiv.metodo_recomendado ?? ""],
   ];
@@ -6654,13 +6657,13 @@ const ensureIivtnuSimulator = async () => {
 		  const result = resp?.result || {};
 		  const ab = result?.abatimiento && typeof result.abatimiento === "object" ? result.abatimiento : {};
 		  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
-		  const kpis = [
-		    { label: "Días transcurridos", value: result.days_transcurridos },
-		    { label: "Ganancia diaria", value: result.ganancia_sujeta_diaria || result.ganancia_diaria },
-		    { label: "Exenta", value: result.exento },
-		    { label: "Ganancia sujeta", value: result.ganancia_sujeta },
-		    { label: regimen === "irnr" ? "Cuota neta" : "Cuota estimada", value: regimen === "irnr" ? result.cuota_neta : result.cuota_ahorro_estimada },
-		  ];
+			  const kpis = [
+			    { label: "Días transcurridos", value: result.days_transcurridos },
+			    { label: "Ganancia diaria", value: result.ganancia_sujeta_diaria || result.ganancia_diaria },
+			    { label: "Exenta", value: result.exento },
+			    { label: "Ganancia sujeta", value: result.ganancia_sujeta },
+			    { label: "Importe a pagar (estimado)", value: regimen === "irnr" ? result.cuota_neta : result.cuota_ahorro_estimada },
+			  ];
 		  const fields = [
 		      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
 		      ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
@@ -6691,8 +6694,8 @@ const ensureIivtnuSimulator = async () => {
 			      ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
 			      ["Ganancia computable", result.ganancia_patrimonial_computable],
 			      ["Base ahorro sujeta", result.base_ahorro_sujeta],
-			      ["Cuota estimada", result.cuota_ahorro_estimada],
-			    );
+				      ["Importe a pagar (estimado)", regimen === "irnr" ? result.cuota_neta : result.cuota_ahorro_estimada],
+				    );
 	  if (regimen === "irnr") {
 	    fields.push(["Retención (importe)", result.retencion_importe]);
 	    fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
@@ -7576,21 +7579,22 @@ const openIrpfGananciaModal = (options = {}) => {
     if (!el) return;
     el.checked = Boolean(checked);
   };
-  const readPayload = () => {
-    const payload = Object.fromEntries(new FormData(form).entries());
-    const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
+	  const readPayload = () => {
+	    const payload = Object.fromEntries(new FormData(form).entries());
+	    const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
+	    let impuestosAdq = sum(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"]);
+	    if (!impuestosAdq) impuestosAdq = sum(["gastos_adq_itp_iva_ajd"]);
 	    const adqDesglose = sum([
 	      "gastos_adq_agencia",
 	      "gastos_adq_abogado",
 	      "gastos_adq_tasacion",
 	      "gastos_adq_hipoteca",
-	      "gastos_adq_itp_iva_ajd",
 	      "gastos_adq_notaria",
 	      "gastos_adq_registro",
 	      "gastos_adq_notaria_registro",
 	      "gastos_adq_gestoria",
 	      "gastos_adq_otros",
-	    ]);
+	    ]) + impuestosAdq;
 	    const txDesglose = sum([
 	      "gastos_tx_agencia",
 	      "gastos_tx_abogado",
@@ -7631,19 +7635,19 @@ const openIrpfGananciaModal = (options = {}) => {
 	      fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
 	      fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
 	    }
-		    fields.push(
-		      ["Participación", result.participacion_factor],
-		      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-		      ["Valor transmisión (calc.)", result.valor_transmision_calc],
-		      ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
-		      ["Exento", result.exento],
-		      ["Motivo exención", result.exencion_motivo || "—"],
-		      ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
-		      ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
-		      ["Ganancia computable", result.ganancia_patrimonial_computable],
-		      ["Base ahorro sujeta", result.base_ahorro_sujeta],
-		      ["Cuota estimada", result.cuota_ahorro_estimada],
-		    );
+		      fields.push(
+			      ["Participación", result.participacion_factor],
+			      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+			      ["Valor transmisión (calc.)", result.valor_transmision_calc],
+			      ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
+			      ["Exento", result.exento],
+			      ["Motivo exención", result.exencion_motivo || "—"],
+			      ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
+			      ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
+			      ["Ganancia computable", result.ganancia_patrimonial_computable],
+			      ["Base ahorro sujeta", result.base_ahorro_sujeta],
+			      ["Importe a pagar (estimado)", regimen === "irnr" ? result.cuota_neta : result.cuota_ahorro_estimada],
+			    );
 	    if (regimen === "irnr") {
 	      fields.push(["Retención (importe)", result.retencion_importe]);
 	      fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
@@ -7685,13 +7689,20 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("valor_adquisicion", prefill.valor_adquisicion || "");
   setValue("gastos_adquisicion", prefill.gastos_adquisicion || "");
   setValue("gastos_adquisicion_mode", prefill.gastos_adquisicion_mode || "manual");
-  setValue("gastos_adq_agencia", prefill.gastos_adq_agencia || "");
-  setValue("gastos_adq_abogado", prefill.gastos_adq_abogado || "");
-  setValue("gastos_adq_tasacion", prefill.gastos_adq_tasacion || "");
-  setValue("gastos_adq_itp_iva_ajd", prefill.gastos_adq_itp_iva_ajd || "");
-  setValue("gastos_adq_notaria_registro", prefill.gastos_adq_notaria_registro || "");
-  setValue("gastos_adq_gestoria", prefill.gastos_adq_gestoria || "");
-  setValue("gastos_adq_otros", prefill.gastos_adq_otros || "");
+	  setValue("gastos_adq_agencia", prefill.gastos_adq_agencia || "");
+	  setValue("gastos_adq_abogado", prefill.gastos_adq_abogado || "");
+	  setValue("gastos_adq_tasacion", prefill.gastos_adq_tasacion || "");
+	  setValue("gastos_adq_itp", prefill.gastos_adq_itp || "");
+	  setValue("gastos_adq_iva", prefill.gastos_adq_iva || "");
+	  setValue("gastos_adq_ajd", prefill.gastos_adq_ajd || "");
+	  if (!prefill.gastos_adq_itp && !prefill.gastos_adq_iva && !prefill.gastos_adq_ajd && prefill.gastos_adq_itp_iva_ajd) {
+	    setValue("gastos_adq_itp", prefill.gastos_adq_itp_iva_ajd || "");
+	  }
+	  setValue("gastos_adq_hipoteca", prefill.gastos_adq_hipoteca || "");
+	  setValue("gastos_adq_notaria", prefill.gastos_adq_notaria || "");
+	  setValue("gastos_adq_registro", prefill.gastos_adq_registro || "");
+	  setValue("gastos_adq_gestoria", prefill.gastos_adq_gestoria || "");
+	  setValue("gastos_adq_otros", prefill.gastos_adq_otros || "");
   setValue("inversiones_mejoras", prefill.inversiones_mejoras || "");
   setValue("amortizacion_deducida", prefill.amortizacion_deducida || "");
   setValue("valor_transmision", prefill.valor_transmision || "");
@@ -61293,27 +61304,28 @@ if (irpfGainForm) {
         return acc + parseMoneyValue(input.value || 0);
       }, 0);
 
-    if (adqTotalInput) {
-      adqTotalInput.readOnly = showAdq;
-      if (showAdq) {
-        const total = sumInputs([
-          "gastos_adq_agencia",
-          "gastos_adq_abogado",
-          "gastos_adq_tasacion",
-          "gastos_adq_itp_iva_ajd",
-          "gastos_adq_notaria",
-          "gastos_adq_registro",
-          "gastos_adq_notaria_registro",
-          "gastos_adq_gestoria",
-          "gastos_adq_hipoteca",
-          "gastos_adq_otros",
-        ]);
-        adqTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-      }
-    }
+	    if (adqTotalInput) {
+	      adqTotalInput.readOnly = showAdq;
+	      if (showAdq) {
+	        const impuestosAdq =
+	          sumInputs(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"]) || sumInputs(["gastos_adq_itp_iva_ajd"]);
+	        const total = sumInputs([
+	          "gastos_adq_agencia",
+	          "gastos_adq_abogado",
+	          "gastos_adq_tasacion",
+	          "gastos_adq_notaria",
+	          "gastos_adq_registro",
+	          "gastos_adq_notaria_registro",
+	          "gastos_adq_gestoria",
+	          "gastos_adq_hipoteca",
+	          "gastos_adq_otros",
+	        ]) + impuestosAdq;
+	        adqTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
+	          minimumFractionDigits: 2,
+	          maximumFractionDigits: 2,
+	        });
+	      }
+	    }
 	    if (txTotalInput) {
 	      txTotalInput.readOnly = showTx;
 	      if (showTx) {

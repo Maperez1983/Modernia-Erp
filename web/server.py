@@ -8064,12 +8064,15 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             total += _money(k)
         return round(max(0.0, total) + 1e-9, 2)
 
+    adq_impuestos_total = _sum_money(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"])
+    if adq_impuestos_total <= 0:
+        adq_impuestos_total = _money("gastos_adq_itp_iva_ajd")
+
     adq_desglose_total = _sum_money(
         [
             "gastos_adq_agencia",
             "gastos_adq_abogado",
             "gastos_adq_tasacion",
-            "gastos_adq_itp_iva_ajd",
             "gastos_adq_notaria",
             "gastos_adq_registro",
             "gastos_adq_notaria_registro",
@@ -8078,6 +8081,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "gastos_adq_otros",
         ]
     )
+    adq_desglose_total = round(max(0.0, adq_desglose_total + adq_impuestos_total) + 1e-9, 2)
     tx_desglose_total = _sum_money(
         [
             "gastos_tx_agencia",
@@ -8449,15 +8453,21 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     def date_text(value: object) -> str:
         return str(value or "").strip()
 
-    kpi_lines = [
-        ("Días transcurridos", str(result.get("days_transcurridos") or "—")),
-        ("Ganancia diaria (bruta)", money(result.get("ganancia_diaria"))),
-        ("Ganancia diaria (sujeta)", money(result.get("ganancia_sujeta_diaria"))),
-        ("Exenta", money(result.get("exento"))),
-        ("Exenta (%)", f"{float(result.get('exento_pct') or 0):.2f}%"),
-        ("Sujeta", money(result.get("ganancia_sujeta"))),
-        ("Cuota estimada", money(result.get("cuota_ahorro_estimada"))),
-    ]
+    importe_a_pagar = result.get("cuota_ahorro_estimada")
+    if regimen == "irnr" and result.get("cuota_neta") is not None:
+        importe_a_pagar = result.get("cuota_neta")
+    resumen_cards = {
+        "kind": "kpi_cards",
+        "columns": 3,
+        "items": [
+            {"label": "Días transcurridos", "value": str(result.get("days_transcurridos") or "—")},
+            {"label": "Ganancia patrimonial", "value": money(result.get("ganancia_patrimonial"))},
+            {"label": "Ganancia diaria", "value": money(result.get("ganancia_diaria"))},
+            {"label": "Exenta", "value": money(result.get("exento"))},
+            {"label": "Sujeta", "value": money(result.get("ganancia_sujeta"))},
+            {"label": "Importe a pagar (estimado)", "value": money(importe_a_pagar), "accent": True},
+        ],
+    }
 
     input_lines = [
         ("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"),
@@ -8476,7 +8486,9 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Gastos adquisición · Agencia", money(payload.get("gastos_adq_agencia"))),
         ("Gastos adquisición · Abogado/asesoría", money(payload.get("gastos_adq_abogado"))),
         ("Gastos adquisición · Tasación", money(payload.get("gastos_adq_tasacion"))),
-        ("Gastos adquisición · ITP/IVA+AJD", money(payload.get("gastos_adq_itp_iva_ajd"))),
+        ("Gastos adquisición · ITP", money(payload.get("gastos_adq_itp"))),
+        ("Gastos adquisición · IVA", money(payload.get("gastos_adq_iva"))),
+        ("Gastos adquisición · AJD", money(payload.get("gastos_adq_ajd"))),
         ("Gastos adquisición · Notaría", money(payload.get("gastos_adq_notaria"))),
         ("Gastos adquisición · Registro", money(payload.get("gastos_adq_registro"))),
         ("Gastos adquisición · Notaría/Registro (legacy)", money(payload.get("gastos_adq_notaria_registro"))),
@@ -8532,7 +8544,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Abatimiento (DT 9ª) · Reducción", money((result.get("abatimiento") or {}).get("reduccion_importe"))),
         ("Ganancia computable", money(result.get("ganancia_patrimonial_computable"))),
         ("Base ahorro sujeta", money(result.get("base_ahorro_sujeta"))),
-        ("Cuota ahorro estimada", money(result.get("cuota_ahorro_estimada"))),
+        ("Importe a pagar (estimado)", money(importe_a_pagar)),
         ]
     )
     if regimen == "irnr":
@@ -8556,7 +8568,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         "Informe IRPF/IRNR · Ganancia patrimonial",
         subtitle,
         [
-            ("Indicadores clave", kpi_lines),
+            ("Resumen", resumen_cards),
             ("Datos de entrada", input_lines),
             ("Resultado", output_lines),
         ],
@@ -8627,7 +8639,9 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Valor adquisición", money(irpf_payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
         ("Gastos adquisición · Agencia", money(irpf_payload.get("gastos_adq_agencia"))),
-        ("Gastos adquisición · ITP/IVA+AJD", money(irpf_payload.get("gastos_adq_itp_iva_ajd"))),
+        ("Gastos adquisición · ITP", money(irpf_payload.get("gastos_adq_itp"))),
+        ("Gastos adquisición · IVA", money(irpf_payload.get("gastos_adq_iva"))),
+        ("Gastos adquisición · AJD", money(irpf_payload.get("gastos_adq_ajd"))),
         ("Gastos adquisición · Notaría", money(irpf_payload.get("gastos_adq_notaria"))),
         ("Gastos adquisición · Registro", money(irpf_payload.get("gastos_adq_registro"))),
         ("Gastos adquisición · Notaría/Registro (legacy)", money(irpf_payload.get("gastos_adq_notaria_registro"))),
@@ -8668,7 +8682,10 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("Abatimiento (DT 9ª) · Reducción", money((irpf_result.get("abatimiento") or {}).get("reduccion_importe"))),
         ("Ganancia computable", money(irpf_result.get("ganancia_patrimonial_computable"))),
         ("Base ahorro sujeta", money(irpf_result.get("base_ahorro_sujeta"))),
-        ("Cuota estimada", money(irpf_result.get("cuota_ahorro_estimada"))),
+        (
+            "Importe a pagar (estimado)",
+            money(irpf_result.get("cuota_neta") if str(irpf_params.get("regimen_fiscal") or "").lower() == "irnr" else irpf_result.get("cuota_ahorro_estimada")),
+        ),
     ]
     if str(irpf_params.get("regimen_fiscal") or "").lower() == "irnr":
         irpf_lines.append(("Retención (importe)", money(irpf_result.get("retencion_importe"))))
@@ -34737,6 +34754,9 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
     font_subtitle = _document_font(16, bold=False)
     font_section = _document_font(22, bold=True)
     font_body = _document_font(17, bold=False)
+    font_body_bold = _document_font(17, bold=True)
+    font_kpi_value = _document_font(26, bold=True)
+    font_kpi_label = _document_font(14, bold=False)
     font_footer = _document_font(15, bold=False)
     font_header_small = _document_font(14, bold=False)
 
@@ -34803,12 +34823,98 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=ink, font=font_section)
         y = heading_box[3] + 12
-        for line in lines:
-            raw = f"{line[0]}: {line[1]}" if isinstance(line, (list, tuple)) and len(line) == 2 else str(line or "")
-            wrapped, _line_height, total_height = _pil_multiline(draw, raw, font_body, width=96, line_gap=6)
-            ensure_space(total_height + 6)
-            draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=ink, font=font_body, spacing=6)
-            y += total_height + 6
+        kind = str(lines.get("kind") or "").strip().lower() if isinstance(lines, dict) else ""
+
+        if kind == "kpi_cards":
+            items = lines.get("items") or []
+            try:
+                cols = int(lines.get("columns") or 3)
+            except Exception:
+                cols = 3
+            cols = max(2, min(4, cols))
+            gap = 18
+            card_w = int((content_width - gap * (cols - 1)) / cols)
+            card_h = 98
+            radius = 18
+            border = (225, 228, 232)
+            fill = (250, 250, 250)
+            accent_border = gold
+            accent_fill = (252, 248, 235)
+
+            def _rounded(box, *, outline=None, fill=None, width=2, r=18):
+                try:
+                    draw.rounded_rectangle(box, radius=r, outline=outline, fill=fill, width=width)
+                except Exception:
+                    draw.rectangle(box, outline=outline, fill=fill, width=width)
+
+            row = 0
+            col = 0
+            for item in items:
+                if isinstance(item, dict):
+                    label = str(item.get("label") or "").strip()
+                    value = str(item.get("value") or "").strip()
+                    accent = bool(item.get("accent") or False)
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    label = str(item[0] or "").strip()
+                    value = str(item[1] or "").strip()
+                    accent = False
+                else:
+                    label = ""
+                    value = str(item or "").strip()
+                    accent = False
+                if not label and not value:
+                    continue
+                x0 = margin_x + col * (card_w + gap)
+                y0 = y + row * (card_h + gap)
+                x1 = x0 + card_w
+                y1 = y0 + card_h
+                ensure_space((row + 1) * (card_h + gap) + 10)
+                _rounded(
+                    (x0, y0, x1, y1),
+                    outline=accent_border if accent else border,
+                    fill=accent_fill if accent else fill,
+                    width=3 if accent else 2,
+                    r=radius,
+                )
+                pad_x = 18
+                draw.text((x0 + pad_x, y0 + 16), label, fill=muted, font=font_kpi_label)
+                draw.text((x0 + pad_x, y0 + 44), value, fill=ink, font=font_kpi_value)
+
+                col += 1
+                if col >= cols:
+                    col = 0
+                    row += 1
+            used_rows = row + (1 if col > 0 else 0)
+            if used_rows <= 0:
+                used_rows = 1
+            y += used_rows * card_h + (used_rows - 1) * gap + 10
+        else:
+            lines_iter = lines if isinstance(lines, list) else []
+            for line in lines_iter:
+                if isinstance(line, (list, tuple)) and len(line) == 2:
+                    label = str(line[0] or "").strip()
+                    value = str(line[1] or "").strip()
+                    if label and value:
+                        try:
+                            label_w = draw.textlength(label, font=font_body)
+                            value_w = draw.textlength(value, font=font_body_bold)
+                        except Exception:
+                            label_w = 0
+                            value_w = 0
+                        if (label_w and value_w and (label_w + value_w + 24) <= content_width) and (
+                            len(label) <= 42 and len(value) <= 42
+                        ):
+                            line_h = 30
+                            ensure_space(line_h + 6)
+                            draw.text((margin_x, y), label, fill=muted, font=font_body)
+                            draw.text((page_width - margin_x, y), value, fill=ink, font=font_body_bold, anchor="ra")
+                            y += line_h
+                            continue
+                raw = f"{line[0]}: {line[1]}" if isinstance(line, (list, tuple)) and len(line) == 2 else str(line or "")
+                wrapped, _line_height, total_height = _pil_multiline(draw, raw, font_body, width=96, line_gap=6)
+                ensure_space(total_height + 6)
+                draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=ink, font=font_body, spacing=6)
+                y += total_height + 6
         y += 14
 
     for line in footer_lines:
