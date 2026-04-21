@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=222" />
+				    <link rel="stylesheet" href="styles.css?v=223" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -1153,7 +1153,7 @@
 		                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
 		              </div>
 		            </div>
-			            <form id="irpfGainForm" class="form-grid">
+			            <form id="irpfGainForm" class="form-grid fiscal-grid">
 			              <div class="form-grid-section">Identificación</div>
 			              <label class="span-2">
 			                Referencia (opcional)
@@ -1230,13 +1230,13 @@
 			              </label>
 			              <label class="span-2">
 			                Gastos adquisición
-			                <div class="inline-row">
-			                  <input name="gastos_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
-			                  <select name="gastos_adquisicion_mode">
-			                    <option value="" selected>Total</option>
-			                    <option value="desglose">Desglose</option>
-			                  </select>
-			                </div>
+				                <div class="field-row">
+				                  <input name="gastos_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				                  <select name="gastos_adquisicion_mode">
+				                    <option value="" selected>Total</option>
+				                    <option value="desglose">Desglose</option>
+				                  </select>
+				                </div>
 		                <div class="muted">Si eliges “Desglose”, el sistema suma los conceptos detallados.</div>
 		              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
@@ -1302,13 +1302,13 @@
 				              </label>
 			              <label class="span-2">
 			                Amortización (auto)
-			                <div class="inline-row">
-			                  <label class="ui-check"><input type="checkbox" name="inmueble_alquilado" /> Inmueble alquilado/afecto</label>
-			                  <select name="amortizacion_mode">
-			                    <option value="" selected>Manual</option>
-			                    <option value="auto">Auto</option>
-			                  </select>
-			                </div>
+				                <div class="field-row">
+				                  <label class="ui-check"><input type="checkbox" name="inmueble_alquilado" /> Inmueble alquilado/afecto</label>
+				                  <select name="amortizacion_mode">
+				                    <option value="" selected>Manual</option>
+				                    <option value="auto">Auto</option>
+				                  </select>
+				                </div>
 			                <div class="muted">Si eliges “Auto” y dejas la amortización manual en 0, se calcula automáticamente.</div>
 			              </label>
 			              <label class="irpf-amort-auto hidden">
@@ -1342,13 +1342,13 @@
 			              </label>
 			              <label class="span-2">
 			                Gastos transmisión
-			                <div class="inline-row">
-			                  <input name="gastos_transmision" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
-			                  <select name="gastos_transmision_mode">
-			                    <option value="" selected>Total</option>
-			                    <option value="desglose">Desglose</option>
-			                  </select>
-			                </div>
+				                <div class="field-row">
+				                  <input name="gastos_transmision" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				                  <select name="gastos_transmision_mode">
+				                    <option value="" selected>Total</option>
+				                    <option value="desglose">Desglose</option>
+				                  </select>
+				                </div>
 		                <div class="muted">Si eliges “Desglose”, el sistema suma los conceptos detallados.</div>
 		              </label>
 			              <label class="irpf-gastos-tx-desglose hidden">
@@ -1389,10 +1389,10 @@
 			                <input name="plusvalia_municipal" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 		              <label class="span-2">
-		                <div class="inline-row">
-		                  <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
-		                  <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención >65 (si aplica)</label>
-		                </div>
+			                <div class="field-row">
+			                  <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
+			                  <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención >65 (si aplica)</label>
+			                </div>
 		              </label>
 			              <label>
 			                Importe reinvertido (opcional)
@@ -9774,7 +9774,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=628"></script>
+					    <script src="app.js?v=629"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

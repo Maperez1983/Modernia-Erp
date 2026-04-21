@@ -7254,7 +7254,7 @@ const openIrpfGananciaModal = (options = {}) => {
 	          <h3>Simulador IRPF/IRNR · Ganancia patrimonial</h3>
 	          <button type="button" class="ghost" data-irpf-close>✕</button>
 	        </div>
-		        <form class="modal-body form-grid" data-irpf-form>
+		        <form class="modal-body form-grid fiscal-grid" data-irpf-form>
 		          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
 	          <label class="span-2">
 	            Referencia (opcional)
@@ -7466,7 +7466,7 @@ const openIrpfGananciaModal = (options = {}) => {
 		            <input name="plusvalia_municipal" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 		          </label>
 	          <label class="span-2">
-	            <div class="inline-row">
+	            <div class="field-row">
 	              <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual (incluye últimos 2 años)</label>
 	              <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención &gt;65 (forzar)</label>
 	            </div>
@@ -7487,10 +7487,10 @@ const openIrpfGananciaModal = (options = {}) => {
                 <summary class="muted" style="cursor:pointer;">Alquiler y amortización (auto)</summary>
                 <div class="form-grid" style="margin-top:10px;">
                   <label class="span-2">
-                    <div class="inline-row">
+                      <div class="field-row">
                       <label class="ui-check"><input type="checkbox" name="inmueble_alquilado" /> Estuvo alquilado (o afecto a actividad)</label>
                       <label class="ui-check"><input type="checkbox" name="amortizacion_mode" value="auto" /> Calcular amortización automáticamente</label>
-                    </div>
+                      </div>
                   </label>
                   <label>
                     Inicio alquiler (opcional)
@@ -61304,47 +61304,52 @@ if (irpfGainForm) {
         return acc + parseMoneyValue(input.value || 0);
       }, 0);
 
-	    if (adqTotalInput) {
-	      adqTotalInput.readOnly = showAdq;
-	      if (showAdq) {
-	        const impuestosAdq =
-	          sumInputs(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"]) || sumInputs(["gastos_adq_itp_iva_ajd"]);
-	        const total = sumInputs([
-	          "gastos_adq_agencia",
-	          "gastos_adq_abogado",
-	          "gastos_adq_tasacion",
-	          "gastos_adq_notaria",
-	          "gastos_adq_registro",
-	          "gastos_adq_notaria_registro",
-	          "gastos_adq_gestoria",
-	          "gastos_adq_hipoteca",
-	          "gastos_adq_otros",
-	        ]) + impuestosAdq;
-	        adqTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
-	          minimumFractionDigits: 2,
-	          maximumFractionDigits: 2,
-	        });
-	      }
-	    }
-	    if (txTotalInput) {
-	      txTotalInput.readOnly = showTx;
-	      if (showTx) {
-	        const total = sumInputs([
-	          "gastos_tx_agencia",
-	          "gastos_tx_abogado",
-	          "gastos_tx_cert_energetico",
-	          "gastos_tx_notaria",
-	          "gastos_tx_registro",
-	          "gastos_tx_notaria_registro",
-	          "gastos_tx_cancelacion",
-	          "gastos_tx_cancelacion_registral",
-	          "gastos_tx_hipoteca",
-	          "gastos_tx_otros",
-	        ]);
-        txTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
+    const fmtPlain = (num) =>
+      Number(num || 0).toLocaleString("es-ES", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    if (adqTotalInput) {
+      const impuestosAdq = sumInputs(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"]);
+      const adqDesglose = sumInputs([
+        "gastos_adq_agencia",
+        "gastos_adq_abogado",
+        "gastos_adq_tasacion",
+        "gastos_adq_notaria",
+        "gastos_adq_registro",
+        "gastos_adq_notaria_registro",
+        "gastos_adq_gestoria",
+        "gastos_adq_hipoteca",
+        "gastos_adq_otros",
+      ]);
+      const adqTotal = (adqDesglose || 0) + (impuestosAdq || 0);
+      const hasBreakdown = showAdq && adqTotal > 0;
+
+      // Si el usuario marca "Desglose" pero aún no ha rellenado importes, no le borramos el total manual.
+      adqTotalInput.readOnly = Boolean(hasBreakdown);
+      if (hasBreakdown) {
+        adqTotalInput.value = fmtPlain(adqTotal);
+      }
+    }
+
+    if (txTotalInput) {
+      const txTotal = sumInputs([
+        "gastos_tx_agencia",
+        "gastos_tx_abogado",
+        "gastos_tx_cert_energetico",
+        "gastos_tx_notaria",
+        "gastos_tx_registro",
+        "gastos_tx_notaria_registro",
+        "gastos_tx_cancelacion",
+        "gastos_tx_cancelacion_registral",
+        "gastos_tx_hipoteca",
+        "gastos_tx_otros",
+      ]);
+      const hasBreakdown = showTx && txTotal > 0;
+      txTotalInput.readOnly = Boolean(hasBreakdown);
+      if (hasBreakdown) {
+        txTotalInput.value = fmtPlain(txTotal);
       }
     }
 

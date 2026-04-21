@@ -1039,6 +1039,10 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   gap: 10px;
 }
 
+.form-grid.fiscal-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .form-grid .span-all {
   grid-column: 1 / -1;
 }
@@ -1079,6 +1083,51 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   min-width: 0;
 }
 
+.form-grid .field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.form-grid .field-row > * {
+  min-width: 0;
+}
+
+.form-grid .field-row input,
+.form-grid .field-row select,
+.form-grid .field-row textarea {
+  margin: 0;
+}
+
+.form-grid .field-row select {
+  flex: 0 0 160px;
+}
+
+.form-grid .field-row input,
+.form-grid .field-row .field-grow {
+  flex: 1 1 240px;
+}
+
+.ui-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.ui-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
 .form-grid .span-2 {
   grid-column: span 2;
 }
@@ -1116,6 +1165,21 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 
 .form-grid .crm-inline-input .catastro-button {
   flex: 0 0 auto;
+}
+
+@media (max-width: 980px) {
+  .form-grid.fiscal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .form-grid .field-row select {
+    flex: 1 1 180px;
+  }
+}
+
+@media (max-width: 560px) {
+  .form-grid.fiscal-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-layout {
