@@ -1576,6 +1576,10 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   grid-column: 1 / -1;
 }
 
+.inmueble-fiscal-embed {
+  min-width: 0;
+}
+
 .inmueble-fiscal-embed .workspace-central-layout {
   grid-template-columns: 1fr;
   margin-bottom: 0;
@@ -1587,6 +1591,10 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
 
 .inmueble-fiscal-embed .simuladores-embedded {
   margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .workspace-list-item {
@@ -6371,6 +6379,10 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 14px;
   align-items: start;
+}
+
+#inmuebleDetail .inmueble-tecno-main {
+  min-width: 0;
 }
 
 #inmuebleDetail [data-layout="tecno"] {
