@@ -1642,12 +1642,14 @@ def seguro_estado_bucket_expr(alias=""):
         f"THEN 'rechazada' "
         f"WHEN {estado_expr} IN ('anulada', 'anulado', 'cancelada', 'cancelado', 'baja') "
         f"  OR {estado_poliza_expr} IN ('anulada', 'cancelada', 'baja', 'sustituida') THEN 'anulada' "
+        # El "estado" explícito prevalece sobre fechas (evita infracontar cartera cuando
+        # la fecha de efecto se usa como próxima renovación).
+        f"WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', 'activo', 'activa', 'alta', 'emitida', 'recibido') THEN 'en_vigor' "
         f"WHEN {fecha_efecto_expr} IS NOT NULL AND DATE({fecha_efecto_expr}) > {today_expr} THEN 'contratada' "
         f"WHEN {fecha_efecto_expr} IS NOT NULL "
         f"  AND DATE({fecha_efecto_expr}) <= {today_expr} "
         f"  AND ({fecha_venc_expr} IS NULL OR DATE({fecha_venc_expr}) >= {today_expr}) THEN 'en_vigor' "
         f"WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato') THEN 'contratada' "
-        f"WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', 'activo', 'activa', 'alta', 'emitida', 'recibido') THEN 'en_vigor' "
         f"WHEN {estado_expr} = '' AND {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente') THEN 'en_vigor' "
         "ELSE 'presupuesto' "
         "END"
@@ -1684,19 +1686,6 @@ def seguro_estado_bucket_value(seguro_row, *, today=None):
     if estado_poliza_key in ("ANULADA", "CANCELADA", "BAJA", "SUSTITUIDA"):
         return "anulada"
 
-    fecha_efecto = parse_iso_date(row.get("fecha_efecto"))
-    fecha_venc = parse_iso_date(row.get("fecha_vencimiento"))
-    if fecha_efecto and fecha_efecto > today:
-        return "contratada"
-
-    if fecha_efecto and fecha_efecto <= today:
-        # +1 year approximation (close to SQLite DATE('+1 year') for our use)
-        eff_venc = fecha_venc or (fecha_efecto + timedelta(days=365))
-        if (fecha_venc is None) or (eff_venc >= today):
-            return "en_vigor"
-
-    if estado_key in ("CONTRATADA", "CONTRATADO", "CONTRATO"):
-        return "contratada"
     if estado_key in (
         "EN VIGOR",
         "ENVIGOR",
@@ -1711,6 +1700,20 @@ def seguro_estado_bucket_value(seguro_row, *, today=None):
         "RECIBIDO",
     ):
         return "en_vigor"
+
+    fecha_efecto = parse_iso_date(row.get("fecha_efecto"))
+    fecha_venc = parse_iso_date(row.get("fecha_vencimiento"))
+    if fecha_efecto and fecha_efecto > today:
+        return "contratada"
+
+    if fecha_efecto and fecha_efecto <= today:
+        # +1 year approximation (close to SQLite DATE('+1 year') for our use)
+        eff_venc = fecha_venc or (fecha_efecto + timedelta(days=365))
+        if (fecha_venc is None) or (eff_venc >= today):
+            return "en_vigor"
+
+    if estado_key in ("CONTRATADA", "CONTRATADO", "CONTRATO"):
+        return "contratada"
     if (not estado_key) and estado_poliza_key in ("ACTIVA", "ACTIVO", "EN VIGOR", "VIGENTE"):
         return "en_vigor"
     return "presupuesto"
