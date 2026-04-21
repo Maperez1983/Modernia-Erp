@@ -34794,10 +34794,9 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
 
         y = max(logo_bottom + 26, y + 110)
 
-        # Banda título (dorado) + remate oliva como en plantilla.
+        # Banda título (dorado) en ancho completo (sin remate en otro color).
         band_h = 62
-        draw.rectangle((0, y, page_width * 0.74, y + band_h), fill=gold)
-        draw.rectangle((page_width * 0.74, y, page_width, y + band_h), fill=olive)
+        draw.rectangle((0, y, page_width, y + band_h), fill=gold)
         draw.text((page_width / 2, y + 16), str(title or "").upper(), fill="white", font=font_title, anchor="mm")
 
         y += band_h + 34
