@@ -8470,63 +8470,75 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ],
     }
 
-    input_lines = [
-        ("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"),
+    def _money_num(raw: object) -> float | None:
+        try:
+            parsed = parse_money_value(raw)
+        except Exception:
+            parsed = None
+        if parsed is None:
+            return None
+        try:
+            return float(parsed)
+        except Exception:
+            return None
+
+    def _push_money(lines: list, label: str, raw: object, *, keep_zero: bool = False) -> None:
+        val = _money_num(raw)
+        if val is None:
+            return
+        if (not keep_zero) and abs(val) < 1e-9:
+            return
+        lines.append((label, format_eur(val)))
+
+    def _push_text(lines: list, label: str, raw: object) -> None:
+        text = str(raw or "").strip()
+        if not text:
+            return
+        lines.append((label, text))
+
+    # Informe compacto: solo totales + campos relevantes (sin ruido).
+    input_lines: list[tuple[str, str]] = []
+    input_lines.append(("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"))
+    input_lines.append(
         (
             "CCAA aplicable",
             CCAA_LABELS.get(_normalize_ccaa(payload.get("ccaa") or "AN"), _normalize_ccaa(payload.get("ccaa") or "AN")),
-        ),
-        ("Ejercicio", str(ejercicio or "")),
-        ("% participación", pct(payload.get("participacion_pct") or 100)),
-        ("Fecha nacimiento", date_text(payload.get("fecha_nacimiento"))),
-        ("Dependencia", str(payload.get("dependencia_grado") or "—").strip() or "—"),
-        ("Fecha adquisición", date_text(payload.get("fecha_adquisicion"))),
-        ("Fecha transmisión (devengo)", date_text(payload.get("fecha_transmision"))),
-        ("Valor adquisición", money(payload.get("valor_adquisicion"))),
-        ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
-        ("Gastos adquisición · Agencia", money(payload.get("gastos_adq_agencia"))),
-        ("Gastos adquisición · Abogado/asesoría", money(payload.get("gastos_adq_abogado"))),
-        ("Gastos adquisición · Tasación", money(payload.get("gastos_adq_tasacion"))),
-        ("Gastos adquisición · ITP", money(payload.get("gastos_adq_itp"))),
-        ("Gastos adquisición · IVA", money(payload.get("gastos_adq_iva"))),
-        ("Gastos adquisición · AJD", money(payload.get("gastos_adq_ajd"))),
-        ("Gastos adquisición · Notaría", money(payload.get("gastos_adq_notaria"))),
-        ("Gastos adquisición · Registro", money(payload.get("gastos_adq_registro"))),
-        ("Gastos adquisición · Notaría/Registro (legacy)", money(payload.get("gastos_adq_notaria_registro"))),
-        ("Gastos adquisición · Gestoría", money(payload.get("gastos_adq_gestoria"))),
-        ("Gastos adquisición · Hipoteca", money(payload.get("gastos_adq_hipoteca"))),
-        ("Gastos adquisición · Otros", money(payload.get("gastos_adq_otros"))),
-        ("Mejoras / inversiones", money(payload.get("inversiones_mejoras"))),
-        ("Fecha mejoras/inversiones", date_text(payload.get("fecha_mejoras"))),
-        ("Valor tx mejoras (opcional)", money(payload.get("valor_transmision_mejoras"))),
-        ("Amortización deducida", money(payload.get("amortizacion_deducida"))),
-        ("Amortización aplicada (calc.)", money(result.get("amortizacion_deducida_aplicada"))),
-        ("Amortización auto (si aplica)", money(result.get("amortizacion_auto"))),
-        ("Amortización auto · días", str(result.get("amortizacion_auto_days") or "—")),
-        ("Amortización auto · base final", money(result.get("amortizacion_auto_base"))),
-        ("Amortización auto · base manual", money(result.get("amortizacion_auto_base_manual"))),
-        ("Amortización auto · base coste (sin suelo)", money(result.get("amortizacion_auto_base_coste"))),
-        ("Amortización auto · base catastral (sin suelo)", money(result.get("amortizacion_auto_base_catastral"))),
-        ("Amortización auto · %", f"{float(result.get('amortizacion_auto_pct') or 0):.3f}%"),
-        ("Valor transmisión", money(payload.get("valor_transmision"))),
-        ("Gastos transmisión", money(payload.get("gastos_transmision"))),
-        ("Gastos transmisión · Agencia", money(payload.get("gastos_tx_agencia"))),
-        ("Gastos transmisión · Abogado/asesoría", money(payload.get("gastos_tx_abogado"))),
-        ("Gastos transmisión · Certificado energético", money(payload.get("gastos_tx_cert_energetico"))),
-        ("Gastos transmisión · Notaría", money(payload.get("gastos_tx_notaria"))),
-        ("Gastos transmisión · Registro", money(payload.get("gastos_tx_registro"))),
-        ("Gastos transmisión · Notaría/Registro (legacy)", money(payload.get("gastos_tx_notaria_registro"))),
-        ("Gastos transmisión · Gestoría / cancelación", money(payload.get("gastos_tx_cancelacion"))),
-        ("Gastos transmisión · Cancelación registral/cargas", money(payload.get("gastos_tx_cancelacion_registral"))),
-        ("Gastos transmisión · Hipoteca", money(payload.get("gastos_tx_hipoteca"))),
-        ("Gastos transmisión · Otros", money(payload.get("gastos_tx_otros"))),
-        ("Plusvalía municipal pagada", money(payload.get("plusvalia_municipal"))),
-        ("Vivienda habitual", yn(payload.get("vivienda_habitual"))),
-        ("Exención >65", yn(payload.get("exencion_mayor_65"))),
-        ("Importe reinvertido", money(payload.get("importe_reinvertido"))),
-        ("Comprometido a reinvertir", money(payload.get("importe_comprometido_reinvertir"))),
-        ("Préstamo pendiente", money(payload.get("prestamo_pendiente"))),
-    ]
+        )
+    )
+    _push_text(input_lines, "Ejercicio", ejercicio)
+    input_lines.append(("% participación", pct(payload.get("participacion_pct") or 100)))
+    _push_text(input_lines, "Fecha adquisición", date_text(payload.get("fecha_adquisicion")))
+    _push_text(input_lines, "Fecha transmisión (devengo)", date_text(payload.get("fecha_transmision")))
+    _push_money(input_lines, "Valor adquisición", payload.get("valor_adquisicion"), keep_zero=True)
+    _push_money(input_lines, "Valor transmisión", payload.get("valor_transmision"), keep_zero=True)
+
+    _push_money(input_lines, "Gastos adquisición (total)", payload.get("gastos_adquisicion"))
+    _push_money(input_lines, "Gastos transmisión (total)", payload.get("gastos_transmision"))
+
+    impuestos_adq = (
+        (_money_num(payload.get("gastos_adq_itp")) or 0.0)
+        + (_money_num(payload.get("gastos_adq_iva")) or 0.0)
+        + (_money_num(payload.get("gastos_adq_ajd")) or 0.0)
+    )
+    if abs(impuestos_adq) < 1e-9:
+        impuestos_adq = _money_num(payload.get("gastos_adq_itp_iva_ajd")) or 0.0
+    if impuestos_adq > 0:
+        input_lines.append(("Impuestos adquisición (ITP+IVA+AJD)", format_eur(impuestos_adq)))
+
+    # Extras solo si están informados
+    _push_money(input_lines, "Plusvalía municipal", payload.get("plusvalia_municipal"))
+    _push_money(input_lines, "Mejoras / inversiones", payload.get("inversiones_mejoras"))
+    _push_money(input_lines, "Amortización deducida", payload.get("amortizacion_deducida"))
+    _push_money(input_lines, "Préstamo pendiente (reinversión)", payload.get("prestamo_pendiente"))
+
+    if bool(payload.get("vivienda_habitual") or False):
+        input_lines.append(("Vivienda habitual", "Sí"))
+    if str(payload.get("dependencia_grado") or "").strip():
+        input_lines.append(("Dependencia", str(payload.get("dependencia_grado") or "").strip()))
+    if bool(payload.get("exencion_mayor_65") or False):
+        input_lines.append(("Exención >65 (forzar)", "Sí"))
+    _push_money(input_lines, "Importe reinvertido", payload.get("importe_reinvertido"))
+    _push_money(input_lines, "Comprometido a reinvertir", payload.get("importe_comprometido_reinvertir"))
     output_lines = []
     if regimen == "irnr":
         output_lines.append(("Tipo gravamen IRNR", f"{tipo_gravamen_pct:.3f}%" if tipo_gravamen_pct is not None else "—"))
@@ -8534,23 +8546,19 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     else:
         output_lines.append(("Escala usada", str(escala or "")))
         output_lines.append(("Escala asumida", "Sí" if assumed else "No"))
-    output_lines.extend(
-        [
-        ("Valor adquisición (calc.)", money(result.get("valor_adquisicion_calc"))),
-        ("Valor transmisión (calc.)", money(result.get("valor_transmision_calc"))),
-        ("Ganancia patrimonial (bruta)", money(result.get("ganancia_patrimonial"))),
-        ("Exento", money(result.get("exento"))),
-        ("Motivo exención", str(result.get("exencion_motivo") or "—")),
-        ("Ganancia sujeta (post-exención)", money(result.get("ganancia_sujeta"))),
-        ("Abatimiento (DT 9ª) · Reducción", money((result.get("abatimiento") or {}).get("reduccion_importe"))),
-        ("Ganancia computable", money(result.get("ganancia_patrimonial_computable"))),
-        ("Base ahorro sujeta", money(result.get("base_ahorro_sujeta"))),
-        ("Importe a pagar (estimado)", money(importe_a_pagar)),
-        ]
-    )
+    _push_money(output_lines, "Valor adquisición (calc.)", result.get("valor_adquisicion_calc"), keep_zero=True)
+    _push_money(output_lines, "Valor transmisión (calc.)", result.get("valor_transmision_calc"), keep_zero=True)
+    _push_money(output_lines, "Ganancia patrimonial (bruta)", result.get("ganancia_patrimonial"), keep_zero=True)
+    _push_money(output_lines, "Exento", result.get("exento"))
+    if _money_num(result.get("exento")) and (_money_num(result.get("exento")) or 0) > 0:
+        _push_text(output_lines, "Motivo exención", result.get("exencion_motivo"))
+    _push_money(output_lines, "Ganancia sujeta (post-exención)", result.get("ganancia_sujeta"), keep_zero=True)
+    _push_money(output_lines, "Abatimiento (DT 9ª) · Reducción", (result.get("abatimiento") or {}).get("reduccion_importe"))
+    _push_money(output_lines, "Base ahorro sujeta", result.get("base_ahorro_sujeta"), keep_zero=True)
+    _push_money(output_lines, "Importe a pagar (estimado)", importe_a_pagar, keep_zero=True)
     if regimen == "irnr":
-        output_lines.append(("Retención (importe)", money(result.get("retencion_importe"))))
-        output_lines.append(("Cuota neta (cuota - retención)", money(result.get("cuota_neta"))))
+        _push_money(output_lines, "Retención (importe)", result.get("retencion_importe"))
+        _push_money(output_lines, "Cuota neta (cuota - retención)", result.get("cuota_neta"))
 
     empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
     ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
