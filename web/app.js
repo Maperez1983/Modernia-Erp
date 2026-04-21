@@ -6888,6 +6888,9 @@ const applyFiscalWizardPreset = (preset = null) => {
       iivtnuMunicipioCp.dispatchEvent(new Event("change", { bubbles: true }));
     } catch {}
   }
+
+  fiscalWizardActivePreset = preset;
+  setFiscalWizardDgtRefs(preset?.dgt_refs || preset?.dgt || [], { replace: true });
 };
 
 const applyFiscalWizardPrefill = (prefill = {}) => {
@@ -6953,6 +6956,8 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
 };
 
 const openWorkspaceFiscalWizard = (prefill = {}) => {
+  fiscalWizardActivePreset = null;
+  setFiscalWizardDgtRefs([], { replace: true });
   const user = getAuthScopeUser();
   const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
   openHolding({ mode });
@@ -60255,6 +60260,64 @@ if (fiscalWizardForm) {
       }
     });
   }
+
+  try {
+    renderFiscalWizardDgtRefs();
+  } catch {}
+
+  if (fiscalWizardDgtAddBtn && fiscalWizardDgtInput) {
+    fiscalWizardDgtAddBtn.addEventListener("click", () => {
+      const raw = String(fiscalWizardDgtInput.value || "").trim();
+      const normalized = normalizeDgtReference(raw);
+      if (!normalized) {
+        if (fiscalWizardStatus) fiscalWizardStatus.textContent = "Referencia DGT no válida (formato V0000-00).";
+        return;
+      }
+      if (fiscalWizardStatus) fiscalWizardStatus.textContent = "";
+      setFiscalWizardDgtRefs([normalized], { replace: false });
+      fiscalWizardDgtInput.value = "";
+    });
+  }
+
+  if (fiscalWizardDgtList) {
+    fiscalWizardDgtList.addEventListener("click", async (event) => {
+      const lookupBtn = closestFromEvent(event, "[data-dgt-lookup]");
+      const removeBtn = closestFromEvent(event, "[data-dgt-remove]");
+      if (!lookupBtn && !removeBtn) return;
+
+      if (removeBtn) {
+        const ref = normalizeDgtReference(removeBtn.dataset.dgtRemove || "");
+        if (!ref) return;
+        fiscalWizardDgtRefs = (Array.isArray(fiscalWizardDgtRefs) ? fiscalWizardDgtRefs : []).filter((v) => v !== ref);
+        fiscalWizardDgtLookupCache.delete(ref);
+        renderFiscalWizardDgtRefs();
+        return;
+      }
+
+      const ref = normalizeDgtReference(lookupBtn.dataset.dgtLookup || "");
+      if (!ref) return;
+      if (fiscalWizardStatus) fiscalWizardStatus.textContent = `Consultando DGT ${ref}...`;
+      lookupBtn.disabled = true;
+      try {
+        const response = await fetch("/api/legal_dgt_lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ referencia: ref, area: "gestoria", registrar_en_radar: "0" }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || data?.error) throw new Error(data?.error || `HTTP ${response.status}`);
+        fiscalWizardDgtLookupCache.set(ref, data);
+        renderFiscalWizardDgtRefs();
+        if (fiscalWizardStatus) fiscalWizardStatus.textContent = "OK.";
+      } catch (err) {
+        if (fiscalWizardStatus) fiscalWizardStatus.textContent = err?.message || "No se pudo consultar DGT.";
+      } finally {
+        lookupBtn.disabled = false;
+      }
+    });
+  }
+
   if (fiscalWizardPdfBtn) {
     fiscalWizardPdfBtn.addEventListener("click", async () => {
       renderFiscalWizardResult(null);
@@ -60291,6 +60354,13 @@ if (fiscalWizardForm) {
           iivtnu_payload: iivtnuPayload,
           iivtnu_result: iivtnuResp,
         };
+        try {
+          const presetsData = await loadFiscalWizardPresets();
+          pdfPayload.sources_global = Array.isArray(presetsData?.sources_global) ? presetsData.sources_global : [];
+        } catch {}
+        if (fiscalWizardActivePreset?.id) pdfPayload.preset_id = String(fiscalWizardActivePreset.id || "").trim();
+        if (fiscalWizardActivePreset?.title) pdfPayload.preset_title = String(fiscalWizardActivePreset.title || "").trim();
+        if (Array.isArray(fiscalWizardDgtRefs) && fiscalWizardDgtRefs.length) pdfPayload.dgt_refs = [...fiscalWizardDgtRefs];
         await downloadPdfFromApi("/api/fiscal_venta_pdf", pdfPayload, { filenameFallback: "informe_fiscal_venta.pdf" });
         if (fiscalWizardStatus) fiscalWizardStatus.textContent = "PDF generado.";
       } catch (err) {
