@@ -43446,7 +43446,9 @@ const loadCrmAgenda = () => {
     const qRaw = String(crmAgendaSearch?.value || "").trim();
     const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
     const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-		  const preset = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
+		  const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
+		  const presetEquipo = presetRaw.endsWith("_equipo");
+		  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
 		  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
 		  state.crmAgendaAmbito = ambitoFilter;
 		  persistCrmAgendaPrefs();
@@ -43517,7 +43519,7 @@ const loadCrmAgenda = () => {
 	    return ts > 0 && ts < Date.now();
 	  };
 			  const matchPreset = (row) => {
-			    if (!isMine(row)) return false;
+			    if (!presetEquipo && !isMine(row)) return false;
 			    const tipoKey = normalizeTipoKey(row);
 			    const fechaKey = String(row?.fecha || "").trim();
 			    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
@@ -43530,7 +43532,7 @@ const loadCrmAgenda = () => {
 			    return true;
 			  };
 			  const matchPresetCalendar = (row) => {
-			    if (!isMine(row)) return false;
+			    if (!presetEquipo && !isMine(row)) return false;
 			    const tipoKey = normalizeTipoKey(row);
 			    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
 			    // así que NO limitamos por “7 días”. El preset solo decide el tipo.
