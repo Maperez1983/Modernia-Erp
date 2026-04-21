@@ -4404,6 +4404,7 @@ body.tc-resizing {
   position: static;
   top: auto;
   z-index: auto;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border-radius: 0;
@@ -4411,8 +4412,9 @@ body.tc-resizing {
   background: transparent;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  overflow-x: visible;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
