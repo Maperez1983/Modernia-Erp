@@ -4425,6 +4425,15 @@ body.tc-resizing {
   height: 0;
 }
 
+#crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 #crmSection .crm-workspace-tabs.crm-lightning-tabs button {
   box-shadow: none;
 }
