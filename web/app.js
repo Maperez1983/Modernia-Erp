@@ -4077,7 +4077,12 @@ const expandServiceAliases = (services) => {
   if (set.has("hipotecas")) set.add("financiaciones");
   if (set.has("administracion fincas")) set.add("administracion de fincas");
   if (set.has("administracion de fincas")) set.add("administracion fincas");
+  if (set.has("admin de fincas")) {
+    set.add("administracion fincas");
+    set.add("administracion de fincas");
+  }
   if (set.has("administracion fincas") || set.has("administracion de fincas")) set.add("fincas");
+  if (set.has("admin de fincas")) set.add("fincas");
   if (set.has("fincas")) set.add("administracion fincas");
   return Array.from(set);
 };
@@ -4275,7 +4280,7 @@ const userCanAccessService = (serviceKey) => {
   const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
   if (!allowed.size) return false;
   if (normalized === "fincas") {
-    return allowed.has("fincas") || allowed.has("administracion fincas") || allowed.has("administracion de fincas");
+    return allowed.has("fincas") || allowed.has("administracion fincas") || allowed.has("administracion de fincas") || allowed.has("admin de fincas");
   }
   if (normalized === "hipotecas") {
     return allowed.has("hipotecas") || allowed.has("financiaciones");
@@ -5271,38 +5276,38 @@ const renderCompanyCards = () => {
 		      coreCards.appendChild(card);
 		    };
 
-    const appendServiceCard = (serviceKey) => {
-      const service = normalizeSimple(serviceKey);
-      const moduleByService = {
-        inmobiliaria: "inmobiliaria",
-        gestoria: "gestoria",
-        seguros: "seguros",
-        financiaciones: "financiacion",
-      };
-      if (workspaceScoped && moduleByService[service] && !enabledModules.has(moduleByService[service])) {
-        return;
-      }
-      const card = document.createElement("div");
-      card.className = "company-card";
-      if (service === "inmobiliaria") {
-        card.dataset.action = "crm-inmo";
+	    const appendServiceCard = (serviceKey) => {
+	      const service = normalizeSimple(serviceKey);
+	      const card = document.createElement("div");
+	      card.className = "company-card";
+	      if (service === "inmobiliaria") {
+	        card.dataset.action = "crm-inmo";
         card.innerHTML = `
           <h3>CRM Inmobiliario</h3>
           <div class="company-meta">Noticias, inmuebles y operaciones.</div>
           <div class="company-meta">Servicio inmobiliario.</div>
           <a class="card-link" href="/?crm=inmo" data-action="crm-inmo">Entrar</a>
         `;
-      } else if (service === "gestoria") {
-        card.dataset.action = "crm-gestoria";
-        card.innerHTML = `
-          <h3>CRM Gestoría</h3>
-          <div class="company-meta">Clientes en gestión y seguimiento.</div>
-          <div class="company-meta">Servicio de gestoría.</div>
-          <a class="card-link" href="/?crm=gestoria" data-action="crm-gestoria">Entrar</a>
-        `;
-      } else if (service === "seguros") {
-        card.dataset.action = "crm-seguros";
-        card.innerHTML = `
+	      } else if (service === "gestoria") {
+	        card.dataset.action = "crm-gestoria";
+	        card.innerHTML = `
+	          <h3>CRM Gestoría</h3>
+	          <div class="company-meta">Clientes en gestión y seguimiento.</div>
+	          <div class="company-meta">Servicio de gestoría.</div>
+	          <a class="card-link" href="/?crm=gestoria" data-action="crm-gestoria">Entrar</a>
+	        `;
+	      } else if (service === "fincas") {
+	        const href = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=fincas`;
+	        card.dataset.action = "workspace-fincas";
+	        card.innerHTML = `
+	          <h3>Fincas</h3>
+	          <div class="company-meta">Comunidades, incidencias, juntas y seguimiento.</div>
+	          <div class="company-meta">Área de administración de fincas.</div>
+	          <a class="card-link" href="${href}" data-action="workspace-fincas">Entrar</a>
+	        `;
+	      } else if (service === "seguros") {
+	        card.dataset.action = "crm-seguros";
+	        card.innerHTML = `
           <h3>CRM Seguros</h3>
           <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
           <div class="company-meta">Servicio de seguros.</div>
@@ -5316,29 +5321,46 @@ const renderCompanyCards = () => {
           <div class="company-meta">Servicio financiero.</div>
 	          <a class="card-link" href="/?crm=fin" data-action="crm-fin">Entrar</a>
         `;
-      } else {
-        return;
-      }
-      coreCards.appendChild(card);
-    };
+	      } else {
+	        return;
+	      }
+	      coreCards.appendChild(card);
+	    };
 
-	    if (!isPriv) {
-	      appendPersonalCard();
-	      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
-	      try {
-	        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
-	        const mapped = new Set();
-	        services.forEach((key) => {
-	          if (key === "hipotecas") key = "financiaciones";
-	          if (["inmobiliaria", "gestoria", "seguros", "financiaciones"].includes(key)) mapped.add(key);
-	        });
-	        Array.from(mapped).forEach((key) => appendServiceCard(key));
-	      } catch {}
-	      // Prompt de fichaje (solo si aplica al usuario).
-	      maybeAutoShowHomeTimePunchModal();
-        dedupeCoreCards();
-	      return;
-	    }
+	    const appendSimuladoresCard = () => {
+	      const href = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=motores&engine=simuladores`;
+	      const card = document.createElement("div");
+	      card.className = "company-card";
+	      card.dataset.action = "workspace-simuladores";
+	      card.innerHTML = `
+	        <h3>Simuladores fiscales</h3>
+	        <div class="company-meta">IRPF/IRNR, IIVTNU y generación de informe PDF.</div>
+	        <div class="company-meta">Útil para ventas y expedientes.</div>
+	        <a class="card-link" href="${href}" data-action="workspace-simuladores">Abrir</a>
+	      `;
+	      coreCards.appendChild(card);
+	    };
+
+		    if (!isPriv) {
+		      appendPersonalCard();
+		      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
+		      try {
+		        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
+		        const mapped = new Set();
+		        services.forEach((key) => {
+		          if (key === "hipotecas") key = "financiaciones";
+		          if (["inmobiliaria", "gestoria", "seguros", "financiaciones", "fincas"].includes(key)) mapped.add(key);
+		        });
+		        Array.from(mapped).forEach((key) => appendServiceCard(key));
+		        if (mapped.has("gestoria") || mapped.has("inmobiliaria") || mapped.has("fincas")) {
+		          appendSimuladoresCard();
+		        }
+		      } catch {}
+		      // Prompt de fichaje (solo si aplica al usuario).
+		      maybeAutoShowHomeTimePunchModal();
+	        dedupeCoreCards();
+		      return;
+		    }
 
     appendPersonalCard();
     const platformCard = document.createElement("div");
@@ -21757,7 +21779,7 @@ const openHolding = (options = {}) => {
     .toLowerCase();
   if (mode === "tenant" && !canManageWorkspace) {
     const viewKey = normalizeSimple(requestedView);
-    if (viewKey && !["operations", "rrhh", "fincas"].includes(viewKey)) {
+    if (viewKey && !["operations", "rrhh", "fincas", "motores"].includes(viewKey)) {
       requestedView = "";
     }
   }
