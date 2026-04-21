@@ -3219,6 +3219,25 @@ def parse_optional_int(value):
         return None
 
 
+def infer_habitaciones_from_subtipologia(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    upper = re.sub(r"\s+", " ", text.upper()).strip()
+    # Ejemplos: "3 dormitorios", "2 hab.", "4 HABITACIONES + despacho".
+    m = re.search(
+        r"\b(\d{1,2})\s*(?:DORMITORIOS?|DORM\.?|HABITACIONES?|HAB\.?)\b",
+        upper,
+    )
+    if not m:
+        return None
+    try:
+        val = int(m.group(1))
+    except Exception:
+        return None
+    return val if val > 0 else None
+
+
 def parse_boolish(value):
     raw = str(value or "").strip().lower()
     if not raw:
@@ -49607,13 +49626,32 @@ class Handler(BaseHTTPRequestHandler):
                         status=409,
                     )
                     return
+
+                try:
+                    ensure_column(conn, "inmuebles", "planta", "planta TEXT")
+                    ensure_column(conn, "inmuebles", "puerta", "puerta TEXT")
+                    ensure_column(conn, "captaciones", "planta", "planta TEXT")
+                    ensure_column(conn, "captaciones", "puerta", "puerta TEXT")
+                except Exception:
+                    pass
+
+                planta_value = str(payload.get("planta") or "").strip() or None
+                puerta_value = str(payload.get("puerta") or "").strip() or None
+                interior_value = str(payload.get("interior") or "").strip() or None
+                if not interior_value and puerta_value:
+                    # Compatibilidad: algunas pantallas antiguas usaban `interior` como puerta.
+                    interior_value = puerta_value
+                habitaciones_value = parse_optional_int(payload.get("habitaciones"))
+                if not habitaciones_value or int(habitaciones_value) <= 0:
+                    habitaciones_value = infer_habitaciones_from_subtipologia(payload.get("subtipologia"))
+
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
                 etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, titulo, referencia_catastral, direccion, direccion_numero, interior, escalera, edificio,
+                      id, empresa_id, referencia, titulo, referencia_catastral, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, focalizacion, tipo_inmueble, subtipologia,
                       m2, anio_construccion, anio_reforma, habitaciones, banos, precio_objetivo, precio_encargo, precio_valoracion,
                       precio_pedido_cliente, fecha_valoracion, desviacion_pct,
@@ -49628,7 +49666,7 @@ class Handler(BaseHTTPRequestHandler):
                       planificacion_encargo, fecha_ultima_renov_rebaja,
                       estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -49639,7 +49677,9 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("referencia_catastral"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
-                        payload.get("interior"),
+                        planta_value,
+                        puerta_value,
+                        interior_value,
                         payload.get("escalera"),
                         payload.get("edificio"),
                         payload.get("codigo_postal"),
@@ -49653,7 +49693,7 @@ class Handler(BaseHTTPRequestHandler):
                         parse_optional_float(payload.get("m2")),
                         parse_optional_int(payload.get("anio_construccion")),
                         parse_optional_int(payload.get("anio_reforma")),
-                        parse_optional_int(payload.get("habitaciones")),
+                        habitaciones_value,
                         parse_optional_int(payload.get("banos")),
                         parse_optional_float(payload.get("precio_objetivo")),
                         parse_optional_float(payload.get("precio_encargo")),
@@ -49694,48 +49734,50 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
                 conn.execute(
-                    """
-                    INSERT INTO captaciones (
-                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, interior, escalera, edificio,
-                      codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
-                      precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
-                      urgencia, motivo, motivacion, necesidad_venta_alquiler, canal, tipo_procedencia,
-                      situacion_comercial, fecha_conversion,
-	                      etapa, noticia_verificada, situacion_ocupacion, ocupado_por,
-	                      probabilidad, proxima_accion, fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
-	                      no_molestar, planificado, fecha_planificacion, prioridad_noticia, encargo_competencia, encargo_competencia_agencia, encargo_competencia_hasta,
-	                      planificacion_encargo, fecha_ultima_renov_rebaja,
-	                      propietario_telefono, propietario_email,
-	                      asesor, responsable, notas, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        captacion_id,
-                        empresa["id"],
-                        inmueble_id,
+	                    """
+	                    INSERT INTO captaciones (
+	                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
+	                      codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
+	                      precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
+	                      urgencia, motivo, motivacion, necesidad_venta_alquiler, canal, tipo_procedencia,
+	                      situacion_comercial, fecha_conversion,
+		                      etapa, noticia_verificada, situacion_ocupacion, ocupado_por,
+		                      probabilidad, proxima_accion, fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
+		                      no_molestar, planificado, fecha_planificacion, prioridad_noticia, encargo_competencia, encargo_competencia_agencia, encargo_competencia_hasta,
+		                      planificacion_encargo, fecha_ultima_renov_rebaja,
+		                      propietario_telefono, propietario_email,
+		                      asesor, responsable, notas, created_at, updated_at
+	                    ) VALUES (
+	                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+	                    )
+	                    """,
+	                    (
+	                        captacion_id,
+	                        empresa["id"],
+	                        inmueble_id,
                         payload.get("propietario"),
                         payload.get("focalizacion"),
                         payload.get("tipo_inmueble"),
-                        payload.get("subtipologia"),
-                        payload.get("direccion"),
-                        payload.get("direccion_numero"),
-                        payload.get("interior"),
-                        payload.get("escalera"),
-                        payload.get("edificio"),
-                        payload.get("codigo_postal"),
-                        payload.get("localidad"),
+	                        payload.get("subtipologia"),
+	                        payload.get("direccion"),
+	                        payload.get("direccion_numero"),
+	                        planta_value,
+	                        puerta_value,
+	                        interior_value,
+	                        payload.get("escalera"),
+	                        payload.get("edificio"),
+	                        payload.get("codigo_postal"),
+	                        payload.get("localidad"),
                         payload.get("poblacion"),
                         payload.get("provincia"),
-                        payload.get("zona"),
-                        parse_optional_float(payload.get("m2")),
-                        parse_optional_int(payload.get("anio_construccion")),
-                        parse_optional_int(payload.get("habitaciones")),
-                        parse_optional_int(payload.get("banos")),
-                        parse_optional_float(payload.get("precio_objetivo")),
-                        parse_optional_float(payload.get("precio_encargo")),
-                        parse_optional_float(payload.get("precio_valoracion")),
+	                        payload.get("zona"),
+	                        parse_optional_float(payload.get("m2")),
+	                        parse_optional_int(payload.get("anio_construccion")),
+	                        habitaciones_value,
+	                        parse_optional_int(payload.get("banos")),
+	                        parse_optional_float(payload.get("precio_objetivo")),
+	                        parse_optional_float(payload.get("precio_encargo")),
+	                        parse_optional_float(payload.get("precio_valoracion")),
                         parse_optional_float(payload.get("precio_pedido_cliente")),
                         payload.get("fecha_valoracion"),
                         parse_optional_float(payload.get("desviacion_pct")),

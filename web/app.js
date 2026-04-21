@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v191";
+const APP_SW_VERSION = "v192";
 
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;
@@ -6547,6 +6547,13 @@ const ensureIivtnuSimulator = async () => {
 		  const result = resp?.result || {};
 		  const ab = result?.abatimiento && typeof result.abatimiento === "object" ? result.abatimiento : {};
 		  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
+		  const kpis = [
+		    { label: "Días transcurridos", value: result.days_transcurridos },
+		    { label: "Ganancia diaria", value: result.ganancia_sujeta_diaria || result.ganancia_diaria },
+		    { label: "Exenta", value: result.exento },
+		    { label: "Ganancia sujeta", value: result.ganancia_sujeta },
+		    { label: regimen === "irnr" ? "Cuota neta" : "Cuota estimada", value: regimen === "irnr" ? result.cuota_neta : result.cuota_ahorro_estimada },
+		  ];
 		  const fields = [
 		      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
 		      ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
@@ -6584,23 +6591,35 @@ const ensureIivtnuSimulator = async () => {
 	    fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
 	  }
 	  irpfGainResult.innerHTML = `
+	    <div class="workspace-mini-kpis">
+	      ${kpis
+	        .map(
+	          (k) => `
+	            <div class="workspace-mini-kpi">
+	              <span>${escapeHtml(String(k.label || ""))}</span>
+	              <strong>${escapeHtml(k.value == null ? "" : String(k.value))}</strong>
+	            </div>
+	          `
+	        )
+	        .join("")}
+	    </div>
 	    <div class="ui-table">
 	      <table class="data-table">
 	        <tbody>
-          ${fields
-            .map(
-              ([label, value]) => `
-                <tr>
-                  <th>${escapeHtml(label)}</th>
-                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
-                </tr>
-              `
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
+	          ${fields
+	            .map(
+	              ([label, value]) => `
+	                <tr>
+	                  <th>${escapeHtml(label)}</th>
+	                  <td>${escapeHtml(value == null ? "" : String(value))}</td>
+	                </tr>
+	              `
+	            )
+	            .join("")}
+	        </tbody>
+	      </table>
+	    </div>
+	  `;
 };
 
 const renderIrpfRentalResult = (resp = null) => {
@@ -7056,6 +7075,10 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
   if (irpfGainForm) {
     if (ccaa && irpfGainForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(ccaa)}"]`)) {
       irpfGainForm.querySelector('select[name="ccaa"]').value = ccaa;
+    }
+    if (referencia) {
+      const refInput = irpfGainForm.querySelector('input[name="referencia"]');
+      if (refInput) refInput.value = referencia;
     }
     const fechaTx = String(prefill.fecha_transmision || prefill.fechaTx || "").trim();
     const valorTx = String(prefill.valor_transmision || prefill.valorTx || "").trim();
@@ -60667,14 +60690,16 @@ if (fiscalWizardForm) {
 
   if (fiscalWizardOpenIrpfBtn) {
     fiscalWizardOpenIrpfBtn.addEventListener("click", () => {
-      if (irpfGainForm && typeof irpfGainForm.scrollIntoView === "function") {
+      setSimuladoresPane("irpf");
+      if (!scrollToSimuladoresPane("irpf") && irpfGainForm && typeof irpfGainForm.scrollIntoView === "function") {
         irpfGainForm.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
   }
   if (fiscalWizardOpenIivtnuBtn) {
     fiscalWizardOpenIivtnuBtn.addEventListener("click", () => {
-      if (iivtnuSimulatorForm && typeof iivtnuSimulatorForm.scrollIntoView === "function") {
+      setSimuladoresPane("plusvalia");
+      if (!scrollToSimuladoresPane("plusvalia") && iivtnuSimulatorForm && typeof iivtnuSimulatorForm.scrollIntoView === "function") {
         iivtnuSimulatorForm.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
@@ -60888,7 +60913,119 @@ if (iivtnuPdfParseForm) {
   });
 }
 
+// Simuladores · selector de vista (IRPF / Plusvalía / Alquileres)
+try {
+  const storedPane = String(localStorage.getItem(SIMULADORES_PANE_STORAGE_KEY) || "");
+  if (storedPane) setSimuladoresPane(storedPane);
+  else setSimuladoresPane("");
+} catch {}
+
+if (simHubIrpfBtn) {
+  simHubIrpfBtn.addEventListener("click", () => {
+    setSimuladoresPane("irpf");
+    scrollToSimuladoresPane("irpf");
+  });
+}
+if (simHubPlusvaliaBtn) {
+  simHubPlusvaliaBtn.addEventListener("click", () => {
+    setSimuladoresPane("plusvalia");
+    scrollToSimuladoresPane("plusvalia");
+  });
+}
+if (simHubAlquilerBtn) {
+  simHubAlquilerBtn.addEventListener("click", () => {
+    setSimuladoresPane("alquiler");
+    scrollToSimuladoresPane("alquiler");
+  });
+}
+if (simHubVerTodoBtn) {
+  simHubVerTodoBtn.addEventListener("click", () => {
+    setSimuladoresPane("", { scroll: true });
+  });
+}
+
 if (irpfGainForm) {
+  const syncIrpfGainExtras = () => {
+    const data = new FormData(irpfGainForm);
+    const adqMode = normalizeSimple(data.get("gastos_adquisicion_mode") || "");
+    const txMode = normalizeSimple(data.get("gastos_transmision_mode") || "");
+    const showAdq = adqMode === "desglose";
+    const showTx = txMode === "desglose";
+
+    const adqTotalInput = irpfGainForm.querySelector('input[name="gastos_adquisicion"]');
+    const txTotalInput = irpfGainForm.querySelector('input[name="gastos_transmision"]');
+
+    irpfGainForm.querySelectorAll(".irpf-gastos-adq-desglose").forEach((el) => {
+      el.classList.toggle("hidden", !showAdq);
+      el.hidden = !showAdq;
+    });
+    irpfGainForm.querySelectorAll(".irpf-gastos-tx-desglose").forEach((el) => {
+      el.classList.toggle("hidden", !showTx);
+      el.hidden = !showTx;
+    });
+
+    const sumInputs = (names = []) =>
+      names.reduce((acc, name) => {
+        const input = irpfGainForm.querySelector(`[name="${CSS.escape(String(name))}"]`);
+        if (!input) return acc;
+        return acc + parseMoneyValue(input.value || 0);
+      }, 0);
+
+    if (adqTotalInput) {
+      adqTotalInput.readOnly = showAdq;
+      if (showAdq) {
+        const total = sumInputs([
+          "gastos_adq_agencia",
+          "gastos_adq_itp_iva_ajd",
+          "gastos_adq_notaria_registro",
+          "gastos_adq_gestoria",
+          "gastos_adq_otros",
+        ]);
+        adqTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+    }
+    if (txTotalInput) {
+      txTotalInput.readOnly = showTx;
+      if (showTx) {
+        const total = sumInputs([
+          "gastos_tx_agencia",
+          "gastos_tx_notaria_registro",
+          "gastos_tx_cancelacion",
+          "gastos_tx_otros",
+        ]);
+        txTotalInput.value = Number(total || 0).toLocaleString("es-ES", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+    }
+
+    const amortMode = normalizeSimple(data.get("amortizacion_mode") || "");
+    const alquilado = Boolean(data.get("inmueble_alquilado"));
+    const showAmortAuto = amortMode === "auto" || alquilado;
+    irpfGainForm.querySelectorAll(".irpf-amort-auto").forEach((el) => {
+      el.classList.toggle("hidden", !showAmortAuto);
+      el.hidden = !showAmortAuto;
+    });
+  };
+
+  try {
+    syncIrpfGainExtras();
+  } catch {}
+  irpfGainForm.addEventListener("change", () => {
+    try {
+      syncIrpfGainExtras();
+    } catch {}
+  });
+  irpfGainForm.addEventListener("input", () => {
+    try {
+      syncIrpfGainExtras();
+    } catch {}
+  });
+
   if (irpfGainPdfBtn) {
     irpfGainPdfBtn.addEventListener("click", async () => {
       if (irpfGainStatus) irpfGainStatus.textContent = "Generando PDF...";
@@ -63540,7 +63677,7 @@ if (inmuebleNoticiaOpenIrpfBtn) {
       .filter(Boolean)
       .join(" · ");
     const valor_transmision = inmueble.precio_encargo || inmueble.precio_objetivo || captacion.precio_objetivo || "";
-    openIrpfGananciaModal({ ccaa, referencia, valor_transmision });
+    openWorkspaceSimuladores({ pane: "", prefill: { ccaa, referencia, valor_transmision } });
   });
 }
 
@@ -65261,7 +65398,7 @@ if (gestoriaTrabajoForm) {
   if (gestoriaOpenIrpfBtn) {
     gestoriaOpenIrpfBtn.addEventListener("click", () => {
       const ccaa = String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
-      openIrpfGananciaModal({ ccaa });
+      openWorkspaceSimuladores({ pane: "", prefill: { ccaa } });
     });
   }
   gestoriaTrabajoForm.addEventListener("submit", (event) => {
@@ -66344,7 +66481,7 @@ if (compraventaForm) {
           valor_transmision: payload.precio_escritura || "",
         };
       } catch {}
-      openIrpfGananciaModal(prefill);
+      openWorkspaceSimuladores({ pane: "", prefill });
     });
   }
   if (compraventaOpenFiscalWizardBtn) {
