@@ -61132,9 +61132,11 @@ if (irpfGainForm) {
 
     if (adqTotalInput) {
       adqTotalInput.readOnly = showAdq;
-    if (showAdq) {
+      if (showAdq) {
         const total = sumInputs([
           "gastos_adq_agencia",
+          "gastos_adq_abogado",
+          "gastos_adq_tasacion",
           "gastos_adq_itp_iva_ajd",
           "gastos_adq_notaria",
           "gastos_adq_registro",
@@ -61151,7 +61153,7 @@ if (irpfGainForm) {
     }
     if (txTotalInput) {
       txTotalInput.readOnly = showTx;
-    if (showTx) {
+      if (showTx) {
         const total = sumInputs([
           "gastos_tx_agencia",
           "gastos_tx_notaria",
