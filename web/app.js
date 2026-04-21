@@ -2316,6 +2316,7 @@ const gestoriaCrmClientes = document.getElementById("gestoriaCrmClientes");
 const gestoriaCrmTipo = document.getElementById("gestoriaCrmTipo");
 const gestoriaCrmSubtipo = document.getElementById("gestoriaCrmSubtipo");
 const gestoriaCrmEstado = document.getElementById("gestoriaCrmEstado");
+const gestoriaCrmEjercicio = document.getElementById("gestoriaCrmEjercicio");
 const gestoriaCrmLimit = document.getElementById("gestoriaCrmLimit");
 const gestoriaCrmApply = document.getElementById("gestoriaCrmApply");
 const gestoriaCrmReset = document.getElementById("gestoriaCrmReset");
@@ -6431,9 +6432,10 @@ const ensureIivtnuSimulator = async () => {
 	    irpfGainResult.innerHTML = "";
 	    return;
 	  }
-	  const params = resp?.params || {};
-	  const result = resp?.result || {};
-	  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
+		  const params = resp?.params || {};
+		  const result = resp?.result || {};
+		  const ab = result?.abatimiento && typeof result.abatimiento === "object" ? result.abatimiento : {};
+		  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
 	  const fields = [
 	    ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
 	    ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
@@ -6446,16 +6448,19 @@ const ensureIivtnuSimulator = async () => {
 	    fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
 	    fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
 	  }
-	  fields.push(
-	    ["Participación", result.participacion_factor],
-	    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-	    ["Valor transmisión (calc.)", result.valor_transmision_calc],
-	    ["Ganancia patrimonial", result.ganancia_patrimonial],
-	    ["Exento", result.exento],
-	    ["Motivo exención", result.exencion_motivo || "—"],
-	    ["Base ahorro sujeta", result.base_ahorro_sujeta],
-	    ["Cuota estimada", result.cuota_ahorro_estimada],
-	  );
+		  fields.push(
+		    ["Participación", result.participacion_factor],
+		    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+		    ["Valor transmisión (calc.)", result.valor_transmision_calc],
+		    ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
+		    ["Exento", result.exento],
+		    ["Motivo exención", result.exencion_motivo || "—"],
+		    ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
+		    ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
+		    ["Ganancia computable", result.ganancia_patrimonial_computable],
+		    ["Base ahorro sujeta", result.base_ahorro_sujeta],
+		    ["Cuota estimada", result.cuota_ahorro_estimada],
+		  );
 	  if (regimen === "irnr") {
 	    fields.push(["Retención (importe)", result.retencion_importe]);
 	    fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
@@ -7082,15 +7087,39 @@ const openIrpfGananciaModal = (options = {}) => {
             Importe reinvertido (opcional)
             <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
           </label>
-          <label>
-            Préstamo pendiente (opcional)
-            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
-          </label>
-          <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button type="button" class="secondary" data-irpf-simulate>Simular</button>
-            <button type="button" class="secondary ghost" data-irpf-pdf>Informe PDF</button>
-            <span class="muted" data-irpf-status></span>
-          </div>
+	          <label>
+	            Préstamo pendiente (opcional)
+	            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+	          </label>
+	          <label>
+	            Abatimiento (DT 9ª)
+	            <select name="abatimiento_mode">
+	              <option value="auto" selected>Auto (si adquirido &lt; 31/12/1994)</option>
+	              <option value="off">Desactivado</option>
+	              <option value="force">Forzar</option>
+	            </select>
+	          </label>
+	          <label>
+	            Tipo bien (abatimiento)
+	            <select name="abatimiento_tipo">
+	              <option value="inmueble" selected>Inmueble / derecho real</option>
+	              <option value="otros">Otros bienes/derechos</option>
+	              <option value="valores_cotizados">Acciones cotizadas</option>
+	            </select>
+	          </label>
+	          <label>
+	            VT acumulado desde 01/01/2015 (sin este)
+	            <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" placeholder="0,00" />
+	          </label>
+	          <label>
+	            VT (este elemento) override (opcional)
+	            <input name="abatimiento_vt2_override" inputmode="decimal" placeholder="(por defecto: valor transmisión (calc.))" />
+	          </label>
+	          <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
+	            <button type="button" class="secondary" data-irpf-simulate>Simular</button>
+	            <button type="button" class="secondary ghost" data-irpf-pdf>Informe PDF</button>
+	            <span class="muted" data-irpf-status></span>
+	          </div>
         </form>
         <div class="modal-body">
           <div data-irpf-result></div>
@@ -7124,10 +7153,11 @@ const openIrpfGananciaModal = (options = {}) => {
 	    if (!resp) {
 	      resultEl.innerHTML = "";
 	      return;
-	    }
-	    const params = resp?.params || {};
-	    const result = resp?.result || {};
-	    const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
+		    }
+		    const params = resp?.params || {};
+		    const result = resp?.result || {};
+		    const ab = result?.abatimiento && typeof result.abatimiento === "object" ? result.abatimiento : {};
+		    const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
 	    const fields = [
 	      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
 	      ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
@@ -7140,16 +7170,19 @@ const openIrpfGananciaModal = (options = {}) => {
 	      fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
 	      fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
 	    }
-	    fields.push(
-	      ["Participación", result.participacion_factor],
-	      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-	      ["Valor transmisión (calc.)", result.valor_transmision_calc],
-	      ["Ganancia patrimonial", result.ganancia_patrimonial],
-	      ["Exento", result.exento],
-	      ["Motivo exención", result.exencion_motivo || "—"],
-	      ["Base ahorro sujeta", result.base_ahorro_sujeta],
-	      ["Cuota estimada", result.cuota_ahorro_estimada],
-	    );
+		    fields.push(
+		      ["Participación", result.participacion_factor],
+		      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+		      ["Valor transmisión (calc.)", result.valor_transmision_calc],
+		      ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
+		      ["Exento", result.exento],
+		      ["Motivo exención", result.exencion_motivo || "—"],
+		      ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
+		      ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
+		      ["Ganancia computable", result.ganancia_patrimonial_computable],
+		      ["Base ahorro sujeta", result.base_ahorro_sujeta],
+		      ["Cuota estimada", result.cuota_ahorro_estimada],
+		    );
 	    if (regimen === "irnr") {
 	      fields.push(["Retención (importe)", result.retencion_importe]);
 	      fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
@@ -21171,14 +21204,48 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
       if (normalized.includes("modelo") && normalized.includes("100")) return raw;
       return "Modelo 100";
     })();
-    const cells = [
-      row.nombre || "",
-      tipoCell,
-      row.fecha || "",
-      row.estado || "",
-      row.notas || "",
-    ];
-    cells.forEach((value) => {
+    const nombreTd = document.createElement("td");
+    const canRename = Boolean(row && row.id);
+    if (canRename) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = String(row.nombre || "");
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.style.width = "100%";
+      input.title = "Editar nombre del documento";
+      const commit = () => {
+        const next = input.value.trim();
+        const prev = String(row.nombre || "").trim();
+        if (!next) {
+          input.value = prev;
+          return;
+        }
+        if (next === prev) return;
+        row.nombre = next;
+        try {
+          saveGestoriaDocField(row.id, "nombre", next);
+        } catch {}
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          input.value = String(row.nombre || "");
+          input.blur();
+        }
+      });
+      nombreTd.appendChild(input);
+    } else {
+      nombreTd.textContent = row.nombre || "";
+    }
+    tr.appendChild(nombreTd);
+
+    [tipoCell, row.fecha || "", row.estado || "", row.notas || ""].forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value;
       tr.appendChild(td);
@@ -29503,6 +29570,13 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
   if (gestoriaCrmSearch) {
     const isRenta = tabName === "renta";
     gestoriaCrmSearch.placeholder = isRenta ? "Buscar por nombre o DNI/NIF..." : "Buscar cliente...";
+  }
+  if (gestoriaCrmEjercicio) {
+    const isRenta = tabName === "renta";
+    gestoriaCrmEjercicio.classList.toggle("hidden", !isRenta);
+    if (isRenta && !String(gestoriaCrmEjercicio.value || "").trim()) {
+      gestoriaCrmEjercicio.value = String(new Date().getFullYear() - 1);
+    }
   }
   if (gestoriaCrmUploadRentaBtn) {
     gestoriaCrmUploadRentaBtn.classList.toggle("hidden", tabName !== "renta");
@@ -46333,6 +46407,7 @@ const loadGestoriaCrm = async () => {
   const tipo = gestoriaCrmTipo ? gestoriaCrmTipo.value : "";
   const subtipo = gestoriaCrmSubtipo ? gestoriaCrmSubtipo.value.trim() : "";
   const estado = gestoriaCrmEstado ? gestoriaCrmEstado.value : "";
+  const ejercicio = gestoriaCrmEjercicio ? String(gestoriaCrmEjercicio.value || "").trim() : "";
   const limit = gestoriaCrmLimit ? gestoriaCrmLimit.value : "50";
   const noFilters = !q && !estado && !tipo && !subtipo;
   const isFullWithoutFilters = noFilters && state.gestoriaCrmFull;
@@ -46365,6 +46440,7 @@ const loadGestoriaCrm = async () => {
       state.gestoriaRentaCardsCache &&
       state.gestoriaRentaCardsCache.empresaId === empresa.id &&
       String(state.gestoriaRentaCardsCache.estado || "") === String(estado || "") &&
+      String(state.gestoriaRentaCardsCache.ejercicio || "") === String(ejercicio || "") &&
       isFreshCache
     ) {
       const cachedRows = state.gestoriaRentaCardsCache.rows || [];
@@ -46389,6 +46465,9 @@ const loadGestoriaCrm = async () => {
       estado,
       limit: String(Math.max(200, Number(limit || 0) || 50)),
     });
+    if (/^20[0-9]{2}$/.test(ejercicio)) {
+      rentaParams.set("ejercicio", ejercicio);
+    }
     let rentaData = null;
     try {
       rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
@@ -46402,6 +46481,7 @@ const loadGestoriaCrm = async () => {
     state.gestoriaRentaCardsCache = {
       empresaId: empresa.id,
       estado: String(estado || ""),
+      ejercicio: String(ejercicio || ""),
       rows: rentaRows,
       totalHint: Array.isArray(rentaData.rows) ? rentaData.rows.length : 0,
       ts: Date.now(),
@@ -58584,6 +58664,26 @@ if (gestoriaCrmSubtipo) {
     loadGestoriaCrm();
   });
 }
+if (gestoriaCrmEjercicio) {
+  const ensureDefault = () => {
+    if (state.gestoriaCrmTab !== "renta") return;
+    if (!String(gestoriaCrmEjercicio.value || "").trim()) {
+      gestoriaCrmEjercicio.value = String(new Date().getFullYear() - 1);
+    }
+  };
+  gestoriaCrmEjercicio.addEventListener("change", () => {
+    ensureDefault();
+    loadGestoriaCrm();
+  });
+  try {
+    gestoriaCrmEjercicio.innerHTML = "";
+    gestoriaCrmEjercicio.appendChild(createOption("", "Ejercicio (todos)"));
+    const currentYear = new Date().getFullYear();
+    for (let year = currentYear; year >= currentYear - 8; year -= 1) {
+      gestoriaCrmEjercicio.appendChild(createOption(String(year), String(year)));
+    }
+  } catch {}
+}
 if (gestoriaCrmApply) {
   gestoriaCrmApply.addEventListener("click", () => {
     loadGestoriaCrm();
@@ -58605,6 +58705,7 @@ if (gestoriaCrmReset) {
       populateGestoriaSubtipos("");
     }
     if (gestoriaCrmEstado) gestoriaCrmEstado.value = "";
+    if (gestoriaCrmEjercicio) gestoriaCrmEjercicio.value = "";
     if (gestoriaCrmLimit) gestoriaCrmLimit.value = "50";
     gestoriaCrmTable.innerHTML = "<p class='muted'>Usa los filtros para cargar clientes.</p>";
     if (gestoriaCrmSummary) {

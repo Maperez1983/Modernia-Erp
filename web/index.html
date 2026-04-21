@@ -1225,22 +1225,22 @@
 		                Préstamo pendiente (opcional)
 		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
 		              </label>
-		              <label>
-		                Abatimiento (DT 9ª)
-		                <select name="abatimiento_mode">
-		                  <option value="auto" selected>Auto (si adquirido ≤ 31/12/1994)</option>
-		                  <option value="off">Desactivado</option>
-		                  <option value="force">Forzar</option>
-		                </select>
-		              </label>
-		              <label>
-		                Tipo bien (abatimiento)
-		                <select name="abatimiento_tipo_bien">
-		                  <option value="inmueble" selected>Inmueble / derecho real</option>
-		                  <option value="otros">Otros bienes/derechos</option>
-		                  <option value="acciones_cotizadas">Acciones cotizadas</option>
-		                </select>
-		              </label>
+			              <label>
+			                Abatimiento (DT 9ª)
+			                <select name="abatimiento_mode">
+			                  <option value="auto" selected>Auto (si adquirido &lt; 31/12/1994)</option>
+			                  <option value="off">Desactivado</option>
+			                  <option value="force">Forzar</option>
+			                </select>
+			              </label>
+			              <label>
+			                Tipo bien (abatimiento)
+			                <select name="abatimiento_tipo">
+			                  <option value="inmueble" selected>Inmueble / derecho real</option>
+			                  <option value="otros">Otros bienes/derechos</option>
+			                  <option value="valores_cotizados">Acciones cotizadas</option>
+			                </select>
+			              </label>
 		              <label>
 		                VT acumulado desde 01/01/2015 (sin este)
 		                <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" placeholder="0,00" />
@@ -4537,14 +4537,17 @@
                 <option>Cuota mensual</option>
                 <option>Gestión administrativa</option>
               </select>
-              <select id="gestoriaCrmSubtipo">
-                <option value="">Subtipo (todos)</option>
-              </select>
-              <select id="gestoriaCrmEstado">
-                <option value="">Estado (todos)</option>
-                <option>Activo</option>
-                <option>Activa</option>
-                <option>Pendiente</option>
+	              <select id="gestoriaCrmSubtipo">
+	                <option value="">Subtipo (todos)</option>
+	              </select>
+	              <select id="gestoriaCrmEjercicio" class="hidden">
+	                <option value="">Ejercicio (todos)</option>
+	              </select>
+	              <select id="gestoriaCrmEstado">
+	                <option value="">Estado (todos)</option>
+	                <option>Activo</option>
+	                <option>Activa</option>
+	                <option>Pendiente</option>
                 <option>Alta</option>
                 <option>Baja</option>
               </select>

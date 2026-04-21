@@ -4401,8 +4401,7 @@ body.tc-resizing {
   border: none;
   background: transparent;
   display: flex;
-  /* Alinea el botón “+ Nuevo” con la primera fila de módulos. */
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
   overflow-x: visible;
   overflow-y: hidden;
@@ -4431,20 +4430,6 @@ body.tc-resizing {
 #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn:hover {
   transform: translateY(-1px);
   border-color: rgba(15, 23, 42, 0.22);
-}
-
-#crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
-  display: grid;
-  grid-auto-flow: row;
-  grid-template-columns: repeat(4, 92px);
-  gap: 10px;
-  align-items: start;
-}
-
-@media (max-width: 980px) {
-  #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
-    grid-template-columns: repeat(auto-fit, minmax(92px, 92px));
-  }
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
@@ -4914,9 +4899,10 @@ body.tc-resizing {
   z-index: 11010;
   display: block;
   padding: 0;
-  /* En modo anclado (escritorio/iPad) mantenemos look de “popover” pero con overlay suave (evita sensación de solape). */
-  background: rgba(11, 29, 51, 0.22);
-  backdrop-filter: blur(1px);
+  /* En modo anclado, se comporta como modal: pantalla difuminada y foco en el menú “Nuevo”. */
+  background: rgba(11, 29, 51, 0.48);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 .crm-insert-modal--anchored .crm-insert-card {
@@ -5020,21 +5006,8 @@ body.tc-resizing {
 
 #crmSection .crm-insert-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
-}
-
-@media (max-width: 720px) {
-  #crmSection .crm-insert-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 420px) {
-  #crmSection .crm-insert-list {
-    grid-template-columns: 1fr;
-  }
 }
 
 #crmSection .crm-insert-item {

@@ -7752,6 +7752,206 @@ def _irpf_tax_progressive(base, brackets):
     return round(cuota + 1e-9, 2)
 
 
+def _irpf_days_inclusive(start: date, end: date) -> int:
+    if not start or not end:
+        return 0
+    if end < start:
+        return 0
+    return (end - start).days + 1
+
+
+def _safe_calendar_date(year: int, month: int, day: int) -> date:
+    try:
+        return date(int(year), int(month), int(day))
+    except Exception:
+        pass
+    # Ajuste típico 29/02 -> 28/02
+    try:
+        if int(month) == 2 and int(day) == 29:
+            return date(int(year), 2, 28)
+    except Exception:
+        pass
+    return date(int(year), 1, 1)
+
+
+def _irpf_years_to_1996_rounded_up(acq: date) -> int:
+    """
+    DT 9ª LIRPF: años hasta 31-12-1996, redondeado por exceso.
+    """
+    if not acq:
+        return 0
+    end = date(1996, 12, 31)
+    if acq > end:
+        return 0
+    years = end.year - acq.year
+    candidate = _safe_calendar_date(acq.year + years, acq.month, acq.day)
+    if candidate > end:
+        years = max(0, years - 1)
+        candidate = _safe_calendar_date(acq.year + years, acq.month, acq.day)
+    if end > candidate:
+        years += 1
+    return max(0, int(years))
+
+
+def _irpf_abatimiento_reduction_pct(tipo: str, years_to_1996: int) -> float:
+    """
+    DT 9ª LIRPF (Ley 35/2006): porcentajes reductores por año > 2 y reglas de no sujeción.
+    tipo:
+      - "inmueble": bienes inmuebles / derechos sobre los mismos (11,11%)
+      - "valores_cotizados": acciones admitidas a negociación (25%)
+      - "otros": resto (14,28%)
+    """
+    t = str(tipo or "").strip().lower() or "inmueble"
+    y = int(years_to_1996 or 0)
+    if y <= 2:
+        return 0.0
+    if t == "valores_cotizados":
+        if y > 5:
+            return 100.0
+        return min(100.0, (y - 2) * 25.0)
+    if t == "otros":
+        if y > 8:
+            return 100.0
+        return min(100.0, (y - 2) * 14.28)
+    # inmueble (default)
+    if y > 10:
+        return 100.0
+    return min(100.0, (y - 2) * 11.11)
+
+
+def _irpf_apply_abatimiento_dt9(
+    *,
+    acq: date,
+    devengo: date,
+    ganancia_total: float,
+    ganancia_sujeta: float,
+    valor_transmision_calc: float,
+    vt2_override=None,
+    vt1_acumulado_2015: float,
+    tipo_elemento: str,
+    force: bool = False,
+) -> tuple[float, dict]:
+    """
+    Aplica el régimen transitorio DT 9ª (coeficientes de abatimiento).
+    Devuelve: (ganancia_computable_sujeta, detalle_abatimiento)
+    Nota: se aplica sobre la ganancia sujeta y no exenta (doctrina DGT / AEAT).
+    """
+    tipo_norm = str(tipo_elemento or "").strip().lower() or "inmueble"
+    if tipo_norm in ("acciones_cotizadas", "acciones", "cotizadas"):
+        tipo_norm = "valores_cotizados"
+    detail = {
+        "aplicable": 0,
+        "motivo": "",
+        "tipo_elemento": tipo_norm,
+        "vt1_acumulado_2015": round(float(vt1_acumulado_2015 or 0.0) + 1e-9, 2),
+        "vt2_valor_transmision": round(float(valor_transmision_calc or 0.0) + 1e-9, 2),
+        "vt2_override": None if vt2_override is None else round(float(vt2_override or 0.0) + 1e-9, 2),
+        "limite_400k": 400000.0,
+    }
+
+    try:
+        g_total = float(ganancia_total or 0.0)
+    except Exception:
+        g_total = 0.0
+    try:
+        g_sujeta = float(ganancia_sujeta or 0.0)
+    except Exception:
+        g_sujeta = 0.0
+    g_total = round(g_total + 1e-9, 2)
+    g_sujeta = round(max(0.0, g_sujeta) + 1e-9, 2)
+
+    if g_sujeta <= 0:
+        detail["motivo"] = "Sin ganancia sujeta"
+        return g_sujeta, detail
+    if not acq or not devengo:
+        detail["motivo"] = "Fechas inválidas"
+        return g_sujeta, detail
+
+    cutoff_acq = date(1994, 12, 31)
+    if not force and acq >= cutoff_acq:
+        detail["motivo"] = "No aplica: adquisición >= 31/12/1994"
+        return g_sujeta, detail
+
+    # Parte de la ganancia generada antes de 20-01-2006: reparto lineal por días (19-01-2006 inclusive)
+    pre_end = min(date(2006, 1, 19), devengo)
+    days_total = _irpf_days_inclusive(acq, devengo)
+    days_pre = _irpf_days_inclusive(acq, pre_end)
+    if days_total <= 0 or days_pre <= 0:
+        detail["motivo"] = "Sin tramo pre-20/01/2006"
+        return g_sujeta, detail
+    ratio_pre = min(1.0, max(0.0, days_pre / float(days_total)))
+
+    # Ajuste a ganancia sujeta (si hay exención parcial, imputamos proporcionalmente)
+    ratio_sujeta = 1.0
+    if g_total > 0:
+        ratio_sujeta = min(1.0, max(0.0, g_sujeta / float(g_total)))
+
+    g_pre_total = round(g_total * ratio_pre + 1e-9, 2)
+    g_pre_sujeta = round(max(0.0, g_pre_total * ratio_sujeta) + 1e-9, 2)
+    g_post_sujeta = round(max(0.0, g_sujeta - g_pre_sujeta) + 1e-9, 2)
+
+    if g_pre_sujeta <= 0:
+        detail["motivo"] = "Sin ganancia pre-20/01/2006 sujeta"
+        return g_sujeta, detail
+
+    # Límite conjunto 400.000€ desde 01-01-2015 (Ley 26/2014). Para transmisiones previas no aplica.
+    vt2_default = max(0.0, float(valor_transmision_calc or 0.0))
+    vt2 = vt2_default
+    try:
+        vt2o = None if vt2_override is None else float(vt2_override)
+    except Exception:
+        vt2o = None
+    if vt2o is not None and vt2o > 0:
+        vt2 = vt2o
+    detail["vt2_usado_400k"] = round(float(vt2) + 1e-9, 2)
+    vt1 = max(0.0, float(vt1_acumulado_2015 or 0.0))
+    susceptible = g_pre_sujeta
+    susceptible_vt2 = vt2
+    if devengo >= date(2015, 1, 1):
+        if vt1 >= 400000.0:
+            susceptible = 0.0
+        else:
+            remaining = 400000.0 - vt1
+            if vt2 <= 0.0:
+                susceptible = 0.0
+            elif vt1 + vt2 <= 400000.0:
+                susceptible = g_pre_sujeta
+            else:
+                ratio_cap = max(0.0, min(1.0, remaining / vt2))
+                susceptible = g_pre_sujeta * ratio_cap
+                susceptible_vt2 = remaining
+
+    years_1996 = _irpf_years_to_1996_rounded_up(acq)
+    pct = _irpf_abatimiento_reduction_pct(detail.get("tipo_elemento"), years_1996)
+    reduction = round(max(0.0, susceptible) * (pct / 100.0) + 1e-9, 2)
+
+    g_pre_reduced = round(max(0.0, g_pre_sujeta - reduction) + 1e-9, 2)
+    g_computable = round(max(0.0, g_post_sujeta + g_pre_reduced) + 1e-9, 2)
+
+    detail.update(
+        {
+            "aplicable": 1 if reduction > 0 else 0,
+            "motivo": "OK" if reduction > 0 else "Sin reducción (pct=0 o límite)",
+            "days_total": int(days_total),
+            "days_pre_2006": int(days_pre),
+            "ratio_pre_2006": round(ratio_pre + 1e-12, 8),
+            "ganancia_total": g_total,
+            "ganancia_sujeta": g_sujeta,
+            "ganancia_pre_2006_total": g_pre_total,
+            "ganancia_pre_2006_sujeta": g_pre_sujeta,
+            "ganancia_post_2006_sujeta": g_post_sujeta,
+            "ganancia_susceptible_reduccion": round(max(0.0, susceptible) + 1e-9, 2),
+            "vt2_susceptible": round(max(0.0, susceptible_vt2) + 1e-9, 2),
+            "years_to_1996_rounded_up": int(years_1996),
+            "pct_reduccion": round(float(pct) + 1e-12, 4),
+            "reduccion_importe": reduction,
+            "ganancia_pre_2006_reducida": g_pre_reduced,
+            "ganancia_computable": g_computable,
+        }
+    )
+    return g_computable, detail
+
+
 def _irpf_ganancia_simulate(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("payload inválido")
@@ -7813,13 +8013,54 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
         exento = round(ganancia * ratio + 1e-9, 2)
         exencion_motivo = "Exención reinversión (proporcional)"
 
-    base_ahorro = round(max(0.0, ganancia - exento) + 1e-9, 2)
+    ganancia_sujeta = round(max(0.0, ganancia - exento) + 1e-9, 2)
+    ganancia_computable = ganancia_sujeta
+    abatimiento_detail = {"aplicable": 0, "motivo": "No calculado"}
     year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
     ccaa = _normalize_ccaa(payload.get("ccaa") or payload.get("comunidad_autonoma") or "AN")
 
     regimen = str(payload.get("regimen_fiscal") or payload.get("regimen") or "irpf").strip().lower()
     if regimen not in ("irpf", "irnr"):
         regimen = "irpf"
+
+    if regimen == "irpf" and ganancia_sujeta > 0:
+        ab_mode = str(payload.get("abatimiento_mode") or payload.get("abatimiento") or "auto").strip().lower()
+	        if ab_mode in ("0", "no", "off", "false", "n", "disabled"):
+	            abatimiento_detail = {"aplicable": 0, "motivo": "Desactivado"}
+	        else:
+	            tipo_elemento = str(
+	                payload.get("abatimiento_tipo")
+	                or payload.get("abatimiento_tipo_bien")
+	                or payload.get("tipo_elemento")
+	                or "inmueble"
+	            ).strip().lower()
+	            vt1 = parse_optional_float(payload.get("abatimiento_vt1_acumulado_2015") or payload.get("abatimiento_vt1") or 0.0)
+	            if vt1 is None:
+	                vt1 = 0.0
+	            try:
+	                vt1 = float(vt1)
+	            except Exception:
+	                vt1 = 0.0
+	            vt2_override = parse_optional_float(payload.get("abatimiento_vt2_override") or payload.get("abatimiento_vt2") or None)
+	            if vt2_override is not None:
+	                try:
+	                    vt2_override = float(vt2_override)
+	                except Exception:
+	                    vt2_override = None
+	            force = ab_mode in ("force", "si", "yes", "on", "true", "1")
+	            ganancia_computable, abatimiento_detail = _irpf_apply_abatimiento_dt9(
+	                acq=acq,
+	                devengo=devengo,
+	                ganancia_total=ganancia,
+	                ganancia_sujeta=ganancia_sujeta,
+	                valor_transmision_calc=valor_transmision_calc,
+	                vt2_override=vt2_override,
+	                vt1_acumulado_2015=vt1,
+	                tipo_elemento=tipo_elemento,
+	                force=force,
+	            )
+
+    base_ahorro = round(max(0.0, ganancia_computable) + 1e-9, 2)
 
     cuota = 0.0
     scale_year = ""
@@ -7859,18 +8100,22 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "escala_asumida": 1 if assumed else 0,
             "tipo_gravamen_pct": tipo_gravamen_pct,
             "retencion_pct": retencion_pct,
+            "abatimiento_mode": str(payload.get("abatimiento_mode") or payload.get("abatimiento") or "auto").strip().lower(),
         },
         "result": {
             "participacion_factor": round(factor + 1e-12, 6),
             "valor_adquisicion_calc": round(valor_adquisicion_calc + 1e-9, 2),
             "valor_transmision_calc": round(valor_transmision_calc + 1e-9, 2),
             "ganancia_patrimonial": ganancia,
+            "ganancia_sujeta": ganancia_sujeta,
+            "ganancia_patrimonial_computable": round(ganancia_computable + 1e-9, 2),
             "exento": round(exento + 1e-9, 2),
             "exencion_motivo": exencion_motivo,
             "base_ahorro_sujeta": base_ahorro,
             "cuota_ahorro_estimada": cuota,
             "retencion_importe": retencion_importe,
             "cuota_neta": cuota_neta,
+            "abatimiento": abatimiento_detail,
         },
     }
 
@@ -7949,9 +8194,12 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         [
         ("Valor adquisición (calc.)", money(result.get("valor_adquisicion_calc"))),
         ("Valor transmisión (calc.)", money(result.get("valor_transmision_calc"))),
-        ("Ganancia patrimonial", money(result.get("ganancia_patrimonial"))),
+        ("Ganancia patrimonial (bruta)", money(result.get("ganancia_patrimonial"))),
         ("Exento", money(result.get("exento"))),
         ("Motivo exención", str(result.get("exencion_motivo") or "—")),
+        ("Ganancia sujeta (post-exención)", money(result.get("ganancia_sujeta"))),
+        ("Abatimiento (DT 9ª) · Reducción", money((result.get("abatimiento") or {}).get("reduccion_importe"))),
+        ("Ganancia computable", money(result.get("ganancia_patrimonial_computable"))),
         ("Base ahorro sujeta", money(result.get("base_ahorro_sujeta"))),
         ("Cuota ahorro estimada", money(result.get("cuota_ahorro_estimada"))),
         ]
@@ -7970,7 +8218,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
 
     footer = [
         "Estimación determinista generada por el CRM. Revisar antes de presentar/firmar.",
-        "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (coeficientes, abatimiento, convenios, etc.).",
+        "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (mejoras por fecha, valores cotizados especiales, convenios, etc.).",
     ]
     brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
     pdf_bytes = build_branded_document_pdf(
@@ -8060,9 +8308,12 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
     irpf_lines = [
         ("Valor adquisición (calc.)", money(irpf_result.get("valor_adquisicion_calc"))),
         ("Valor transmisión (calc.)", money(irpf_result.get("valor_transmision_calc"))),
-        ("Ganancia patrimonial", money(irpf_result.get("ganancia_patrimonial"))),
+        ("Ganancia patrimonial (bruta)", money(irpf_result.get("ganancia_patrimonial"))),
         ("Exento", money(irpf_result.get("exento"))),
         ("Motivo exención", text(irpf_result.get("exencion_motivo") or "—")),
+        ("Ganancia sujeta (post-exención)", money(irpf_result.get("ganancia_sujeta"))),
+        ("Abatimiento (DT 9ª) · Reducción", money((irpf_result.get("abatimiento") or {}).get("reduccion_importe"))),
+        ("Ganancia computable", money(irpf_result.get("ganancia_patrimonial_computable"))),
         ("Base ahorro sujeta", money(irpf_result.get("base_ahorro_sujeta"))),
         ("Cuota estimada", money(irpf_result.get("cuota_ahorro_estimada"))),
     ]
@@ -21111,7 +21362,7 @@ def sanitize_renta_entries(entries):
     return [sanitize_renta_entry(entry) for entry in entries if isinstance(entry, dict)]
 
 
-def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50):
+def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50, ejercicio=""):
     def renta_ref_id_for_entry(ejercicio: object, entry_id: object) -> str:
         ejercicio_s = str(ejercicio or "").strip()
         entry_s = str(entry_id or "").strip()
@@ -21124,6 +21375,8 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
 
     q_norm = str(q or "").strip().lower()
     estado_norm = normalize_lookup_text(estado or "")
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
     try:
         limit_val = int(limit)
     except Exception:
@@ -21208,12 +21461,18 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     selected_cliente_ids = []
     renta_doc_id_owner = {}
     renta_ref_owner = {}
+    renta_doc_ids_by_cliente = {}
+    renta_ref_ids_by_cliente = {}
     for row in rows:
         servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
         if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
             continue
         renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
+        if ejercicio_val:
+            entries = [e for e in entries if str(e.get("ejercicio") or "").strip() == ejercicio_val]
+            if not entries:
+                continue
         latest = entries[0] if entries else {}
         cliente_id = row["cliente_id"]
         for entry in entries:
@@ -21223,10 +21482,12 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 ref_id = renta_ref_id_for_entry(ejercicio, entry_id)
                 if ref_id:
                     renta_ref_owner[ref_id.lower()] = cliente_id
+                    renta_ref_ids_by_cliente.setdefault(cliente_id, set()).add(ref_id.lower())
                 for field in ("doc_borrador_id", "doc_presentada_id"):
                     doc_id = str(entry.get(field) or "").strip()
                     if doc_id:
                         renta_doc_id_owner[doc_id] = cliente_id
+                        renta_doc_ids_by_cliente.setdefault(cliente_id, set()).add(doc_id)
             except Exception:
                 continue
         pending_presentacion = 1 if latest and normalize_renta_presentacion_status(latest.get("estado_presentacion")) == "Borrador" else 0
@@ -21320,7 +21581,34 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         doc_dict["cliente_id"] = cid
         docs_by_cliente.setdefault(cid, []).append(doc_dict)
     for item in items:
-        docs_list = docs_by_cliente.get(item["cliente_id"], []) or []
+        cliente_id = item["cliente_id"]
+        docs_list = docs_by_cliente.get(cliente_id, []) or []
+        if ejercicio_val and docs_list:
+            allowed_doc_ids = renta_doc_ids_by_cliente.get(cliente_id, set()) or set()
+            allowed_ref_ids = renta_ref_ids_by_cliente.get(cliente_id, set()) or set()
+            filtered_docs = []
+            year_token = ejercicio_val.lower()
+            for doc in docs_list:
+                try:
+                    doc_id = str(doc.get("id") or "").strip()
+                    ref_id = str(doc.get("referencia_id") or "").strip().lower()
+                    nombre = str(doc.get("nombre") or "").strip().lower()
+                    fecha = str(doc.get("fecha") or "").strip()
+                    if doc_id and doc_id in allowed_doc_ids:
+                        filtered_docs.append(doc)
+                        continue
+                    if ref_id and ref_id in allowed_ref_ids:
+                        filtered_docs.append(doc)
+                        continue
+                    if year_token and (year_token in nombre):
+                        filtered_docs.append(doc)
+                        continue
+                    if year_token and fecha.startswith(ejercicio_val):
+                        filtered_docs.append(doc)
+                        continue
+                except Exception:
+                    continue
+            docs_list = filtered_docs
         item["docs"] = docs_list
         if docs_list:
             item["doc_count"] = len(docs_list)
@@ -55003,8 +55291,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             q = params.get("q", [""])[0]
             estado = params.get("estado", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
             limit = params.get("limit", ["50"])[0]
-            items = collect_gestoria_renta_card_items(conn, empresa_id, q=q, estado=estado, limit=limit)
+            items = collect_gestoria_renta_card_items(conn, empresa_id, q=q, estado=estado, limit=limit, ejercicio=ejercicio)
             json_response(self, {"rows": items})
             return
 
