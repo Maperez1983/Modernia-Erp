@@ -8165,6 +8165,10 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
     valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
     ganancia = round(valor_transmision_calc - valor_adquisicion_calc + 1e-9, 2)
 
+    regimen = str(payload.get("regimen_fiscal") or payload.get("regimen") or "irpf").strip().lower()
+    if regimen not in ("irpf", "irnr"):
+        regimen = "irpf"
+
     vivienda_habitual = bool(payload.get("vivienda_habitual") or False)
     exencion_mayor_65 = bool(payload.get("exencion_mayor_65") or False)
     dependencia_grado = str(payload.get("dependencia_grado") or "").strip().lower()
@@ -8184,49 +8188,46 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     exento = 0.0
     exencion_motivo = ""
-    # Exención >65 / dependencia (siempre ligada a vivienda habitual).
-    fecha_nacimiento = parse_iso_date(payload.get("fecha_nacimiento") or "")
-    edad = None
-    if fecha_nacimiento:
-        try:
-            edad = int((devengo - fecha_nacimiento).days // 365.2425)
-        except Exception:
-            edad = None
-    es_dependiente = dependencia_grado in ("severa", "gran", "gran_dependencia", "severe", "great")
-    es_mayor_65 = (edad is not None and edad >= 65)
-    if (exencion_mayor_65 or es_mayor_65 or es_dependiente) and vivienda_habitual and ganancia > 0:
-        exento = ganancia
-        if es_dependiente and not (exencion_mayor_65 or es_mayor_65):
-            exencion_motivo = "Exención dependencia (vivienda habitual)"
-        elif es_mayor_65 and not exencion_mayor_65:
-            exencion_motivo = "Exención >65 vivienda habitual (auto por fecha nacimiento)"
-        else:
-            exencion_motivo = "Exención >65 vivienda habitual (forzada)"
-    elif vivienda_habitual and ganancia > 0:
-        reinv_total = 0.0
-        if reinversion is not None and reinversion > 0:
-            reinv_total += float(reinversion)
-        if reinversion_comprometida is not None and reinversion_comprometida > 0:
-            reinv_total += float(reinversion_comprometida)
-        importe_obtenido = 0.0
-        if reinv_total > 0:
-            # AEAT: "importe total obtenido" = valor transmisión (en los términos del art. 35 LIRPF) - principal pendiente.
-            importe_obtenido = max(0.0, (valor_tx - gastos_tx - plusvalia - prestamo_pendiente) * factor)
-        ratio = 0.0
-        if importe_obtenido > 0:
-            ratio = max(0.0, min(1.0, reinv_total / importe_obtenido))
-        exento = round(ganancia * ratio + 1e-9, 2)
-        exencion_motivo = "Exención reinversión (proporcional)"
+    if regimen == "irpf":
+        # Exención >65 / dependencia (siempre ligada a vivienda habitual).
+        fecha_nacimiento = parse_iso_date(payload.get("fecha_nacimiento") or "")
+        edad = None
+        if fecha_nacimiento:
+            try:
+                edad = int((devengo - fecha_nacimiento).days // 365.2425)
+            except Exception:
+                edad = None
+        es_dependiente = dependencia_grado in ("severa", "gran", "gran_dependencia", "severe", "great")
+        es_mayor_65 = (edad is not None and edad >= 65)
+        if (exencion_mayor_65 or es_mayor_65 or es_dependiente) and vivienda_habitual and ganancia > 0:
+            exento = ganancia
+            if es_dependiente and not (exencion_mayor_65 or es_mayor_65):
+                exencion_motivo = "Exención dependencia (vivienda habitual)"
+            elif es_mayor_65 and not exencion_mayor_65:
+                exencion_motivo = "Exención >65 vivienda habitual (auto por fecha nacimiento)"
+            else:
+                exencion_motivo = "Exención >65 vivienda habitual (forzada)"
+        elif vivienda_habitual and ganancia > 0:
+            reinv_total = 0.0
+            if reinversion is not None and reinversion > 0:
+                reinv_total += float(reinversion)
+            if reinversion_comprometida is not None and reinversion_comprometida > 0:
+                reinv_total += float(reinversion_comprometida)
+            importe_obtenido = 0.0
+            if reinv_total > 0:
+                # AEAT: "importe total obtenido" = valor transmisión (en los términos del art. 35 LIRPF) - principal pendiente.
+                importe_obtenido = max(0.0, (valor_tx - gastos_tx - plusvalia - prestamo_pendiente) * factor)
+            ratio = 0.0
+            if importe_obtenido > 0:
+                ratio = max(0.0, min(1.0, reinv_total / importe_obtenido))
+            exento = round(ganancia * ratio + 1e-9, 2)
+            exencion_motivo = "Exención reinversión (proporcional)"
 
     ganancia_sujeta = round(max(0.0, ganancia - exento) + 1e-9, 2)
     ganancia_computable = ganancia_sujeta
     abatimiento_detail = {"aplicable": 0, "motivo": "No calculado"}
     year = int((payload.get("ejercicio") or devengo.year) or devengo.year)
     ccaa = _normalize_ccaa(payload.get("ccaa") or payload.get("comunidad_autonoma") or "AN")
-
-    regimen = str(payload.get("regimen_fiscal") or payload.get("regimen") or "irpf").strip().lower()
-    if regimen not in ("irpf", "irnr"):
-        regimen = "irpf"
 
     if regimen == "irpf" and ganancia_sujeta > 0:
         ab_mode = str(payload.get("abatimiento_mode") or payload.get("abatimiento") or "auto").strip().lower()
