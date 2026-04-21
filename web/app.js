@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v237";
+const APP_SW_VERSION = "v238";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -44544,6 +44544,30 @@ const restoreWorkspaceSimuladoresFromInmueble = () => {
   portal.mounted = false;
 };
 
+const openEmbeddedFiscalWizard = (options = {}) => {
+  if (!inmuebleTabs || !inmuebleTabFiscal) return false;
+  const prefill = options?.prefill && typeof options.prefill === "object" ? options.prefill : {};
+  const pane = String(options?.pane || "").trim();
+  try {
+    setInmuebleTab("fiscal");
+  } catch {
+    return false;
+  }
+  window.setTimeout(() => {
+    try {
+      if (pane) setSimuladoresPane(pane);
+    } catch {}
+    try {
+      applyFiscalWizardPrefill(prefill);
+    } catch {}
+    try {
+      if (pane) scrollToSimuladoresPane(pane);
+      else scrollToSimuladoresPane("informe");
+    } catch {}
+  }, 120);
+  return true;
+};
+
 const syncInmuebleTecnocloudSidebar = (tabKey = "") => {
   const topKey = resolveInmuebleTopTabKey(tabKey);
   const toggle = (el, on) => {
@@ -51150,6 +51174,17 @@ const bindMoneyPlainInputs = (formEl) => {
       if (num !== null) input.value = fmtView(num);
     });
   });
+  if (formEl.dataset.boundMoneyPlainForm !== "1") {
+    formEl.dataset.boundMoneyPlainForm = "1";
+    formEl.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.matches("input[data-money-plain='1']")) return;
+      if (document.activeElement === target) return;
+      const num = toNumber(target.value);
+      if (num !== null) target.value = fmtView(num);
+    });
+  }
   // Format any pre-filled values immediately (without touching focused input).
   moneyInputs.forEach((input) => {
     if (document.activeElement === input) return;
@@ -66756,36 +66791,40 @@ if (captacionForm) {
 }
 
 if (compraventaForm) {
-  if (compraventaOpenIrpfBtn) {
-    compraventaOpenIrpfBtn.addEventListener("click", () => {
-      let prefill = { empresa_nombre: resolveCrmInmoEmpresaNombre() };
-      try {
-        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
-        prefill = {
-          ...prefill,
-          referencia: payload.direccion || payload.id || "",
-          fecha_transmision: payload.fecha_escritura || "",
-          valor_transmision: payload.precio_escritura || "",
-        };
-      } catch {}
-      openWorkspaceSimuladores({ pane: "", prefill });
-    });
-  }
-  if (compraventaOpenFiscalWizardBtn) {
-    compraventaOpenFiscalWizardBtn.addEventListener("click", () => {
-      let prefill = { operacion: "venta" };
-      try {
-        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
-        prefill = {
-          ...prefill,
-          referencia: payload.direccion || payload.id || "",
-          fecha_transmision: payload.fecha_escritura || payload.fecha_operacion || "",
-          valor_transmision: payload.precio_escritura || payload.precio_contrato || payload.precio_propuesta || "",
-        };
-      } catch {}
-      openWorkspaceFiscalWizard(prefill);
-    });
-  }
+	  if (compraventaOpenIrpfBtn) {
+	    compraventaOpenIrpfBtn.addEventListener("click", () => {
+	      let prefill = { empresa_nombre: resolveCrmInmoEmpresaNombre() };
+	      try {
+	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
+	        prefill = {
+	          ...prefill,
+	          referencia: payload.direccion || payload.id || "",
+	          fecha_transmision: payload.fecha_escritura || "",
+	          valor_transmision: payload.precio_escritura || "",
+	        };
+	      } catch {}
+	      if (!openEmbeddedFiscalWizard({ pane: "irpf", prefill })) {
+	        openWorkspaceSimuladores({ pane: "irpf", prefill });
+	      }
+	    });
+	  }
+	  if (compraventaOpenFiscalWizardBtn) {
+	    compraventaOpenFiscalWizardBtn.addEventListener("click", () => {
+	      let prefill = { operacion: "venta" };
+	      try {
+	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
+	        prefill = {
+	          ...prefill,
+	          referencia: payload.direccion || payload.id || "",
+	          fecha_transmision: payload.fecha_escritura || payload.fecha_operacion || "",
+	          valor_transmision: payload.precio_escritura || payload.precio_contrato || payload.precio_propuesta || "",
+	        };
+	      } catch {}
+	      if (!openEmbeddedFiscalWizard({ pane: "informe", prefill })) {
+	        openWorkspaceFiscalWizard(prefill);
+	      }
+	    });
+	  }
   compraventaForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (compraventaFormStatus) {
@@ -66912,18 +66951,9 @@ if (inmuebleFiscalWizardBtn) {
       .join(" · ");
     const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
     const prefill = { operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal };
-    setInmuebleTab("fiscal");
-    window.setTimeout(() => {
-      try {
-        setSimuladoresPane("informe");
-      } catch {}
-      try {
-        applyFiscalWizardPrefill(prefill);
-      } catch {}
-      try {
-        scrollToSimuladoresPane("informe");
-      } catch {}
-    }, 120);
+    if (!openEmbeddedFiscalWizard({ pane: "informe", prefill })) {
+      openWorkspaceFiscalWizard(prefill);
+    }
   });
 }
 
