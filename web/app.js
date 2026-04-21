@@ -6863,11 +6863,38 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     state.workspaceRrhhEntry = "";
   }
   state.currentWorkspaceView = normalized;
+
+  const enabledModules = tenantMode
+    ? new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeSimple(key)))
+    : null;
+  const moduleEnabled = (key = "") => {
+    const normalizedKey = normalizeSimple(key);
+    if (!normalizedKey || !enabledModules || !enabledModules.size) return true;
+    if (enabledModules.has(normalizedKey)) return true;
+    // Aliases comunes (keys heredadas vs labels UI)
+    if (normalizedKey === "financiacion" && enabledModules.has("financiaciones")) return true;
+    if (normalizedKey === "financiaciones" && enabledModules.has("financiacion")) return true;
+    return false;
+  };
+  const panelModuleAllowed = (panel) => {
+    if (!tenantMode) return true;
+    if (!enabledModules || !enabledModules.size) return true;
+    const only = String(panel?.dataset?.workspaceModule || "").trim();
+    if (only) return moduleEnabled(only);
+    const any = String(panel?.dataset?.workspaceModuleAny || "").trim();
+    if (!any) return true;
+    return any
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .some((key) => moduleEnabled(key));
+  };
+
   workspaceViewButtons.forEach((button) => {
     button.classList.toggle("active", (button.dataset.workspaceViewTab || "") === normalized);
   });
   workspaceViewPanels.forEach((panel) => {
-    const isHidden = (panel.dataset.workspaceView || "") !== normalized;
+    const isHidden = (panel.dataset.workspaceView || "") !== normalized || !panelModuleAllowed(panel);
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });

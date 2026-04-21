@@ -1568,56 +1568,56 @@
 		            <div id="irpfRentalResult"></div>
 		          </div>
 		        </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="operations">
-          <div class="section-head">
-            <div>
-              <h3>Gestoría del workspace</h3>
-              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y renta dentro del workspace.</p>
+	        <div class="form-card crm-workspace-view" data-workspace-view="operations" data-workspace-module="gestoria">
+	          <div class="section-head">
+	            <div>
+	              <h3>Gestoría del workspace</h3>
+	              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y renta dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceGestoriaOverview"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="operations">
-          <div class="section-head">
-            <div>
-              <h3>Seguros del workspace</h3>
-              <p class="muted">Visión operativa de cartera, primas, renovaciones y alertas comerciales dentro del workspace.</p>
+	        <div class="form-card crm-workspace-view" data-workspace-view="operations" data-workspace-module="seguros">
+	          <div class="section-head">
+	            <div>
+	              <h3>Seguros del workspace</h3>
+	              <p class="muted">Visión operativa de cartera, primas, renovaciones y alertas comerciales dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceSegurosOverview"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="operations">
-          <div class="section-head">
-            <div>
-              <h3>Financiación del workspace</h3>
-              <p class="muted">Pipeline hipotecario, firmas, bancos y seguimiento comercial dentro del workspace.</p>
+	        <div class="form-card crm-workspace-view" data-workspace-view="operations" data-workspace-module="financiacion">
+	          <div class="section-head">
+	            <div>
+	              <h3>Financiación del workspace</h3>
+	              <p class="muted">Pipeline hipotecario, firmas, bancos y seguimiento comercial dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceFinOverview"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="operations">
-          <div class="section-head">
-            <div>
-              <h3>Inmobiliaria del workspace</h3>
-              <p class="muted">Pipeline, inmuebles, compraventas y seguimiento comercial dentro del workspace.</p>
+	        <div class="form-card crm-workspace-view" data-workspace-view="operations" data-workspace-module="inmobiliaria">
+	          <div class="section-head">
+	            <div>
+	              <h3>Inmobiliaria del workspace</h3>
+	              <p class="muted">Pipeline, inmuebles, compraventas y seguimiento comercial dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceInmoOverview"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="operations">
-          <div class="section-head">
-            <div>
-              <h3>Operativa del workspace</h3>
-              <p class="muted">Colas de trabajo reales por módulo para operar sin salir del Hub.</p>
+	        <div class="form-card crm-workspace-view" data-workspace-view="operations" data-workspace-module-any="gestoria,seguros,financiacion,inmobiliaria,fincas">
+	          <div class="section-head">
+	            <div>
+	              <h3>Operativa del workspace</h3>
+	              <p class="muted">Colas de trabajo reales por módulo para operar sin salir del Hub.</p>
             </div>
           </div>
           <div id="workspaceServiceDesks"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Inbox de entrada</h3>
+	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Inbox de entrada</h3>
                 <p class="muted">Bandeja central para documentos entrantes antes de clasificarlos o asignarlos.</p>
               </div>
             </div>
@@ -9794,7 +9794,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=632"></script>
+					    <script src="app.js?v=633"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
