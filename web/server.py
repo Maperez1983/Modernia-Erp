@@ -16508,6 +16508,47 @@ def parse_asesoramiento_text(text):
         r"Fecha\s*[:\-]?\s*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4})",
     ])
 
+    # Formatos alternativos: Liquidación comprador / Contrato de intermediación
+    # (no siguen el template CLIENTE 1 / CLIENTE 2).
+    if not fields.get("cliente1_nombre"):
+        comprador_line = pick(
+            [
+                r"\bCLIENTE\s*[:\-]?\s*([A-ZÁÉÍÓÚÜÑ ,/]+?)(?:\s{2,}|\s+DNI|\s+NIF|\s+LOCALIDAD|\s+PROVINCIA|\s*$)",
+                r"\bCOMPRADOR\s*[:\-]?\s*([A-ZÁÉÍÓÚÜÑ ,/]+?)(?:\s{2,}|\s+DNI|\s+NIF|\s+LOCALIDAD|\s+PROVINCIA|\s*$)",
+            ],
+            source_text=cleaned,
+            source_clean=cleaned,
+        )
+        if comprador_line:
+            raw = normalize_person_name(comprador_line)
+            raw = re.sub(r"\s+Y\s+", " / ", raw, flags=re.IGNORECASE)
+            parts = [p.strip(" ,/") for p in raw.split("/") if p.strip(" ,/")]
+            if parts:
+                fields["cliente1_nombre"] = parts[0]
+            if len(parts) > 1:
+                fields["cliente2_nombre"] = parts[1]
+
+    if not fields.get("cliente1_nombre"):
+        m1 = re.search(
+            r"De\s+una\s+parte\s+el\s+Comprador\s*[:\-]?\s*D\.?\s*([A-ZÁÉÍÓÚÜÑ ]+?),\s*con\s+NIF\s*[:\-]?\s*([0-9]{8}[A-Z])",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if m1:
+            fields["cliente1_nombre"] = normalize_person_name(m1.group(1))
+            if not fields.get("cliente1_dni"):
+                fields["cliente1_dni"] = m1.group(2).strip()
+        m2 = re.search(
+            r"Do[ñn]a?\s*([A-ZÁÉÍÓÚÜÑ ]+?),\s*con\s+NIF\s*[:\-]?\s*([0-9]{8}[A-Z])",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if m2:
+            if not fields.get("cliente2_nombre"):
+                fields["cliente2_nombre"] = normalize_person_name(m2.group(1))
+            if not fields.get("cliente2_dni"):
+                fields["cliente2_dni"] = m2.group(2).strip()
+
     parts = re.split(r"(CLIENTE\s*1|CLIENTE\s*2)", text, flags=re.IGNORECASE)
     blocks = {"1": "", "2": ""}
     current = ""
@@ -16582,6 +16623,12 @@ def parse_asesoramiento_text(text):
     phones = re.findall(r"\b[6-9][0-9]{8}\b", cleaned)
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", cleaned, re.IGNORECASE)
     dnis = re.findall(r"\b[0-9]{8}[A-Z]\b", cleaned)
+    # OCR a veces separa el dígito de control: "12345678 H" o con guiones/puntos.
+    dnis_loose = []
+    for m in re.finditer(r"\b([0-9]{8})\s*[-\.,]?\s*([A-Z])\b", cleaned, re.IGNORECASE):
+        dnis_loose.append(f"{m.group(1)}{m.group(2).upper()}")
+    if dnis_loose:
+        dnis = list(dict.fromkeys(dnis + dnis_loose))
     cifs = re.findall(r"\b[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]\b", cleaned)
     docs = dnis + cifs
 
@@ -19498,6 +19545,68 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
                 if val not in (None, "", 0, 0.0):
                     precio_inmueble = val
                     break
+
+    # Backfill desde OCR (notas_ocr): ayuda cuando el asesoramiento se crea desde docs tipo
+    # "Liquidación comprador" / "Contrato de intermediación" y faltan campos clave.
+    ocr_text = ""
+    try:
+        ocr_text = str(row["notas_ocr"] or "")
+    except Exception:
+        ocr_text = ""
+    ocr_clean = re.sub(r"\s+", " ", (ocr_text or "").replace("\u00a0", " ")).strip()
+
+    def _pick_float(patterns):
+        for pat in patterns:
+            m = re.search(pat, ocr_clean, re.IGNORECASE)
+            if not m:
+                continue
+            val = parse_optional_float(m.group(1))
+            if val is None:
+                continue
+            try:
+                val = float(val)
+            except Exception:
+                continue
+            if val > 0:
+                return val
+        return None
+
+    ocr_precio = _pick_float(
+        [
+            r"PRECIO\s+DE\s+COMPRAVENTA.*?(?:ESCRITURADO|ESCRITURAC[IO]N|ESCRIT\w*)\s*[:\-]?\s*([0-9\.,]+)",
+            r"PRECIO\s+DE\s+COMPRAVENTA\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bESCRITURADO\s*[:\-]?\s*([0-9\.,]+)",
+        ]
+    )
+    ocr_importe = _pick_float(
+        [
+            r"IMPORTE\s+DEL\s+PRESTAMO\s*[:\-]?\s*(?:MAXIMO\s*)?([0-9\.,]+)",
+            r"PRESTAMO\s+CONCEDID[OA]\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bCAPITAL\s*[:\-]?\s*([0-9\.,]+)",
+        ]
+    )
+    ocr_tipo_interes = ""
+    for pat in (
+        r"\bTIPO\s+SALIDA\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+        r"\bTIPO\s+BONIFICADO\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+        r"\bINTERES\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+    ):
+        m = re.search(pat, ocr_clean, re.IGNORECASE)
+        if m:
+            ocr_tipo_interes = f"{m.group(1).strip()}%"
+            break
+
+    cliente1_id = row["cliente1_id"]
+    if not cliente1_id and ocr_clean:
+        ocr_fields = parse_asesoramiento_text(ocr_text)
+        cliente1_id = ensure_cliente_for_financiacion(
+            conn,
+            empresa_id,
+            ocr_fields.get("cliente1_nombre"),
+            ocr_fields.get("cliente1_dni"),
+            now,
+            {"telefono": ocr_fields.get("cliente1_telefono"), "email": ocr_fields.get("cliente1_email")},
+        )
     cliente_nombre = row["cliente1_nombre"] or ""
     if row["cliente2_nombre"]:
         cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
@@ -19522,17 +19631,17 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
             hipoteca_id,
             empresa_id,
             cliente_nombre,
-            row["cliente1_id"],
+            cliente1_id,
             None,
-            precio_inmueble,
-            None,
+            precio_inmueble if precio_inmueble not in (None, "", 0, 0.0) else ocr_precio,
+            ocr_importe,
             None,
             None,
             None,
             None,
             fecha,
             None,
-            None,
+            ocr_tipo_interes or None,
             None,
             None,
             None,
