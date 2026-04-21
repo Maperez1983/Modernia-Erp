@@ -63308,21 +63308,12 @@ if (inmuebleNoticiaOpenIrpfBtn) {
     const provincia = inmueble.provincia || captacion.provincia || "";
     const inferred = inferFiscalTerritoryFromProvincia(provincia);
     const ccaa = inferred.ccaa || String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
-    const pv = inferred.pv_territorio || "";
     const referencia = [inmueble.direccion || captacion.direccion || "", inmueble.referencia_catastral || ""]
       .map((v) => String(v || "").trim())
       .filter(Boolean)
       .join(" · ");
-    const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
     const valor_transmision = inmueble.precio_encargo || inmueble.precio_objetivo || captacion.precio_objetivo || "";
-    openWorkspaceFiscalWizard({ operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal, valor_transmision });
-    window.setTimeout(() => {
-      try {
-        if (irpfGainForm && typeof irpfGainForm.scrollIntoView === "function") {
-          irpfGainForm.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      } catch {}
-    }, 650);
+    openIrpfGananciaModal({ ccaa, referencia, valor_transmision });
   });
 }
 
@@ -65043,14 +65034,7 @@ if (gestoriaTrabajoForm) {
   if (gestoriaOpenIrpfBtn) {
     gestoriaOpenIrpfBtn.addEventListener("click", () => {
       const ccaa = String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
-      openWorkspaceFiscalWizard({ operacion: "venta", ccaa });
-      window.setTimeout(() => {
-        try {
-          if (irpfGainForm && typeof irpfGainForm.scrollIntoView === "function") {
-            irpfGainForm.scrollIntoView({ behavior: "smooth", block: "start" });
-          }
-        } catch {}
-      }, 650);
+      openIrpfGananciaModal({ ccaa });
     });
   }
   gestoriaTrabajoForm.addEventListener("submit", (event) => {
