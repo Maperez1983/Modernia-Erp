@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v195";
+const APP_SW_VERSION = "v237";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -3094,13 +3094,15 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
   const inmuebleTabPersonas = document.getElementById("inmuebleTabPersonas");
   const inmueblePersonasTabNewBtn = document.getElementById("inmueblePersonasTabNewBtn");
   const inmueblePersonasTabList = document.getElementById("inmueblePersonasTabList");
-  const inmuebleTabHistorial = document.getElementById("inmuebleTabHistorial");
-  const inmuebleHistorialTabList = document.getElementById("inmuebleHistorialTabList");
-  const inmuebleTabEvolucion = document.getElementById("inmuebleTabEvolucion");
-  const inmuebleEvolucionTabTable = document.getElementById("inmuebleEvolucionTabTable");
-	const inmuebleTabServicios = document.getElementById("inmuebleTabServicios");
-	const inmuebleServiciosTabEditBtn = document.getElementById("inmuebleServiciosTabEditBtn");
-	const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
+	const inmuebleTabHistorial = document.getElementById("inmuebleTabHistorial");
+	const inmuebleHistorialTabList = document.getElementById("inmuebleHistorialTabList");
+	const inmuebleTabEvolucion = document.getElementById("inmuebleTabEvolucion");
+	const inmuebleEvolucionTabTable = document.getElementById("inmuebleEvolucionTabTable");
+	const inmuebleTabFiscal = document.getElementById("inmuebleTabFiscal");
+	const inmuebleFiscalEmbed = document.getElementById("inmuebleFiscalEmbed");
+		const inmuebleTabServicios = document.getElementById("inmuebleTabServicios");
+		const inmuebleServiciosTabEditBtn = document.getElementById("inmuebleServiciosTabEditBtn");
+		const inmuebleServiciosTabList = document.getElementById("inmuebleServiciosTabList");
 		const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleEncargoModalOpenBtn = document.getElementById("inmuebleEncargoModalOpenBtn");
 const inmuebleNoticiaOpenIrpfBtn = document.getElementById("inmuebleNoticiaOpenIrpfBtn");
@@ -7312,14 +7314,14 @@ const openIrpfGananciaModal = (options = {}) => {
 	            Fecha transmisión (devengo)
 	            <input name="fecha_transmision" type="date" required />
 	          </label>
-	          <label>
-	            Valor adquisición
-	            <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
-	          </label>
-              <label>
-                Gastos adquisición (total)
-                <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
-              </label>
+		          <label>
+		            Valor adquisición
+		            <input name="valor_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="150000,00" required />
+		          </label>
+	              <label>
+	                Gastos adquisición (total)
+	                <input name="gastos_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	              </label>
               <label>
                 Gastos adquisición (modo)
                 <select name="gastos_adquisicion_mode">
@@ -7330,67 +7332,71 @@ const openIrpfGananciaModal = (options = {}) => {
               <details class="span-2" data-irpf-adq-breakdown style="margin-top:-6px;">
                 <summary class="muted" style="cursor:pointer;">Desglose gastos de adquisición (opcional)</summary>
                 <div class="form-grid" style="margin-top:10px;">
-                  <label>
-                    Agencia/comisión
-                    <input name="gastos_adq_agencia" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Abogado/asesoría
-                    <input name="gastos_adq_abogado" inputmode="decimal" placeholder="0,00" />
-                  </label>
 	                  <label>
-	                    Tasación
-	                    <input name="gastos_adq_tasacion" inputmode="decimal" placeholder="0,00" />
+	                    Agencia/comisión
+	                    <input name="gastos_adq_agencia" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 	                  </label>
 	                  <label>
-	                    Gastos hipoteca (constitución)
-	                    <input name="gastos_adq_hipoteca" inputmode="decimal" placeholder="0,00" />
+	                    Abogado/asesoría
+	                    <input name="gastos_adq_abogado" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+		                  <label>
+		                    Tasación
+		                    <input name="gastos_adq_tasacion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		                  </label>
+		                  <label>
+		                    Gastos hipoteca (constitución)
+		                    <input name="gastos_adq_hipoteca" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		                  </label>
+		                  <label>
+		                    ITP/IVA y AJD
+		                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		                  </label>
+	                  <label>
+	                    Notaría
+	                    <input name="gastos_adq_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 	                  </label>
 	                  <label>
-	                    ITP/IVA y AJD
-	                    <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
+	                    Registro
+	                    <input name="gastos_adq_registro" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 	                  </label>
-                  <label>
-                    Notaría y Registro
-                    <input name="gastos_adq_notaria_registro" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Gestoría
-                    <input name="gastos_adq_gestoria" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Otros
-                    <input name="gastos_adq_otros" inputmode="decimal" placeholder="0,00" />
-                  </label>
+	                  <label>
+	                    Gestoría
+	                    <input name="gastos_adq_gestoria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Otros
+	                    <input name="gastos_adq_otros" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
                   <div class="span-2 muted">
                     Si eliges “Desglose (suma)”, el CRM recalcula el total con estos importes (sin borrar el total manual).
                   </div>
                 </div>
               </details>
-		          <label>
-		            Mejoras / inversiones (opcional)
-		            <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
-		          </label>
+			          <label>
+			            Mejoras / inversiones (opcional)
+			            <input name="inversiones_mejoras" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			          </label>
 	          <label>
 	            Fecha mejoras/inversiones (opcional)
 	            <input name="fecha_mejoras" type="date" />
 	          </label>
-	          <label>
-	            Valor transmisión imputable a mejoras (opcional)
-	            <input name="valor_transmision_mejoras" inputmode="decimal" placeholder="0,00" />
-	          </label>
-	          <label>
-	            Amortización deducida (opcional)
-	            <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
-	          </label>
-	          <label>
-	            Valor transmisión
-	            <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
-	          </label>
-              <label>
-                Gastos transmisión (total)
-                <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
-              </label>
+		          <label>
+		            Valor transmisión imputable a mejoras (opcional)
+		            <input name="valor_transmision_mejoras" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		          </label>
+		          <label>
+		            Amortización deducida (opcional)
+		            <input name="amortizacion_deducida" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		          </label>
+		          <label>
+		            Valor transmisión
+		            <input name="valor_transmision" inputmode="decimal" data-money-plain="1" placeholder="200000,00" required />
+		          </label>
+	              <label>
+	                Gastos transmisión (total)
+	                <input name="gastos_transmision" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	              </label>
               <label>
                 Gastos transmisión (modo)
                 <select name="gastos_transmision_mode">
@@ -7401,61 +7407,65 @@ const openIrpfGananciaModal = (options = {}) => {
               <details class="span-2" data-irpf-tx-breakdown style="margin-top:-6px;">
                 <summary class="muted" style="cursor:pointer;">Desglose gastos de transmisión (opcional)</summary>
                 <div class="form-grid" style="margin-top:10px;">
-                  <label>
-                    Agencia/comisión
-                    <input name="gastos_tx_agencia" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Abogado/asesoría
-                    <input name="gastos_tx_abogado" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Certificado energético
-                    <input name="gastos_tx_cert_energetico" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Notaría y Registro
-                    <input name="gastos_tx_notaria_registro" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Cancelación hipoteca (gastos)
-                    <input name="gastos_tx_cancelacion" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Cancelación registral/cargas
-                    <input name="gastos_tx_cancelacion_registral" inputmode="decimal" placeholder="0,00" />
-                  </label>
-                  <label>
-                    Otros
-                    <input name="gastos_tx_otros" inputmode="decimal" placeholder="0,00" />
-                  </label>
+	                  <label>
+	                    Agencia/comisión
+	                    <input name="gastos_tx_agencia" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Abogado/asesoría
+	                    <input name="gastos_tx_abogado" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Certificado energético
+	                    <input name="gastos_tx_cert_energetico" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Notaría
+	                    <input name="gastos_tx_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Registro
+	                    <input name="gastos_tx_registro" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Cancelación hipoteca (gastos)
+	                    <input name="gastos_tx_cancelacion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Cancelación registral/cargas
+	                    <input name="gastos_tx_cancelacion_registral" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
+	                  <label>
+	                    Otros
+	                    <input name="gastos_tx_otros" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
                   <div class="span-2 muted">
                     Si eliges “Desglose (suma)”, el CRM recalcula el total con estos importes.
                   </div>
                 </div>
               </details>
-	          <label>
-	            Plusvalía municipal pagada (opcional)
-	            <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
-	          </label>
+		          <label>
+		            Plusvalía municipal pagada (opcional)
+		            <input name="plusvalia_municipal" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		          </label>
 	          <label class="span-2">
 	            <div class="inline-row">
 	              <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual (incluye últimos 2 años)</label>
 	              <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención &gt;65 (forzar)</label>
 	            </div>
 	          </label>
-	          <label>
-	            Importe reinvertido (opcional)
-	            <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
-	          </label>
-              <label>
-                Comprometido a reinvertir (opcional)
-                <input name="importe_comprometido_reinvertir" inputmode="decimal" placeholder="0,00" />
-              </label>
 		          <label>
-		            Préstamo pendiente (opcional)
-		            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
+		            Importe reinvertido (opcional)
+		            <input name="importe_reinvertido" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 		          </label>
+	              <label>
+	                Comprometido a reinvertir (opcional)
+	                <input name="importe_comprometido_reinvertir" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	              </label>
+			          <label>
+			            Préstamo pendiente (opcional)
+			            <input name="prestamo_pendiente" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			          </label>
               <details class="span-2" style="margin-top:-6px;">
                 <summary class="muted" style="cursor:pointer;">Alquiler y amortización (auto)</summary>
                 <div class="form-grid" style="margin-top:10px;">
@@ -7473,18 +7483,18 @@ const openIrpfGananciaModal = (options = {}) => {
                     Fin alquiler (opcional)
                     <input name="fecha_fin_alquiler" type="date" />
                   </label>
-                  <label>
-                    Base amortización (construcción, opcional)
-                    <input name="amortizacion_base" inputmode="decimal" placeholder="0,00" />
-                  </label>
+	                  <label>
+	                    Base amortización (construcción, opcional)
+	                    <input name="amortizacion_base" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
                   <label>
                     % amortización anual
                     <input name="amortizacion_pct" inputmode="decimal" placeholder="3" value="3" />
                   </label>
-                  <label>
-                    Valor catastral total (opcional)
-                    <input name="valor_catastral_total" inputmode="decimal" placeholder="0,00" />
-                  </label>
+	                  <label>
+	                    Valor catastral total (opcional)
+	                    <input name="valor_catastral_total" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+	                  </label>
                   <label>
                     % suelo (Catastro, opcional)
                     <input name="porcentaje_suelo" inputmode="decimal" placeholder="20" />
@@ -7510,14 +7520,14 @@ const openIrpfGananciaModal = (options = {}) => {
 	              <option value="valores_cotizados">Acciones cotizadas</option>
 	            </select>
 	          </label>
-	          <label>
-	            VT acumulado desde 01/01/2015 (sin este)
-	            <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" placeholder="0,00" />
-	          </label>
-	          <label>
-	            VT (este elemento) override (opcional)
-	            <input name="abatimiento_vt2_override" inputmode="decimal" placeholder="(por defecto: valor transmisión (calc.))" />
-	          </label>
+		          <label>
+		            VT acumulado desde 01/01/2015 (sin este)
+		            <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+		          </label>
+		          <label>
+		            VT (este elemento) override (opcional)
+		            <input name="abatimiento_vt2_override" inputmode="decimal" data-money-plain="1" placeholder="(por defecto: valor transmisión (calc.))" />
+		          </label>
 	          <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
 	            <button type="button" class="secondary" data-irpf-simulate>Simular</button>
 	            <button type="button" class="secondary ghost" data-irpf-pdf>Informe PDF</button>
@@ -7532,12 +7542,15 @@ const openIrpfGananciaModal = (options = {}) => {
     document.body.appendChild(modal);
   }
 
-  const form = modal.querySelector("[data-irpf-form]");
-  const closeBtn = modal.querySelector("[data-irpf-close]");
-  const simulateBtn = modal.querySelector("[data-irpf-simulate]");
-  const pdfBtn = modal.querySelector("[data-irpf-pdf]");
-  const statusEl = modal.querySelector("[data-irpf-status]");
-  const resultEl = modal.querySelector("[data-irpf-result]");
+	  const form = modal.querySelector("[data-irpf-form]");
+	  try {
+	    bindMoneyPlainInputs(form);
+	  } catch {}
+	  const closeBtn = modal.querySelector("[data-irpf-close]");
+	  const simulateBtn = modal.querySelector("[data-irpf-simulate]");
+	  const pdfBtn = modal.querySelector("[data-irpf-pdf]");
+	  const statusEl = modal.querySelector("[data-irpf-status]");
+	  const resultEl = modal.querySelector("[data-irpf-result]");
 
   const setValue = (name, value) => {
     const el = form?.querySelector(`[name=\"${name}\"]`);
@@ -7558,19 +7571,23 @@ const openIrpfGananciaModal = (options = {}) => {
 	      "gastos_adq_tasacion",
 	      "gastos_adq_hipoteca",
 	      "gastos_adq_itp_iva_ajd",
+	      "gastos_adq_notaria",
+	      "gastos_adq_registro",
 	      "gastos_adq_notaria_registro",
 	      "gastos_adq_gestoria",
 	      "gastos_adq_otros",
 	    ]);
-    const txDesglose = sum([
-      "gastos_tx_agencia",
-      "gastos_tx_abogado",
-      "gastos_tx_cert_energetico",
-      "gastos_tx_notaria_registro",
-      "gastos_tx_cancelacion",
-      "gastos_tx_cancelacion_registral",
-      "gastos_tx_otros",
-    ]);
+	    const txDesglose = sum([
+	      "gastos_tx_agencia",
+	      "gastos_tx_abogado",
+	      "gastos_tx_cert_energetico",
+	      "gastos_tx_notaria",
+	      "gastos_tx_registro",
+	      "gastos_tx_notaria_registro",
+	      "gastos_tx_cancelacion",
+	      "gastos_tx_cancelacion_registral",
+	      "gastos_tx_otros",
+	    ]);
     const adqMode = String(payload.gastos_adquisicion_mode || "manual").toLowerCase();
     const txMode = String(payload.gastos_transmision_mode || "manual").toLowerCase();
     if (adqMode === "desglose") payload.gastos_adquisicion = adqDesglose ? String(adqDesglose) : String(parseMoneyValue(payload.gastos_adquisicion || 0));
@@ -44462,11 +44479,69 @@ const normalizeInmuebleTabKey = (tab) => {
 const resolveInmuebleTopTabKey = (tabKey = "") => {
   const key = normalizeInmuebleTabKey(tabKey);
   if (key === "noticia") return "datos";
+  if (key === "fiscal") return "datos";
   if (["datos", "evolucion", "imagenes", "adjuntos"].includes(key)) return key;
   if (["actividad", "historial", "personas", "servicios", "demandas", "visitas", "estado"].includes(key)) {
     return "evolucion";
   }
   return "datos";
+};
+
+let inmuebleFiscalSimuladoresPortal = null;
+
+const getWorkspaceSimuladoresEngineNode = () => {
+  try {
+    return document.querySelector(
+      '.crm-workspace-view[data-workspace-view="motores"][data-workspace-engine="simuladores"]'
+    );
+  } catch {
+    return null;
+  }
+};
+
+const mountWorkspaceSimuladoresIntoInmueble = () => {
+  if (!inmuebleFiscalEmbed) return;
+  const node = getWorkspaceSimuladoresEngineNode();
+  if (!node) {
+    inmuebleFiscalEmbed.innerHTML = "<div class='muted'>Simuladores no disponibles en este despliegue.</div>";
+    return;
+  }
+  if (!inmuebleFiscalSimuladoresPortal) {
+    inmuebleFiscalSimuladoresPortal = {
+      node,
+      parent: node.parentElement || null,
+      nextSibling: node.nextElementSibling || null,
+      mounted: false,
+      wasHidden: false,
+    };
+  }
+  const portal = inmuebleFiscalSimuladoresPortal;
+  portal.node = node;
+  if (portal.mounted && node.parentElement === inmuebleFiscalEmbed) return;
+  // Limpia placeholder y monta.
+  inmuebleFiscalEmbed.innerHTML = "";
+  portal.wasHidden = node.classList.contains("hidden");
+  portal.mounted = true;
+  node.classList.remove("hidden");
+  node.classList.add("simuladores-embedded");
+  inmuebleFiscalEmbed.appendChild(node);
+};
+
+const restoreWorkspaceSimuladoresFromInmueble = () => {
+  const portal = inmuebleFiscalSimuladoresPortal;
+  if (!portal || !portal.node || !portal.mounted) return;
+  const node = portal.node;
+  const parent = portal.parent;
+  if (parent) {
+    if (portal.nextSibling && portal.nextSibling.parentElement === parent) {
+      parent.insertBefore(node, portal.nextSibling);
+    } else {
+      parent.appendChild(node);
+    }
+  }
+  node.classList.remove("simuladores-embedded");
+  if (portal.wasHidden) node.classList.add("hidden");
+  portal.mounted = false;
 };
 
 const syncInmuebleTecnocloudSidebar = (tabKey = "") => {
@@ -44512,6 +44587,7 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
   if (inmuebleTabNoticia) inmuebleTabNoticia.classList.toggle("hidden", key !== "noticia");
   if (inmuebleTabEvolucion) inmuebleTabEvolucion.classList.toggle("hidden", key !== "evolucion");
+  if (inmuebleTabFiscal) inmuebleTabFiscal.classList.toggle("hidden", key !== "fiscal");
   if (inmuebleTabHistorial) inmuebleTabHistorial.classList.toggle("hidden", !(key === "evolucion" || key === "historial"));
   if (inmuebleTabImagenes) inmuebleTabImagenes.classList.toggle("hidden", key !== "imagenes");
   if (inmuebleTabAdjuntos) inmuebleTabAdjuntos.classList.toggle("hidden", key !== "adjuntos");
@@ -44524,6 +44600,12 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", key !== "demandas");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", key !== "estado");
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", key !== "docs");
+
+  if (key === "fiscal") {
+    mountWorkspaceSimuladoresIntoInmueble();
+  } else {
+    restoreWorkspaceSimuladoresFromInmueble();
+  }
 
   syncInmuebleTecnocloudSidebar(key);
 };
@@ -51044,6 +51126,35 @@ const bindMoneyInputs = (formEl) => {
       const num = toNumber(input.value);
       if (num !== null) input.value = euroFormatter.format(num);
     });
+  });
+};
+
+const bindMoneyPlainInputs = (formEl) => {
+  if (!formEl) return;
+  const moneyInputs = formEl.querySelectorAll("input[data-money-plain='1']");
+  const fmtEdit = (num) => `${num.toFixed(2)}`.replace(".", ",");
+  const fmtView = (num) =>
+    num.toLocaleString("es-ES", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  moneyInputs.forEach((input) => {
+    if (input.dataset.boundMoneyPlain === "1") return;
+    input.dataset.boundMoneyPlain = "1";
+    input.addEventListener("focus", () => {
+      const num = toNumber(input.value);
+      if (num !== null) input.value = fmtEdit(num);
+    });
+    input.addEventListener("blur", () => {
+      const num = toNumber(input.value);
+      if (num !== null) input.value = fmtView(num);
+    });
+  });
+  // Format any pre-filled values immediately (without touching focused input).
+  moneyInputs.forEach((input) => {
+    if (document.activeElement === input) return;
+    const num = toNumber(input.value);
+    if (num !== null) input.value = fmtView(num);
   });
 };
 
@@ -63006,6 +63117,9 @@ if (agendaBackBtn) {
 
 if (inmuebleBackBtn) {
   inmuebleBackBtn.addEventListener("click", () => {
+    try {
+      restoreWorkspaceSimuladoresFromInmueble();
+    } catch {}
     if (inmuebleDetail) {
       inmuebleDetail.classList.add("hidden");
     }
@@ -66791,7 +66905,19 @@ if (inmuebleFiscalWizardBtn) {
       .filter(Boolean)
       .join(" · ");
     const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
-    openWorkspaceFiscalWizard({ operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal });
+    const prefill = { operacion: "venta", ccaa, pv_territorio: pv, referencia, codigo_postal };
+    setInmuebleTab("fiscal");
+    window.setTimeout(() => {
+      try {
+        setSimuladoresPane("informe");
+      } catch {}
+      try {
+        applyFiscalWizardPrefill(prefill);
+      } catch {}
+      try {
+        scrollToSimuladoresPane("informe");
+      } catch {}
+    }, 120);
   });
 }
 

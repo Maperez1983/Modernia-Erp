@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=220" />
+				    <link rel="stylesheet" href="styles.css?v=221" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -1224,70 +1224,74 @@
 		                <input name="fecha_transmision" type="date" required />
 		              </label>
 			              <div class="form-grid-section">Adquisición</div>
-		              <label>
-		                Valor adquisición
-		                <input name="valor_adquisicion" inputmode="decimal" placeholder="150000,00" required />
-		              </label>
-		              <label class="span-2">
-		                Gastos adquisición
-		                <div class="inline-row">
-		                  <input name="gastos_adquisicion" inputmode="decimal" placeholder="0,00" />
-		                  <select name="gastos_adquisicion_mode">
-		                    <option value="" selected>Total</option>
-		                    <option value="desglose">Desglose</option>
-		                  </select>
-		                </div>
+			              <label>
+			                Valor adquisición
+			                <input name="valor_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="150000,00" required />
+			              </label>
+			              <label class="span-2">
+			                Gastos adquisición
+			                <div class="inline-row">
+			                  <input name="gastos_adquisicion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			                  <select name="gastos_adquisicion_mode">
+			                    <option value="" selected>Total</option>
+			                    <option value="desglose">Desglose</option>
+			                  </select>
+			                </div>
 		                <div class="muted">Si eliges “Desglose”, el sistema suma los conceptos detallados.</div>
 		              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
 			                Honorarios inmobiliaria (compra)
-			                <input name="gastos_adq_agencia" inputmode="decimal" placeholder="0,00" />
+			                <input name="gastos_adq_agencia" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
 			                Abogado / asesoría (compra)
-			                <input name="gastos_adq_abogado" inputmode="decimal" placeholder="0,00" />
+			                <input name="gastos_adq_abogado" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
 			                Tasación (compra)
-			                <input name="gastos_adq_tasacion" inputmode="decimal" placeholder="0,00" />
+			                <input name="gastos_adq_tasacion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
 			                Gastos hipoteca (constitución)
-			                <input name="gastos_adq_hipoteca" inputmode="decimal" placeholder="0,00" />
+			                <input name="gastos_adq_hipoteca" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 			              <label class="irpf-gastos-adq-desglose hidden">
 			                ITP / IVA / AJD (compra)
-			                <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
+			                <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 			              </label>
 		              <label class="irpf-gastos-adq-desglose hidden">
-		                Notaría + Registro (compra)
-		                <input name="gastos_adq_notaria_registro" inputmode="decimal" placeholder="0,00" />
+		                Notaría (compra)
+		                <input name="gastos_adq_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 		              </label>
 		              <label class="irpf-gastos-adq-desglose hidden">
-		                Gestoría (compra)
-		                <input name="gastos_adq_gestoria" inputmode="decimal" placeholder="0,00" />
+		                Registro (compra)
+		                <input name="gastos_adq_registro" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
 		              </label>
-		              <label class="irpf-gastos-adq-desglose hidden">
-		                Otros (compra)
-		                <input name="gastos_adq_otros" inputmode="decimal" placeholder="0,00" />
-		              </label>
+			              <label class="irpf-gastos-adq-desglose hidden">
+			                Gestoría (compra)
+			                <input name="gastos_adq_gestoria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-adq-desglose hidden">
+			                Otros (compra)
+			                <input name="gastos_adq_otros" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
 			              <div class="form-grid-section">Mejoras y amortización</div>
-			              <label>
-			                Mejoras / inversiones
-			                <input name="inversiones_mejoras" inputmode="decimal" placeholder="0,00" />
-			              </label>
+				              <label>
+				                Mejoras / inversiones
+				                <input name="inversiones_mejoras" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
 			              <label>
 			                Fecha mejoras/inversiones (opcional)
 			                <input name="fecha_mejoras" type="date" />
 			              </label>
-			              <label>
-			                Valor transmisión imputable a mejoras (opcional)
-			                <input name="valor_transmision_mejoras" inputmode="decimal" placeholder="0,00" />
-			              </label>
-			              <label>
-			                Amortización deducida (si alquilado)
-			                <input name="amortizacion_deducida" inputmode="decimal" placeholder="0,00" />
-			              </label>
+				              <label>
+				                Valor transmisión imputable a mejoras (opcional)
+				                <input name="valor_transmision_mejoras" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
+				              <label>
+				                Amortización deducida (si alquilado)
+				                <input name="amortizacion_deducida" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
 			              <label class="span-2">
 			                Amortización (auto)
 			                <div class="inline-row">
@@ -1303,14 +1307,14 @@
 			                Amortización % anual (auto)
 			                <input name="amortizacion_pct" inputmode="decimal" placeholder="3" />
 			              </label>
-			              <label class="irpf-amort-auto hidden">
-			                Base amortización (manual, opcional)
-			                <input name="amortizacion_base" inputmode="decimal" placeholder="0,00" />
-			              </label>
-			              <label class="irpf-amort-auto hidden">
-			                Valor catastral total (opcional)
-			                <input name="valor_catastral_total" inputmode="decimal" placeholder="120000,00" />
-			              </label>
+				              <label class="irpf-amort-auto hidden">
+				                Base amortización (manual, opcional)
+				                <input name="amortizacion_base" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				              </label>
+				              <label class="irpf-amort-auto hidden">
+				                Valor catastral total (opcional)
+				                <input name="valor_catastral_total" inputmode="decimal" data-money-plain="1" placeholder="120000,00" />
+				              </label>
 			              <label class="irpf-amort-auto hidden">
 			                % suelo (si hay valor catastral)
 			                <input name="porcentaje_suelo" inputmode="decimal" placeholder="25" />
@@ -1324,60 +1328,76 @@
 			                <input name="fecha_fin_alquiler" type="date" />
 			              </label>
 			              <div class="form-grid-section">Transmisión</div>
-		              <label>
-		                Valor transmisión
-		                <input name="valor_transmision" inputmode="decimal" placeholder="200000,00" required />
-		              </label>
-		              <label class="span-2">
-		                Gastos transmisión
-		                <div class="inline-row">
-		                  <input name="gastos_transmision" inputmode="decimal" placeholder="0,00" />
-		                  <select name="gastos_transmision_mode">
-		                    <option value="" selected>Total</option>
-		                    <option value="desglose">Desglose</option>
-		                  </select>
-		                </div>
+			              <label>
+			                Valor transmisión
+			                <input name="valor_transmision" inputmode="decimal" data-money-plain="1" placeholder="200000,00" required />
+			              </label>
+			              <label class="span-2">
+			                Gastos transmisión
+			                <div class="inline-row">
+			                  <input name="gastos_transmision" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			                  <select name="gastos_transmision_mode">
+			                    <option value="" selected>Total</option>
+			                    <option value="desglose">Desglose</option>
+			                  </select>
+			                </div>
 		                <div class="muted">Si eliges “Desglose”, el sistema suma los conceptos detallados.</div>
 		              </label>
-		              <label class="irpf-gastos-tx-desglose hidden">
-		                Honorarios inmobiliaria (venta)
-		                <input name="gastos_tx_agencia" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label class="irpf-gastos-tx-desglose hidden">
-		                Notaría + Registro (venta)
-		                <input name="gastos_tx_notaria_registro" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label class="irpf-gastos-tx-desglose hidden">
-		                Cancelación / gestoría (venta)
-		                <input name="gastos_tx_cancelacion" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label class="irpf-gastos-tx-desglose hidden">
-		                Otros (venta)
-		                <input name="gastos_tx_otros" inputmode="decimal" placeholder="0,00" />
-		              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Honorarios inmobiliaria (venta)
+			                <input name="gastos_tx_agencia" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Abogado / asesoría (venta)
+			                <input name="gastos_tx_abogado" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Certificado energético (venta)
+			                <input name="gastos_tx_cert_energetico" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Notaría (venta)
+			                <input name="gastos_tx_notaria" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Registro (venta)
+			                <input name="gastos_tx_registro" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Cancelación hipoteca (gastos)
+			                <input name="gastos_tx_cancelacion" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Cancelación registral/cargas
+			                <input name="gastos_tx_cancelacion_registral" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label class="irpf-gastos-tx-desglose hidden">
+			                Otros (venta)
+			                <input name="gastos_tx_otros" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
 			              <div class="form-grid-section">Exenciones</div>
-		              <label>
-		                Plusvalía municipal pagada (opcional)
-		                <input name="plusvalia_municipal" inputmode="decimal" placeholder="0,00" />
-		              </label>
+			              <label>
+			                Plusvalía municipal pagada (opcional)
+			                <input name="plusvalia_municipal" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
 		              <label class="span-2">
 		                <div class="inline-row">
 		                  <label class="ui-check"><input type="checkbox" name="vivienda_habitual" /> Vivienda habitual</label>
 		                  <label class="ui-check"><input type="checkbox" name="exencion_mayor_65" /> Exención >65 (si aplica)</label>
 		                </div>
 		              </label>
-		              <label>
-		                Importe reinvertido (opcional)
-		                <input name="importe_reinvertido" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label>
-		                Compromiso reinversión (opcional)
-		                <input name="importe_comprometido_reinvertir" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label>
-		                Préstamo pendiente (opcional)
-		                <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
-		              </label>
+			              <label>
+			                Importe reinvertido (opcional)
+			                <input name="importe_reinvertido" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label>
+			                Compromiso reinversión (opcional)
+			                <input name="importe_comprometido_reinvertir" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label>
+			                Préstamo pendiente (opcional)
+			                <input name="prestamo_pendiente" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
 			              <div class="form-grid-section">Avanzado</div>
 			              <label>
 			                Abatimiento (DT 9ª)
@@ -1395,14 +1415,14 @@
 			                  <option value="valores_cotizados">Acciones cotizadas</option>
 			                </select>
 			              </label>
-		              <label>
-		                VT acumulado desde 01/01/2015 (sin este)
-		                <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" placeholder="0,00" />
-		              </label>
-		              <label>
-		                VT (este inmueble) override (opcional)
-		                <input name="abatimiento_vt2_override" inputmode="decimal" placeholder="(por defecto: valor transmisión bruto × participación)" />
-		              </label>
+			              <label>
+			                VT acumulado desde 01/01/2015 (sin este)
+			                <input name="abatimiento_vt1_acumulado_2015" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+			              </label>
+			              <label>
+			                VT (este inmueble) override (opcional)
+			                <input name="abatimiento_vt2_override" inputmode="decimal" data-money-plain="1" placeholder="(por defecto: valor transmisión bruto × participación)" />
+			              </label>
 			              <div class="form-actions span-2">
 			                <button type="submit">Simular ganancia IRPF</button>
 			                <button type="button" class="secondary ghost" id="irpfGainPdfBtn">Informe PDF</button>
@@ -4178,6 +4198,7 @@
 			              <button class="tab active" type="button" data-tab="datos">Información</button>
 			              <button class="tab hidden" type="button" data-tab="noticia" id="inmuebleNoticiaTabBtn">Noticia</button>
 			              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+			              <button class="tab" type="button" data-tab="fiscal">Simulador fiscal</button>
 			              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
 			              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
 			            </div>
@@ -4482,21 +4503,32 @@
 	                <div id="inmuebleHistorialTabList" class="crm-focus-list"></div>
 	              </div>
 	            </div>
-	            <div id="inmuebleTabEvolucion" class="hidden">
-	              <div class="form-card">
-	                <div class="section-head">
-	                  <div>
-	                    <h3>Evolución del inmueble</h3>
-	                    <p class="muted">Evolución por fechas y estados (resumen operativo).</p>
-	                  </div>
-	                </div>
-	                <div id="inmuebleEvolucionTabTable"></div>
-	              </div>
-	            </div>
-	            <div id="inmuebleTabServicios" class="hidden">
-	              <div class="form-card">
-	                <div class="section-head">
-	                  <div>
+		            <div id="inmuebleTabEvolucion" class="hidden">
+		              <div class="form-card">
+		                <div class="section-head">
+		                  <div>
+		                    <h3>Evolución del inmueble</h3>
+		                    <p class="muted">Evolución por fechas y estados (resumen operativo).</p>
+		                  </div>
+		                </div>
+		                <div id="inmuebleEvolucionTabTable"></div>
+		              </div>
+		            </div>
+		            <div id="inmuebleTabFiscal" class="hidden">
+		              <div class="form-card">
+		                <div class="section-head">
+		                  <div>
+		                    <h3>Simulador fiscal</h3>
+		                    <p class="muted">Simula y genera informe sin salir de la ficha del inmueble.</p>
+		                  </div>
+		                </div>
+		                <div id="inmuebleFiscalEmbed" class="inmueble-fiscal-embed"></div>
+		              </div>
+		            </div>
+		            <div id="inmuebleTabServicios" class="hidden">
+		              <div class="form-card">
+		                <div class="section-head">
+		                  <div>
 	                    <h3>Servicios inmobiliarios</h3>
 		                    <p class="muted">Características rápidas de la vivienda.</p>
 	                  </div>
@@ -9734,7 +9766,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-					    <script src="app.js?v=621"></script>
+					    <script src="app.js?v=622"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

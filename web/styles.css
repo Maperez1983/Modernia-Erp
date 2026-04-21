@@ -1512,6 +1512,19 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   grid-column: 1 / -1;
 }
 
+.inmueble-fiscal-embed .workspace-central-layout {
+  grid-template-columns: 1fr;
+  margin-bottom: 0;
+}
+
+.inmueble-fiscal-embed .workspace-central-layout > .span-2 {
+  grid-column: auto;
+}
+
+.inmueble-fiscal-embed .simuladores-embedded {
+  margin: 0;
+}
+
 .workspace-list-item {
   width: 100%;
   display: flex;
