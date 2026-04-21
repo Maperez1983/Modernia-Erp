@@ -3,7 +3,10 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v192";
+const APP_SW_VERSION = "v193";
+
+// Simuladores (vista filtrada)
+const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
 
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;
@@ -3779,6 +3782,80 @@ const normalizeLookupText = (value) =>
 try {
   window.normalizeLookupText = normalizeLookupText;
 } catch {}
+
+function setSimuladoresPane(pane = "", options = {}) {
+  const next = normalizeSimple(pane || "");
+  try {
+    state.simuladoresPane = next;
+  } catch {}
+  try {
+    localStorage.setItem(SIMULADORES_PANE_STORAGE_KEY, next);
+  } catch {}
+
+  const panes = document.querySelectorAll('.simuladores-pane[data-sim-pane]');
+  panes.forEach((el) => {
+    const key = normalizeSimple(el.dataset.simPane || "");
+    const show = !next || next === "all" || key === next;
+    el.classList.toggle("hidden", !show);
+    el.hidden = !show;
+  });
+
+  const status = document.getElementById("simHubStatus");
+  if (status) {
+    if (!next) status.textContent = "Mostrando todos los simuladores.";
+    else if (next === "irpf") status.textContent = "Vista: IRPF.";
+    else if (next === "plusvalia") status.textContent = "Vista: Plusvalía (IIVTNU).";
+    else if (next === "alquiler") status.textContent = "Vista: Alquileres.";
+    else if (next === "informe") status.textContent = "Vista: Informe fiscal (venta).";
+    else status.textContent = "";
+  }
+
+  if (options?.scroll) {
+    const hub = document.getElementById("simuladoresHub");
+    if (hub && typeof hub.scrollIntoView === "function") {
+      hub.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+}
+
+function scrollToSimuladoresPane(pane = "") {
+  const key = normalizeSimple(pane || "");
+  const el =
+    (key === "irpf" && document.getElementById("simPaneIrpf")) ||
+    (key === "plusvalia" && document.getElementById("simPanePlusvalia")) ||
+    (key === "alquiler" && document.getElementById("simPaneAlquiler")) ||
+    (key === "informe" && document.getElementById("simPaneInforme")) ||
+    null;
+  if (el && typeof el.scrollIntoView === "function") {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    return true;
+  }
+  return false;
+}
+
+function openWorkspaceSimuladores(opts = {}) {
+  const pane = opts?.pane || "";
+  const prefill = opts?.prefill && typeof opts.prefill === "object" ? opts.prefill : {};
+  const user = getAuthScopeUser();
+  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
+  openHolding({ mode });
+  window.setTimeout(() => {
+    const viewOptions = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
+    const anchor = document.getElementById("simuladoresHub") || document.getElementById("fiscalWizardForm");
+    focusWorkspaceEngine("simuladores", anchor, viewOptions).catch(() => {});
+    window.setTimeout(() => {
+      try {
+        setSimuladoresPane(pane);
+      } catch {}
+      try {
+        applyFiscalWizardPrefill(prefill);
+      } catch {}
+      try {
+        if (pane) scrollToSimuladoresPane(pane);
+      } catch {}
+    }, 80);
+  }, 220);
+}
 
 const tokenizeSearchQuery = (raw = "") => {
   const text = String(raw || "").trim();
