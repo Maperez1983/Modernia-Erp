@@ -2764,12 +2764,19 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 		const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
 			const crmLightningSidebar = document.getElementById("crmLightningSidebar");
 			const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
-				const crmInsertModal = document.getElementById("crmInsertModal");
-					const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
-					const crmInsertSearch = document.getElementById("crmInsertSearch");
-					const crmInsertList = document.getElementById("crmInsertList");
-					let crmInsertAnchorEl = null;
-				const crmClienteModal = document.getElementById("crmClienteModal");
+					const crmInsertModal = document.getElementById("crmInsertModal");
+						const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
+						const crmInsertSearch = document.getElementById("crmInsertSearch");
+						const crmInsertList = document.getElementById("crmInsertList");
+						let crmInsertAnchorEl = null;
+					// Evita “cortes” visuales del overlay si el CRM vive dentro de un contenedor con overflow/transform:
+					// el modal debe colgar del <body> para cubrir toda la pantalla (position: fixed real).
+					try {
+					  if (crmInsertModal && document.body && crmInsertModal.parentElement !== document.body) {
+					    document.body.appendChild(crmInsertModal);
+					  }
+					} catch {}
+					const crmClienteModal = document.getElementById("crmClienteModal");
 				const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
 				const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
 			const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
@@ -19047,8 +19054,7 @@ const syncCrmModalOpenState = () => {
     const open =
       (crmInsertModal &&
         !crmInsertModal.classList.contains("hidden") &&
-        !crmInsertModal.classList.contains("crm-insert-modal--dropdown") &&
-        !crmInsertModal.classList.contains("crm-insert-modal--anchored")) ||
+        !crmInsertModal.classList.contains("crm-insert-modal--dropdown")) ||
       (crmClienteModal && !crmClienteModal.classList.contains("hidden")) ||
       (crmCaptacionModal && !crmCaptacionModal.classList.contains("hidden")) ||
       (actionModal && !actionModal.classList.contains("hidden"));
@@ -19071,23 +19077,6 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
 			    const isAnchored = Boolean(anchorEl && preferAnchored);
 			    crmInsertModal.classList.toggle("crm-insert-modal--anchored", isAnchored);
 			    crmInsertModal.classList.remove("crm-insert-modal--dropdown");
-			    // En modo anclado queremos un “desplegable” limpio (sin oscurecer la ficha)
-			    // y reservar espacio para que no pise el listado.
-			    try {
-			      if (isAnchored) {
-			        crmInsertModal.style.background = "transparent";
-			        crmInsertModal.style.backdropFilter = "none";
-			      } else {
-			        crmInsertModal.style.removeProperty("background");
-			        crmInsertModal.style.removeProperty("backdrop-filter");
-			      }
-			    } catch {}
-			    try {
-			      const needsSpace = Boolean(isAnchored && anchorEl && anchorEl.id === "crmTopNewBtn");
-			      if (crmWorkspaceTabs && crmWorkspaceTabs.classList.contains("crm-lightning-tabs")) {
-			        crmWorkspaceTabs.style.marginBottom = needsSpace ? "320px" : "";
-			      }
-			    } catch {}
 			    if (isAnchored) {
 			      crmInsertAnchorEl = anchorEl;
 			      positionCrmInsertModal(anchorEl);
@@ -19111,15 +19100,6 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
 				    crmInsertModal.style.removeProperty("--crm-insert-left");
 				    crmInsertModal.style.removeProperty("--crm-insert-top");
 				    crmInsertModal.style.removeProperty("--crm-sidebar-right");
-				    try {
-				      crmInsertModal.style.removeProperty("background");
-				      crmInsertModal.style.removeProperty("backdrop-filter");
-				    } catch {}
-				    try {
-				      if (crmWorkspaceTabs && crmWorkspaceTabs.classList.contains("crm-lightning-tabs")) {
-				        crmWorkspaceTabs.style.marginBottom = "";
-				      }
-				    } catch {}
 				  }
 				  syncCrmModalOpenState();
 				};
