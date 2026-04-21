@@ -7254,7 +7254,7 @@ const openIrpfGananciaModal = (options = {}) => {
 	          <h3>Simulador IRPF/IRNR · Ganancia patrimonial</h3>
 	          <button type="button" class="ghost" data-irpf-close>✕</button>
 	        </div>
-		        <form class="modal-body form-grid fiscal-grid" data-irpf-form>
+		        <form class="modal-body form-grid fiscal-grid" data-irpf-form data-money-euro="1">
 		          <input type="hidden" name="brand_logo_url" value="/assets/grupo_modernia_logo.png" />
 	          <label class="span-2">
 	            Referencia (opcional)
@@ -51181,6 +51181,7 @@ const bindMoneyInputs = (formEl) => {
 const bindMoneyPlainInputs = (formEl) => {
   if (!formEl) return;
   const moneyInputs = formEl.querySelectorAll("input[data-money-plain='1']");
+  const formUsesEuro = formEl.dataset.moneyEuro === "1";
   const fmtEdit = (num) => `${num.toFixed(2)}`.replace(".", ",");
   const fmtView = (num) =>
     num.toLocaleString("es-ES", {
@@ -51190,13 +51191,14 @@ const bindMoneyPlainInputs = (formEl) => {
   moneyInputs.forEach((input) => {
     if (input.dataset.boundMoneyPlain === "1") return;
     input.dataset.boundMoneyPlain = "1";
+    const usesEuro = formUsesEuro || input.dataset.moneyEuro === "1";
     input.addEventListener("focus", () => {
       const num = toNumber(input.value);
       if (num !== null) input.value = fmtEdit(num);
     });
     input.addEventListener("blur", () => {
       const num = toNumber(input.value);
-      if (num !== null) input.value = fmtView(num);
+      if (num !== null) input.value = `${fmtView(num)}${usesEuro ? "€" : ""}`;
     });
   });
   if (formEl.dataset.boundMoneyPlainForm !== "1") {
@@ -51206,15 +51208,17 @@ const bindMoneyPlainInputs = (formEl) => {
       if (!(target instanceof HTMLInputElement)) return;
       if (!target.matches("input[data-money-plain='1']")) return;
       if (document.activeElement === target) return;
+      const usesEuro = formUsesEuro || target.dataset.moneyEuro === "1";
       const num = toNumber(target.value);
-      if (num !== null) target.value = fmtView(num);
+      if (num !== null) target.value = `${fmtView(num)}${usesEuro ? "€" : ""}`;
     });
   }
   // Format any pre-filled values immediately (without touching focused input).
   moneyInputs.forEach((input) => {
     if (document.activeElement === input) return;
+    const usesEuro = formUsesEuro || input.dataset.moneyEuro === "1";
     const num = toNumber(input.value);
-    if (num !== null) input.value = fmtView(num);
+    if (num !== null) input.value = `${fmtView(num)}${usesEuro ? "€" : ""}`;
   });
 };
 
@@ -61305,10 +61309,10 @@ if (irpfGainForm) {
       }, 0);
 
     const fmtPlain = (num) =>
-      Number(num || 0).toLocaleString("es-ES", {
+      `${Number(num || 0).toLocaleString("es-ES", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      });
+      })}€`;
 
     if (adqTotalInput) {
       const impuestosAdq = sumInputs(["gastos_adq_itp", "gastos_adq_iva", "gastos_adq_ajd"]);
