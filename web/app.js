@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v193";
+const APP_SW_VERSION = "v194";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -3836,25 +3836,29 @@ function scrollToSimuladoresPane(pane = "") {
 function openWorkspaceSimuladores(opts = {}) {
   const pane = opts?.pane || "";
   const prefill = opts?.prefill && typeof opts.prefill === "object" ? opts.prefill : {};
-  const user = getAuthScopeUser();
-  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
-  openHolding({ mode });
+  // Los simuladores viven en el workspace tenant. En modo plataforma (admin) no existe la vista `motores`.
+  let workspace = "";
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    workspace = String(params.get("workspace") || "").trim();
+  } catch {}
+  if (!workspace) {
+    try {
+      workspace = String(state.currentWorkspaceTarget || "").trim();
+    } catch {}
+  }
+  openHolding({ mode: "tenant", workspace, view: "motores", engine: "simuladores" });
   window.setTimeout(() => {
-    const viewOptions = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
-    const anchor = document.getElementById("simuladoresHub") || document.getElementById("fiscalWizardForm");
-    focusWorkspaceEngine("simuladores", anchor, viewOptions).catch(() => {});
-    window.setTimeout(() => {
-      try {
-        setSimuladoresPane(pane);
-      } catch {}
-      try {
-        applyFiscalWizardPrefill(prefill);
-      } catch {}
-      try {
-        if (pane) scrollToSimuladoresPane(pane);
-      } catch {}
-    }, 80);
-  }, 220);
+    try {
+      setSimuladoresPane(pane);
+    } catch {}
+    try {
+      applyFiscalWizardPrefill(prefill);
+    } catch {}
+    try {
+      if (pane) scrollToSimuladoresPane(pane);
+    } catch {}
+  }, 180);
 }
 
 const tokenizeSearchQuery = (raw = "") => {
@@ -6950,13 +6954,7 @@ const openWorkspaceFinCopilot = () => {
 };
 
 const openWorkspaceIrpfSimulator = () => {
-  const user = getAuthScopeUser();
-  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
-  openHolding({ mode });
-  window.setTimeout(() => {
-    const options = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
-    focusWorkspaceEngine("simuladores", irpfGainForm, options).catch(() => {});
-  }, 220);
+  openWorkspaceSimuladores({ pane: "irpf" });
 };
 
 const inferFiscalTerritoryFromProvincia = (provinciaRaw = "") => {
@@ -7188,14 +7186,28 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
 const openWorkspaceFiscalWizard = (prefill = {}) => {
   fiscalWizardActivePreset = null;
   setFiscalWizardDgtRefs([], { replace: true });
-  const user = getAuthScopeUser();
-  const mode = canAccessSharedHomeModules(user) ? "platform" : "tenant";
-  openHolding({ mode });
+  let workspace = "";
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    workspace = String(params.get("workspace") || "").trim();
+  } catch {}
+  if (!workspace) {
+    try {
+      workspace = String(state.currentWorkspaceTarget || "").trim();
+    } catch {}
+  }
+  openHolding({ mode: "tenant", workspace, view: "motores", engine: "simuladores" });
   window.setTimeout(() => {
-    const options = mode === "tenant" ? { scroll: true, forceTenantView: true } : { scroll: true };
-    focusWorkspaceEngine("simuladores", fiscalWizardForm, options).catch(() => {});
-    window.setTimeout(() => applyFiscalWizardPrefill(prefill), 60);
-  }, 220);
+    try {
+      setSimuladoresPane("informe");
+    } catch {}
+    try {
+      applyFiscalWizardPrefill(prefill);
+    } catch {}
+    try {
+      scrollToSimuladoresPane("informe");
+    } catch {}
+  }, 180);
 };
 
 const openIrpfGananciaModal = (options = {}) => {
