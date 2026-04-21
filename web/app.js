@@ -6506,11 +6506,11 @@ const ensureIivtnuSimulator = async () => {
 		  const result = resp?.result || {};
 		  const ab = result?.abatimiento && typeof result.abatimiento === "object" ? result.abatimiento : {};
 		  const regimen = String(params.regimen_fiscal || "irpf").toLowerCase();
-	  const fields = [
-	    ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
-	    ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
-	    ["Ejercicio", params.ejercicio ?? ""],
-	  ];
+		  const fields = [
+		      ["Régimen fiscal", regimen === "irnr" ? "IRNR (no residente)" : "IRPF (residente)"],
+		      ["CCAA aplicable", params.ccaa_label || params.ccaa || "—"],
+		      ["Ejercicio", params.ejercicio ?? ""],
+		    ];
 	  if (regimen === "irnr") {
 	    fields.push(["Tipo gravamen IRNR", params.tipo_gravamen_pct != null ? `${params.tipo_gravamen_pct}%` : "—"]);
 	    fields.push(["Retención %", params.retencion_pct != null ? `${params.retencion_pct}%` : "—"]);
@@ -6518,19 +6518,26 @@ const ensureIivtnuSimulator = async () => {
 	    fields.push(["Escala usada", params.escala_ejercicio ?? ""]);
 	    fields.push(["Escala asumida", params.escala_asumida ? "Sí" : "No"]);
 	  }
-		  fields.push(
-		    ["Participación", result.participacion_factor],
-		    ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
-		    ["Valor transmisión (calc.)", result.valor_transmision_calc],
-		    ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
-		    ["Exento", result.exento],
-		    ["Motivo exención", result.exencion_motivo || "—"],
-		    ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
-		    ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
-		    ["Ganancia computable", result.ganancia_patrimonial_computable],
-		    ["Base ahorro sujeta", result.base_ahorro_sujeta],
-		    ["Cuota estimada", result.cuota_ahorro_estimada],
-		  );
+			    fields.push(
+			      ["Días transcurridos", result.days_transcurridos],
+			      ["Ganancia diaria (bruta)", result.ganancia_diaria],
+			      ["Ganancia diaria (sujeta)", result.ganancia_sujeta_diaria],
+			      ["Exenta", result.exento],
+			      ["Exenta (%)", result.exento_pct != null ? `${result.exento_pct}%` : "—"],
+			      ["Participación", result.participacion_factor],
+			      ["Valor adquisición (calc.)", result.valor_adquisicion_calc],
+			      ["Valor transmisión (calc.)", result.valor_transmision_calc],
+			      ["Ganancia patrimonial (bruta)", result.ganancia_patrimonial],
+			      ["Exento", result.exento],
+			      ["Motivo exención", result.exencion_motivo || "—"],
+			      ["Ganancia sujeta (post-exención)", result.ganancia_sujeta],
+			      ["Amortización aplicada (calc.)", result.amortizacion_deducida_aplicada],
+			      ["Amortización auto", result.amortizacion_auto],
+			      ["Abatimiento (DT 9ª) · Reducción", ab.reduccion_importe],
+			      ["Ganancia computable", result.ganancia_patrimonial_computable],
+			      ["Base ahorro sujeta", result.base_ahorro_sujeta],
+			      ["Cuota estimada", result.cuota_ahorro_estimada],
+			    );
 	  if (regimen === "irnr") {
 	    fields.push(["Retención (importe)", result.retencion_importe]);
 	    fields.push(["Cuota neta (cuota - retención)", result.cuota_neta]);
@@ -7150,6 +7157,10 @@ const openIrpfGananciaModal = (options = {}) => {
                 <summary class="muted" style="cursor:pointer;">Desglose gastos de adquisición (opcional)</summary>
                 <div class="form-grid" style="margin-top:10px;">
                   <label>
+                    Agencia/comisión
+                    <input name="gastos_adq_agencia" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
                     ITP/IVA y AJD
                     <input name="gastos_adq_itp_iva_ajd" inputmode="decimal" placeholder="0,00" />
                   </label>
@@ -7247,10 +7258,40 @@ const openIrpfGananciaModal = (options = {}) => {
 		            Préstamo pendiente (opcional)
 		            <input name="prestamo_pendiente" inputmode="decimal" placeholder="0,00" />
 		          </label>
+              <details class="span-2" style="margin-top:-6px;">
+                <summary class="muted" style="cursor:pointer;">Alquiler y amortización (auto)</summary>
+                <div class="form-grid" style="margin-top:10px;">
+                  <label class="span-2">
+                    <div class="inline-row">
+                      <label class="ui-check"><input type="checkbox" name="inmueble_alquilado" /> Estuvo alquilado (o afecto a actividad)</label>
+                      <label class="ui-check"><input type="checkbox" name="amortizacion_mode" value="auto" /> Calcular amortización automáticamente</label>
+                    </div>
+                  </label>
+                  <label>
+                    Inicio alquiler (opcional)
+                    <input name="fecha_inicio_alquiler" type="date" />
+                  </label>
+                  <label>
+                    Fin alquiler (opcional)
+                    <input name="fecha_fin_alquiler" type="date" />
+                  </label>
+                  <label>
+                    Base amortización (construcción)
+                    <input name="amortizacion_base" inputmode="decimal" placeholder="0,00" />
+                  </label>
+                  <label>
+                    % amortización anual
+                    <input name="amortizacion_pct" inputmode="decimal" placeholder="3" value="3" />
+                  </label>
+                  <div class="span-2 muted">
+                    Si no indicas “amortización deducida” manual, el CRM estima la amortización deducible prorateada por días con los datos anteriores.
+                  </div>
+                </div>
+              </details>
 		          <label>
-	            Abatimiento (DT 9ª)
-	            <select name="abatimiento_mode">
-	              <option value="auto" selected>Auto (si adquirido &lt; 31/12/1994)</option>
+		            Abatimiento (DT 9ª)
+		            <select name="abatimiento_mode">
+		              <option value="auto" selected>Auto (si adquirido &lt; 31/12/1994)</option>
 	              <option value="off">Desactivado</option>
 	              <option value="force">Forzar</option>
 	            </select>
@@ -7305,7 +7346,13 @@ const openIrpfGananciaModal = (options = {}) => {
   const readPayload = () => {
     const payload = Object.fromEntries(new FormData(form).entries());
     const sum = (names = []) => (names || []).reduce((acc, key) => acc + parseMoneyValue(payload[key] || 0), 0);
-    const adqDesglose = sum(["gastos_adq_itp_iva_ajd", "gastos_adq_notaria_registro", "gastos_adq_gestoria", "gastos_adq_otros"]);
+    const adqDesglose = sum([
+      "gastos_adq_agencia",
+      "gastos_adq_itp_iva_ajd",
+      "gastos_adq_notaria_registro",
+      "gastos_adq_gestoria",
+      "gastos_adq_otros",
+    ]);
     const txDesglose = sum(["gastos_tx_agencia", "gastos_tx_notaria_registro", "gastos_tx_cancelacion", "gastos_tx_otros"]);
     const adqMode = String(payload.gastos_adquisicion_mode || "manual").toLowerCase();
     const txMode = String(payload.gastos_transmision_mode || "manual").toLowerCase();
@@ -7390,6 +7437,7 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("valor_adquisicion", prefill.valor_adquisicion || "");
   setValue("gastos_adquisicion", prefill.gastos_adquisicion || "");
   setValue("gastos_adquisicion_mode", prefill.gastos_adquisicion_mode || "manual");
+  setValue("gastos_adq_agencia", prefill.gastos_adq_agencia || "");
   setValue("gastos_adq_itp_iva_ajd", prefill.gastos_adq_itp_iva_ajd || "");
   setValue("gastos_adq_notaria_registro", prefill.gastos_adq_notaria_registro || "");
   setValue("gastos_adq_gestoria", prefill.gastos_adq_gestoria || "");
@@ -7407,6 +7455,10 @@ const openIrpfGananciaModal = (options = {}) => {
   setValue("importe_reinvertido", prefill.importe_reinvertido || "");
   setValue("importe_comprometido_reinvertir", prefill.importe_comprometido_reinvertir || "");
   setValue("prestamo_pendiente", prefill.prestamo_pendiente || "");
+  setValue("fecha_inicio_alquiler", prefill.fecha_inicio_alquiler || "");
+  setValue("fecha_fin_alquiler", prefill.fecha_fin_alquiler || "");
+  setValue("amortizacion_base", prefill.amortizacion_base || "");
+  setValue("amortizacion_pct", prefill.amortizacion_pct || "3");
   setChecked("vivienda_habitual", Boolean(prefill.vivienda_habitual));
   setChecked("exencion_mayor_65", Boolean(prefill.exencion_mayor_65));
   renderResult(null);

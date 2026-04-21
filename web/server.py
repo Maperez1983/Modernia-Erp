@@ -8003,6 +8003,7 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     adq_desglose_total = _sum_money(
         [
+            "gastos_adq_agencia",
             "gastos_adq_itp_iva_ajd",
             "gastos_adq_notaria_registro",
             "gastos_adq_gestoria",
@@ -8023,6 +8024,35 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
         gastos_adq = adq_desglose_total
     if tx_mode == "desglose" and tx_desglose_total > 0:
         gastos_tx = tx_desglose_total
+
+    # Amortización (auto) si el inmueble estuvo alquilado (o afecto) y hay base.
+    amort_auto = 0.0
+    amort_auto_days = 0
+    amort_auto_base = _money("amortizacion_base")
+    amort_auto_pct = parse_optional_float(payload.get("amortizacion_pct") or 3.0)
+    if amort_auto_pct is None:
+        amort_auto_pct = 3.0
+    try:
+        amort_auto_pct = float(amort_auto_pct)
+    except Exception:
+        amort_auto_pct = 3.0
+    amort_auto_pct = max(0.0, min(10.0, amort_auto_pct))
+    alquilado_flag = bool(payload.get("inmueble_alquilado") or False)
+    amort_mode = str(payload.get("amortizacion_mode") or "").strip().lower()
+    if (amort_mode == "auto" or alquilado_flag) and amort <= 0 and amort_auto_base > 0 and amort_auto_pct > 0:
+        start = parse_iso_date(payload.get("fecha_inicio_alquiler") or "") or acq
+        end = parse_iso_date(payload.get("fecha_fin_alquiler") or "") or devengo
+        if end > devengo:
+            end = devengo
+        if start < acq:
+            start = acq
+        if end > start:
+            amort_auto_days = int((end - start).days)
+            amort_auto = round(
+                float(amort_auto_base) * (float(amort_auto_pct) / 100.0) * (float(amort_auto_days) / 365.0) + 1e-9,
+                2,
+            )
+            amort = max(0.0, amort_auto)
 
     valor_adquisicion_calc = max(0.0, (valor_adq + gastos_adq + mejoras - amort) * factor)
     valor_transmision_calc = max(0.0, (valor_tx - gastos_tx - plusvalia) * factor)
@@ -8198,6 +8228,11 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     base_ahorro = round(max(0.0, ganancia_computable) + 1e-9, 2)
 
+    days_total = int((devengo - acq).days)
+    ganancia_diaria = round((ganancia / days_total) + 1e-12, 6) if days_total > 0 else 0.0
+    ganancia_sujeta_diaria = round((ganancia_sujeta / days_total) + 1e-12, 6) if days_total > 0 else 0.0
+    exento_pct = round((float(exento) / float(ganancia)) * 100.0 + 1e-12, 4) if ganancia > 0 else 0.0
+
     cuota = 0.0
     scale_year = ""
     assumed = 0
@@ -8240,6 +8275,10 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
         },
         "result": {
             "participacion_factor": round(factor + 1e-12, 6),
+            "days_transcurridos": days_total,
+            "ganancia_diaria": ganancia_diaria,
+            "ganancia_sujeta_diaria": ganancia_sujeta_diaria,
+            "exento_pct": exento_pct,
             "valor_adquisicion_calc": round(valor_adquisicion_calc + 1e-9, 2),
             "valor_transmision_calc": round(valor_transmision_calc + 1e-9, 2),
             "ganancia_patrimonial": ganancia,
@@ -8248,6 +8287,11 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
             "exento": round(exento + 1e-9, 2),
             "exencion_motivo": exencion_motivo,
             "edad_transmision": edad,
+            "amortizacion_deducida_aplicada": round(float(amort or 0.0) + 1e-9, 2),
+            "amortizacion_auto": round(float(amort_auto or 0.0) + 1e-9, 2),
+            "amortizacion_auto_days": int(amort_auto_days or 0),
+            "amortizacion_auto_base": round(float(amort_auto_base or 0.0) + 1e-9, 2),
+            "amortizacion_auto_pct": round(float(amort_auto_pct or 0.0) + 1e-12, 6),
             "base_ahorro_sujeta": base_ahorro,
             "cuota_ahorro_estimada": cuota,
             "retencion_importe": retencion_importe,
@@ -8298,6 +8342,16 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     def date_text(value: object) -> str:
         return str(value or "").strip()
 
+    kpi_lines = [
+        ("Días transcurridos", str(result.get("days_transcurridos") or "—")),
+        ("Ganancia diaria (bruta)", money(result.get("ganancia_diaria"))),
+        ("Ganancia diaria (sujeta)", money(result.get("ganancia_sujeta_diaria"))),
+        ("Exenta", money(result.get("exento"))),
+        ("Exenta (%)", f"{float(result.get('exento_pct') or 0):.2f}%"),
+        ("Sujeta", money(result.get("ganancia_sujeta"))),
+        ("Cuota estimada", money(result.get("cuota_ahorro_estimada"))),
+    ]
+
     input_lines = [
         ("Régimen fiscal", "IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"),
         (
@@ -8312,6 +8366,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Fecha transmisión (devengo)", date_text(payload.get("fecha_transmision"))),
         ("Valor adquisición", money(payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(payload.get("gastos_adquisicion"))),
+        ("Gastos adquisición · Agencia", money(payload.get("gastos_adq_agencia"))),
         ("Gastos adquisición · ITP/IVA+AJD", money(payload.get("gastos_adq_itp_iva_ajd"))),
         ("Gastos adquisición · Notaría/Registro", money(payload.get("gastos_adq_notaria_registro"))),
         ("Gastos adquisición · Gestoría", money(payload.get("gastos_adq_gestoria"))),
@@ -8320,6 +8375,11 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ("Fecha mejoras/inversiones", date_text(payload.get("fecha_mejoras"))),
         ("Valor tx mejoras (opcional)", money(payload.get("valor_transmision_mejoras"))),
         ("Amortización deducida", money(payload.get("amortizacion_deducida"))),
+        ("Amortización aplicada (calc.)", money(result.get("amortizacion_deducida_aplicada"))),
+        ("Amortización auto (si aplica)", money(result.get("amortizacion_auto"))),
+        ("Amortización auto · días", str(result.get("amortizacion_auto_days") or "—")),
+        ("Amortización auto · base", money(result.get("amortizacion_auto_base"))),
+        ("Amortización auto · %", f"{float(result.get('amortizacion_auto_pct') or 0):.3f}%"),
         ("Valor transmisión", money(payload.get("valor_transmision"))),
         ("Gastos transmisión", money(payload.get("gastos_transmision"))),
         ("Gastos transmisión · Agencia", money(payload.get("gastos_tx_agencia"))),
@@ -8371,14 +8431,16 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         "No sustituye asesoramiento fiscal profesional ni contempla todos los supuestos (mejoras por fecha, valores cotizados especiales, convenios, etc.).",
     ]
     brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
-    pdf_bytes = build_branded_document_pdf(
-        "INFORME IRPF/IRNR · GANANCIA PATRIMONIAL",
+    pdf_bytes = build_modernia_branded_document_pdf(
+        "Informe IRPF/IRNR · Ganancia patrimonial",
         subtitle,
         [
+            ("Indicadores clave", kpi_lines),
             ("Datos de entrada", input_lines),
             ("Resultado", output_lines),
         ],
         footer_lines=footer,
+        company={},
         brand_logo_url=brand,
     )
     return pdf_bytes or b""
@@ -8443,6 +8505,7 @@ def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dic
         ("% participación", text(irpf_payload.get("participacion_pct") or iivtnu_payload.get("participacion_pct") or "100")),
         ("Valor adquisición", money(irpf_payload.get("valor_adquisicion"))),
         ("Gastos adquisición", money(irpf_payload.get("gastos_adquisicion"))),
+        ("Gastos adquisición · Agencia", money(irpf_payload.get("gastos_adq_agencia"))),
         ("Gastos adquisición · ITP/IVA+AJD", money(irpf_payload.get("gastos_adq_itp_iva_ajd"))),
         ("Gastos adquisición · Notaría/Registro", money(irpf_payload.get("gastos_adq_notaria_registro"))),
         ("Gastos adquisición · Gestoría", money(irpf_payload.get("gastos_adq_gestoria"))),
