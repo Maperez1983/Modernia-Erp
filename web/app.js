@@ -44216,15 +44216,14 @@ const loadCrmAgenda = () => {
 			    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
 			    return true;
 			  };
-			  const matchPresetCalendar = (row) => {
-			    if (!presetEquipo && !isMine(row)) return false;
-			    const tipoKey = normalizeTipoKey(row);
-			    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
-			    // así que NO limitamos por “7 días”. El preset solo decide el tipo.
-			    if (preset.startsWith("citas")) return tipoKey === "cita";
-			    if (preset.startsWith("actividades")) return tipoKey !== "cita";
-			    return true;
-			  };
+				  const matchPresetCalendar = (row) => {
+				    const tipoKey = normalizeTipoKey(row);
+				    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
+				    // así que NO limitamos por “7 días”. El preset solo decide el tipo.
+				    if (preset.startsWith("citas")) return tipoKey === "cita";
+				    if (preset.startsWith("actividades")) return tipoKey !== "cita";
+				    return true;
+				  };
 		  const matchAmbito = (row) => {
 		    if (!ambitoFilter) return true;
 		    const key = resolveCrmAgendaAmbitoKey(row);
