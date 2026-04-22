@@ -1593,8 +1593,23 @@ body.crm-fin #crmSection .crm-lightning-sidebar {
   margin: 0;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: visible;
+}
+
+/* En el embed del inmueble, evitamos scroll lateral: forzamos grids más compactos. */
+.inmueble-fiscal-embed .simuladores-embedded .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.inmueble-fiscal-embed .simuladores-embedded .form-grid.fiscal-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .inmueble-fiscal-embed .simuladores-embedded .form-grid.fiscal-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .workspace-list-item {
