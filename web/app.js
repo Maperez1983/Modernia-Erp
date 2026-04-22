@@ -61767,7 +61767,19 @@ if (irpfGainForm) {
     if (fallback && irpfClienteIdInput) {
       irpfClienteIdInput.value = fallback;
     }
-    return fallback;
+    if (fallback) return fallback;
+    // Si venimos desde un inmueble, el cliente ya está determinado por los propietarios enlazados.
+    try {
+      const ctx = state.currentInmuebleContext || {};
+      const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+      const first = propietarios.find((p) => p && (p.id || p.cliente_id));
+      const inferred = String(first?.id || first?.cliente_id || "").trim();
+      if (inferred && irpfClienteIdInput) {
+        irpfClienteIdInput.value = inferred;
+      }
+      return inferred;
+    } catch {}
+    return "";
   };
 
   const setSlotStatus = (t = "") => {
@@ -67586,6 +67598,12 @@ if (compraventaForm) {
 	    compraventaOpenIrpfBtn.addEventListener("click", () => {
 	      let prefill = { empresa_nombre: resolveCrmInmoEmpresaNombre() };
 	      try {
+	        const ctx = state.currentInmuebleContext || {};
+	        const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+	        const cliente_id = String(propietarios?.[0]?.id || state.currentClienteId || "").trim();
+	        if (cliente_id) prefill.cliente_id = cliente_id;
+	      } catch {}
+	      try {
 	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
 	        prefill = {
 	          ...prefill,
@@ -67602,6 +67620,12 @@ if (compraventaForm) {
 	  if (compraventaOpenFiscalWizardBtn) {
 	    compraventaOpenFiscalWizardBtn.addEventListener("click", () => {
 	      let prefill = { operacion: "venta" };
+	      try {
+	        const ctx = state.currentInmuebleContext || {};
+	        const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+	        const cliente_id = String(propietarios?.[0]?.id || state.currentClienteId || "").trim();
+	        if (cliente_id) prefill.cliente_id = cliente_id;
+	      } catch {}
 	      try {
 	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
 	        prefill = {
