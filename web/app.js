@@ -37680,16 +37680,50 @@ const refreshInmuebleActividadClientesCandidates = (type) => {
     candidates,
     scope === "demandas" ? "Comprador (opcional)" : "Propietario (opcional)"
   );
-  if (!String(inmuebleActividadClienteId.value || "").trim() && candidates.length === 1) {
-    const only = candidates[0] || {};
-    const id = String(only.cliente_id || only.id || "").trim();
-    const nombre = formatNombreCliente(only.nombre || only.cliente || only.cliente_nombre || only.propietario || "");
-    if (id && nombre) {
-      inmuebleActividadClienteId.value = id;
-      inmuebleActividadClienteInput.value = nombre;
-      if (inmuebleActividadClienteQuick && inmuebleActividadClienteQuick._agendaQuickMap?.has(id)) {
-        inmuebleActividadClienteQuick.value = id;
-      }
+  const cleaned = (Array.isArray(candidates) ? candidates : [])
+    .map((row) => {
+      const id = String(row.cliente_id || row.id || "").trim();
+      const nombreRaw = row.nombre || row.cliente || row.cliente_nombre || row.propietario || "";
+      const nombre = formatNombreCliente(nombreRaw);
+      const key = normalizeSimple(nombre);
+      return { id, nombre, key };
+    })
+    .filter((item) => item.key);
+  const idSet = new Set(cleaned.map((item) => item.id).filter(Boolean));
+  const nameToId = new Map(cleaned.filter((item) => item.id).map((item) => [item.key, item.id]));
+  const setSelection = (id, nombre) => {
+    inmuebleActividadClienteId.value = id || "";
+    inmuebleActividadClienteInput.value = nombre || "";
+    if (inmuebleActividadClienteQuick && inmuebleActividadClienteQuick._agendaQuickMap?.has(id)) {
+      inmuebleActividadClienteQuick.value = id;
+    }
+  };
+  const clearSelection = () => {
+    inmuebleActividadClienteId.value = "";
+    inmuebleActividadClienteInput.value = "";
+    if (inmuebleActividadClienteQuick) inmuebleActividadClienteQuick.value = "";
+  };
+  // Evita “arrastre” de cliente anterior (otro inmueble) y fuerza coherencia con el scope actual.
+  const currentId = String(inmuebleActividadClienteId.value || "").trim();
+  const currentNameKey = normalizeSimple(inmuebleActividadClienteInput.value || "");
+  if (currentId && !idSet.has(currentId)) {
+    clearSelection();
+  } else if (!currentId && currentNameKey && nameToId.has(currentNameKey)) {
+    const id = nameToId.get(currentNameKey) || "";
+    const hit = cleaned.find((item) => item.id === id) || null;
+    if (id && hit) setSelection(id, hit.nombre);
+  } else if (scope === "propietarios" && currentNameKey && !nameToId.has(currentNameKey)) {
+    // Para citas de cambio de estado (propietarios), no dejamos un nombre “suelto” que venga del último cliente trabajado.
+    clearSelection();
+  }
+  // Defaults: si estamos en propietarios, siempre proponemos el primer propietario.
+  if (!String(inmuebleActividadClienteId.value || "").trim()) {
+    if (cleaned.length === 1) {
+      const only = cleaned[0] || {};
+      if (only.id && only.nombre) setSelection(only.id, only.nombre);
+    } else if (scope === "propietarios" && cleaned.length) {
+      const first = cleaned.find((item) => item.id) || cleaned[0];
+      if (first?.id && first?.nombre) setSelection(first.id, first.nombre);
     }
   }
 };
