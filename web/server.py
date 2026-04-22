@@ -53195,9 +53195,59 @@ class Handler(BaseHTTPRequestHandler):
             filename = str(payload.get("filename") or "renta.pdf").strip()
             ejercicio = str(payload.get("ejercicio") or "").strip()
             estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
+            # Fallback: algunos navegadores bloquean el PUT directo a S3 (CORS) y devuelven "Load failed".
+            # Permitimos subir el fichero en base64 para que el backend lo guarde en S3 y continúe con el OCR.
             if not doc_key:
-                json_response(self, {"error": "doc_key requerido"}, status=400)
-                return
+                file_base64 = payload.get("file_base64") or payload.get("fileBase64") or ""
+                content_type = str(payload.get("content_type") or payload.get("contentType") or "").strip() or None
+                prefix = str(payload.get("prefix") or "gestoria").strip() or "gestoria"
+                if not file_base64:
+                    json_response(self, {"error": "doc_key requerido"}, status=400)
+                    return
+                try:
+                    raw = str(file_base64).strip()
+                    if "base64," in raw:
+                        raw = raw.split("base64,", 1)[1]
+                    blob = base64.b64decode(raw.encode("utf-8"), validate=False)
+                except Exception:
+                    json_response(self, {"error": "file_base64 inválido"}, status=400)
+                    return
+                if len(blob) <= 0:
+                    json_response(self, {"error": "file_base64 vacío"}, status=400)
+                    return
+                if len(blob) > 30 * 1024 * 1024:
+                    json_response(self, {"error": "Archivo demasiado grande (máx 30MB)"}, status=413)
+                    return
+                client = s3_client()
+                if not client:
+                    bucket, region = s3_config()
+                    missing = []
+                    if not bucket:
+                        missing.append("AWS_S3_BUCKET")
+                    if not region:
+                        missing.append("AWS_REGION")
+                    if not S3_BOTO3_AVAILABLE:
+                        missing.append("boto3")
+                    detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                    json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                    return
+                bucket, region = s3_config()
+                key = s3_safe_key(prefix, filename or "renta.pdf")
+                try:
+                    put_params = {"Bucket": bucket, "Key": key, "Body": blob}
+                    if content_type:
+                        put_params["ContentType"] = content_type
+                    client.put_object(**put_params)
+                except Exception:
+                    json_response(self, {"error": "No se pudo subir el archivo a S3"}, status=502)
+                    return
+                doc_key = key
+                doc_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                try:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    _s3_grant_key(session, key, conn=conn)
+                except Exception:
+                    pass
             doc_id = uuid.uuid4().hex
             doc_nombre = str(payload.get("nombre") or "").strip() or (
                 f"Renta {ejercicio or datetime.now().year} · {estado_presentacion}.pdf"
@@ -53252,7 +53302,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}", "detail": str(exc)}, status=503)
                 return
-            json_response(self, {"ok": True, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "doc_id": doc_id,
+                    "ocr_job_id": ocr_job_id,
+                    "doc_key": doc_key,
+                    "doc_url": doc_url,
+                },
+            )
             return
         elif parsed.path == "/api/renta_quick_attach":
             cliente_id = str(payload.get("cliente_id") or "").strip()

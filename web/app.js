@@ -562,15 +562,16 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
         } catch {
           return "";
         }
-      })();
-      const hint = origin ? ` Revisa CORS del bucket para permitir PUT desde ${origin}.` : "";
-      const message = String(fetchErr?.message || xhrErr?.message || "").trim();
-      if (normalizeSimple(message) === "loadfailed") {
-        throw new Error(`No se pudo subir el archivo (bloqueo de red/CORS).${hint}`);
-      }
-      throw new Error(message || `No se pudo subir el archivo.${hint}`);
-    }
-  }
+	      })();
+	      const hint = origin ? ` Revisa CORS del bucket para permitir PUT desde ${origin}.` : "";
+	      const message = String(fetchErr?.message || xhrErr?.message || "").trim();
+	      const msgKey = normalizeSimple(message).replace(/\s+/g, "");
+	      if (msgKey === "loadfailed") {
+	        throw new Error(`No se pudo subir el archivo (bloqueo de red/CORS).${hint}`);
+	      }
+	      throw new Error(message || `No se pudo subir el archivo.${hint}`);
+	    }
+	  }
   if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
     const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
     const pct = optimized.originalSize
@@ -53696,19 +53697,48 @@ const submitGestoriaRentaQuick = async () => {
   if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Subiendo...";
   if (gestoriaRentaQuickMatches) gestoriaRentaQuickMatches.innerHTML = "";
   try {
-    const upload = await uploadFileToS3(file, "gestoria", gestoriaRentaQuickStatus);
-    if (!upload?.key && !upload?.public_url) {
-      throw new Error("No se pudo subir el archivo.");
+    let upload = null;
+    let ocrStart = null;
+    try {
+      upload = await uploadFileToS3(file, "gestoria", gestoriaRentaQuickStatus);
+    } catch (err) {
+      // Safari/WebKit puede devolver "Load failed" por bloqueo CORS en PUT a S3.
+      // Fallback: enviamos el fichero al servidor en base64 para que el backend lo suba a S3.
+      const rawMsg = String(err?.message || "").trim();
+      const key = normalizeSimple(rawMsg).replace(/\s+/g, "");
+      const looksLikeCors =
+        key === "loadfailed"
+        || rawMsg.toLowerCase().includes("cors")
+        || rawMsg.toLowerCase().includes("bloqueo");
+      if (!looksLikeCors) throw err;
+      if (gestoriaRentaQuickStatus) {
+        gestoriaRentaQuickStatus.textContent = "Subida directa bloqueada. Enviando al servidor...";
+      }
+      const fileBase64 = await fileToBase64(file);
+      ocrStart = await apiPost("/api/renta_quick_ocr", {
+        empresa_nombre: empresa.nombre,
+        usuario: getCurrentUser(),
+        file_base64: fileBase64,
+        content_type: guessMimeType(file) || "application/octet-stream",
+        filename: file.name || "renta.pdf",
+        ejercicio,
+        estado_presentacion,
+      });
     }
-    const ocrStart = await apiPost("/api/renta_quick_ocr", {
-      empresa_nombre: empresa.nombre,
-      usuario: getCurrentUser(),
-      doc_key: upload.key || "",
-      doc_url: upload.public_url || "",
-      filename: file.name || "renta.pdf",
-      ejercicio,
-      estado_presentacion,
-    });
+    if (!ocrStart) {
+      if (!upload?.key && !upload?.public_url) {
+        throw new Error("No se pudo subir el archivo.");
+      }
+      ocrStart = await apiPost("/api/renta_quick_ocr", {
+        empresa_nombre: empresa.nombre,
+        usuario: getCurrentUser(),
+        doc_key: upload.key || "",
+        doc_url: upload.public_url || "",
+        filename: file.name || "renta.pdf",
+        ejercicio,
+        estado_presentacion,
+      });
+    }
     const docId = String(ocrStart?.doc_id || "").trim();
     const jobId = ocrStart?.ocr_job_id;
     if (!jobId) {
@@ -53726,6 +53756,8 @@ const submitGestoriaRentaQuick = async () => {
     );
     const fields = (result && typeof result === "object" ? result.fields : null) || {};
     const nif = String(fields.nif_detectado || "").trim();
+    const docKey = String(ocrStart?.doc_key || upload?.key || "").trim();
+    const docUrl = String(ocrStart?.doc_url || upload?.public_url || "").trim();
     if (!nif) {
       if (gestoriaRentaQuickStatus) {
         gestoriaRentaQuickStatus.textContent = "OCR listo. Documento guardado, pero no detectó DNI/NIF.";
@@ -53735,8 +53767,8 @@ const submitGestoriaRentaQuick = async () => {
         ejercicio,
         estado_presentacion,
         doc_id: docId,
-        doc_key: upload.key || "",
-        doc_url: upload.public_url || "",
+        doc_key: docKey,
+        doc_url: docUrl,
       });
       return;
     }
@@ -53748,8 +53780,8 @@ const submitGestoriaRentaQuick = async () => {
       ejercicio,
       estado_presentacion,
       doc_id: docId,
-      doc_key: upload.key || "",
-      doc_url: upload.public_url || "",
+      doc_key: docKey,
+      doc_url: docUrl,
       presentacion_fecha: String(fields.presentacion_fecha || "").trim(),
       nombre: `Renta ${ejercicio} · ${estado_presentacion}.pdf`,
       notas: "",
