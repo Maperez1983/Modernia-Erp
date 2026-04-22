@@ -66221,10 +66221,23 @@ if (inmuebleActividadForm) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
-      .then((res) => res.json())
+      .then(async (res) => {
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || "Respuesta no válida del servidor.");
+        }
+        if (!res.ok && data?.error) {
+          throw new Error(data.error);
+        }
+        return data;
+      })
       .then((data) => {
         if (inmuebleActividadStatus) {
-          inmuebleActividadStatus.textContent = data.error || "Guardado.";
+          const extra = data?._workflow_error ? ` (workflow: ${data._workflow_error})` : "";
+          inmuebleActividadStatus.textContent = (data.error ? `${data.error}${extra}` : `Guardado.${extra}`).trim();
         }
         if (!data.error) {
           inmuebleActividadForm.reset();

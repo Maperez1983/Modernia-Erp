@@ -16965,6 +16965,63 @@ def parse_asesoramiento_text(text):
             if not fields.get("cliente2_dni"):
                 fields["cliente2_dni"] = m2.group(2).strip()
 
+    # Contrato de intermediación: C1/C2 con N.I.F. + email + teléfono.
+    if not fields.get("cliente1_nombre") or not fields.get("cliente1_dni"):
+        def _extract_contract_party(label: str, next_label: str) -> dict:
+            # Usamos `cleaned` (1 sola línea) para tolerar saltos de página y cortes raros de OCR.
+            m = re.search(
+                rf"\b{label}\s*[:\-]\s*(.+?)(?=(\b{next_label}\s*[:\-])|\bActuando\b|\b2\.|\bCondiciones\b|$)",
+                cleaned,
+                re.IGNORECASE,
+            )
+            segment = m.group(1).strip() if m else ""
+            out = {}
+            if not segment:
+                return out
+            # Nombre: tras D./Da./Dª si existe y hasta coma.
+            m_name = re.search(r"\bD\.?\s*ª?\s*([^,]+)", segment, re.IGNORECASE) or re.search(
+                r"\bDA\.?\s*([^,]+)", segment, re.IGNORECASE
+            )
+            if not m_name:
+                m_name = re.search(r"^([^,]+)", segment)
+            if m_name:
+                out["nombre"] = normalize_person_name(m_name.group(1))
+            # NIF/DNI: puede venir con puntos/guiones.
+            m_nif = re.search(
+                r"\bN\.?\s*[I1]\.?\s*F\.?\s*[:\-]?\s*([0-9A-Z.\- ]{6,24})",
+                segment,
+                re.IGNORECASE,
+            )
+            if m_nif:
+                out["dni"] = normalize_nif(m_nif.group(1))
+            m_email = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", segment, re.IGNORECASE)
+            if m_email:
+                out["email"] = m_email.group(0).strip()
+            m_tel = re.search(r"\b[6-9][0-9]{8}\b", segment)
+            if m_tel:
+                out["telefono"] = m_tel.group(0)
+            return out
+
+        c1 = _extract_contract_party("C1", "C2")
+        c2 = _extract_contract_party("C2", "C1")
+        if c1.get("nombre") and not fields.get("cliente1_nombre"):
+            fields["cliente1_nombre"] = c1["nombre"]
+        if c1.get("dni") and not fields.get("cliente1_dni"):
+            fields["cliente1_dni"] = c1["dni"]
+        if c1.get("telefono") and not fields.get("cliente1_telefono"):
+            fields["cliente1_telefono"] = c1["telefono"]
+        if c1.get("email") and not fields.get("cliente1_email"):
+            fields["cliente1_email"] = c1["email"]
+
+        if c2.get("nombre") and not fields.get("cliente2_nombre"):
+            fields["cliente2_nombre"] = c2["nombre"]
+        if c2.get("dni") and not fields.get("cliente2_dni"):
+            fields["cliente2_dni"] = c2["dni"]
+        if c2.get("telefono") and not fields.get("cliente2_telefono"):
+            fields["cliente2_telefono"] = c2["telefono"]
+        if c2.get("email") and not fields.get("cliente2_email"):
+            fields["cliente2_email"] = c2["email"]
+
     parts = re.split(r"(CLIENTE\s*1|CLIENTE\s*2)", text, flags=re.IGNORECASE)
     blocks = {"1": "", "2": ""}
     current = ""
@@ -16980,33 +17037,41 @@ def parse_asesoramiento_text(text):
 
     if blocks["1"]:
         data1 = parse_asesoramiento_block(blocks["1"])
-        fields["cliente1_nombre"] = data1.get("nombre", "")
-        fields["cliente1_dni"] = data1.get("dni", "")
-        fields["cliente1_telefono"] = data1.get("telefono", "")
-        fields["cliente1_email"] = data1.get("email", "")
-        fields["cliente1_fecha_nacimiento"] = data1.get("fecha_nacimiento", "")
-        fields["cliente1_estado_civil"] = data1.get("estado_civil", "")
-        fields["cliente1_hijos"] = data1.get("hijos", "")
-        fields["cliente1_profesion"] = data1.get("profesion", "")
-        fields["cliente1_tipo_contrato"] = data1.get("tipo_contrato", "")
-        fields["cliente1_ingresos"] = data1.get("ingresos", "")
-        fields["cliente1_patrimonio"] = data1.get("patrimonio", "")
-        fields["cliente1_prestamos"] = data1.get("prestamos", "")
+        for field, target in (
+            ("nombre", "cliente1_nombre"),
+            ("dni", "cliente1_dni"),
+            ("telefono", "cliente1_telefono"),
+            ("email", "cliente1_email"),
+            ("fecha_nacimiento", "cliente1_fecha_nacimiento"),
+            ("estado_civil", "cliente1_estado_civil"),
+            ("hijos", "cliente1_hijos"),
+            ("profesion", "cliente1_profesion"),
+            ("tipo_contrato", "cliente1_tipo_contrato"),
+            ("ingresos", "cliente1_ingresos"),
+            ("patrimonio", "cliente1_patrimonio"),
+            ("prestamos", "cliente1_prestamos"),
+        ):
+            if data1.get(field) and not fields.get(target):
+                fields[target] = data1.get(field)
 
     if blocks["2"]:
         data2 = parse_asesoramiento_block(blocks["2"])
-        fields["cliente2_nombre"] = data2.get("nombre", "")
-        fields["cliente2_dni"] = data2.get("dni", "")
-        fields["cliente2_telefono"] = data2.get("telefono", "")
-        fields["cliente2_email"] = data2.get("email", "")
-        fields["cliente2_fecha_nacimiento"] = data2.get("fecha_nacimiento", "")
-        fields["cliente2_estado_civil"] = data2.get("estado_civil", "")
-        fields["cliente2_hijos"] = data2.get("hijos", "")
-        fields["cliente2_profesion"] = data2.get("profesion", "")
-        fields["cliente2_tipo_contrato"] = data2.get("tipo_contrato", "")
-        fields["cliente2_ingresos"] = data2.get("ingresos", "")
-        fields["cliente2_patrimonio"] = data2.get("patrimonio", "")
-        fields["cliente2_prestamos"] = data2.get("prestamos", "")
+        for field, target in (
+            ("nombre", "cliente2_nombre"),
+            ("dni", "cliente2_dni"),
+            ("telefono", "cliente2_telefono"),
+            ("email", "cliente2_email"),
+            ("fecha_nacimiento", "cliente2_fecha_nacimiento"),
+            ("estado_civil", "cliente2_estado_civil"),
+            ("hijos", "cliente2_hijos"),
+            ("profesion", "cliente2_profesion"),
+            ("tipo_contrato", "cliente2_tipo_contrato"),
+            ("ingresos", "cliente2_ingresos"),
+            ("patrimonio", "cliente2_patrimonio"),
+            ("prestamos", "cliente2_prestamos"),
+        ):
+            if data2.get(field) and not fields.get(target):
+                fields[target] = data2.get(field)
 
     if not fields.get("cliente1_nombre"):
         fields["cliente1_nombre"] = pick([
@@ -17699,18 +17764,36 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         return
     captacion = ensure_captacion_for_inmueble(conn, inmueble["empresa_id"], inmueble_id, now)
     if captacion:
-        extra_set = ""
-        extra_vals = []
+        # Compat: instalaciones legacy pueden no tener `noticia_verificada` en Postgres aún.
+        # Intentamos setearlo en Encargo, y si falla (columna ausente), hacemos el update básico.
         if destino_label == "Encargo":
-            extra_set = ", noticia_verificada = 1"
-        conn.execute(
-            """
-            UPDATE captaciones
-            SET etapa = ?, situacion_comercial = ?""" + extra_set + """, updated_at = datetime(?)
-            WHERE id = ?
-            """,
-            (destino_label, destino_label, *extra_vals, now, captacion["id"]),
-        )
+            try:
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET etapa = ?, situacion_comercial = ?, noticia_verificada = 1, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (destino_label, destino_label, now, captacion["id"]),
+                )
+            except Exception:
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (destino_label, destino_label, now, captacion["id"]),
+                )
+        else:
+            conn.execute(
+                """
+                UPDATE captaciones
+                SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (destino_label, destino_label, now, captacion["id"]),
+            )
     conn.execute(
         """
         UPDATE inmuebles
@@ -53561,7 +53644,11 @@ class Handler(BaseHTTPRequestHandler):
                     elif resultado_norm == "negativo":
                         destino = estado_siguiente or "Cerrado negativamente"
                     if destino:
-                        sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
+                        try:
+                            sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
+                        except Exception as exc:
+                            # No rompemos el guardado de la cita si el workflow falla (p.ej. columna legacy ausente).
+                            response_payload = {"ok": True, "id": action_row["id"] if action_row else None, "_workflow_error": f"{type(exc).__name__}: {exc}"}
                 else:
                     inmueble = conn.execute(
                         "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
@@ -53571,11 +53658,15 @@ class Handler(BaseHTTPRequestHandler):
                     # Al programar la cita (Pendiente) llevamos el expediente a Adquisición
                     # desde fases iniciales (Inmueble/Noticia).
                     if estado_actual in {"", "inmueble", "noticia"}:
-                        sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
+                        try:
+                            sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
+                        except Exception:
+                            pass
             elif servicio_norm == "financiaciones":
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
-            response_payload = {"ok": True, "id": action_row["id"] if action_row else None}
+            if "response_payload" not in locals():
+                response_payload = {"ok": True, "id": action_row["id"] if action_row else None}
             if inmueble_id:
                 response_payload["inmueble_id"] = inmueble_id
                 try:
