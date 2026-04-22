@@ -1149,36 +1149,61 @@
 	            </form>
 		            <div id="iivtnuPdfParsed"></div>
 		          </div>
-			          <div class="form-card simuladores-pane" data-sim-pane="irpf" id="simPaneIrpf">
-			            <div class="section-head">
-			              <div>
-				                <h3>Ganancia patrimonial (IRPF/IRNR)</h3>
-				                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
-			              </div>
-			              <div class="inline-actions">
-			                <button type="button" class="secondary ghost" data-sim-go="informe">Volver al wizard</button>
-			              </div>
-			            </div>
-			            <form id="irpfGainForm" class="form-grid fiscal-grid" data-money-euro="1">
-			              <div class="form-grid-section">Identificación</div>
-			              <input type="hidden" name="cliente_id" />
-			              <label class="span-2">
-			                Escenarios (cliente)
-			                <div class="field-row">
-			                  <select id="irpfScenarioSelect">
-			                    <option value="" selected>—</option>
-			                  </select>
-			                  <button type="button" id="irpfScenarioNewBtn" class="secondary ghost">Nuevo</button>
-			                  <button type="button" id="irpfScenarioSaveBtn" class="secondary">Guardar</button>
-			                  <button type="button" id="irpfScenarioCompareBtn" class="secondary ghost">Comparar</button>
-			                  <button type="button" id="irpfScenarioDeleteBtn" class="secondary ghost">Borrar</button>
-			                </div>
-			                <div id="irpfScenarioStatus" class="muted"></div>
-			              </label>
-			              <label class="span-2">
-			                Referencia (opcional)
-			                <input name="referencia" placeholder="Inmueble / expediente / dirección" />
-			              </label>
+				          <div class="form-card simuladores-pane" data-sim-pane="irpf" id="simPaneIrpf">
+				            <div class="section-head">
+				              <div>
+					                <h3>Ganancia patrimonial (IRPF/IRNR)</h3>
+					                <p class="muted">Cálculo de ganancia y cuota estimada en base del ahorro (configurable por ejercicio).</p>
+				              </div>
+				              <div class="inline-actions">
+				                <button type="button" class="secondary ghost" data-sim-go="informe">Volver al wizard</button>
+				              </div>
+				            </div>
+				            <div class="tabs" id="irpfScenarioTabs">
+				              <button class="tab active" type="button" data-irpf-slot="A">Ejemplo 1</button>
+				              <button class="tab" type="button" data-irpf-slot="B">Ejemplo 2</button>
+				              <button class="tab" type="button" data-irpf-slot="C">Ejemplo 3</button>
+				            </div>
+				            <div class="form-card" id="irpfScenarioPanel">
+				              <div class="form-grid fiscal-grid">
+				                <label class="span-2">
+				                  Nombre escenario
+				                  <input id="irpfSlotNombre" placeholder="Ej. Venta (precio real)" />
+				                </label>
+				                <label>
+				                  Precio transmisión
+				                  <input id="irpfSlotPrecioVenta" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				                </label>
+				                <label>
+				                  Precio escrituración
+				                  <input id="irpfSlotPrecioEscritura" inputmode="decimal" data-money-plain="1" placeholder="0,00" />
+				                </label>
+				                <label>
+				                  Calcular con
+				                  <select id="irpfSlotCalcWith">
+				                    <option value="venta" selected>Transmisión</option>
+				                    <option value="escritura">Escrituración</option>
+				                  </select>
+				                </label>
+				                <label class="inline-field">
+				                  <span>Incluir en informe</span>
+				                  <input id="irpfSlotInclude" type="checkbox" />
+				                </label>
+				                <div class="form-actions span-2">
+				                  <button type="button" class="secondary" id="irpfSlotSimulateBtn">Simular escenario</button>
+				                  <button type="button" class="secondary" id="irpfSlotSaveBtn">Guardar escenario</button>
+				                  <button type="button" class="secondary ghost" id="irpfSlotComparePdfBtn">Imprimir informe (marcados)</button>
+				                  <span id="irpfSlotStatus" class="muted"></span>
+				                </div>
+				              </div>
+				            </div>
+				            <form id="irpfGainForm" class="form-grid fiscal-grid" data-money-euro="1">
+				              <div class="form-grid-section">Identificación</div>
+				              <input type="hidden" name="cliente_id" />
+				              <label class="span-2">
+				                Referencia (opcional)
+				                <input name="referencia" placeholder="Inmueble / expediente / dirección" />
+				              </label>
 			              <label>
 			                Ejercicio (opcional)
 			                <input name="ejercicio" inputmode="numeric" placeholder="2025" />
