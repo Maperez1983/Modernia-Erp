@@ -30,6 +30,53 @@ def _safe_filename(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", base)
     return cleaned or "archivo.pdf"
 
+def _clean_person_name(value: str) -> str:
+    name = _compact(value).strip(" ,;:-")
+    if not name:
+        return ""
+    # OCR frecuente: "Da.", "D.", "DON/DOÑA", o "a." (por "Da.")
+    name = re.sub(r"^(?:DO[ÑN]A|DONA|DON)\s+", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"^(?:D\.?\s*A\.?|DA\.?|D\.?)\s+", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"^A\.\s+", "", name, flags=re.IGNORECASE)
+    return name.strip(" ,;:-")
+
+def _infer_dni_letter(digits8: str) -> str:
+    letters = "TRWAGMYFPDXBNJZSQVHLCKE"
+    try:
+        return letters[int(digits8) % 23]
+    except Exception:
+        return ""
+
+def _normalize_person_nif(raw_value: str) -> str:
+    """
+    Normaliza DNI/NIE/CIF en escenarios OCR:
+    - Palabras pegadas tras el DNI: 54371652CMAYOR -> 54371652C
+    - Letra OCR como dígito: 448011211 -> 44801121<letra>
+    """
+    nif = server.normalize_nif(raw_value or "")
+    if not nif:
+        return ""
+    # Recorte conservador cuando empieza por 8 dígitos (DNI) y hay basura pegada.
+    if re.match(r"^[0-9]{8}[A-Z0-9]", nif) and len(nif) > 9:
+        nif = nif[:9]
+
+    # DNI: 8 dígitos + dígito (letra mal OCR) -> inferir letra
+    if re.fullmatch(r"[0-9]{9}", nif):
+        inferred = _infer_dni_letter(nif[:8])
+        if inferred:
+            nif = f"{nif[:8]}{inferred}"
+
+    # NIE: X/Y/Z + 7 dígitos + dígito (letra mal OCR) -> inferir letra
+    if re.fullmatch(r"[XYZ][0-9]{8}", nif):
+        prefix_map = {"X": "0", "Y": "1", "Z": "2"}
+        base = prefix_map.get(nif[0], "")
+        if base:
+            inferred = _infer_dni_letter(f"{base}{nif[1:8]}")
+            if inferred:
+                nif = f"{nif[0]}{nif[1:8]}{inferred}"
+
+    return nif
+
 
 def _env_first(*keys: str) -> str:
     for k in keys:
@@ -126,10 +173,10 @@ def extract_from_pdf(pdf_path: Path) -> Extracted:
     text, err = server.ocr_pdf_all_pages(str(pdf_path), use_external=False)
     text = text or ""
     fields = server.parse_asesoramiento_text(text)
-    cliente1_nombre = _compact(fields.get("cliente1_nombre") or "")
-    cliente1_nif = server.normalize_nif(fields.get("cliente1_dni") or fields.get("cliente1_nif") or "")
-    cliente2_nombre = _compact(fields.get("cliente2_nombre") or "")
-    cliente2_nif = server.normalize_nif(fields.get("cliente2_dni") or fields.get("cliente2_nif") or "")
+    cliente1_nombre = _clean_person_name(fields.get("cliente1_nombre") or "")
+    cliente1_nif = _normalize_person_nif(fields.get("cliente1_dni") or fields.get("cliente1_nif") or "")
+    cliente2_nombre = _clean_person_name(fields.get("cliente2_nombre") or "")
+    cliente2_nif = _normalize_person_nif(fields.get("cliente2_dni") or fields.get("cliente2_nif") or "")
 
     precio = _pick_float(
         text,
