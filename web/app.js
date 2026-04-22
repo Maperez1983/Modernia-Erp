@@ -53701,19 +53701,27 @@ const submitGestoriaRentaQuick = async () => {
     let ocrStart = null;
     try {
       upload = await uploadFileToS3(file, "gestoria", gestoriaRentaQuickStatus);
-    } catch (err) {
-      // Safari/WebKit puede devolver "Load failed" por bloqueo CORS en PUT a S3.
-      // Fallback: enviamos el fichero al servidor en base64 para que el backend lo suba a S3.
-      const rawMsg = String(err?.message || "").trim();
-      const key = normalizeSimple(rawMsg).replace(/\s+/g, "");
-      const looksLikeCors =
-        key === "loadfailed"
-        || rawMsg.toLowerCase().includes("cors")
-        || rawMsg.toLowerCase().includes("bloqueo");
-      if (!looksLikeCors) throw err;
-      if (gestoriaRentaQuickStatus) {
-        gestoriaRentaQuickStatus.textContent = "Subida directa bloqueada. Enviando al servidor...";
-      }
+	    } catch (err) {
+	      // Safari/WebKit puede devolver "Load failed" por bloqueo CORS en PUT a S3.
+	      // Fallback: enviamos el fichero al servidor en base64 para que el backend lo suba a S3.
+	      const rawMsg = String(err?.message || "").trim();
+	      const key = normalizeSimple(rawMsg).replace(/\s+/g, "");
+	      const rawLower = rawMsg.toLowerCase();
+	      const looksLikePresignGateway =
+	        rawLower.includes("/api/s3_presign")
+	        || rawLower.includes("s3_presign")
+	        || rawLower.includes("http 502")
+	        || rawLower.startsWith("502")
+	        || rawLower.includes("502 · /api/s3_presign");
+	      const looksLikeCors =
+	        key === "loadfailed"
+	        || rawLower.includes("cors")
+	        || rawLower.includes("bloqueo")
+	        || looksLikePresignGateway;
+	      if (!looksLikeCors) throw err;
+	      if (gestoriaRentaQuickStatus) {
+	        gestoriaRentaQuickStatus.textContent = "Subida directa bloqueada. Enviando al servidor...";
+	      }
       const fileBase64 = await fileToBase64(file);
       ocrStart = await apiPost("/api/renta_quick_ocr", {
         empresa_nombre: empresa.nombre,
