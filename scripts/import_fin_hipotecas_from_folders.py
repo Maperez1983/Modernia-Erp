@@ -446,7 +446,21 @@ def main() -> None:
                 "SELECT cliente_id FROM hipotecas WHERE id = ? LIMIT 1",
                 (hipoteca_id,),
             ).fetchone()["cliente_id"]
-            s3_key, _bucket = upload_pdf_to_s3(pdf, prefix=args.s3_prefix)
+            existing_doc = conn.execute(
+                """
+                SELECT id, COALESCE(NULLIF(TRIM(COALESCE(doc_key,'')), ''), '') AS doc_key
+                FROM gestoria_docs
+                WHERE empresa_id = ?
+                  AND referencia_tipo = 'hipoteca'
+                  AND notas = ?
+                LIMIT 1
+                """,
+                (empresa_id, str(pdf)),
+            ).fetchone()
+            if existing_doc and existing_doc["doc_key"]:
+                s3_key = existing_doc["doc_key"]
+            else:
+                s3_key, _bucket = upload_pdf_to_s3(pdf, prefix=args.s3_prefix)
             doc_id = attach_pdf_doc(
                 conn,
                 empresa_id=empresa_id,
