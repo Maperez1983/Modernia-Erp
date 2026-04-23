@@ -38489,10 +38489,11 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/workspace_update",
 	            "/api/workspace_delete",
 	            "/api/workspace_module_update",
+	            "/api/admin_seed_modernia_users",
 	            "/api/workspace_facturacion",
 	            "/api/workspace_series",
 	            "/api/workspace_inbox",
-            "/api/workspace_inbox_review",
+	            "/api/workspace_inbox_review",
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
             "/api/workspace_registro_notifications",
@@ -42521,6 +42522,164 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"ok": True, "result": result})
             return
+        elif parsed.path == "/api/admin_seed_modernia_users":
+            # Recuperación rápida tras borrados accidentales: recrea usuarios base y memberships
+            # para los workspaces Modernia / Modernia Centro.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session or not workspace_session_is_privileged(session) or not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if confirm != "SEED":
+                json_response(self, {"error": "confirm inválido (usa SEED)"}, status=400)
+                return
+            dry_run = str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+            try:
+                ensure_usuarios_schema(conn)
+                ensure_workspace_core_tables(conn)
+                ensure_auth_invites_table(conn)
+            except Exception:
+                pass
+
+            def _ws_id_for(name_or_slug: str) -> str:
+                key = normalize_workspace_slug(name_or_slug)
+                row = conn.execute("SELECT id FROM workspaces WHERE slug = ? OR nombre = ? LIMIT 1", (key, name_or_slug)).fetchone()
+                return str(row_value(row, "id") or row_value(row, 0) or "").strip() if row else ""
+
+            ws_modernia = _ws_id_for("modernia")
+            ws_centro = _ws_id_for("modernia-centro") or _ws_id_for("Modernia Centro")
+            if not ws_modernia or not ws_centro:
+                json_response(
+                    self,
+                    {"error": "No encuentro workspaces Modernia/Modernia Centro. Revisa slugs/nombres.", "ws_modernia": ws_modernia, "ws_centro": ws_centro},
+                    status=409,
+                )
+                return
+
+            def _make_email(usuario_value: str) -> str:
+                base = re.sub(r"[^a-z0-9]+", "", str(usuario_value or "").strip().lower())
+                base = base or os.urandom(4).hex()
+                return f"{base}@grupomodernia.es"
+
+            seed_rows = [
+                # (usuario, email, nombre, apellido, servicio_csv, rol_usuario, workspace_id, rol_miembro)
+                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
+                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
+                ("Icanamero", "", "I", "Canamero", "Administración", "Administrador", ws_modernia, "Owner"),
+                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Lectura", ws_modernia, "Miembro"),
+                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Lectura", ws_modernia, "Miembro"),
+                ("Tramos", "", "T", "Ramos", "Gestoría", "Lectura", ws_modernia, "Miembro"),
+                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Lectura", ws_modernia, "Miembro"),
+                ("Gbartha", "", "G", "Bartha", "Registro horario", "Lectura", ws_modernia, "Miembro"),
+                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
+                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
+                ("AMelgar", "", "A", "Melgar", "Gestoría", "Lectura", ws_modernia, "Miembro"),
+                ("JBernal", "", "J", "Bernal", "Financiaciones", "Lectura", ws_modernia, "Miembro"),
+                ("S.sanchez", "sergirex@gmail.com", "S", "Sanchez", "Administración", "Administrador", ws_centro, "Owner"),
+                ("C.anca", "modernia.centro@grupomodernia.es", "C", "Anca", "Administración", "Administrador", ws_centro, "Owner"),
+            ]
+
+            base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/") or ""
+            created = []
+            updated = []
+            memberships = []
+            invites = []
+            skipped = []
+
+            def _find_user_id(usuario_value: str, email_value: str) -> str:
+                u_key = str(usuario_value or "").strip().lower()
+                e_key = str(email_value or "").strip().lower()
+                row = None
+                if u_key:
+                    row = conn.execute("SELECT id FROM usuarios WHERE LOWER(TRIM(usuario)) = ? LIMIT 1", (u_key,)).fetchone()
+                if (not row) and e_key:
+                    row = conn.execute("SELECT id FROM usuarios WHERE LOWER(TRIM(email)) = ? LIMIT 1", (e_key,)).fetchone()
+                return str(row_value(row, "id") or row_value(row, 0) or "").strip() if row else ""
+
+            for usuario_value, email_value, nombre, apellido, servicio_csv, rol_usuario, ws_id, member_role in seed_rows:
+                usuario_value = str(usuario_value or "").strip()
+                email_value = str(email_value or "").strip() or _make_email(usuario_value)
+                nombre = normalize_person_name(nombre) or usuario_value
+                apellido = normalize_person_name(apellido) or "-"
+                servicio_csv = ", ".join([s.strip() for s in str(servicio_csv or "").split(",") if s.strip()])
+                registro_horario = 1 if ("registro" in servicio_csv.lower() or "rrhh" in servicio_csv.lower()) else 0
+
+                user_id = _find_user_id(usuario_value, email_value)
+                if not user_id:
+                    user_id = os.urandom(16).hex()
+                    if not dry_run:
+                        try:
+                            conn.execute(
+                                """
+                                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, registro_horario_activo, password_hash, activo, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, datetime(?), datetime(?))
+                                """,
+                                (user_id, nombre, apellido, usuario_value, email_value, servicio_csv, rol_usuario, int(registro_horario), now, now),
+                            )
+                        except Exception as exc:
+                            skipped.append({"usuario": usuario_value, "email": email_value, "error": str(exc)})
+                            continue
+                    created.append({"id": user_id, "usuario": usuario_value, "email": email_value})
+                else:
+                    if not dry_run:
+                        conn.execute(
+                            """
+                            UPDATE usuarios
+                            SET activo = 1,
+                                nombre = COALESCE(NULLIF(?, ''), nombre),
+                                apellido = COALESCE(NULLIF(?, ''), apellido),
+                                servicio = COALESCE(NULLIF(?, ''), servicio),
+                                rol = COALESCE(NULLIF(?, ''), rol),
+                                registro_horario_activo = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(registro_horario_activo, 0) END,
+                                updated_at = datetime(?)
+                            WHERE id = ?
+                            """,
+                            (nombre, apellido, servicio_csv, rol_usuario, int(registro_horario), now, user_id),
+                        )
+                    updated.append({"id": user_id, "usuario": usuario_value, "email": email_value})
+
+                if not dry_run:
+                    try:
+                        conn.execute("DELETE FROM workspace_miembros WHERE usuario_id = ? AND workspace_id <> ?", (user_id, ws_id))
+                    except Exception:
+                        pass
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+                        ON CONFLICT (workspace_id, usuario_id) DO UPDATE
+                        SET rol = EXCLUDED.rol, updated_at = EXCLUDED.updated_at
+                        """,
+                        (os.urandom(16).hex(), ws_id, user_id, member_role, now, now),
+                    )
+                memberships.append({"usuario_id": user_id, "workspace_id": ws_id, "rol": member_role})
+
+                try:
+                    row = conn.execute("SELECT COALESCE(password_hash,'') AS ph FROM usuarios WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+                    has_ph = bool(str(row_value(row, "ph") or row_value(row, 0) or "").strip()) if row else False
+                except Exception:
+                    has_ph = False
+                if (not has_ph) and (not dry_run):
+                    token = secrets.token_urlsafe(32)
+                    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=AUTH_INVITE_TTL_SECONDS)).isoformat()
+                    try:
+                        conn.execute(
+                            """
+                            INSERT INTO auth_invites (token, user_id, expires_at, created_at, sent_at, notes)
+                            VALUES (?, ?, ?, datetime('now'), datetime('now'), ?)
+                            """,
+                            (token, user_id, expires_at, "seed_modernia_users"),
+                        )
+                        url = f"{base_url}/?activar_token={urllib.parse.quote(token)}" if base_url else f"/?activar_token={urllib.parse.quote(token)}"
+                        invites.append({"usuario": usuario_value, "email": email_value, "activar_url": url})
+                    except Exception:
+                        pass
+
+            if not dry_run:
+                conn.commit()
+            json_response(self, {"ok": True, "dry_run": dry_run, "workspaces": {"modernia": ws_modernia, "modernia_centro": ws_centro}, "created": created, "updated": updated, "memberships": memberships, "invites": invites, "skipped": skipped})
+            return
+
         elif parsed.path == "/api/workspace_module_update":
             session = getattr(self, "auth_session", None) or self._current_session()
             record_id = str(payload.get("id") or "").strip()
@@ -42536,13 +42695,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
-            conn.execute(
-                "UPDATE workspace_modulos SET enabled = ?, updated_at = datetime(?) WHERE id = ?",
-                (enabled, now, record_id),
-            )
+            conn.execute("UPDATE workspace_modulos SET enabled = ?, updated_at = datetime(?) WHERE id = ?", (enabled, now, record_id))
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
             return
+
         elif parsed.path == "/api/workspace_link_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()
             if not workspace_actor_is_privileged(conn, session):
