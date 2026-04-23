@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v239";
+const APP_SW_VERSION = "v248";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -14580,12 +14580,11 @@ const renderWorkspaceRrhhHub = () => {
           && String(emp?.usuario_id || "") === String(authUser.id)
         );
         const geo = isSelf ? await getGeoLocation(3500) : null;
-        const res = await fetch("/api/workspace_registro_horario_toggle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, persona_id: personaId, ...(geo ? { geo } : {}) }),
-        }).then((r) => r.json());
-        if (res?.error) throw new Error(res.error);
+        await apiPost("/api/workspace_registro_horario_toggle", {
+          workspace_id: state.currentWorkspaceId,
+          persona_id: personaId,
+          ...(geo ? { geo } : {}),
+        });
         await refreshWorkspaceRrhh();
       } catch (error) {
         alert(error.message || "No se pudo registrar la entrada/salida.");
@@ -16625,18 +16624,13 @@ const renderWorkspaceTimeEmployeePreview = () => {
         && String(employee?.usuario_id || "") === String(authUser.id)
       );
       const geo = isSelf ? await getGeoLocation(3500) : null;
-      const resp = await fetch("/api/workspace_registro_horario_toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: state.currentWorkspaceId,
-          persona_id: personaId,
-          empresa_id: employee.empresa_id || "",
-          action,
-          ...(geo ? { geo } : {}),
-        }),
-      }).then((res) => res.json());
-      if (resp?.error) throw new Error(resp.error);
+      await apiPost("/api/workspace_registro_horario_toggle", {
+        workspace_id: state.currentWorkspaceId,
+        persona_id: personaId,
+        empresa_id: employee.empresa_id || "",
+        action,
+        ...(geo ? { geo } : {}),
+      });
       await loadWorkspaceDetail(state.currentWorkspaceId);
       state.workspaceTimeSelectedPersonaId = personaId;
       const refreshed = (state.workspaceTimeEmployees || []).find((row) => String(row.id || "") === personaId);
@@ -16767,17 +16761,12 @@ const renderHomeTimePunchModal = () => {
     try {
       const isSelf = Boolean(user?.id);
       const geo = isSelf ? await getGeoLocation(3500) : null;
-      const resp = await fetch("/api/workspace_registro_horario_toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: status.workspace_id,
-          persona_id: personaId,
-          action,
-          ...(geo ? { geo } : {}),
-        }),
-      }).then((res) => res.json());
-      if (resp?.error) throw new Error(resp.error);
+      await apiPost("/api/workspace_registro_horario_toggle", {
+        workspace_id: status.workspace_id,
+        persona_id: personaId,
+        action,
+        ...(geo ? { geo } : {}),
+      });
       _homeTimePunchLastActionAt = Date.now();
       try {
         const next = await api("/api/home_time_status");
@@ -53554,10 +53543,139 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
     return;
   }
   if (!Array.isArray(matches) || matches.length === 0) {
+    const normalizeNameToken = (token = "") => {
+      const t = String(token || "").trim();
+      if (!t) return "";
+      if (/^[0-9]{6,}$/.test(t)) return "";
+      if (/^[0-9a-f]{6,}$/i.test(t)) return "";
+      if (/^[0-9]{2,4}[/-][0-9]{2}[/-][0-9]{2,4}$/.test(t)) return "";
+      return t;
+    };
+
+    const guessNameFromSource = () => {
+      const raw = String(ctx.source_filename || ctx.filename || ctx.doc_key || ctx.doc_url || "").trim();
+      if (!raw) return "";
+      const base = raw.split("/").pop() || raw;
+      const noExt = base.replace(/\.[a-z0-9]{1,5}$/i, "");
+      const cleaned = noExt.replace(/%20/g, " ").replace(/[()+]/g, " ").replace(/-/g, "_");
+      const parts = cleaned
+        .split(/[_\s]+/g)
+        .map((p) => normalizeNameToken(p))
+        .filter(Boolean);
+      // Heurística: saltamos prefijos típicos (fecha/hora/hash) y nos quedamos con palabras del nombre.
+      const out = [];
+      for (const part of parts) {
+        if (!out.length && (/^[0-9]{8,}$/.test(part) || /^[0-9]{6}$/.test(part))) continue;
+        if (!out.length && /^[0-9]{2,4}$/.test(part)) continue;
+        if (!out.length && /^[0-9]{2,4}[A-Z]{1,3}$/i.test(part)) continue;
+        if (!out.length && /^[A-Z]{1,2}[0-9]{1,4}$/i.test(part)) continue;
+        if (!out.length && part.toLowerCase() === "renta") continue;
+        if (out.length >= 5) break;
+        out.push(part);
+      }
+      return out.join(" ").trim();
+    };
+
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "No hay clientes con ese DNI/NIF. Crea el cliente y vuelve a intentar asignarlo.";
+    empty.textContent = "No hay clientes con ese DNI/NIF. Puedes crearlo ahora y asignar la renta automáticamente.";
     container.appendChild(empty);
+
+    const createWrap = document.createElement("div");
+    createWrap.className = "inline-row";
+    const left = document.createElement("div");
+    left.style.display = "grid";
+    left.style.gap = "6px";
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "muted";
+    nameLabel.textContent = "Nombre cliente";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Ej. Juan Pérez";
+    nameInput.value = guessNameFromSource();
+    nameInput.autocomplete = "name";
+    nameInput.style.maxWidth = "520px";
+    nameInput.style.width = "100%";
+    left.appendChild(nameLabel);
+    left.appendChild(nameInput);
+    const right = document.createElement("div");
+    right.className = "inline-actions";
+    const createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.className = "secondary";
+    createBtn.textContent = "Crear cliente y asignar renta";
+    createBtn.addEventListener("click", async () => {
+      const empresa = resolveCrmGestoriaEmpresa();
+      if (!empresa) {
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa de Gestoría.";
+        return;
+      }
+      const nif = String(ctx.nif || "").trim().toUpperCase();
+      const nombre = String(nameInput.value || "").trim();
+      if (!nif) {
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "No hay DNI/NIF detectado.";
+        return;
+      }
+      if (!nombre) {
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Introduce el nombre para crear el cliente.";
+        return;
+      }
+      createBtn.disabled = true;
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Creando cliente...";
+      try {
+        const newId = randomId();
+        const payload = {
+          id: newId,
+          nombre,
+          tipo_persona: "Física",
+          nif,
+        };
+        const res = await fetch("/api/clientes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        let clienteId = newId;
+        if (data?.error) {
+          if (res.status === 409 && data.id) {
+            clienteId = String(data.id || "").trim();
+          } else {
+            throw new Error(data.error || "No se pudo crear el cliente.");
+          }
+        }
+        // Vincula Gestoría y activa el módulo Renta.
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Asignando servicio Renta...";
+        try {
+          await postJsonWithDbRetry("/api/clientes_link", {
+            cliente_id: clienteId,
+            empresa_id: empresa.id,
+            servicio: "Gestoría",
+            estado: "Activo",
+            fecha_inicio: new Date().toISOString().slice(0, 10),
+          });
+        } catch {}
+        try {
+          await apiPost("/api/cliente_gestoria_update", {
+            cliente_id: clienteId,
+            tipo_cliente: "Cliente Renta",
+            mod_renta: 1,
+          });
+        } catch {}
+        // Asigna el documento y abre el cliente.
+        await attachGestoriaRentaQuickToCliente(clienteId, ctx);
+      } catch (err) {
+        if (gestoriaRentaQuickStatus) {
+          gestoriaRentaQuickStatus.textContent = err?.message || "No se pudo crear el cliente.";
+        }
+      } finally {
+        createBtn.disabled = false;
+      }
+    });
+    right.appendChild(createBtn);
+    createWrap.appendChild(left);
+    createWrap.appendChild(right);
+    container.appendChild(createWrap);
     gestoriaRentaQuickMatches.appendChild(container);
     return;
   }
@@ -53790,6 +53908,7 @@ const submitGestoriaRentaQuick = async () => {
       doc_id: docId,
       doc_key: docKey,
       doc_url: docUrl,
+      source_filename: String(file?.name || "").trim(),
       presentacion_fecha: String(fields.presentacion_fecha || "").trim(),
       nombre: `Renta ${ejercicio} · ${estado_presentacion}.pdf`,
       notas: "",
