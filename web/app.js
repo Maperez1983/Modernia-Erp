@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v248";
+const APP_SW_VERSION = "v249";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -4393,7 +4393,17 @@ const userCanAccessService = (serviceKey) => {
   const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
   if (!allowed.size) return false;
   if (normalized === "fincas") {
-    return allowed.has("fincas") || allowed.has("administracion fincas") || allowed.has("administracion de fincas") || allowed.has("admin de fincas");
+    if (allowed.has("fincas") || allowed.has("administracion fincas") || allowed.has("administracion de fincas") || allowed.has("admin de fincas")) {
+      return true;
+    }
+    // Compat: si el servicio viene como etiqueta tipo "Fincas Velazquez", "Administración Fincas - Velazquez", etc.
+    // consideramos que habilita el módulo Fincas.
+    try {
+      for (const key of allowed) {
+        if (String(key || "").includes("fincas")) return true;
+      }
+    } catch {}
+    return false;
   }
   if (normalized === "hipotecas") {
     return allowed.has("hipotecas") || allowed.has("financiaciones");
@@ -5986,9 +5996,9 @@ const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
 const shouldScopeFincasByCompany = () => {
   const authUser = getAuthScopeUser();
   if (!authUser) return true;
-  if (isPrivilegedUser(authUser)) return true;
-  // Un usuario no admin con el servicio de Fincas debe poder ver la operativa de Fincas
-  // aunque la empresa activa no coincida con la del registro.
+  // Regla general Modernia: si el usuario tiene el servicio de Fincas, ve TODO el contenido de Fincas
+  // del workspace, independientemente de la empresa activa (sin filtrar por empresa_id).
+  // La segmentación se hace por workspace, no por responsable/empresa.
   try {
     if (userCanAccessService("fincas")) return false;
   } catch {}
