@@ -28152,6 +28152,11 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
         "COALESCE(p.source, 'manual') != 'auto'",
     ]
     params = [workspace_id]
+    # Seguridad multi-workspace: si una ficha está vinculada a un usuario del sistema,
+    # ese usuario debe ser miembro del workspace. Esto evita que aparezca personal de otro
+    # workspace por vinculaciones accidentales o por payloads manipulados.
+    join_member = "LEFT JOIN workspace_miembros mem ON mem.workspace_id = p.workspace_id AND mem.usuario_id = p.usuario_id"
+    where.append("(p.usuario_id IS NULL OR TRIM(COALESCE(p.usuario_id, '')) = '' OR mem.usuario_id IS NOT NULL)")
     if requested_company:
         # En vistas por empresa solo consideramos asignaciones confirmadas manualmente.
         if not empresa_ids or requested_company not in {str(x) for x in empresa_ids}:
@@ -28175,9 +28180,9 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
         SELECT
           p.id,
           p.workspace_id,
-          CASE WHEN COALESCE(p.empresa_manual, 0) = 1 THEN p.empresa_id ELSE '' END AS empresa_id,
-          CASE WHEN COALESCE(p.empresa_manual, 0) = 1 THEN COALESCE(e.nombre, '') ELSE '' END AS empresa_nombre,
-          CASE WHEN COALESCE(p.usuario_manual, 0) = 1 THEN p.usuario_id ELSE '' END AS usuario_id,
+          COALESCE(p.empresa_id, '') AS empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(p.usuario_id, '') AS usuario_id,
           COALESCE(p.usuario_manual, 0) AS usuario_manual,
           COALESCE(p.empresa_manual, 0) AS empresa_manual,
           COALESCE(p.source, 'manual') AS source,
@@ -28200,6 +28205,7 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.updated_at
         FROM workspace_registro_personal p
         LEFT JOIN empresas e ON e.id = p.empresa_id
+        {join_member}
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(p.activo, 1) DESC, p.nombre COLLATE NOCASE ASC
         LIMIT ?
@@ -44065,6 +44071,15 @@ class Handler(BaseHTTPRequestHandler):
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str((session or {}).get("user_id") or "").strip()
             is_privileged = workspace_actor_is_privileged(conn, session)
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            # Multi-workspace: ningún usuario normal puede escribir RRHH de un workspace donde no es miembro.
+            if not is_privileged:
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             if not workspace_id or not nombre:
                 json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
                 return
@@ -44085,8 +44100,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 horas_pactadas_semana = None
             active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
-            usuario_provided = "usuario_id" in payload
-            usuario_id_value = (str(payload.get("usuario_id") or "").strip() or None) if usuario_provided else None
+            # El formulario siempre envía el campo hidden `usuario_id` aunque esté vacío.
+            # Si llega vacío, NO lo interpretamos como "desvincular", sino como "no tocar".
+            usuario_raw = str(payload.get("usuario_id") or "").strip()
+            usuario_provided = ("usuario_id" in payload) and bool(usuario_raw)
+            usuario_id_value = (usuario_raw or None) if usuario_provided else None
             usuario_manual_flag = 1 if usuario_id_value else 0
             prev = None
 
@@ -44214,6 +44232,25 @@ class Handler(BaseHTTPRequestHandler):
                     usuario_manual_flag = 1 if (usuario_id_value and int(prev["usuario_manual"] or 0) == 1) else 0
                 except Exception:
                     usuario_manual_flag = 1 if usuario_id_value else 0
+            # Si se intenta vincular un usuario, debe ser miembro del workspace (evita contaminación).
+            if usuario_provided and usuario_id_value:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    pass
+                member_ok = False
+                try:
+                    member_ok = bool(
+                        conn.execute(
+                            "SELECT 1 FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                            (workspace_id, usuario_id_value),
+                        ).fetchone()
+                    )
+                except Exception:
+                    member_ok = False
+                if not member_ok:
+                    json_response(self, {"error": "Usuario no pertenece a este workspace."}, status=409)
+                    return
             foto_provided = "foto_url" in payload
             foto_url_value = str(payload.get("foto_url") or "").strip() or None
             prev_foto = None
@@ -44224,8 +44261,7 @@ class Handler(BaseHTTPRequestHandler):
                     prev_foto = None
             if record_id and (not foto_provided) and prev_foto:
                 foto_url_value = str(prev_foto or "").strip() or None
-            values = (
-                workspace_id,
+            values_common = (
                 empresa_id,
                 manual_flag,
                 usuario_id_value,
@@ -44253,13 +44289,13 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         """
                         UPDATE workspace_registro_personal
-                        SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
+                        SET empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
                             fecha_nacimiento = ?, tipo_contrato = ?,
                             tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                             activo = ?, notas = ?, updated_at = datetime(?)
                         WHERE id = ? AND workspace_id = ?
                         """,
-                        (*values, now, record_id, workspace_id),
+                        (*values_common, now, record_id, workspace_id),
                     )
                 else:
                     record_id = os.urandom(16).hex()
@@ -44270,7 +44306,7 @@ class Handler(BaseHTTPRequestHandler):
                           horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                         """,
-                        (record_id, *values, now, now),
+                        (record_id, workspace_id, *values_common, now, now),
                     )
                     prev = None
                 # Garantiza unicidad del vínculo: un usuario del sistema solo puede estar en una ficha por workspace.
