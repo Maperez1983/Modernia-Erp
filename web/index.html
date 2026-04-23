@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=230" />
+				    <link rel="stylesheet" href="styles.css?v=231" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -9547,6 +9547,10 @@
 		              ></select>
 		            </label>
 		            <label>
+		              Pendientes (usuario)
+		              <select id="gestoriaRentaQuickPendingUser"></select>
+		            </label>
+		            <label>
 		              Precio
 		              <input name="precio_servicio" id="gestoriaRentaQuickPrecio" type="number" step="0.01" min="0" />
 		            </label>
@@ -9578,6 +9582,7 @@
 		            </div>
 		          </form>
 		          <div id="gestoriaRentaQuickMatches"></div>
+		          <div id="gestoriaRentaQuickPending"></div>
 		        </div>
 		      </div>
 		    </div>
@@ -9832,7 +9837,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-							    <script src="app.js?v=643"></script>
+							    <script src="app.js?v=645"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

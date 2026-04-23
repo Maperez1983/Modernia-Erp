@@ -2433,6 +2433,8 @@ const gestoriaRentaQuickRemesadaWrap = document.getElementById("gestoriaRentaQui
 const gestoriaRentaQuickFile = document.getElementById("gestoriaRentaQuickFile");
 const gestoriaRentaQuickStatus = document.getElementById("gestoriaRentaQuickStatus");
 const gestoriaRentaQuickMatches = document.getElementById("gestoriaRentaQuickMatches");
+const gestoriaRentaQuickPending = document.getElementById("gestoriaRentaQuickPending");
+const gestoriaRentaQuickPendingUser = document.getElementById("gestoriaRentaQuickPendingUser");
 const gestoriaRentaQuickModal = document.getElementById("gestoriaRentaQuickModal");
 const gestoriaRentaQuickModalClose = document.getElementById("gestoriaRentaQuickModalClose");
 const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
@@ -53288,6 +53290,171 @@ const syncGestoriaRentaRemesaToggles = () => {
   }
 };
 
+const parseRentaQuickNifFromNotas = (raw = "") => {
+  const text = String(raw || "");
+  const match = text.match(/nif\\s*detectado\\s*:\\s*([a-z0-9\\-]+)/i);
+  return match ? String(match[1] || "").trim() : "";
+};
+
+const populateGestoriaRentaQuickPendingUserSelect = () => {
+  if (!gestoriaRentaQuickPendingUser) return;
+  const current = String(gestoriaRentaQuickPendingUser.value || "").trim();
+  gestoriaRentaQuickPendingUser.innerHTML = "";
+  gestoriaRentaQuickPendingUser.appendChild(createOption("", "Todos"));
+  const used = new Set();
+  const users = Array.isArray(state.usersList) ? state.usersList : [];
+  users.forEach((u) => {
+    const value = String(u?.usuario || "").trim() || String(`${u?.nombre || ""} ${u?.apellido || ""}`.trim());
+    if (!value) return;
+    const key = normalizeSimple(value);
+    if (used.has(key)) return;
+    used.add(key);
+    gestoriaRentaQuickPendingUser.appendChild(createOption(value, value));
+  });
+  if (current && normalizeSimple(current) !== normalizeSimple(gestoriaRentaQuickPendingUser.value)) {
+    gestoriaRentaQuickPendingUser.appendChild(createOption(current, current));
+  }
+  const saved = String(state.gestoriaRentaQuickPendingUser || "").trim();
+  if (saved) {
+    gestoriaRentaQuickPendingUser.value = saved;
+  } else if (current) {
+    gestoriaRentaQuickPendingUser.value = current;
+  } else {
+    // Default: todos, para que un admin pueda ver subidas de otros (p.ej. AMostazo) sin tocar nada.
+    gestoriaRentaQuickPendingUser.value = "";
+  }
+};
+
+const buildRentaQuickCtxFromPendingRow = (row = {}) => {
+  let audit = {};
+  try {
+    audit = row?.audit_detalles ? JSON.parse(String(row.audit_detalles || "{}")) : {};
+  } catch {
+    audit = {};
+  }
+  const ejercicioFromAudit = String(audit?.ejercicio || "").trim();
+  const estadoFromAudit = String(audit?.estado_presentacion || "").trim();
+  const ejercicio =
+    (/^20[0-9]{2}$/.test(ejercicioFromAudit) && ejercicioFromAudit) ||
+    String(gestoriaRentaQuickEjercicio?.value || "").trim() ||
+    String(new Date().getFullYear());
+  const estado_presentacion = estadoFromAudit || "Borrador";
+  const notas = String(row?.notas || "").trim();
+  const nif = parseRentaQuickNifFromNotas(notas);
+  const presentacionMatch = notas.match(/fecha\\s*presentaci[oó]n\\s*:\\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+  const presentacion_fecha = presentacionMatch ? String(presentacionMatch[1] || "").trim() : "";
+  return {
+    nif,
+    ejercicio,
+    estado_presentacion,
+    doc_id: String(row?.id || "").trim(),
+    doc_key: String(row?.doc_key || "").trim(),
+    doc_url: String(row?.doc_url || "").trim(),
+    nombre: String(row?.nombre || "").trim() || `Renta ${ejercicio} · ${estado_presentacion}.pdf`,
+    notas,
+    presentacion_fecha,
+  };
+};
+
+const loadGestoriaRentaQuickPendientes = async () => {
+  if (!gestoriaRentaQuickPending) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    gestoriaRentaQuickPending.innerHTML = "";
+    return;
+  }
+  const usuario = String(gestoriaRentaQuickPendingUser?.value || "").trim();
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    limit: "30",
+  });
+  if (usuario) params.set("usuario", usuario);
+  gestoriaRentaQuickPending.innerHTML = "<p class='muted'>Cargando pendientes...</p>";
+  let data = null;
+  try {
+    data = await api(`/api/renta_quick_pending?${params.toString()}`);
+  } catch {
+    gestoriaRentaQuickPending.innerHTML = "<p class='muted'>No se pudieron cargar los pendientes.</p>";
+    return;
+  }
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  if (!rows.length) {
+    gestoriaRentaQuickPending.innerHTML = "<p class='muted'>Sin documentos pendientes de asignar.</p>";
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.className = "form-card";
+  wrapper.innerHTML = `
+    <h4>Documentos pendientes</h4>
+    <p class="muted">Subidas de renta que quedaron sin asignar a un cliente (p. ej., si no se completó el paso “Asignar documento”).</p>
+  `;
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["fecha", "usuario", "documento", "notas", "accion"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const tdFecha = document.createElement("td");
+    tdFecha.textContent = formatCell("fecha", row.created_at || "-") || String(row.created_at || "-");
+    const tdUser = document.createElement("td");
+    tdUser.textContent = row.usuario || "-";
+    const tdDoc = document.createElement("td");
+    tdDoc.textContent = row.nombre || row.id || "-";
+    const tdNotas = document.createElement("td");
+    tdNotas.textContent = row.notas || "-";
+    const tdAction = document.createElement("td");
+    const actions = document.createElement("div");
+    actions.className = "inline-actions";
+    const pdfBtn = document.createElement("button");
+    pdfBtn.type = "button";
+    pdfBtn.className = "secondary ghost";
+    pdfBtn.textContent = "Ver PDF";
+    pdfBtn.addEventListener("click", () => {
+      openS3File(String(row.doc_key || ""), String(row.doc_url || ""));
+    });
+    actions.appendChild(pdfBtn);
+    const assignBtn = document.createElement("button");
+    assignBtn.type = "button";
+    assignBtn.className = "secondary";
+    assignBtn.textContent = "Asignar";
+    assignBtn.addEventListener("click", async () => {
+      const ctx = buildRentaQuickCtxFromPendingRow(row);
+      let nif = String(ctx.nif || "").trim();
+      if (!nif) {
+        nif = String(window.prompt("DNI/NIF del cliente para buscar:", "") || "").trim();
+      }
+      if (!nif) return;
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = `Buscando cliente por NIF: ${nif}...`;
+      let matches = null;
+      try {
+        matches = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(nif)}&limit=6`);
+      } catch {
+        matches = { rows: [] };
+      }
+      const rowsMatch = Array.isArray(matches?.rows) ? matches.rows : [];
+      ctx.nif = nif;
+      renderGestoriaRentaQuickMatches(rowsMatch, ctx);
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = rowsMatch.length ? "Selecciona cliente." : "Cliente no encontrado.";
+    });
+    actions.appendChild(assignBtn);
+    tdAction.appendChild(actions);
+
+    [tdFecha, tdUser, tdDoc, tdNotas, tdAction].forEach((td) => tr.appendChild(td));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+  gestoriaRentaQuickPending.innerHTML = "";
+  gestoriaRentaQuickPending.appendChild(wrapper);
+};
+
 const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
   if (!gestoriaRentaQuickModal) return;
   gestoriaRentaQuickModal.classList.remove("hidden");
@@ -53302,6 +53469,7 @@ const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
         .then(() => {
           try {
             populateResponsableSelects();
+            populateGestoriaRentaQuickPendingUserSelect();
           } catch {}
         })
         .catch(() => {});
@@ -53310,11 +53478,18 @@ const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
     }
   } catch {}
   syncGestoriaRentaRemesaToggles();
+  try {
+    populateGestoriaRentaQuickPendingUserSelect();
+  } catch {}
   if (gestoriaRentaQuickStatus) {
     gestoriaRentaQuickStatus.textContent = "";
   }
   if (gestoriaRentaQuickMatches) {
     gestoriaRentaQuickMatches.innerHTML = "";
+  }
+  if (gestoriaRentaQuickPending) {
+    gestoriaRentaQuickPending.innerHTML = "";
+    loadGestoriaRentaQuickPendientes().catch(() => {});
   }
   if (autoPickFile && gestoriaRentaQuickFile) {
     window.setTimeout(() => {
@@ -53884,6 +54059,22 @@ const submitGestoriaRentaQuick = async () => {
     const nif = String(fields.nif_detectado || "").trim();
     const docKey = String(ocrStart?.doc_key || upload?.key || "").trim();
     const docUrl = String(ocrStart?.doc_url || upload?.public_url || "").trim();
+    try {
+      if (docId) {
+        const noteLines = [];
+        if (nif) noteLines.push(`NIF detectado: ${nif}`);
+        if (fields.presentacion_fecha) noteLines.push(`Fecha presentación: ${String(fields.presentacion_fecha || "").trim()}`);
+        if (!noteLines.length) noteLines.push("OCR listo. NIF no detectado.");
+        await apiPost("/api/renta_quick_note", {
+          empresa_nombre: empresa.nombre,
+          usuario: getCurrentUser(),
+          doc_id: docId,
+          notas: noteLines.join("\n"),
+        });
+        // Refresca listado de pendientes (por si el admin quiere reasignar más tarde).
+        loadGestoriaRentaQuickPendientes().catch(() => {});
+      }
+    } catch {}
     if (!nif) {
       if (gestoriaRentaQuickStatus) {
         gestoriaRentaQuickStatus.textContent = "OCR listo. Documento guardado, pero no detectó DNI/NIF.";
@@ -65757,6 +65948,13 @@ document.addEventListener("keydown", (event) => {
 if (gestoriaRentaQuickFormaCobro) {
   gestoriaRentaQuickFormaCobro.addEventListener("change", () => {
     syncGestoriaRentaRemesaToggles();
+  });
+}
+
+if (gestoriaRentaQuickPendingUser) {
+  gestoriaRentaQuickPendingUser.addEventListener("change", () => {
+    state.gestoriaRentaQuickPendingUser = String(gestoriaRentaQuickPendingUser.value || "").trim();
+    loadGestoriaRentaQuickPendientes().catch(() => {});
   });
 }
 
