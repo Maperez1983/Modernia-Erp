@@ -1547,6 +1547,117 @@ def fetch_active_users_by_login(conn, login_value):
         (login, login),
     ).fetchall()
 
+
+def admin_lookup_users_by_login(conn, login_value):
+    """
+    Lookup administrativo (superadmin): devuelve estado del usuario sin exponer password_hash.
+    """
+    login = str(login_value or "").strip()
+    if not login:
+        return []
+    rows = conn.execute(
+        """
+        SELECT id, usuario, email, activo, COALESCE(password_hash,'') AS ph, updated_at
+        FROM usuarios
+        WHERE LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
+           OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+        """,
+        (login, login),
+    ).fetchall()
+    out = []
+    for r in rows or []:
+        uid = str(row_value(r, "id") or row_value(r, 0) or "").strip()
+        usuario = str(row_value(r, "usuario") or row_value(r, 1) or "").strip()
+        email = str(row_value(r, "email") or row_value(r, 2) or "").strip()
+        activo = int(row_value(r, "activo") or row_value(r, 3) or 0)
+        ph = str(row_value(r, "ph") or "").strip()
+        updated_at = str(row_value(r, "updated_at") or row_value(r, 5) or "").strip()
+        memberships = []
+        try:
+            ensure_workspace_core_tables(conn)
+            mrows = conn.execute(
+                "SELECT workspace_id, rol FROM workspace_miembros WHERE usuario_id = ? ORDER BY workspace_id",
+                (uid,),
+            ).fetchall()
+            for m in mrows or []:
+                memberships.append(
+                    {
+                        "workspace_id": str(row_value(m, "workspace_id") or row_value(m, 0) or "").strip(),
+                        "rol": str(row_value(m, "rol") or row_value(m, 1) or "").strip(),
+                    }
+                )
+        except Exception:
+            memberships = []
+        out.append(
+            {
+                "id": uid,
+                "usuario": usuario,
+                "email": email,
+                "activo": bool(activo),
+                "has_password": bool(ph),
+                "updated_at": updated_at,
+                "memberships": memberships,
+            }
+        )
+    return out
+
+
+def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
+    """
+    Superadmin-only: limpia la contraseña del usuario y genera una nueva invitación.
+    """
+    login = str(login_value or "").strip()
+    if not login:
+        raise ValueError("login requerido")
+    ensure_usuarios_schema(conn)
+    ensure_auth_invites_table(conn)
+    ttl = int(ttl_seconds or AUTH_INVITE_TTL_SECONDS)
+    row = conn.execute(
+        """
+        SELECT id, usuario, email
+        FROM usuarios
+        WHERE LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
+           OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+        LIMIT 1
+        """,
+        (login, login),
+    ).fetchone()
+    if not row:
+        raise LookupError("usuario no encontrado")
+    user_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+    usuario = str(row_value(row, "usuario") or row_value(row, 1) or "").strip()
+    email = str(row_value(row, "email") or row_value(row, 2) or "").strip()
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat()
+    # Revoca invitaciones anteriores (best-effort)
+    try:
+        conn.execute(
+            "UPDATE auth_invites SET revoked_at = COALESCE(NULLIF(revoked_at,''), datetime('now')) WHERE user_id = ? AND used_at IS NULL",
+            (user_id,),
+        )
+    except Exception:
+        pass
+    conn.execute(
+        "UPDATE usuarios SET password_hash = NULL, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now'), activo = 1 WHERE id = ?",
+        (user_id,),
+    )
+    conn.execute(
+        """
+        INSERT INTO auth_invites (token, user_id, expires_at, created_at, sent_at, notes)
+        VALUES (?, ?, ?, datetime('now'), datetime('now'), ?)
+        """,
+        (token, user_id, expires_at, "admin_force_reset"),
+    )
+    # Compat legacy fields (por si algún flujo aún lee invite_token)
+    try:
+        conn.execute(
+            "UPDATE usuarios SET invite_token = ?, invite_expires_at = ?, invite_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+            (token, expires_at, user_id),
+        )
+    except Exception:
+        pass
+    return {"user_id": user_id, "usuario": usuario, "email": email, "token": token, "expires_at": expires_at}
+
 def normalize_person_name(value):
     if not value:
         return ""
@@ -38516,6 +38627,7 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/workspace_delete",
 	            "/api/workspace_module_update",
 	            "/api/admin_seed_modernia_users",
+	            "/api/admin_user_force_reset_invite",
 	            "/api/workspace_facturacion",
 	            "/api/workspace_series",
 	            "/api/workspace_inbox",
@@ -42715,6 +42827,41 @@ class Handler(BaseHTTPRequestHandler):
             if not dry_run:
                 conn.commit()
             json_response(self, {"ok": True, "dry_run": dry_run, "workspaces": {"modernia": ws_modernia, "modernia_centro": ws_centro}, "created": created, "updated": updated, "memberships": memberships, "invites": invites, "skipped": skipped})
+            return
+
+        elif parsed.path == "/api/admin_user_force_reset_invite":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            login = str(payload.get("login") or payload.get("usuario") or payload.get("email") or "").strip()
+            if not login:
+                json_response(self, {"error": "login requerido"}, status=400)
+                return
+            if str(payload.get("confirm") or "").strip() != "RESET":
+                json_response(self, {"error": "confirm inválido (usa RESET)"}, status=400)
+                return
+            try:
+                result = admin_force_reset_password_invite(conn, login)
+                conn.commit()
+            except LookupError:
+                json_response(self, {"error": "Usuario no encontrado"}, status=404)
+                return
+            except Exception as exc:
+                json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            token = str(result.get("token") or "").strip()
+            url = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "usuario": result.get("usuario") or "",
+                    "email": result.get("email") or "",
+                    "activar_url": url,
+                    "expires_at": result.get("expires_at") or "",
+                },
+            )
             return
 
         elif parsed.path == "/api/workspace_module_update":
@@ -55204,6 +55351,27 @@ class Handler(BaseHTTPRequestHandler):
                     "is_privileged_db": bool(workspace_actor_is_privileged(conn, session)),
                 },
             )
+            return
+
+        if path == "/api/admin_user_lookup":
+            session = self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            login = (params.get("login", [""])[0] or "").strip()
+            if not login:
+                json_response(self, {"error": "login requerido"}, status=400)
+                return
+            try:
+                ensure_usuarios_schema(conn)
+                conn.commit()
+            except Exception:
+                pass
+            items = admin_lookup_users_by_login(conn, login)
+            json_response(self, {"ok": True, "items": items})
             return
 
         if path == "/api/auth_invite_status":
