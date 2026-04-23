@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v254";
+const APP_SW_VERSION = "v255";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -62097,6 +62097,27 @@ if (irpfGainForm) {
     C: { id: "", nombre: "Alternativo", venta: "", escritura: "", calc: "venta", include: false, last: null },
   };
 
+  // Persistencia UX: si el usuario ya tocó el formulario base, no lo sobreescribimos al cargar desde DB.
+  let irpfBaseTouched = false;
+  let irpfBaseHydrated = false;
+  let irpfBaseHydrateMute = false;
+  try {
+    irpfGainForm.addEventListener(
+      "input",
+      () => {
+        if (!irpfBaseHydrateMute) irpfBaseTouched = true;
+      },
+      true
+    );
+    irpfGainForm.addEventListener(
+      "change",
+      () => {
+        if (!irpfBaseHydrateMute) irpfBaseTouched = true;
+      },
+      true
+    );
+  } catch {}
+
   const resolveScenarioEmpresaId = () => {
     try {
       const gest = resolveCrmGestoriaEmpresa();
@@ -62187,8 +62208,37 @@ if (irpfGainForm) {
   };
 
   const readBasePayload = () => {
-    const data = new FormData(irpfGainForm);
-    const payload = Object.fromEntries(data.entries());
+    // OJO: FormData excluye campos `disabled`. Para que A/B/C siempre puedan simular/guardarse,
+    // serializamos el DOM directamente (incluye también controles deshabilitados).
+    const payload = {};
+    const nodes = irpfGainForm.querySelectorAll("input[name], select[name], textarea[name]");
+    nodes.forEach((el) => {
+      if (!el) return;
+      const name = String(el.name || "").trim();
+      if (!name) return;
+      const type = String(el.type || "").toLowerCase();
+      if (type === "submit" || type === "button" || type === "reset" || type === "file") return;
+      if (type === "checkbox") {
+        if (el.checked) payload[name] = String(el.value || "on");
+        return;
+      }
+      if (type === "radio") {
+        if (el.checked) payload[name] = String(el.value || "");
+        return;
+      }
+      if (el.tagName && String(el.tagName).toLowerCase() === "select" && el.multiple) {
+        try {
+          const selected = Array.from(el.options || [])
+            .filter((opt) => opt && opt.selected)
+            .map((opt) => String(opt.value || ""));
+          payload[name] = selected.length ? selected.join(",") : "";
+        } catch {
+          payload[name] = String(el.value ?? "");
+        }
+        return;
+      }
+      payload[name] = String(el.value ?? "");
+    });
     return payload;
   };
 
@@ -62219,14 +62269,31 @@ if (irpfGainForm) {
     if (!row) return;
     slotState[slot].id = String(row.id || "").trim();
     slotState[slot].nombre = String(row.nombre || slotState[slot].nombre || "").trim();
-    // Intentamos rehidratar valores guardados desde payload_json.
+    // Rehidrata valores guardados desde payload_json (incluye metadatos del escenario).
+    let pl = {};
     try {
-      const pl = typeof row.payload_json === "string" ? JSON.parse(row.payload_json || "{}") : {};
+      pl = typeof row.payload_json === "string" ? JSON.parse(row.payload_json || "{}") : {};
+    } catch {
+      pl = {};
+    }
+    try {
+      const meta = pl && typeof pl.__scenario_meta === "object" ? pl.__scenario_meta : {};
+      const metaVenta = String(meta?.precio_venta ?? meta?.venta ?? "").trim();
+      const metaEsc = String(meta?.precio_escritura ?? meta?.escritura ?? "").trim();
+      const metaCalc = String(meta?.calc_with ?? meta?.calc ?? "").trim();
+      const metaInclude = meta?.include;
+      if (metaVenta) slotState[slot].venta = metaVenta;
+      if (metaEsc) slotState[slot].escritura = metaEsc;
+      if (metaCalc) slotState[slot].calc = metaCalc;
+      if (metaInclude != null) slotState[slot].include = Number(metaInclude || 0) === 1 || metaInclude === true;
+    } catch {}
+    // Fallback: si no hay meta, usamos valor_transmision guardado.
+    try {
       const savedValor = pl?.valor_transmision != null ? parseMoneyValue(pl.valor_transmision) : null;
       if (savedValor != null && Number.isFinite(savedValor) && savedValor > 0) {
         const asText = `${Number(savedValor).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        if (slot === "B") slotState[slot].escritura = asText;
-        else slotState[slot].venta = asText;
+        if (slot === "B") slotState[slot].escritura = slotState[slot].escritura || asText;
+        else slotState[slot].venta = slotState[slot].venta || asText;
       }
     } catch {}
     if (row?.valor_transmision != null && Number(row.valor_transmision) > 0) {
@@ -62234,10 +62301,63 @@ if (irpfGainForm) {
       if (slot === "B") slotState[slot].escritura = slotState[slot].escritura || asText;
       else slotState[slot].venta = slotState[slot].venta || asText;
     }
+    if (slot === "A" && pl && typeof pl === "object") {
+      slotState.A._basePayload = pl;
+    }
+  };
+
+  const hydrateIrpfBaseForm = (pl) => {
+    if (!pl || typeof pl !== "object") return;
+    if (irpfBaseHydrated) return;
+    if (irpfBaseTouched) return;
+    irpfBaseHydrateMute = true;
+    try {
+      Object.entries(pl).forEach(([key, val]) => {
+        const name = String(key || "").trim();
+        if (!name || name === "cliente_id" || name.startsWith("__scenario_")) return;
+        const elList = irpfGainForm.querySelectorAll(`[name="${CSS.escape(name)}"]`);
+        if (!elList || !elList.length) return;
+        elList.forEach((el) => {
+          if (!el) return;
+          const type = String(el.type || "").toLowerCase();
+          if (type === "radio") {
+            el.checked = String(el.value || "") === String(val ?? "");
+            return;
+          }
+          if (type === "checkbox") {
+            const v = val;
+            el.checked = v === true || v === 1 || v === "1" || v === "on" || v === "true" || v === "sí" || v === "si";
+            return;
+          }
+          if (el.tagName && String(el.tagName).toLowerCase() === "select" && el.multiple) {
+            const values = String(val ?? "")
+              .split(",")
+              .map((s) => String(s || "").trim())
+              .filter(Boolean);
+            Array.from(el.options || []).forEach((opt) => {
+              opt.selected = values.includes(String(opt.value || ""));
+            });
+            return;
+          }
+          try {
+            el.value = String(val ?? "");
+          } catch {}
+        });
+      });
+    } finally {
+      irpfBaseHydrateMute = false;
+    }
+    irpfBaseHydrated = true;
+    try {
+      syncIrpfGainExtras();
+    } catch {}
   };
 
   const loadAllSlots = async () => {
     await Promise.all(["A", "B", "C"].map((s) => loadSlotFromDb(s)));
+    try {
+      hydrateIrpfBaseForm(slotState.A._basePayload);
+    } catch {}
     renderSlotPanel();
   };
 
@@ -62258,6 +62378,14 @@ if (irpfGainForm) {
     const base = readBasePayload();
     const calcValor = slot === "A" ? parseMoneyValue(base.valor_transmision || 0) : calcValorTransmisionForSlot(st);
     base.valor_transmision = `${Number(calcValor || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    base.__scenario_meta = {
+      slot,
+      nombre,
+      precio_venta: String(st.venta || ""),
+      precio_escritura: String(st.escritura || ""),
+      calc_with: String(st.calc || ""),
+      include: st.include ? 1 : 0,
+    };
     const resp = await postJsonWithDbRetry("/api/fiscal_scenario_upsert", {
       id: st.id || "",
       slot,
@@ -62385,6 +62513,11 @@ if (irpfGainForm) {
 
   if (irpfClienteIdInput) {
     irpfClienteIdInput.addEventListener("change", () => {
+      irpfBaseTouched = false;
+      irpfBaseHydrated = false;
+      try {
+        delete slotState.A._basePayload;
+      } catch {}
       void loadAllSlots();
     });
   }
