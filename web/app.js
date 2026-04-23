@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v249";
+const APP_SW_VERSION = "v254";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -4179,12 +4179,14 @@ const expandServiceAliases = (services) => {
   Array.from(set).forEach((svc) => {
     const key = normalizeSimple(svc);
     if (!key) return;
-    if (key === "inmo" || key === "crm inmo" || key === "crm inmobiliario" || key === "crm inmobiliaria") {
-      set.add("inmobiliaria");
-    }
-    if (key.includes("inmobiliaria")) {
-      set.add("inmobiliaria");
-    }
+    // Heurísticas: si el servicio viene con apellido/marca ("Fincas Velazquez", "Seguros Modernia", etc.)
+    // lo colapsamos al módulo raíz.
+    if (key === "inmo" || key === "crm inmo" || key === "crm inmobiliario" || key === "crm inmobiliaria") set.add("inmobiliaria");
+    if (key.includes("inmobili")) set.add("inmobiliaria");
+    if (key.includes("seguro")) set.add("seguros");
+    if (key.includes("gestor")) set.add("gestoria");
+    if (key.includes("finca")) set.add("fincas");
+    if (key.includes("hipotec") || key.includes("financi")) set.add("financiaciones");
   });
   if (set.has("financiaciones")) set.add("hipotecas");
   if (set.has("hipotecas")) set.add("financiaciones");
@@ -4402,6 +4404,27 @@ const userCanAccessService = (serviceKey) => {
       for (const key of allowed) {
         if (String(key || "").includes("fincas")) return true;
       }
+    } catch {}
+    return false;
+  }
+  if (normalized === "gestoria") {
+    if (allowed.has("gestoria")) return true;
+    try {
+      for (const key of allowed) if (String(key || "").includes("gestoria")) return true;
+    } catch {}
+    return false;
+  }
+  if (normalized === "seguros") {
+    if (allowed.has("seguros")) return true;
+    try {
+      for (const key of allowed) if (String(key || "").includes("seguros") || String(key || "").includes("seguro")) return true;
+    } catch {}
+    return false;
+  }
+  if (normalized === "inmobiliaria") {
+    if (allowed.has("inmobiliaria")) return true;
+    try {
+      for (const key of allowed) if (String(key || "").includes("inmobili")) return true;
     } catch {}
     return false;
   }
@@ -5986,24 +6009,30 @@ const getWorkspaceCompanyContextLabel = () =>
     ? getWorkspaceDisplayName(state.currentWorkspaceName || state.currentWorkspaceTarget || DEFAULT_TENANT_WORKSPACE_SLUG)
     : (state.currentWorkspaceCompanyName || "Empresa activa");
 
-const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
+const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id", serviceKey = "") => {
   const companyId = getWorkspaceCompanyFilter();
   const items = Array.isArray(rows) ? rows : [];
+  if (serviceKey) {
+    try {
+      if (!shouldScopeByCompanyForService(serviceKey)) return items;
+    } catch {}
+  }
   if (!companyId) return items;
   return items.filter((row) => String(row?.[field] || "").trim() === companyId);
 };
 
-const shouldScopeFincasByCompany = () => {
+const shouldScopeByCompanyForService = (serviceKey = "") => {
   const authUser = getAuthScopeUser();
   if (!authUser) return true;
-  // Regla general Modernia: si el usuario tiene el servicio de Fincas, ve TODO el contenido de Fincas
-  // del workspace, independientemente de la empresa activa (sin filtrar por empresa_id).
-  // La segmentación se hace por workspace, no por responsable/empresa.
+  // Regla general Modernia: si el usuario tiene asignado un servicio,
+  // ve TODO lo relacionado con ese servicio dentro del workspace.
   try {
-    if (userCanAccessService("fincas")) return false;
+    if (userCanAccessService(serviceKey)) return false;
   } catch {}
   return true;
 };
+
+const shouldScopeFincasByCompany = () => shouldScopeByCompanyForService("fincas");
 
 const filterWorkspaceFincasRowsByCompany = (rows = [], field = "empresa_id") => {
   const items = Array.isArray(rows) ? rows : [];
