@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v257";
+const APP_SW_VERSION = "v258";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -16820,6 +16820,9 @@ const renderHomeTimePunchModal = () => {
       try {
         const next = await api("/api/home_time_status");
         state.homeTimeStatus = next && next.ok ? next : state.homeTimeStatus;
+        try {
+          if (typeof setAuthUi === "function") setAuthUi(state.authUser);
+        } catch {}
       } catch {}
       renderCompanyCards();
       closeHomeTimePunchModal({ persist: false });
@@ -16839,6 +16842,9 @@ const renderHomeTimePunchModal = () => {
 	      if (next && next.ok) {
 	        state.homeTimeStatus = next;
 	      }
+	      try {
+	        if (typeof setAuthUi === "function") setAuthUi(state.authUser);
+	      } catch {}
 	    } catch {}
 	  };
 	  // Refresca siempre (best-effort) para que el modal y el botón no "dependan" del orden de carga.
@@ -19474,6 +19480,8 @@ const resolveCrmTecnocloudVertical = () => {
 
 const syncCrmTecnocloudVerticalNav = () => {
   const vertical = resolveCrmTecnocloudVertical();
+  const isGestoria = vertical === "gestoria";
+  const isInmo = vertical === "inmo";
   const allowedViews =
     vertical === "seguros"
       ? new Set(["seguros"])
@@ -19510,6 +19518,19 @@ const syncCrmTecnocloudVerticalNav = () => {
 
   applyToRoot(crmWorkspaceTabs);
   applyToRoot(crmLightningSidebar);
+
+  // No mezclar pantallas: Gestoría NO debe mostrar el workspace del CRM Inmobiliaria.
+  // Reutilizamos el estilo (topbar / módulos), pero el contenido visible debe ser solo Gestoría.
+  if (crmWorkspaceShell) {
+    crmWorkspaceShell.classList.toggle("hidden", isGestoria);
+  }
+  if (crmLightningSidebar) {
+    // Sidebar estilo "Inmo" solo cuando estás en Inmobiliaria.
+    crmLightningSidebar.classList.toggle("hidden", !isInmo);
+  }
+  if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
+    inmuebleDetail.classList.toggle("hidden", isGestoria);
+  }
 
   // Topbar: alterna módulos Inmobiliaria vs Gestoría.
   try {
@@ -58158,16 +58179,28 @@ const setAuthUi = (user) => {
       setCurrentUser(userValue);
     }
   }
-	  if (authSessionPill) {
-	    if (user) {
-	      const label = user.nombre_completo || user.usuario || user.email || "Sesión activa";
-	      authSessionPill.textContent = `${label} · ${APP_SW_VERSION}`;
-	      authSessionPill.classList.remove("hidden");
-	    } else {
-	      authSessionPill.textContent = "";
-	      authSessionPill.classList.add("hidden");
-	    }
-	  }
+  const syncAuthSessionPill = () => {
+    if (!authSessionPill) return;
+    if (!state.authUser) {
+      authSessionPill.textContent = "";
+      authSessionPill.title = "";
+      authSessionPill.classList.add("hidden");
+      return;
+    }
+    const baseLabel =
+      state.authUser.nombre_completo ||
+      state.authUser.usuario ||
+      state.authUser.email ||
+      "Sesión activa";
+    const personaLabel = String(state.homeTimeStatus?.persona?.nombre || "").trim();
+    const shownLabel = personaLabel || baseLabel;
+    authSessionPill.textContent = `${shownLabel} · ${APP_SW_VERSION}`;
+    // Si hay discrepancia, dejamos trazabilidad en tooltip para que se pueda corregir en administración.
+    const mismatch = personaLabel && normalizeSimple(personaLabel) !== normalizeSimple(baseLabel);
+    authSessionPill.title = mismatch ? `Sesión: ${baseLabel}` : "";
+    authSessionPill.classList.remove("hidden");
+  };
+  syncAuthSessionPill();
   if (authLogoutBtn) {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
@@ -58366,6 +58399,10 @@ const init = async () => {
     state.tablas = tablas;
     state.resumen = resumen;
     state.homeTimeStatus = homeTimeStatus && homeTimeStatus.ok ? homeTimeStatus : null;
+    try {
+      // Refresca el pill de usuario cuando llega RRHH (puede diferir del nombre del usuario si hay datos legacy).
+      if (typeof setAuthUi === "function") setAuthUi(state.authUser);
+    } catch {}
 
     if (empresaSelect) {
       empresaSelect.appendChild(createOption("", "Todas las empresas"));
