@@ -98,14 +98,89 @@ def fetch_users(conn) -> Dict[str, Dict[str, str]]:
         uid = str(row[0] or "").strip()
         usuario = str(row[1] or "").strip()
         email = str(row[2] or "").strip()
-        key = norm_login(usuario)
-        if not key:
-            continue
-        # Si hay duplicados, preferimos el que tenga email.
-        if key in out and out[key].get("email"):
-            continue
-        out[key] = {"id": uid, "usuario": usuario, "email": email}
+        # Index por usuario normalizado y por local-part del email (si existe).
+        keys = set()
+        if usuario:
+            keys.add(norm_login(usuario))
+        if email and "@" in email:
+            keys.add(norm_login(email.split("@", 1)[0]))
+        keys = {k for k in keys if k}
+        for key in keys:
+            # Si hay duplicados, preferimos el que tenga email.
+            if key in out and out[key].get("email"):
+                continue
+            out[key] = {"id": uid, "usuario": usuario, "email": email}
     return out
+
+
+def tokens_for_login(login: str) -> List[str]:
+    base = norm_login(login)
+    tokens = []
+    if base:
+        tokens.append(base)
+        if len(base) >= 4:
+            tokens.append(base[1:])
+        if len(base) >= 5:
+            tokens.append(base[2:])
+    # orden: más específico primero, sin duplicados
+    seen = set()
+    ordered = []
+    for tok in sorted(tokens, key=lambda x: (-len(x), x)):
+        if tok and tok not in seen:
+            seen.add(tok)
+            ordered.append(tok)
+    return ordered
+
+
+def resolve_user_id(conn, users_index: Dict[str, Dict[str, str]], login: str) -> Tuple[Optional[str], List[dict]]:
+    """
+    Devuelve (user_id, candidates). Si no puede resolver unívocamente, user_id=None y candidates contiene sugerencias.
+    """
+    key = norm_login(login)
+    direct = users_index.get(key)
+    if direct:
+        return str(direct["id"]), []
+    # Intento por tokens (dgarcia -> garcia, sllallana -> lallana, etc.)
+    all_candidates: Dict[str, dict] = {}
+    for tok in tokens_for_login(login):
+        pattern = f"%{tok}%"
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, usuario, email, nombre, apellido, activo
+                FROM usuarios
+                WHERE LOWER(COALESCE(usuario,'')) LIKE LOWER(%s)
+                   OR LOWER(COALESCE(email,'')) LIKE LOWER(%s)
+                   OR LOWER(COALESCE(nombre,'')) LIKE LOWER(%s)
+                   OR LOWER(COALESCE(apellido,'')) LIKE LOWER(%s)
+                ORDER BY COALESCE(activo, 1) DESC, COALESCE(updated_at, created_at) DESC NULLS LAST
+                LIMIT 8
+                """,
+                (pattern, pattern, pattern, pattern),
+            ).fetchall()
+        except Exception:
+            rows = []
+        for row in rows or []:
+            rid = str(row[0] or "").strip()
+            if not rid:
+                continue
+            if rid not in all_candidates:
+                all_candidates[rid] = {
+                    "id": rid,
+                    "usuario": str(row[1] or "").strip(),
+                    "email": str(row[2] or "").strip(),
+                    "nombre": str(row[3] or "").strip(),
+                    "apellido": str(row[4] or "").strip(),
+                    "activo": int(row[5] or 0) if row[5] is not None else 0,
+                }
+        if len(all_candidates) == 1:
+            # resolución unívoca temprana
+            only_id = next(iter(all_candidates.keys()))
+            return only_id, []
+    candidates = list(all_candidates.values())
+    if len(candidates) == 1:
+        return candidates[0]["id"], []
+    return None, candidates[:8]
 
 
 def main() -> int:
@@ -140,13 +215,15 @@ def main() -> int:
 
         prepared: List[Tuple[UserSpec, str, str]] = []
         missing_users: List[str] = []
+        ambiguous_users: Dict[str, List[dict]] = {}
         for spec in specs:
-            key = norm_login(spec.login)
-            user = users_map.get(key)
-            if not user:
-                missing_users.append(spec.login)
+            user_id, candidates = resolve_user_id(conn, users_map, spec.login)
+            if not user_id:
+                if candidates:
+                    ambiguous_users[spec.login] = candidates
+                else:
+                    missing_users.append(spec.login)
                 continue
-            user_id = user["id"]
             ws_id = ws_map[spec.workspace_key]
             prepared.append((spec, user_id, ws_id))
 
@@ -154,6 +231,14 @@ def main() -> int:
             print("Usuarios NO encontrados (revisa login exacto):")
             for u in missing_users:
                 print(f" - {u}")
+            print("")
+        if ambiguous_users:
+            print("Usuarios ambiguos (varios candidatos, el script no elige para no liarla):")
+            for login, rows in ambiguous_users.items():
+                print(f" - {login}:")
+                for row in rows:
+                    label = f"{row.get('usuario') or '-'} · {row.get('email') or '-'} · {row.get('nombre') or '-'} {row.get('apellido') or '-'}".strip()
+                    print(f"    - {row.get('id')} :: {label}")
             print("")
 
         changes = []
@@ -211,4 +296,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
