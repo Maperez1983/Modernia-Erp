@@ -216,6 +216,8 @@ def main() -> int:
         prepared: List[Tuple[UserSpec, str, str]] = []
         missing_users: List[str] = []
         ambiguous_users: Dict[str, List[dict]] = {}
+        duplicate_user_ids: Dict[str, List[str]] = {}
+        used_user_ids: Dict[str, str] = {}
         for spec in specs:
             user_id, candidates = resolve_user_id(conn, users_map, spec.login)
             if not user_id:
@@ -224,6 +226,22 @@ def main() -> int:
                 else:
                     missing_users.append(spec.login)
                 continue
+            # Seguridad: nunca asignar el MISMO usuario a dos "logins" distintos.
+            if user_id in used_user_ids and used_user_ids[user_id] != spec.login:
+                duplicate_user_ids.setdefault(user_id, []).extend([used_user_ids[user_id], spec.login])
+                # marcamos como ambiguo para forzar intervención humana
+                ambiguous_users[spec.login] = [
+                    {
+                        "id": user_id,
+                        "usuario": users_map.get(norm_login(spec.login), {}).get("usuario", ""),
+                        "email": users_map.get(norm_login(spec.login), {}).get("email", ""),
+                        "nombre": "",
+                        "apellido": "",
+                        "activo": 0,
+                    }
+                ]
+                continue
+            used_user_ids[user_id] = spec.login
             ws_id = ws_map[spec.workspace_key]
             prepared.append((spec, user_id, ws_id))
 
@@ -240,6 +258,20 @@ def main() -> int:
                     label = f"{row.get('usuario') or '-'} · {row.get('email') or '-'} · {row.get('nombre') or '-'} {row.get('apellido') or '-'}".strip()
                     print(f"    - {row.get('id')} :: {label}")
             print("")
+        if duplicate_user_ids:
+            print("Conflicto: el mismo usuario aparece asignado a varios logins (se aborta para evitar liarla):")
+            for uid, logins in duplicate_user_ids.items():
+                uniq = []
+                for l in logins:
+                    if l not in uniq:
+                        uniq.append(l)
+                print(f" - {uid}: {', '.join(uniq)}")
+            print("")
+
+        if missing_users or ambiguous_users or duplicate_user_ids:
+            print("NO se puede aplicar todavía: faltan resoluciones unívocas.")
+            print("Solución: dime el `usuario` exacto (login) o el email de cada uno de los NO encontrados, y lo fijo con mapeo exacto.")
+            return 2
 
         changes = []
         for spec, user_id, ws_id in prepared:
