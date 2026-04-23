@@ -109,6 +109,7 @@ def extract_fecha_firma(text: str) -> str:
         return ""
     for pat in (
         r"FECHA\s+Y\s+HORA\s+DE\s+FIRMA\s*[:\-]?\s*([0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4})",
+        r"FECHA\s+DE\s+FIRMA\s*[:\-]?\s*([0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4})",
         r"\b(?:LUNES|MARTES|MI[EÉ]RCOLES|JUEVES|VIERNES|S[ÁA]BADO|DOMINGO)\s+([0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4})\b",
     ):
         m = re.search(pat, cleaned, re.IGNORECASE)
@@ -117,6 +118,60 @@ def extract_fecha_firma(text: str) -> str:
             if iso:
                 return iso
     return ""
+
+def extract_tipo_interes(text: str) -> str:
+    """
+    Devuelve un string que puede incluir:
+    - tipo: Fijo/Variable/Mixto
+    - porcentaje: 3,15%
+    Ejemplos: "Fijo 3,15%", "Variable", "2,90%".
+    """
+    raw = str(text or "")
+    cleaned = " ".join(raw.replace("\u00a0", " ").split())
+    if not cleaned:
+        return ""
+
+    # porcentaje (best-effort)
+    rate = ""
+    for pat in (
+        r"\bTIPO\s+BONIFICADO\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+        r"\bTIPO\s+SALIDA\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+        r"\bTIPO\s+DE\s+INTER[ÉE]S\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+        r"\bINTER[ÉE]S\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
+    ):
+        m = re.search(pat, cleaned, re.IGNORECASE)
+        if m:
+            rate = m.group(1).strip()
+            break
+    if rate and not rate.endswith("%"):
+        rate = f"{rate}%"
+
+    # tipo (FIJO/VARIABLE/MIXTO)
+    tipo = ""
+    window = cleaned
+    m = re.search(r"\bTIPO\s+DE\s+INTER[ÉE]S\b(.{0,260})", cleaned, re.IGNORECASE)
+    if m:
+        window = m.group(1)
+    marked = re.search(r"(?:\b|\[)\s*[Xx✓]\s*(FIJO|VARIABLE|MIXTO)\b", window, re.IGNORECASE)
+    if marked:
+        tipo = marked.group(1).strip().capitalize()
+    else:
+        present = []
+        for cand in ("FIJO", "VARIABLE", "MIXTO"):
+            if re.search(rf"\b{cand}\b", window, re.IGNORECASE):
+                present.append(cand)
+        if len(present) == 1:
+            tipo = present[0].capitalize()
+        else:
+            m2 = re.search(r"\bTIPO\s+(FIJO|VARIABLE|MIXTO)\b", window, re.IGNORECASE)
+            if m2:
+                tipo = m2.group(1).strip().capitalize()
+
+    if tipo and rate:
+        return f"{tipo} {rate}"
+    if tipo:
+        return tipo
+    return rate
 
 
 @dataclass
@@ -181,6 +236,10 @@ def extract_from_pdf(pdf_path: Path) -> Extracted:
     precio = _pick_float(
         text,
         (
+            r"PRECIO\s+DE\s+COMPRA\s+DE\s+LA\s+VIVIENDA\s*[:\-]?\s*([0-9\.,]+)",
+            r"PRECIO\s+DE\s+COMPRA\s+DE\s+LA\s+VIVIENDA.*?([0-9\.,]+)\s*(?:EUROS|€)\b",
+            r"\bPRECIO\s+DE\s+COMPRA\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bPRECIO\s+VIVIENDA\s*[:\-]?\s*([0-9\.,]+)",
             r"PRECIO\s+DE\s+COMPRAVENTA.*?(?:ESCRITURADO|ESCRITURAC[IO]N|ESCRIT\w*)\s*[:\-]?\s*([0-9\.,]+)",
             r"PRECIO\s+DE\s+COMPRAVENTA\s*[:\-]?\s*([0-9\.,]+)",
             r"\bESCRITURADO\s*[:\-]?\s*([0-9\.,]+)",
@@ -192,18 +251,11 @@ def extract_from_pdf(pdf_path: Path) -> Extracted:
             r"IMPORTE\s+DEL\s+PRESTAMO\s*[:\-]?\s*(?:MAXIMO\s*)?([0-9\.,]+)",
             r"PRESTAMO\s+CONCEDID[OA]\s*[:\-]?\s*([0-9\.,]+)",
             r"\bCAPITAL\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bC[UY]ANTIA\s+DEL\s+PR[ÉE]STAMO\s*[:\-]?\s*([0-9\.,]+)",
+            r"\bC[UY]ANTIA\s+DEL\s+PRESTAMO\s*[:\-]?\s*([0-9\.,]+)",
         ),
     )
-    tipo = ""
-    for pat in (
-        r"\bTIPO\s+SALIDA\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
-        r"\bTIPO\s+BONIFICADO\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
-        r"\bINTER[ÉE]S\s*[:\-]?\s*([0-9]{1,2}[\\.,][0-9]{1,3})\s*%?",
-    ):
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            tipo = f"{m.group(1).strip()}%"
-            break
+    tipo = extract_tipo_interes(text)
 
     return Extracted(
         cliente1_nombre=cliente1_nombre,
