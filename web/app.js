@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v255";
+const APP_SW_VERSION = "v256";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -30499,7 +30499,22 @@ const renderPropietariosEditor = (propietarios) => {
     const select = document.createElement("select");
     select.classList.add("inline-input");
     populateClientesSelect(select, clienteId);
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary ghost";
+    openBtn.textContent = "Editar";
+    const syncOpenBtn = () => {
+      const selected = String(select.value || "").trim();
+      openBtn.disabled = !selected;
+      openBtn.title = selected ? "Abrir ficha del propietario" : "Selecciona un propietario";
+    };
+    openBtn.addEventListener("click", () => {
+      const selected = String(select.value || "").trim();
+      if (!selected) return;
+      openClienteDetail(selected);
+    });
     select.addEventListener("change", () => {
+      syncOpenBtn();
       savePropietariosFromList();
     });
     const removeBtn = document.createElement("button");
@@ -30511,8 +30526,10 @@ const renderPropietariosEditor = (propietarios) => {
       savePropietariosFromList();
     });
     row.appendChild(select);
+    row.appendChild(openBtn);
     row.appendChild(removeBtn);
     list.appendChild(row);
+    syncOpenBtn();
   };
 
   const savePropietariosFromList = () => {
