@@ -11149,25 +11149,27 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	    state.workspaceRrhhPersonaCacheId = "";
 	  }
 
-	  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
-	  const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary, ausenciasAll, turnos] = await Promise.all([
-	    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
-	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
-	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
-	    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
-	    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
-	    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_turnos?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { rows: [] }) : { rows: [] },
-	  ]);
-	  if (isStale()) return;
+		  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
+		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, vacSummary, ausenciasAll, turnos] = await Promise.all([
+		    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
+		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
+		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
+		    manager ? safeWorkspaceApi(`/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=500`, { rows: [] }) : { rows: [] },
+		    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
+		    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
+		    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_turnos?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { rows: [] }) : { rows: [] },
+		  ]);
+		  if (isStale()) return;
 
-	  state.workspaceRrhhProfileRow = profile?.row || null;
-	  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
-	  state.workspaceRrhhAusenciasAllRows = ausenciasAll?.rows || [];
-	  state.workspaceRrhhGastosRows = gastos?.rows || [];
-	  state.workspaceRrhhDocsRows = docs?.rows || [];
+		  state.workspaceTimeUsers = timeUsers?.rows || [];
+		  state.workspaceRrhhProfileRow = profile?.row || null;
+		  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
+		  state.workspaceRrhhAusenciasAllRows = ausenciasAll?.rows || [];
+		  state.workspaceRrhhGastosRows = gastos?.rows || [];
+		  state.workspaceRrhhDocsRows = docs?.rows || [];
 	  state.workspaceRrhhTurnosRows = turnos?.rows || [];
 	  state.workspaceRrhhTimeSummary = timeSummary || null;
 	  state.workspaceRrhhTimeRows = timeRows?.rows || [];
@@ -16166,10 +16168,13 @@ const fillWorkspaceTimeForm = (record = null) => {
 };
 
 const getWorkspaceTimeEligibleUsers = () => {
-  const tenantMode = isTenantWorkspaceMode();
+  // Importante: en contexto Workspace, la lista de "usuarios elegibles" para RRHH/registro horario
+  // debe venir siempre del endpoint del workspace (state.workspaceTimeUsers). Si no está cargada,
+  // devolvemos vacío para evitar mezclar usuarios globales de otros workspaces.
+  const inWorkspaceContext = Boolean(String(state.currentWorkspaceId || "").trim());
   const sourceRows = (state.workspaceTimeUsers && state.workspaceTimeUsers.length)
     ? state.workspaceTimeUsers
-    : (tenantMode ? [] : state.usersList);
+    : (inWorkspaceContext ? [] : state.usersList);
   const seen = new Set();
   const deduped = (sourceRows || []).filter((user) => {
     if (Number(user.activo ?? 1) !== 1) return false;
