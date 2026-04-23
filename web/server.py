@@ -25448,7 +25448,8 @@ def ensure_auth_invites_table(conn):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_invites_expires ON auth_invites(expires_at, used_at, revoked_at)")
     except Exception:
         pass
-    conn.close()
+    # Importante: este helper NO debe cerrar la conexión recibida.
+    # El caller gestiona el ciclo de vida (SQLite/Postgres).
 
 
 def fetch_workspace_rows(conn):
