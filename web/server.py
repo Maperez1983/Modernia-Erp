@@ -38712,109 +38712,119 @@ class Handler(BaseHTTPRequestHandler):
             if len(password) < 8:
                 json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
                 return
-            conn = get_db(self.db_path)
-            self._track_conn(conn)
-            ensure_usuarios_schema(conn)
-            ensure_auth_invites_table(conn)
-            conn.commit()
-            # Nuevo flujo (auth_invites): permite reenvíos sin invalidar enlaces previos, pero se anulan al activar.
-            invite = None
             try:
-                invite = conn.execute(
+                conn = get_db(self.db_path)
+                self._track_conn(conn)
+                ensure_usuarios_schema(conn)
+                ensure_auth_invites_table(conn)
+                conn.commit()
+
+                # Nuevo flujo (auth_invites): permite reenvíos sin invalidar enlaces previos, pero se anulan al activar.
+                invite = None
+                try:
+                    invite = conn.execute(
+                        """
+                        SELECT
+                          ai.user_id,
+                          ai.expires_at,
+                          ai.used_at,
+                          ai.revoked_at,
+                          u.activo,
+                          u.password_hash
+                        FROM auth_invites ai
+                        JOIN usuarios u ON u.id = ai.user_id
+                        WHERE ai.token = ?
+                        LIMIT 1
+                        """,
+                        (token,),
+                    ).fetchone()
+                except Exception:
+                    invite = None
+                if invite:
+                    user_id = str(invite["user_id"] or "").strip()
+                    if not user_id:
+                        json_response(self, {"error": "Invitación inválida"}, status=404)
+                        return
+                    if not bool(invite["activo"]):
+                        json_response(self, {"error": "Usuario inactivo"}, status=403)
+                        return
+                    if str(invite["revoked_at"] or "").strip() or str(invite["used_at"] or "").strip():
+                        json_response(self, {"error": "Invitación inválida"}, status=404)
+                        return
+                    if str(invite["password_hash"] or "").strip():
+                        json_response(self, {"error": "La cuenta ya está activada"}, status=409)
+                        return
+                    expires_dt = _parse_iso_dt_utc(invite["expires_at"])
+                    if expires_dt and expires_dt < datetime.now(timezone.utc):
+                        json_response(self, {"error": "Invitación caducada"}, status=410)
+                        return
+                    conn.execute(
+                        """
+                        UPDATE usuarios
+                        SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
+                        WHERE id = ?
+                        """,
+                        (hash_password(password), user_id),
+                    )
+                    # Invalida todas las invitaciones pendientes del usuario (evita que alguien cambie la contraseña con otro token).
+                    try:
+                        conn.execute(
+                            """
+                            UPDATE auth_invites
+                            SET used_at = COALESCE(NULLIF(used_at, ''), datetime('now'))
+                            WHERE user_id = ?
+                              AND revoked_at IS NULL
+                            """,
+                            (user_id,),
+                        )
+                    except Exception:
+                        pass
+                    conn.commit()
+                    json_response(self, {"ok": True})
+                    return
+
+                row = conn.execute(
                     """
-                    SELECT
-                      ai.user_id,
-                      ai.expires_at,
-                      ai.used_at,
-                      ai.revoked_at,
-                      u.activo,
-                      u.password_hash
-                    FROM auth_invites ai
-                    JOIN usuarios u ON u.id = ai.user_id
-                    WHERE ai.token = ?
+                    SELECT id, activo, invite_expires_at
+                    FROM usuarios
+                    WHERE invite_token = ?
                     LIMIT 1
                     """,
                     (token,),
                 ).fetchone()
-            except Exception:
-                invite = None
-            if invite:
-                user_id = str(invite["user_id"] or "").strip()
-                if not user_id:
+                if not row:
                     json_response(self, {"error": "Invitación inválida"}, status=404)
                     return
-                if not bool(invite["activo"]):
+                if not row["activo"]:
                     json_response(self, {"error": "Usuario inactivo"}, status=403)
                     return
-                if str(invite["revoked_at"] or "").strip() or str(invite["used_at"] or "").strip():
-                    json_response(self, {"error": "Invitación inválida"}, status=404)
-                    return
-                if str(invite["password_hash"] or "").strip():
-                    json_response(self, {"error": "La cuenta ya está activada"}, status=409)
-                    return
-                expires_dt = _parse_iso_dt_utc(invite["expires_at"])
-                if expires_dt and expires_dt < datetime.now(timezone.utc):
-                    json_response(self, {"error": "Invitación caducada"}, status=410)
-                    return
+                expires_raw = str(row["invite_expires_at"] or "").strip()
+                if expires_raw:
+                    try:
+                        dt = _parse_iso_dt_utc(expires_raw)
+                        if dt and dt < datetime.now(timezone.utc):
+                            json_response(self, {"error": "Invitación caducada"}, status=410)
+                            return
+                    except Exception:
+                        pass
                 conn.execute(
                     """
                     UPDATE usuarios
                     SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
                     WHERE id = ?
                     """,
-                    (hash_password(password), user_id),
+                    (hash_password(password), row["id"]),
                 )
-                # Invalida todas las invitaciones pendientes del usuario (evita que alguien cambie la contraseña con otro token).
-                try:
-                    conn.execute(
-                        """
-                        UPDATE auth_invites
-                        SET used_at = COALESCE(NULLIF(used_at, ''), datetime('now'))
-                        WHERE user_id = ?
-                          AND revoked_at IS NULL
-                        """,
-                        (user_id,),
-                    )
-                except Exception:
-                    pass
                 conn.commit()
                 json_response(self, {"ok": True})
                 return
-            row = conn.execute(
-                """
-                SELECT id, activo, invite_expires_at
-                FROM usuarios
-                WHERE invite_token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
-            if not row:
-                json_response(self, {"error": "Invitación inválida"}, status=404)
-                return
-            if not row["activo"]:
-                json_response(self, {"error": "Usuario inactivo"}, status=403)
-                return
-            expires_raw = str(row["invite_expires_at"] or "").strip()
-            if expires_raw:
+            except Exception as exc:
                 try:
-                    dt = _parse_iso_dt_utc(expires_raw)
-                    if dt and dt < datetime.now(timezone.utc):
-                        json_response(self, {"error": "Invitación caducada"}, status=410)
-                        return
+                    Handler._record_api_error(parsed.path, exc)
                 except Exception:
                     pass
-            conn.execute(
-                """
-                UPDATE usuarios
-                SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
-                WHERE id = ?
-                """,
-                (hash_password(password), row["id"]),
-            )
-            conn.commit()
-            json_response(self, {"ok": True})
-            return
+                json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
 
         empresa_nombre = payload.get("empresa_nombre")
         path_value = str(parsed.path or "")
