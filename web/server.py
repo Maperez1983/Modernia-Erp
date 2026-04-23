@@ -1571,6 +1571,15 @@ def admin_lookup_users_by_login(conn, login_value):
         email = str(row_value(r, "email") or row_value(r, 2) or "").strip()
         activo = int(row_value(r, "activo") or row_value(r, 3) or 0)
         ph = str(row_value(r, "ph") or "").strip()
+        scheme = ""
+        if ph:
+            if ph.startswith(f"{PBKDF2_SHA256}$") or ph.startswith("pbkdf2_sha256$"):
+                scheme = "pbkdf2_sha256"
+            elif "$" in ph:
+                scheme = "legacy_sha256"
+            else:
+                scheme = "unknown"
+        ph_len = len(ph or "")
         updated_at = str(row_value(r, "updated_at") or row_value(r, 5) or "").strip()
         memberships = []
         try:
@@ -1595,6 +1604,8 @@ def admin_lookup_users_by_login(conn, login_value):
                 "email": email,
                 "activo": bool(activo),
                 "has_password": bool(ph),
+                "password_scheme": scheme,
+                "password_len": ph_len,
                 "updated_at": updated_at,
                 "memberships": memberships,
             }
