@@ -3163,6 +3163,31 @@ def parse_datetime_value(value):
     return None
 
 
+def _parse_iso_dt_utc(value):
+    """
+    Parseo best-effort de timestamps ISO y normaliza a UTC.
+    Devuelve datetime con tzinfo o None.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        dt = None
+    if dt is None:
+        parsed_date = parse_iso_date(raw)
+        if not parsed_date:
+            return None
+        return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    try:
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return dt
+
+
 def add_year_to_date(value):
     base = parse_iso_date(value)
     if not base:
