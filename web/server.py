@@ -38831,6 +38831,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_library_documents",
                 "/api/legal_radar_auto_status",
                 "/api/legal_radar_counts",
+                "/api/admin_seed_modernia_users",
             }
         )
         # Workspace endpoints are scoped by workspace_id/empresa_id; legal/copilot endpoints are scoped by `area`.
