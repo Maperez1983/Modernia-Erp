@@ -13711,10 +13711,18 @@ const renderWorkspaceRrhhHub = () => {
           rol,
           registro_horario_activo: 1,
           activo: 1,
+          workspace_id: state.currentWorkspaceId || "",
         });
         if (create?.error) throw new Error(create.error);
         const userId = String(create?.id || "").trim();
         if (!userId) throw new Error("No se pudo crear el usuario.");
+        // Asegura que el usuario pertenece al workspace ANTES de vincularlo a RRHH (evita cruces entre workspaces).
+        const member = await apiPost("/api/workspace_member_upsert", {
+          workspace_id: state.currentWorkspaceId || "",
+          login: usuario,
+          role: "Miembro",
+        });
+        if (member?.error) throw new Error(member.error);
         // Vincula el usuario a la ficha (y evita duplicados).
         const link = await apiPost("/api/workspace_registro_personal", { ...payload, usuario_id: userId });
         if (link?.error) throw new Error(link.error);
@@ -44747,6 +44755,70 @@ const openEmbeddedFiscalWizard = (options = {}) => {
   return true;
 };
 
+const buildFiscalPrefillFromCurrentInmueble = () => {
+  const ctx = state.currentInmuebleContext || {};
+  const inmueble = ctx.inmueble || state.currentInmueble || {};
+  const captacion = ctx.captacion || {};
+  const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
+  const cliente_id = String(propietarios?.[0]?.id || propietarios?.[0]?.cliente_id || state.currentClienteId || "").trim();
+  const provincia = inmueble.provincia || captacion.provincia || "";
+  const inferred = inferFiscalTerritoryFromProvincia(provincia);
+  const ccaa = inferred.ccaa || String(localStorage.getItem("crm.fiscalWizard.ccaa") || "AN").trim().toUpperCase();
+  const pv = inferred.pv_territorio || String(localStorage.getItem("crm.fiscalWizard.pv") || "").trim().toUpperCase();
+  const referencia = [inmueble.direccion || captacion.direccion || "", inmueble.referencia_catastral || captacion.referencia_catastral || ""]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+  const codigo_postal = inmueble.codigo_postal || captacion.codigo_postal || "";
+  return {
+    operacion: "venta",
+    ccaa,
+    pv_territorio: pv,
+    referencia,
+    codigo_postal,
+    cliente_id,
+  };
+};
+
+const resetFiscalSimulatorsForInmuebleChange = () => {
+  try {
+    fiscalWizardActivePreset = null;
+  } catch {}
+  try {
+    setFiscalWizardDgtRefs([], { replace: true });
+  } catch {}
+  try {
+    if (fiscalWizardStatus) fiscalWizardStatus.textContent = "";
+    if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = "";
+    if (fiscalWizardResult) fiscalWizardResult.innerHTML = "";
+  } catch {}
+  try {
+    if (fiscalWizardForm && typeof fiscalWizardForm.reset === "function") fiscalWizardForm.reset();
+  } catch {}
+  try {
+    if (irpfGainStatus) irpfGainStatus.textContent = "";
+    if (irpfGainResult) irpfGainResult.innerHTML = "";
+  } catch {}
+  try {
+    if (irpfGainForm && typeof irpfGainForm.reset === "function") irpfGainForm.reset();
+  } catch {}
+  try {
+    if (irpfGainForm && typeof irpfGainForm._crmResetIrpfScenarioState === "function") {
+      irpfGainForm._crmResetIrpfScenarioState();
+    }
+  } catch {}
+  try {
+    if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "";
+    if (iivtnuSimulatorResult) iivtnuSimulatorResult.innerHTML = "";
+    if (iivtnuSimulatorForm && typeof iivtnuSimulatorForm.reset === "function") iivtnuSimulatorForm.reset();
+  } catch {}
+  try {
+    if (irpfRentalStatus) irpfRentalStatus.textContent = "";
+    if (irpfRentalResult) irpfRentalResult.innerHTML = "";
+    if (irpfRentalForm && typeof irpfRentalForm.reset === "function") irpfRentalForm.reset();
+  } catch {}
+};
+
 const syncInmuebleTecnocloudSidebar = (tabKey = "") => {
   const topKey = resolveInmuebleTopTabKey(tabKey);
   const toggle = (el, on) => {
@@ -44807,6 +44879,16 @@ const setInmuebleTab = (tab) => {
 
   if (key === "fiscal") {
     mountWorkspaceSimuladoresIntoInmueble();
+    try {
+      const inmuebleId = String(state.currentInmuebleId || "").trim();
+      if (inmuebleId && state._lastFiscalPrefillInmuebleId !== inmuebleId) {
+        resetFiscalSimulatorsForInmuebleChange();
+        state._lastFiscalPrefillInmuebleId = inmuebleId;
+      }
+    } catch {}
+    try {
+      applyFiscalWizardPrefill(buildFiscalPrefillFromCurrentInmueble());
+    } catch {}
   } else {
     restoreWorkspaceSimuladoresFromInmueble();
   }
@@ -53058,10 +53140,11 @@ const downloadBlobFile = (filename, blob) => {
 };
 
 const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
-  const { filenameFallback = "informe.pdf" } = options || {};
+  const { filenameFallback = "informe.pdf", targetWindow = null } = options || {};
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify(payload || {}),
   });
   if (!res.ok) {
@@ -53077,6 +53160,30 @@ const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
   const match = disposition.match(/filename=\"([^\"]+)\"/i);
   const filename = match && match[1] ? match[1] : filenameFallback;
   const blob = await res.blob();
+  if (targetWindow && typeof targetWindow === "object") {
+    try {
+      if (!targetWindow.closed) {
+        const url = URL.createObjectURL(blob);
+        try {
+          targetWindow.location.href = url;
+        } catch {
+          // Fallback: si no podemos navegar el popup, descargamos como fichero.
+          downloadBlobFile(filename, blob);
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+          return;
+        }
+        // No revocamos inmediatamente: algunos navegadores necesitan tiempo para cargar el PDF.
+        setTimeout(() => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        }, 120000);
+        return;
+      }
+    } catch {}
+  }
   downloadBlobFile(filename, blob);
 };
 
@@ -62189,15 +62296,48 @@ if (irpfGainForm) {
     });
   };
 
-  const renderSlotPanel = () => {
-    const st = slotState[activeSlot] || slotState.A;
-    if (irpfSlotNombre) irpfSlotNombre.value = st.nombre || "";
-    if (irpfSlotPrecioVenta) irpfSlotPrecioVenta.value = st.venta || "";
-    if (irpfSlotPrecioEscritura) irpfSlotPrecioEscritura.value = st.escritura || "";
-    if (irpfSlotCalcWith) irpfSlotCalcWith.value = st.calc || "venta";
-    if (irpfSlotInclude) irpfSlotInclude.checked = Boolean(st.include);
-    setFormLock(activeSlot !== "A");
-  };
+	  const renderSlotPanel = () => {
+	    const st = slotState[activeSlot] || slotState.A;
+	    if (irpfSlotNombre) irpfSlotNombre.value = st.nombre || "";
+	    if (irpfSlotPrecioVenta) irpfSlotPrecioVenta.value = st.venta || "";
+	    if (irpfSlotPrecioEscritura) irpfSlotPrecioEscritura.value = st.escritura || "";
+	    if (irpfSlotCalcWith) irpfSlotCalcWith.value = st.calc || "venta";
+	    if (irpfSlotInclude) irpfSlotInclude.checked = Boolean(st.include);
+	    setFormLock(activeSlot !== "A");
+	  };
+
+	  // Expuesto para poder resetear el simulador al cambiar de inmueble (evita arrastrar ejemplos anteriores).
+	  irpfGainForm._crmResetIrpfScenarioState = () => {
+	    try {
+	      irpfLastSimResp = null;
+	      activeSlot = "A";
+	      const defaults = {
+	        A: { id: "", nombre: "Venta (precio real)", venta: "", escritura: "", calc: "venta", include: true, last: null },
+	        B: { id: "", nombre: "Escritura", venta: "", escritura: "", calc: "escritura", include: true, last: null },
+	        C: { id: "", nombre: "Alternativo", venta: "", escritura: "", calc: "venta", include: false, last: null },
+	      };
+	      ["A", "B", "C"].forEach((slot) => {
+	        const st = slotState[slot];
+	        const def = defaults[slot];
+	        if (!st || !def) return;
+	        st.id = def.id;
+	        st.nombre = def.nombre;
+	        st.venta = def.venta;
+	        st.escritura = def.escritura;
+	        st.calc = def.calc;
+	        st.include = def.include;
+	        st.last = null;
+	        try {
+	          delete st._basePayload;
+	        } catch {}
+	      });
+	      irpfBaseTouched = false;
+	      irpfBaseHydrated = false;
+	      irpfBaseHydrateMute = false;
+	      setSlotStatus("");
+	      renderSlotPanel();
+	    } catch {}
+	  };
 
   const calcValorTransmisionForSlot = (st) => {
     const vVenta = parseMoneyValue(st?.venta || 0);
@@ -62402,19 +62542,22 @@ if (irpfGainForm) {
     setSlotStatus("Guardado.");
   };
 
-  const printComparePdf = async () => {
-    const selected = ["A", "B", "C"].filter((s) => slotState[s]?.include);
-    if (!selected.length) {
-      setSlotStatus("Marca al menos un escenario.");
-      return;
-    }
-    setSlotStatus("Preparando informe...");
-    // Simula los que no tengan resultado.
-    for (const slot of selected) {
-      if (!slotState[slot]?.last) {
-        await simulateSlot(slot);
-      }
-    }
+	  const printComparePdf = async ({ popup = null } = {}) => {
+	    const selected = ["A", "B", "C"].filter((s) => slotState[s]?.include);
+	    if (!selected.length) {
+	      setSlotStatus("Marca al menos un escenario.");
+        try {
+          if (popup) popup.close();
+        } catch {}
+	      return;
+	    }
+	    setSlotStatus("Preparando informe...");
+	    // Simula los que no tengan resultado.
+	    for (const slot of selected) {
+	      if (!slotState[slot]?.last) {
+	        await simulateSlot(slot);
+	      }
+	    }
     const base = readBasePayload();
     if (!base.empresa_nombre) {
       base.empresa_nombre =
@@ -62423,21 +62566,21 @@ if (irpfGainForm) {
         state.currentWorkspaceCompanyName ||
         "";
     }
-    const scenarios = selected.map((slot) => {
-      const st = slotState[slot];
-      const payload = { ...base };
-      const calcValor = slot === "A" ? parseMoneyValue(payload.valor_transmision || 0) : calcValorTransmisionForSlot(st);
-      payload.valor_transmision = `${Number(calcValor || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      return { nombre: st.nombre || `Escenario ${slot}`, payload };
-    });
-    await downloadPdfFromApi("/api/irpf_ganancia_compare_pdf", {
-      empresa_nombre: base.empresa_nombre || "",
-      referencia: base.referencia || "",
-      brand_logo_url: "/assets/grupo_modernia_logo.png",
-      scenarios,
-    }, { filenameFallback: "informe_irpf_comparativo.pdf" });
-    setSlotStatus("PDF generado.");
-  };
+	    const scenarios = selected.map((slot) => {
+	      const st = slotState[slot];
+	      const payload = { ...base };
+	      const calcValor = slot === "A" ? parseMoneyValue(payload.valor_transmision || 0) : calcValorTransmisionForSlot(st);
+	      payload.valor_transmision = `${Number(calcValor || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	      return { slot, nombre: st.nombre || `Escenario ${slot}`, payload };
+	    });
+	    await downloadPdfFromApi("/api/irpf_ganancia_compare_pdf", {
+	      empresa_nombre: base.empresa_nombre || "",
+	      referencia: base.referencia || "",
+	      brand_logo_url: "/assets/grupo_modernia_logo.png",
+	      scenarios,
+	    }, { filenameFallback: "informe_irpf_comparativo.pdf", targetWindow: popup });
+	    setSlotStatus("PDF generado.");
+	  };
 
   const setActiveSlot = (slot) => {
     activeSlot = slot;
@@ -62501,15 +62644,23 @@ if (irpfGainForm) {
     });
   }
 
-  if (irpfSlotComparePdfBtn) {
-    irpfSlotComparePdfBtn.addEventListener("click", async () => {
-      try {
-        await printComparePdf();
-      } catch (err) {
-        setSlotStatus(err?.message || "No se pudo generar el PDF.");
-      }
-    });
-  }
+	  if (irpfSlotComparePdfBtn) {
+	    irpfSlotComparePdfBtn.addEventListener("click", async () => {
+	      let popup = null;
+	      try {
+	        // Abrimos primero para evitar bloqueo de popups/descargas tras awaits (Safari/iOS especialmente).
+	        popup = window.open("", "_blank", "noopener");
+	      } catch {}
+	      try {
+	        await printComparePdf({ popup });
+	      } catch (err) {
+	        try {
+	          if (popup) popup.close();
+	        } catch {}
+	        setSlotStatus(err?.message || "No se pudo generar el PDF.");
+	      }
+	    });
+	  }
 
   if (irpfClienteIdInput) {
     irpfClienteIdInput.addEventListener("change", () => {
@@ -62945,6 +63096,42 @@ if (workspaceForm) {
       if (workspaceFormStatus) {
         workspaceFormStatus.textContent = error.message || "Error al guardar el workspace.";
       }
+    }
+  });
+}
+
+const workspaceDeleteBtn = document.getElementById("workspaceDeleteBtn");
+if (workspaceDeleteBtn) {
+  workspaceDeleteBtn.addEventListener("click", async () => {
+    try {
+      const formData = workspaceForm ? new FormData(workspaceForm) : null;
+      const wsId = formData ? String(formData.get("id") || "").trim() : "";
+      const wsName = formData ? String(formData.get("nombre") || "").trim() : "";
+      if (!wsId) {
+        alert("Selecciona primero un workspace.");
+        return;
+      }
+      const typed = String(prompt(`Vas a ELIMINAR el workspace "${wsName || wsId}".\n\nEscribe ELIMINAR para continuar:`) || "").trim().toUpperCase();
+      if (typed !== "ELIMINAR") return;
+      workspaceDeleteBtn.disabled = true;
+      if (workspaceFormStatus) workspaceFormStatus.textContent = "Revisando impacto...";
+      const dry = await apiPost("/api/workspace_delete", { id: wsId, confirm: "ELIMINAR", dry_run: 1 });
+      if (dry?.error) throw new Error(dry.error);
+      const totals = Object.values(dry?.result?.tables || {}).reduce((acc, row) => acc + Number(row?.rows || 0), 0);
+      const ok = confirm(`Resumen: ${totals} filas relacionadas.\n\n¿Eliminar definitivamente el workspace "${wsName || wsId}"?`);
+      if (!ok) {
+        if (workspaceFormStatus) workspaceFormStatus.textContent = "Cancelado.";
+        return;
+      }
+      if (workspaceFormStatus) workspaceFormStatus.textContent = "Eliminando workspace...";
+      const resp = await apiPost("/api/workspace_delete", { id: wsId, confirm: "ELIMINAR" });
+      if (resp?.error) throw new Error(resp.error);
+      if (workspaceFormStatus) workspaceFormStatus.textContent = "Workspace eliminado.";
+      await loadWorkspaceCentral();
+    } catch (error) {
+      if (workspaceFormStatus) workspaceFormStatus.textContent = error.message || "No se pudo eliminar.";
+    } finally {
+      workspaceDeleteBtn.disabled = false;
     }
   });
 }

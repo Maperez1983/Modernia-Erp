@@ -8725,6 +8725,12 @@ def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
             return raw.strip()
         return format_eur(parsed)
 
+    def _money_num(value: object) -> float:
+        try:
+            return float(parse_money_value(value or 0) or 0.0)
+        except Exception:
+            return 0.0
+
     empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
     ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
     subtitle_parts = [empresa]
@@ -8744,7 +8750,11 @@ def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
     for idx, scenario in enumerate(scenarios):
         if not isinstance(scenario, dict):
             continue
-        name = str(scenario.get("nombre") or scenario.get("name") or "").strip() or f"Escenario {idx + 1}"
+        slot_label = str(scenario.get("slot") or "").strip().upper()
+        if slot_label and len(slot_label) > 6:
+            slot_label = slot_label[:6]
+        base_name = str(scenario.get("nombre") or scenario.get("name") or "").strip() or f"Escenario {idx + 1}"
+        name = f"{slot_label} · {base_name}" if slot_label else base_name
         sp = scenario.get("payload") if isinstance(scenario.get("payload"), dict) else {}
         # Hereda metadatos del informe si no vienen en el escenario.
         if isinstance(sp, dict):
@@ -8761,6 +8771,10 @@ def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
         params = out.get("params") or {}
         result = out.get("result") or {}
         regimen = str(params.get("regimen_fiscal") or sp.get("regimen_fiscal") or "irpf").strip().lower() or "irpf"
+        escala = params.get("escala_ejercicio")
+        assumed = bool(params.get("escala_asumida"))
+        tipo_gravamen_pct = params.get("tipo_gravamen_pct")
+        retencion_pct = params.get("retencion_pct")
         importe = result.get("cuota_ahorro_estimada")
         if regimen == "irnr" and result.get("cuota_neta") is not None:
             importe = result.get("cuota_neta")
@@ -8789,7 +8803,58 @@ def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
                 {"label": "A pagar (estimado)", "value": money(importe), "accent": True},
             ],
         }
-        sections.append((f"Resumen · {name}", resumen_cards))
+        input_lines = []
+        try:
+            _push_text(input_lines, "Régimen fiscal", ("IRNR (no residente)" if regimen == "irnr" else "IRPF (residente)"))
+            _push_text(input_lines, "Fecha adquisición", str(sp.get("fecha_adquisicion") or "").strip())
+            _push_text(input_lines, "Fecha transmisión (devengo)", str(sp.get("fecha_transmision") or "").strip())
+            _push_money(input_lines, "Valor adquisición", sp.get("valor_adquisicion"), keep_zero=True)
+            _push_money(input_lines, "Valor transmisión", sp.get("valor_transmision"), keep_zero=True)
+            _push_money(input_lines, "Gastos adquisición (total)", sp.get("gastos_adquisicion"))
+            _push_money(input_lines, "Gastos transmisión (total)", sp.get("gastos_transmision"))
+            _push_money(input_lines, "Plusvalía municipal", sp.get("plusvalia_municipal"))
+            _push_money(input_lines, "Mejoras / inversiones", sp.get("inversiones_mejoras"))
+            _push_money(input_lines, "Amortización deducida", sp.get("amortizacion_deducida"))
+            if bool(sp.get("vivienda_habitual") or False):
+                input_lines.append(("Vivienda habitual", "Sí"))
+            if str(sp.get("dependencia_grado") or "").strip():
+                input_lines.append(("Dependencia", str(sp.get("dependencia_grado") or "").strip()))
+            if bool(sp.get("exencion_mayor_65") or False):
+                input_lines.append(("Exención >65 (forzar)", "Sí"))
+            _push_money(input_lines, "Importe reinvertido", sp.get("importe_reinvertido"))
+            _push_money(input_lines, "Comprometido a reinvertir", sp.get("importe_comprometido_reinvertir"))
+        except Exception:
+            input_lines = input_lines or []
+
+        output_lines = []
+        try:
+            if regimen == "irnr":
+                output_lines.append(("Tipo gravamen IRNR", f"{tipo_gravamen_pct:.3f}%" if tipo_gravamen_pct is not None else "—"))
+                output_lines.append(("Retención a cuenta", f"{float(retencion_pct or 0):.2f}%" if retencion_pct is not None else "—"))
+            else:
+                output_lines.append(("Escala usada", str(escala or "")))
+                output_lines.append(("Escala asumida", "Sí" if assumed else "No"))
+            _push_money(output_lines, "Valor adquisición (calc.)", result.get("valor_adquisicion_calc"), keep_zero=True)
+            _push_money(output_lines, "Valor transmisión (calc.)", result.get("valor_transmision_calc"), keep_zero=True)
+            _push_money(output_lines, "Ganancia patrimonial (bruta)", result.get("ganancia_patrimonial"), keep_zero=True)
+            _push_money(output_lines, "Exento", result.get("exento"))
+            if (_money_num(result.get("exento")) or 0.0) > 0:
+                _push_text(output_lines, "Motivo exención", result.get("exencion_motivo"))
+            _push_money(output_lines, "Ganancia sujeta (post-exención)", result.get("ganancia_sujeta"), keep_zero=True)
+            _push_money(output_lines, "Abatimiento (DT 9ª) · Reducción", (result.get("abatimiento") or {}).get("reduccion_importe"))
+            _push_money(output_lines, "Base ahorro sujeta", result.get("base_ahorro_sujeta"), keep_zero=True)
+            _push_money(output_lines, "A pagar (estimado)", importe, keep_zero=True)
+            if regimen == "irnr":
+                _push_money(output_lines, "Retención (importe)", result.get("retencion_importe"))
+                _push_money(output_lines, "Cuota neta (cuota - retención)", result.get("cuota_neta"))
+        except Exception:
+            output_lines = output_lines or []
+
+        sections.append((f"Escenario · {name} · Resumen", resumen_cards))
+        if input_lines:
+            sections.append((f"Escenario · {name} · Datos de entrada", input_lines))
+        if output_lines:
+            sections.append((f"Escenario · {name} · Resultado", output_lines))
 
     if not sections:
         raise ValueError("No hay escenarios válidos para comparar")
@@ -38419,13 +38484,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_create",
             "/api/workspace_empresa_link",
             "/api/workspace_empresa_unlink",
-            "/api/workspace_member_upsert",
-            "/api/workspace_member_delete",
-            "/api/workspace_update",
-            "/api/workspace_module_update",
-            "/api/workspace_facturacion",
-            "/api/workspace_series",
-            "/api/workspace_inbox",
+	            "/api/workspace_member_upsert",
+	            "/api/workspace_member_delete",
+	            "/api/workspace_update",
+	            "/api/workspace_delete",
+	            "/api/workspace_module_update",
+	            "/api/workspace_facturacion",
+	            "/api/workspace_series",
+	            "/api/workspace_inbox",
             "/api/workspace_inbox_review",
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
@@ -42340,6 +42406,120 @@ class Handler(BaseHTTPRequestHandler):
                     ensure_workspace_member(conn, workspace_id, creator_id, role="Owner", now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": workspace_id})
+            return
+        elif parsed.path == "/api/workspace_delete":
+            # Eliminación fuerte de un workspace (solo superadmin).
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session) or not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("id") or payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if confirm != "ELIMINAR":
+                json_response(self, {"error": "confirm inválido (usa ELIMINAR)"}, status=400)
+                return
+            dry_run = str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+
+            ws_row = conn.execute("SELECT id, nombre, slug FROM workspaces WHERE id = ? LIMIT 1", (workspace_id,)).fetchone()
+            if not ws_row:
+                json_response(self, {"error": "workspace no encontrado"}, status=404)
+                return
+            ws_slug = str(row_value(ws_row, "slug") or "").strip()
+            ws_name = str(row_value(ws_row, "nombre") or "").strip()
+            protected = {"modernia", "modernia-centro", "moderniacentro", "modernia_centro"}
+            if normalize_workspace_slug(ws_slug or ws_name) in protected:
+                json_response(self, {"error": "Workspace protegido: no se puede borrar."}, status=409)
+                return
+
+            purge_tables = [
+                "workspace_presupuesto_lineas",
+                "workspace_presupuestos",
+                "workspace_facturacion_cobros",
+                "workspace_facturacion_remesas",
+                "workspace_facturacion",
+                "workspace_facturacion_series",
+                "workspace_documentos_inbox",
+                "workspace_portal_requerimientos",
+                "workspace_portal_clientes",
+                "workspace_automatizacion_logs",
+                "workspace_automatizaciones",
+                "workspace_registro_horario",
+                "workspace_registro_alerts",
+                "workspace_registro_notifications",
+                "workspace_registro_audit",
+                "workspace_registro_periodos",
+                "workspace_rrhh_turnos",
+                "workspace_rrhh_ausencias",
+                "workspace_rrhh_gastos",
+                "workspace_rrhh_documentos",
+                "workspace_rrhh_profile",
+                "workspace_registro_personal",
+                "workspace_fincas_contabilidad",
+                "workspace_fincas_incidencias",
+                "workspace_fincas_juntas",
+                "workspace_fincas_proveedores",
+                "workspace_fincas_comunidades",
+                "workspace_contratos",
+                "workspace_servicio_empresas",
+                "workspace_modulos",
+                "workspace_empresas",
+                "workspace_miembros",
+            ]
+            result = {"workspace_id": workspace_id, "workspace_nombre": ws_name, "workspace_slug": ws_slug, "dry_run": dry_run, "tables": {}}
+
+            def _table_exists(name: str) -> bool:
+                try:
+                    conn.execute(f"SELECT 1 FROM {name} LIMIT 1")
+                    return True
+                except Exception:
+                    return False
+
+            try:
+                for table in purge_tables:
+                    if not _table_exists(table):
+                        result["tables"][table] = {"exists": False, "rows": 0, "deleted": 0}
+                        continue
+                    try:
+                        row = conn.execute(f"SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ?", (workspace_id,)).fetchone()
+                        total = int(row_value(row, "total") or row_value(row, 0) or 0)
+                    except Exception:
+                        total = 0
+                    result["tables"][table] = {"exists": True, "rows": total, "deleted": 0}
+                    if (not dry_run) and total:
+                        conn.execute(f"DELETE FROM {table} WHERE workspace_id = ?", (workspace_id,))
+                        result["tables"][table]["deleted"] = total
+
+                if _table_exists("workspace_links"):
+                    try:
+                        row = conn.execute(
+                            "SELECT COUNT(*) AS total FROM workspace_links WHERE source_workspace_id = ? OR target_workspace_id = ?",
+                            (workspace_id, workspace_id),
+                        ).fetchone()
+                        total = int(row_value(row, "total") or row_value(row, 0) or 0)
+                    except Exception:
+                        total = 0
+                    result["tables"]["workspace_links"] = {"exists": True, "rows": total, "deleted": 0}
+                    if (not dry_run) and total:
+                        conn.execute(
+                            "DELETE FROM workspace_links WHERE source_workspace_id = ? OR target_workspace_id = ?",
+                            (workspace_id, workspace_id),
+                        )
+                        result["tables"]["workspace_links"]["deleted"] = total
+
+                if not dry_run:
+                    conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+                    conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo borrar el workspace.", "detail": result}, status=500)
+                return
+            json_response(self, {"ok": True, "result": result})
             return
         elif parsed.path == "/api/workspace_module_update":
             session = getattr(self, "auth_session", None) or self._current_session()
