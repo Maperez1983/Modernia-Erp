@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=232" />
+				    <link rel="stylesheet" href="styles.css?v=233" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3310,13 +3310,13 @@
 				                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
 				                    + Nuevo
 				                  </button>
-                          <div class="crm-top-modules" id="crmTopModules">
-				                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
-				                    <span class="tc-mod-ico" aria-hidden="true">
-				                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-				                    </span>
-				                    <span class="tc-mod-label">Financiaciones</span>
-				                  </button>
+	                          <div class="crm-top-modules" id="crmTopModules">
+					                  <button type="button" class="tab tc-module hidden-context" data-crm-view="fin" title="Financiaciones">
+					                    <span class="tc-mod-ico" aria-hidden="true">
+					                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9l8-5 8 5v10" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19v-6h8v6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+					                    </span>
+					                    <span class="tc-mod-label">Financiaciones</span>
+					                  </button>
 			                  <button type="button" class="tab tc-module hidden-context" data-crm-view="seguros" title="Seguros">
 			                    <span class="tc-mod-ico" aria-hidden="true">
 			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 20 6v6c0 5-3.4 9.4-8 10-4.6-.6-8-5-8-10V6l8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -3367,14 +3367,52 @@
 			                    </span>
 			                    <span class="tc-mod-label">Act./Citas</span>
 			                  </button>
-				                  <button type="button" class="tab tc-module" data-crm-view="analisis" title="Búsq./Inf.">
-				                    <span class="tc-mod-ico" aria-hidden="true">
-				                      <svg viewBox="0 0 24 24" fill="none"><path d="M10 18a8 8 0 1 1 5.29-14.03A8 8 0 0 1 10 18Z" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-				                    </span>
-				                    <span class="tc-mod-label">Búsq./Inf.</span>
-				                  </button>
-                          </div>
-				                </div>
+					                  <button type="button" class="tab tc-module" data-crm-view="analisis" title="Búsq./Inf.">
+					                    <span class="tc-mod-ico" aria-hidden="true">
+					                      <svg viewBox="0 0 24 24" fill="none"><path d="M10 18a8 8 0 1 1 5.29-14.03A8 8 0 0 1 10 18Z" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+					                    </span>
+					                    <span class="tc-mod-label">Búsq./Inf.</span>
+					                  </button>
+	                          </div>
+	                          <div class="crm-top-modules hidden" id="crmTopGestoriaModules">
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-dash" title="Dashboard">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h7v7H4zM13 4h7v16h-7zM4 4h7v7H4z" stroke="currentColor" stroke-width="2"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Dashboard</span>
+	                            </button>
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-crm" title="Clientes">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Clientes</span>
+	                            </button>
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-docs" title="Inbox documental">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h7l3 3v15H7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6M9 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Inbox</span>
+	                            </button>
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-agenda" title="Agenda">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Agenda</span>
+	                            </button>
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-fact" title="Presupuestos">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h9l3 3v17H6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M15 2v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Presup.</span>
+	                            </button>
+	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-conta" title="Contabilidad">
+	                              <span class="tc-mod-ico" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10v4H7z" stroke="currentColor" stroke-width="2"/><path d="M6 6h12v16H6z" stroke="currentColor" stroke-width="2"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	                              </span>
+	                              <span class="tc-mod-label">Conta</span>
+	                            </button>
+	                          </div>
+					                </div>
 
 			                <div class="crm-lightning-topbar-right">
 			                  <div class="crm-top-actions" aria-label="Accesos directos">
@@ -9838,11 +9876,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-									    <script src="app.js?v=650"></script>
+									    <script src="app.js?v=651"></script>
 			    <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-								        const TARGET_SW = "/sw.js?v=215";
+								        const TARGET_SW = "/sw.js?v=216";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

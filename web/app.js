@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v256";
+const APP_SW_VERSION = "v257";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -19465,6 +19465,8 @@ const resolveCrmTecnocloudVertical = () => {
   if (currentTab === "seguros-crm") return "seguros";
   if (currentTab === "fin-crm" || currentTab === "fin-sim") return "fin";
   if (currentTab === "crm") return "inmo";
+  if (currentTab && currentTab.startsWith("gestoria")) return "gestoria";
+  if (crmContext === "gestoria") return "gestoria";
   if (crmContext === "seguros") return "seguros";
   if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") return "fin";
   return "inmo";
@@ -19477,23 +19479,25 @@ const syncCrmTecnocloudVerticalNav = () => {
       ? new Set(["seguros"])
       : vertical === "fin"
         ? new Set(["fin"])
-        : new Set([
-          "resumen",
-          "clientes",
-          "analisis",
-          "captaciones",
-          "inmuebles",
-          "mapa_inmuebles",
-          "alquileres",
-          "compraventas",
-          "demandas",
-          "relaciones",
-          "visitas",
-          "agenda",
-          "informadores",
-          "edificios",
-          "legal",
-        ]);
+        : vertical === "gestoria"
+          ? new Set([]) // En Gestoría usamos tabs de servicio (no `data-crm-view`).
+          : new Set([
+              "resumen",
+              "clientes",
+              "analisis",
+              "captaciones",
+              "inmuebles",
+              "mapa_inmuebles",
+              "alquileres",
+              "compraventas",
+              "demandas",
+              "relaciones",
+              "visitas",
+              "agenda",
+              "informadores",
+              "edificios",
+              "legal",
+            ]);
 
   const applyToRoot = (root) => {
     if (!root) return;
@@ -19506,6 +19510,19 @@ const syncCrmTecnocloudVerticalNav = () => {
 
   applyToRoot(crmWorkspaceTabs);
   applyToRoot(crmLightningSidebar);
+
+  // Topbar: alterna módulos Inmobiliaria vs Gestoría.
+  try {
+    const inmoModules = document.getElementById("crmTopModules");
+    const gestoriaModules = document.getElementById("crmTopGestoriaModules");
+    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria");
+    if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria");
+    if (gestoriaModules) {
+      gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
+        btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
+      });
+    }
+  } catch {}
 
   const showInmoChrome = vertical === "inmo";
   [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
@@ -19524,6 +19541,9 @@ const syncCrmTecnocloudVerticalNav = () => {
     } else if (vertical === "fin") {
       crmBrandTitle.textContent = company || "Financiaciones";
       crmBrandSubtitle.textContent = "CRM financiaciones";
+    } else if (vertical === "gestoria") {
+      crmBrandTitle.textContent = company || "Gestoría";
+      crmBrandSubtitle.textContent = "CRM gestoría";
     } else {
       syncCrmInmoBrand(company);
     }
@@ -30692,8 +30712,10 @@ const updateTableVisibility = () => {
     currentTab === "seguros-crm" ||
     currentTab === "fin-crm" ||
     currentTab === "fin-sim" ||
+    currentTab.startsWith("gestoria") ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
+    crmContext === "gestoria" ||
     crmContext === "seguros" ||
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
@@ -30703,6 +30725,8 @@ const updateTableVisibility = () => {
     currentTab === "crm" ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
+    crmContext === "gestoria" ||
+    currentTab.startsWith("gestoria") ||
     isInmuebleDetailOpen;
   document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || isInmuebleDetailOpen);
   document.body.classList.toggle(
@@ -30907,7 +30931,18 @@ const updateTableVisibility = () => {
   if (crmSection) {
     crmSection.classList.toggle(
       "hidden",
-      isClientePage || !["crm", "seguros-crm", "fin-crm"].includes(currentTab)
+      isClientePage ||
+        ![
+          "crm",
+          "seguros-crm",
+          "fin-crm",
+          "gestoria-dash",
+          "gestoria-crm",
+          "gestoria-docs",
+          "gestoria-agenda",
+          "gestoria-fact",
+          "gestoria-conta",
+        ].includes(currentTab)
     );
   }
   if (gestoriaCrmSection) {
@@ -58730,6 +58765,20 @@ if (crmWorkspaceTabs) {
     const quick = closestFromEvent(event, "[data-crm-quick]");
     if (quick) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
+      return;
+    }
+    const svcBtn = closestFromEvent(event, "[data-crm-service-tab]");
+    if (svcBtn) {
+      const tab = String(svcBtn.dataset.crmServiceTab || "").trim();
+      if (tab) {
+        try {
+          openGestoriaServiceTab(tab);
+        } catch {
+          try {
+            setTab(tab);
+          } catch {}
+        }
+      }
       return;
     }
     const btn = closestFromEvent(event, "[data-crm-view]");
