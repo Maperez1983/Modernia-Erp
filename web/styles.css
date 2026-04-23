@@ -11496,6 +11496,11 @@ body.crm-context-inmo #crmSection .crm-lightning-topbar {
   border-color: rgba(var(--gold-rgb), 0.18);
 }
 
+/* Gestoría: evita mezclar pantallas del CRM inmobiliario dentro del vertical */
+body.crm-context-gestoria #crmSection #crmWorkspaceShell .crm-workspace-view {
+  display: none;
+}
+
 /* === Verifika²: Sistema visual unificado de cards (todo el sistema) === */
 body.theme-operativa {
   --v2-card-radius: 20px;
