@@ -53177,7 +53177,8 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     except Exception:
                         ocr_job_id = ""
-            audit("renta_campaign_document", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            # Auditoría: usa `cliente_id` para que el dashboard muestre el cliente y podamos trazar quién subió qué.
+            audit("renta_campaign_document", cliente_id, "actualizar", json.dumps(payload), payload.get("usuario"))
             json_response(
                 self,
                 {
@@ -53302,6 +53303,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}", "detail": str(exc)}, status=503)
                 return
+            try:
+                if doc_id:
+                    audit(
+                        "renta_quick_ocr",
+                        doc_id,
+                        "crear",
+                        json.dumps(
+                            {
+                                "doc_id": doc_id,
+                                "ejercicio": ejercicio,
+                                "estado_presentacion": estado_presentacion,
+                                "doc_key": doc_key,
+                                "filename": filename,
+                                "ocr_job_id": ocr_job_id,
+                            }
+                        ),
+                        payload.get("usuario"),
+                    )
+            except Exception:
+                pass
             json_response(
                 self,
                 {
@@ -53497,7 +53518,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except Exception:
                     ocr_job_id = ""
-            audit("renta_quick_attach", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            # Auditoría: usa `cliente_id` para que el dashboard muestre el cliente y podamos filtrar por usuario.
+            audit("renta_quick_attach", cliente_id, "actualizar", json.dumps(payload), payload.get("usuario"))
             try:
                 conn.commit()
             except Exception:
@@ -53506,6 +53528,52 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
+            return
+        elif parsed.path == "/api/renta_quick_note":
+            doc_id = str(payload.get("doc_id") or "").strip()
+            notas = str(payload.get("notas") or "").strip()
+            if not doc_id:
+                json_response(self, {"error": "doc_id requerido"}, status=400)
+                return
+            if not notas:
+                json_response(self, {"error": "notas requeridas"}, status=400)
+                return
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE gestoria_docs
+                    SET notas = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                      AND referencia_tipo = 'renta'
+                      AND (cliente_id IS NULL OR TRIM(COALESCE(cliente_id,'')) = '')
+                    """,
+                    (notas, now, doc_id),
+                )
+                if getattr(cur, "rowcount", 0) == 0:
+                    json_response(self, {"error": "Documento no encontrado o ya asignado"}, status=404)
+                    return
+                try:
+                    audit(
+                        "renta_quick_note",
+                        doc_id,
+                        "actualizar",
+                        json.dumps({"doc_id": doc_id, "notas": notas[:500]}),
+                        payload.get("usuario"),
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudieron guardar las notas del documento"}, status=500)
+                return
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/cliente_relaciones":
             cliente_id = str(payload.get("cliente_id") or "").strip()
@@ -58646,6 +58714,7 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             entidad = (params.get("entidad", [""])[0] if params else "").strip()
             entidad_id = (params.get("entidad_id", [""])[0] if params else "").strip()
+            usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit = params.get("limit", [""])[0]
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
@@ -58661,6 +58730,9 @@ class Handler(BaseHTTPRequestHandler):
             if entidad_id:
                 where.append("a.entidad_id = ?")
                 values.append(entidad_id)
+            if usuario:
+                where.append("a.usuario = ?")
+                values.append(usuario)
             where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
@@ -58676,6 +58748,137 @@ class Handler(BaseHTTPRequestHandler):
                 tuple(values),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/renta_quick_pending":
+            empresa_id = params.get("empresa_id", [""])[0]
+            usuario = (params.get("usuario", [""])[0] if params else "").strip()
+            limit_raw = params.get("limit", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                limit_val = int(limit_raw or 30)
+            except Exception:
+                limit_val = 30
+            limit_val = max(1, min(limit_val, 200))
+            where = [
+                "d.empresa_id = ?",
+                "d.referencia_tipo = 'renta'",
+                "(d.cliente_id IS NULL OR TRIM(COALESCE(d.cliente_id,'')) = '')",
+                "LOWER(COALESCE(d.referencia_id,'')) LIKE 'renta-pendiente-%'",
+            ]
+            values = [empresa_id]
+            if usuario:
+                where.append("a.usuario = ?")
+                values.append(usuario)
+            where_clause = " AND ".join(where) if where else "1=1"
+            rows = conn.execute(
+                f"""
+                SELECT
+                  d.id,
+                  d.nombre,
+                  d.tipo,
+                  d.estado,
+                  d.notas,
+                  d.doc_key,
+                  d.doc_url,
+                  d.created_at,
+                  COALESCE(a.usuario, '') AS usuario,
+                  COALESCE(a.detalles, '') AS audit_detalles
+                FROM gestoria_docs d
+                LEFT JOIN auditoria a
+                  ON a.empresa_id = d.empresa_id
+                 AND a.entidad = 'renta_quick_ocr'
+                 AND a.entidad_id = d.id
+                WHERE {where_clause}
+                ORDER BY d.created_at DESC
+                LIMIT ?
+                """,
+                tuple(values + [limit_val]),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_renta_debug":
+            empresa_id = params.get("empresa_id", [""])[0]
+            cliente_id = (params.get("cliente_id", [""])[0] if params else "").strip()
+            ejercicio = (params.get("ejercicio", [""])[0] if params else "").strip()
+            if not empresa_id or not cliente_id:
+                json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
+                return
+            ejercicio_val = ejercicio if re.match(r"^20[0-9]{2}$", ejercicio or "") else ""
+            service_filter = (
+                "LOWER(servicio) IN ('gestoria', 'gestoría', 'administracion fincas', 'administración fincas')"
+            )
+            cliente_row = conn.execute(
+                "SELECT id, nombre, nif, estado, updated_at, created_at FROM clientes WHERE id = ? LIMIT 1",
+                (cliente_id,),
+            ).fetchone()
+            cg_row = conn.execute(
+                "SELECT mod_renta, renta_detalles FROM cliente_gestoria WHERE cliente_id = ? LIMIT 1",
+                (cliente_id,),
+            ).fetchone()
+            mod_renta = 1 if (cg_row and int(cg_row["mod_renta"] or 0) == 1) else 0
+            link_row = conn.execute(
+                f"""
+                SELECT id, servicio, estado, updated_at, created_at
+                FROM clientes_empresas
+                WHERE empresa_id = ? AND cliente_id = ? AND {service_filter}
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (empresa_id, cliente_id),
+            ).fetchone()
+            has_service_link = 1 if link_row else 0
+            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+            entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
+            ejercicios = []
+            seen = set()
+            for entry in entries:
+                ej = str(entry.get("ejercicio") or "").strip()
+                if re.match(r"^20[0-9]{2}$", ej or "") and ej not in seen:
+                    seen.add(ej)
+                    ejercicios.append(ej)
+            has_entry_for_ejercicio = 0
+            if ejercicio_val:
+                has_entry_for_ejercicio = 1 if any(str(e.get("ejercicio") or "").strip() == ejercicio_val for e in entries) else 0
+            docs = conn.execute(
+                """
+                SELECT id, nombre, estado, referencia_id, notas, doc_key, doc_url, created_at
+                FROM gestoria_docs
+                WHERE empresa_id = ? AND cliente_id = ? AND referencia_tipo = 'renta'
+                ORDER BY created_at DESC
+                LIMIT 50
+                """,
+                (empresa_id, cliente_id),
+            ).fetchall()
+            reasons = []
+            if not cliente_row:
+                reasons.append("Cliente no encontrado.")
+            if not mod_renta:
+                reasons.append("El cliente no tiene activado el módulo Renta en Gestoría (mod_renta=0).")
+            if not has_service_link:
+                reasons.append("El cliente no está vinculado a la empresa con servicio Gestoría/Administración de fincas.")
+            if ejercicio_val and not has_entry_for_ejercicio:
+                reasons.append(
+                    f"No hay expediente de renta para el ejercicio {ejercicio_val} (tiene: {', '.join(ejercicios) or 'ninguno'})."
+                )
+            will_show_in_cards = bool(mod_renta) and bool(has_service_link) and (not ejercicio_val or bool(has_entry_for_ejercicio))
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "will_show_in_cards": will_show_in_cards,
+                    "reasons": reasons,
+                    "cliente": dict(cliente_row) if cliente_row else {},
+                    "mod_renta": mod_renta,
+                    "empresa_link": dict(link_row) if link_row else {},
+                    "ejercicios": ejercicios,
+                    "entries_count": len(entries),
+                    "docs": [dict(r) for r in docs],
+                },
+            )
             return
 
         if path == "/api/catalogo":

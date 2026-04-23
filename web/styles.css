@@ -8085,6 +8085,22 @@ body.crm-context-inmo .crm-resumen-compact-note {
   display: none !important;
 }
 
+/* IRPF escenarios: bloquea edición del formulario base sin usar `disabled` (FormData debe incluir fechas). */
+#irpfGainForm.irpf-form-locked {
+  position: relative;
+}
+#irpfGainForm.irpf-form-locked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: transparent;
+  cursor: not-allowed;
+}
+#irpfGainForm.irpf-form-locked * {
+  pointer-events: none;
+}
+
 .table-tools {
   display: flex;
   justify-content: flex-end;

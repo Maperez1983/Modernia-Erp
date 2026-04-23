@@ -62097,24 +62097,35 @@ if (irpfGainForm) {
   };
 
   const setFormLock = (locked) => {
-    const controls = irpfGainForm.querySelectorAll("input, select, textarea, button");
-    controls.forEach((el) => {
-      const tag = String(el.tagName || "").toLowerCase();
+    // IMPORTANTE: no usamos `disabled` en los campos del formulario porque entonces
+    // FormData no incluye fechas/valores (y B/C dejan de poder simularse/guardarse).
+    irpfGainForm.classList.toggle("irpf-form-locked", Boolean(locked));
+    const nodes = irpfGainForm.querySelectorAll("input, select, textarea");
+    nodes.forEach((el) => {
+      if (!el || el.name === "cliente_id") return;
       const type = String(el.type || "").toLowerCase();
-      if (tag === "button") return;
-      // nunca deshabilitamos el cliente_id hidden.
-      if (el.name === "cliente_id") return;
-      if (!locked) {
-        el.disabled = false;
-        return;
+      if (type === "hidden") return;
+      if (type !== "checkbox" && type !== "radio") {
+        try {
+          el.readOnly = Boolean(locked);
+        } catch {}
       }
-      // En B/C se ven los datos pero no se editan (solo se cambia en el panel de escenario).
-      el.disabled = true;
-    });
-    // Rehabilita los selectores/inputs de escenario.
-    [irpfSlotNombre, irpfSlotPrecioVenta, irpfSlotPrecioEscritura, irpfSlotCalcWith, irpfSlotInclude].forEach((el) => {
-      if (!el) return;
-      el.disabled = false;
+      // Bloqueo de focus por teclado (sin perder valores).
+      const prev = el.getAttribute("data-prev-tabindex");
+      if (locked) {
+        if (prev === null) {
+          const current = el.getAttribute("tabindex");
+          el.setAttribute("data-prev-tabindex", current === null ? "" : String(current));
+        }
+        el.setAttribute("tabindex", "-1");
+      } else {
+        if (prev !== null) {
+          const old = String(prev || "");
+          if (old) el.setAttribute("tabindex", old);
+          else el.removeAttribute("tabindex");
+          el.removeAttribute("data-prev-tabindex");
+        }
+      }
     });
   };
 
