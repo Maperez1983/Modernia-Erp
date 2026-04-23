@@ -8707,6 +8707,105 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
     return pdf_bytes or b""
 
 
+def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
+    payload = payload or {}
+    scenarios = payload.get("scenarios")
+    if not isinstance(scenarios, list) or not scenarios:
+        raise ValueError("scenarios requerido")
+
+    def money(value: object) -> str:
+        raw = "" if value is None else str(value)
+        if not raw.strip():
+            return "—"
+        try:
+            parsed = parse_money_value(value)
+        except Exception:
+            parsed = None
+        if parsed is None:
+            return raw.strip()
+        return format_eur(parsed)
+
+    empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
+    ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
+    subtitle_parts = [empresa]
+    if ref:
+        subtitle_parts.append(ref)
+    subtitle_parts.append(f"Generado: {format_export_date(datetime.now(timezone.utc).date().isoformat())}")
+    subtitle = " · ".join([p for p in subtitle_parts if p])
+
+    brand = str(payload.get("brand_logo_url") or "").strip() or "/assets/grupo_modernia_logo.png"
+    footer = [
+        "Estimación determinista generada por el CRM. Revisar antes de presentar/firmar.",
+        "Comparativa basada en los datos introducidos en cada escenario. No contempla todos los supuestos.",
+    ]
+
+    compare_lines = []
+    sections = []
+    for idx, scenario in enumerate(scenarios):
+        if not isinstance(scenario, dict):
+            continue
+        name = str(scenario.get("nombre") or scenario.get("name") or "").strip() or f"Escenario {idx + 1}"
+        sp = scenario.get("payload") if isinstance(scenario.get("payload"), dict) else {}
+        # Hereda metadatos del informe si no vienen en el escenario.
+        if isinstance(sp, dict):
+            if payload.get("empresa_nombre") and not sp.get("empresa_nombre"):
+                sp["empresa_nombre"] = payload.get("empresa_nombre")
+            if payload.get("referencia") and not sp.get("referencia"):
+                sp["referencia"] = payload.get("referencia")
+            if payload.get("brand_logo_url") and not sp.get("brand_logo_url"):
+                sp["brand_logo_url"] = payload.get("brand_logo_url")
+        try:
+            out = _irpf_ganancia_simulate(sp)
+        except ValueError as exc:
+            raise ValueError(f"{name}: {str(exc)}") from exc
+        params = out.get("params") or {}
+        result = out.get("result") or {}
+        regimen = str(params.get("regimen_fiscal") or sp.get("regimen_fiscal") or "irpf").strip().lower() or "irpf"
+        importe = result.get("cuota_ahorro_estimada")
+        if regimen == "irnr" and result.get("cuota_neta") is not None:
+            importe = result.get("cuota_neta")
+        compare_lines.append(
+            (
+                name,
+                " · ".join(
+                    [
+                        f"Ganancia {money(result.get('ganancia_patrimonial'))}",
+                        f"Exento {money(result.get('exento'))}",
+                        f"Sujeta {money(result.get('ganancia_sujeta'))}",
+                        f"A pagar {money(importe)}",
+                    ]
+                ),
+            )
+        )
+        resumen_cards = {
+            "kind": "kpi_cards",
+            "columns": 3,
+            "items": [
+                {"label": "Días", "value": str(result.get("days_transcurridos") or "—")},
+                {"label": "Ganancia", "value": money(result.get("ganancia_patrimonial"))},
+                {"label": "Exento", "value": money(result.get("exento"))},
+                {"label": "Sujeta", "value": money(result.get("ganancia_sujeta"))},
+                {"label": "Base ahorro", "value": money(result.get("base_ahorro_sujeta"))},
+                {"label": "A pagar (estimado)", "value": money(importe), "accent": True},
+            ],
+        }
+        sections.append((f"Resumen · {name}", resumen_cards))
+
+    if not sections:
+        raise ValueError("No hay escenarios válidos para comparar")
+
+    sections.insert(0, ("Comparativa", compare_lines))
+    pdf_bytes = build_modernia_branded_document_pdf(
+        "Informe comparativo IRPF/IRNR · Ganancia patrimonial",
+        subtitle,
+        sections,
+        footer_lines=footer,
+        company={},
+        brand_logo_url=brand,
+    )
+    return pdf_bytes or b""
+
+
 def build_fiscal_venta_report_pdf(payload: dict, irpf_out: dict, iivtnu_out: dict) -> bytes:
     payload = payload or {}
     irpf_out = irpf_out or {}
@@ -23764,6 +23863,7 @@ def ensure_tables(db_path):
           empresa_id TEXT NOT NULL,
           cliente_id TEXT NOT NULL,
           kind TEXT NOT NULL,
+          slot TEXT,
           nombre TEXT,
           valor_transmision REAL,
           importe_a_pagar REAL,
@@ -23775,9 +23875,20 @@ def ensure_tables(db_path):
         )
         """
     )
+    ensure_column(conn, "fiscal_scenarios", "slot", "slot TEXT")
+    try:
+        conn.execute("UPDATE fiscal_scenarios SET slot = 'A' WHERE slot IS NULL OR TRIM(slot) = ''")
+    except Exception:
+        pass
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fiscal_scenarios_cliente_kind ON fiscal_scenarios (empresa_id, cliente_id, kind, updated_at)"
+        )
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fiscal_scenarios_slot ON fiscal_scenarios (empresa_id, cliente_id, kind, slot, updated_at)"
         )
     except Exception:
         pass
@@ -38241,6 +38352,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/irpf_ganancia_simulate",
             "/api/irpf_alquiler_simulate",
             "/api/irpf_ganancia_pdf",
+            "/api/irpf_ganancia_compare_pdf",
             "/api/fiscal_scenarios_list",
             "/api/fiscal_scenario_upsert",
             "/api/fiscal_scenario_delete",
@@ -38263,6 +38375,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_gestoria_update",
             "/api/renta_quick_ocr",
             "/api/renta_quick_attach",
+            "/api/renta_quick_note",
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
             "/api/gestoria_modelos_delete",
@@ -39781,23 +39894,40 @@ class Handler(BaseHTTPRequestHandler):
                     empresa_id = ""
             cliente_id = str(payload.get("cliente_id") or "").strip()
             kind = str(payload.get("kind") or "irpf_ganancia").strip().lower() or "irpf_ganancia"
+            slot = str(payload.get("slot") or "").strip().upper()
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
                 return
             try:
-                rows = conn.execute(
-                    """
-                    SELECT id, empresa_id, cliente_id, kind, nombre,
-                           valor_transmision, importe_a_pagar,
-                           payload_json, result_json,
-                           created_at, updated_at, created_by
-                    FROM fiscal_scenarios
-                    WHERE empresa_id = ? AND cliente_id = ? AND kind = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 100
-                    """,
-                    (empresa_id, cliente_id, kind),
-                ).fetchall()
+                if slot:
+                    rows = conn.execute(
+                        """
+                        SELECT id, empresa_id, cliente_id, kind, slot, nombre,
+                               valor_transmision, importe_a_pagar,
+                               payload_json, result_json,
+                               created_at, updated_at, created_by
+                        FROM fiscal_scenarios
+                        WHERE empresa_id = ? AND cliente_id = ? AND kind = ?
+                          AND UPPER(COALESCE(slot, '')) = ?
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa_id, cliente_id, kind, slot),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, empresa_id, cliente_id, kind, slot, nombre,
+                               valor_transmision, importe_a_pagar,
+                               payload_json, result_json,
+                               created_at, updated_at, created_by
+                        FROM fiscal_scenarios
+                        WHERE empresa_id = ? AND cliente_id = ? AND kind = ?
+                        ORDER BY updated_at DESC
+                        LIMIT 100
+                        """,
+                        (empresa_id, cliente_id, kind),
+                    ).fetchall()
             except Exception as exc:
                 json_response(self, {"error": "No se pudieron cargar escenarios", "detail": Handler._safe_exc_detail(exc)}, status=500)
                 return
@@ -39816,7 +39946,25 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
                 return
-            scenario_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            slot = str(payload.get("slot") or "").strip().upper() or "A"
+            scenario_id = str(payload.get("id") or "").strip()
+            if not scenario_id:
+                try:
+                    existing = conn.execute(
+                        """
+                        SELECT id FROM fiscal_scenarios
+                        WHERE empresa_id = ? AND cliente_id = ? AND kind = ?
+                          AND UPPER(COALESCE(slot, '')) = ?
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa_id, cliente_id, kind, slot),
+                    ).fetchone()
+                    if existing:
+                        scenario_id = str(existing[0] or "").strip()
+                except Exception:
+                    scenario_id = ""
+            scenario_id = scenario_id or os.urandom(16).hex()
             nombre = str(payload.get("nombre") or payload.get("title") or "").strip()
             created_by = str(payload.get("created_by") or payload.get("usuario") or "").strip()
 
@@ -39888,7 +40036,8 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         f"""
                         UPDATE fiscal_scenarios
-                        SET nombre = ?,
+                        SET slot = ?,
+                            nombre = ?,
                             valor_transmision = ?,
                             importe_a_pagar = ?,
                             payload_json = ?,
@@ -39897,6 +40046,7 @@ class Handler(BaseHTTPRequestHandler):
                         WHERE id = ?
                         """,
                         (
+                            slot,
                             nombre,
                             valor_transmision,
                             importe_a_pagar,
@@ -39909,12 +40059,12 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         f"""
                         INSERT INTO fiscal_scenarios (
-                          id, empresa_id, cliente_id, kind, nombre,
+                          id, empresa_id, cliente_id, kind, slot, nombre,
                           valor_transmision, importe_a_pagar,
                           payload_json, result_json,
                           created_at, updated_at, created_by
                         ) VALUES (
-                          ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?,
                           ?, ?,
                           ?, ?,
                           {now_expr}, {now_expr}, ?
@@ -39925,6 +40075,7 @@ class Handler(BaseHTTPRequestHandler):
                             empresa_id,
                             cliente_id,
                             kind,
+                            slot,
                             nombre,
                             valor_transmision,
                             importe_a_pagar,
@@ -39972,6 +40123,23 @@ class Handler(BaseHTTPRequestHandler):
             devengo = str(payload.get("fecha_transmision") or "").strip() or "ganancia"
             safe_devengo = re.sub(r"[^0-9A-Za-z_-]", "_", devengo)[:32] or "ganancia"
             filename = f"irpf_ganancia_{ejercicio}_{safe_devengo}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if parsed.path == "/api/irpf_ganancia_compare_pdf":
+            try:
+                pdf_bytes = build_irpf_ganancia_compare_report_pdf(payload)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            safe_ref = re.sub(r"[^0-9A-Za-z_-]", "_", str(payload.get("referencia") or ""))[:32] or "comparativa"
+            filename = f"informe_irpf_comparativo_{safe_ref}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
