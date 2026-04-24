@@ -37836,6 +37836,7 @@ class Handler(BaseHTTPRequestHandler):
             "rol": session.get("rol") or "",
             "email": session.get("email") or "",
             "servicio": session.get("servicio") or "",
+            "is_superadmin": bool(is_superadmin_actor(None, session)),
         }
 
     def _external_base_url(self):

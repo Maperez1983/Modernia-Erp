@@ -4260,7 +4260,9 @@ const isPrivilegedRole = (value) => {
 
 const isPrivilegedUser = (user) => {
   if (!user) return false;
-  return isPrivilegedRole(user.rol);
+  // En modo multi-workspace estricto, la "administración global" (home platform/admin)
+  // se controla por allowlist (superadmin), no por rol/servicio.
+  return Boolean(user.is_superadmin);
 };
 
 const isWorkspaceMemberManagerRole = (value) => {
@@ -4276,7 +4278,7 @@ const canManageCurrentWorkspace = () => {
 
 const canAccessAdminPanel = (user) => {
   if (!user) return false;
-  return isPrivilegedRole(user.rol);
+  return Boolean(user.is_superadmin);
 };
 
 const canAccessSharedHomeModules = (user) => isPrivilegedUser(user);
