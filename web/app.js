@@ -3761,6 +3761,19 @@ const ICONS = {
   close: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
 };
 
+const renderIco = (id, size = 18) =>
+  `<svg width="${Number(size) || 18}" height="${Number(size) || 18}" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="#ico-${String(id || "")
+    .trim()
+    .replace(/[^a-z0-9\\-]/gi, "")}"></use></svg>`;
+
+const setPasswordToggleIcon = (button, isHidden) => {
+  if (!button) return;
+  const hidden = Boolean(isHidden);
+  button.innerHTML = renderIco(hidden ? "eye" : "eye-off", 18);
+  button.setAttribute("aria-label", hidden ? "Mostrar contraseña" : "Ocultar contraseña");
+  button.setAttribute("title", hidden ? "Mostrar contraseña" : "Ocultar contraseña");
+};
+
 const createIconButton = (iconKey, label, opts = {}) => {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -11526,16 +11539,16 @@ const renderWorkspaceRrhhHub = () => {
                 <input type="checkbox" name="registro_horario_activo" value="1" ${Number(selected?.registro_horario_activo || 0) === 1 ? "checked" : ""} />
                 Activar registro horario (podrás añadirlo a plantilla)
               </label>
-              <label class="span-2">
-                Contraseña ${selected ? "(opcional: para cambiar)" : "(opcional)"}
-                <div class="input-with-icon">
-                  <input name="password" id="workspaceRrhhUserPassword" type="password" placeholder="${selected ? "Nueva contraseña" : "Contraseña inicial"}" />
-                  <button type="button" class="icon-btn" id="workspaceRrhhUserPasswordToggle" aria-label="Mostrar contraseña">👁</button>
-                </div>
-                <div class="workspace-rrhh-user-pass-actions">
-                  <button type="button" class="secondary ghost button-inline" data-rrhh-user-pass-generate>Generar</button>
-                </div>
-              </label>
+	              <label class="span-2">
+	                Contraseña ${selected ? "(opcional: para cambiar)" : "(opcional)"}
+	                <div class="input-with-icon">
+	                  <input name="password" id="workspaceRrhhUserPassword" type="password" placeholder="${selected ? "Nueva contraseña" : "Contraseña inicial"}" />
+	                  <button type="button" class="icon-btn" id="workspaceRrhhUserPasswordToggle" aria-label="Mostrar contraseña">${renderIco("eye", 18)}</button>
+	                </div>
+	                <div class="workspace-rrhh-user-pass-actions">
+	                  <button type="button" class="secondary ghost button-inline" data-rrhh-user-pass-generate>Generar</button>
+	                </div>
+	              </label>
               <div class="form-actions span-2">
                 <button type="submit">${selected ? "Guardar cambios" : "Crear usuario"}</button>
                 <button type="button" class="secondary ghost" data-rrhh-user-reset>Nuevo</button>
@@ -14503,11 +14516,11 @@ const renderWorkspaceRrhhHub = () => {
   const userPassToggle = workspaceRrhhHub.querySelector("#workspaceRrhhUserPasswordToggle");
   const userPassInput = workspaceRrhhHub.querySelector("#workspaceRrhhUserPassword");
   if (userPassToggle && userPassInput) {
+    setPasswordToggleIcon(userPassToggle, userPassInput.type === "password");
     userPassToggle.addEventListener("click", () => {
       const isHidden = userPassInput.type === "password";
       userPassInput.type = isHidden ? "text" : "password";
-      userPassToggle.textContent = isHidden ? "🙈" : "👁";
-      userPassToggle.setAttribute("aria-label", isHidden ? "Ocultar contraseña" : "Mostrar contraseña");
+      setPasswordToggleIcon(userPassToggle, userPassInput.type === "password");
     });
   }
   const passGenerate = workspaceRrhhHub.querySelector("[data-rrhh-user-pass-generate]");
@@ -14515,7 +14528,7 @@ const renderWorkspaceRrhhHub = () => {
     passGenerate.addEventListener("click", () => {
       userPassInput.value = generateTempPassword(12);
       userPassInput.type = "text";
-      if (userPassToggle) userPassToggle.textContent = "🙈";
+      if (userPassToggle) setPasswordToggleIcon(userPassToggle, false);
     });
   }
   const userForm = workspaceRrhhHub.querySelector('form[data-rrhh-user-form="1"]');
@@ -23940,34 +23953,34 @@ const isCompanyColumn = (colName = "") => {
 };
 
 const RAMO_ICONS = [
-  { key: "hogar", icon: "🏠" },
-  { key: "auto", icon: "🚗" },
-  { key: "coche", icon: "🚗" },
-  { key: "moto", icon: "🏍️" },
-  { key: "salud", icon: "🩺" },
-  { key: "vida", icon: "❤️" },
-  { key: "decesos", icon: "⚰️" },
-  { key: "comercio", icon: "🏬" },
-  { key: "pyme", icon: "🏢" },
-  { key: "empresa", icon: "🏢" },
-  { key: "responsabilidad civil", icon: "🛡️" },
-  { key: "rc", icon: "🛡️" },
-  { key: "viaje", icon: "✈️" },
-  { key: "impago", icon: "💳" },
-  { key: "alquiler", icon: "🏘️" },
-  { key: "accidentes", icon: "🦺" },
-  { key: "mascotas", icon: "🐾" },
-  { key: "dental", icon: "🦷" },
-  { key: "ciber", icon: "🛡️" },
-  { key: "embarcaciones", icon: "⛵" },
-  { key: "subsidio", icon: "💶" },
+  { key: "hogar", icon: "home" },
+  { key: "auto", icon: "car" },
+  { key: "coche", icon: "car" },
+  { key: "moto", icon: "car" },
+  { key: "salud", icon: "shield" },
+  { key: "vida", icon: "spark" },
+  { key: "decesos", icon: "file" },
+  { key: "comercio", icon: "building-gear" },
+  { key: "pyme", icon: "building-gear" },
+  { key: "empresa", icon: "building-gear" },
+  { key: "responsabilidad civil", icon: "shield" },
+  { key: "rc", icon: "shield" },
+  { key: "viaje", icon: "layers" },
+  { key: "impago", icon: "receipt" },
+  { key: "alquiler", icon: "building-home" },
+  { key: "accidentes", icon: "shield" },
+  { key: "mascotas", icon: "spark" },
+  { key: "dental", icon: "spark" },
+  { key: "ciber", icon: "shield" },
+  { key: "embarcaciones", icon: "layers" },
+  { key: "subsidio", icon: "coins" },
 ];
 
-const getRamoIcon = (value) => {
+const getRamoIconKey = (value) => {
   const text = String(value || "").toLowerCase();
   if (!text) return "";
   const hit = RAMO_ICONS.find((item) => text.includes(item.key));
-  return hit ? hit.icon : "📄";
+  return hit ? hit.icon : "file";
 };
 
 const isRamoColumn = (colName = "") => colName.toLowerCase().includes("ramo");
@@ -23977,7 +23990,7 @@ const createRamoBadge = (value) => {
   wrapper.className = "ramo-badge";
   const icon = document.createElement("span");
   icon.className = "ramo-icon";
-  icon.textContent = getRamoIcon(value);
+  icon.innerHTML = renderIco(getRamoIconKey(value) || "file", 16);
   const label = document.createElement("span");
   label.textContent = value || "-";
   wrapper.appendChild(icon);
@@ -30093,17 +30106,15 @@ const renderAdminUserDetail = () => {
     input.type = "password";
     input.value = value || "";
     if (opts.placeholder) input.placeholder = opts.placeholder;
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "icon-btn";
-    toggle.setAttribute("aria-label", "Mostrar contraseña");
-    toggle.textContent = "👁";
-    toggle.addEventListener("click", () => {
-      const isHidden = input.type === "password";
-      input.type = isHidden ? "text" : "password";
-      toggle.textContent = isHidden ? "🙈" : "👁";
-      toggle.setAttribute("aria-label", isHidden ? "Ocultar contraseña" : "Mostrar contraseña");
-    });
+	    const toggle = document.createElement("button");
+	    toggle.type = "button";
+	    toggle.className = "icon-btn";
+	    setPasswordToggleIcon(toggle, true);
+	    toggle.addEventListener("click", () => {
+	      const isHidden = input.type === "password";
+	      input.type = isHidden ? "text" : "password";
+	      setPasswordToggleIcon(toggle, input.type === "password");
+	    });
     shell.appendChild(input);
     shell.appendChild(toggle);
     label.appendChild(shell);
@@ -40970,39 +40981,25 @@ const renderInmuebleTecnocloudPanels = ({
     if (inmuebleTecnoSideServiciosCount) {
       inmuebleTecnoSideServiciosCount.textContent = String(list.length);
     }
-    if (!list.length) {
-      inmuebleTecnoSideServiciosList.innerHTML = "<p class='muted'>Sin servicios definidos.</p>";
-    } else {
-      const iconFor = (label) => {
-        const key = normalizeSimple(label || "");
-        if (key.includes("bañ") || key.includes("bano") || key.includes("aseo")) return "🛁";
-        if (key.includes("cocin")) return "🍳";
-        if (key.includes("calef")) return "🔥";
-        if (key.includes("ascens")) return "🛗";
-        if (key.includes("terraza") || key.includes("balcon") || key.includes("balcón")) return "🌤";
-        if (key.includes("garaje") || key.includes("parking")) return "🚗";
-        if (key.includes("traster")) return "📦";
-        if (key.includes("piscin")) return "🏊";
-        if (key.includes("jardin") || key.includes("jardín")) return "🌿";
-        if (key.includes("aire") || key.includes("a/a") || key.includes("acond")) return "❄️";
-        return "＋";
-      };
-      const quick = list.slice(0, 8);
-      inmuebleTecnoSideServiciosList.innerHTML = `
-        <div class="tc-servgrid" role="list">
-          ${quick
-            .map(
-              (s) => `
-                <div class="tc-servitem" role="listitem">
-                  <div class="tc-servico" aria-hidden="true">${escapeHtml(iconFor(s))}</div>
-                  <div class="tc-servlabel">${escapeHtml(s)}</div>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-        <button type="button" class="secondary ghost tc-servmore" data-open-servicios="1">Ver/Editar todos</button>
-      `;
+	    if (!list.length) {
+	      inmuebleTecnoSideServiciosList.innerHTML = "<p class='muted'>Sin servicios definidos.</p>";
+	    } else {
+	      const quick = list.slice(0, 8);
+	      inmuebleTecnoSideServiciosList.innerHTML = `
+	        <div class="tc-servgrid" role="list">
+	          ${quick
+	            .map(
+	              (s) => `
+	                <div class="tc-servitem" role="listitem">
+	                  <div class="tc-servico" aria-hidden="true">${inmuebleServicioIconFor(s, 18)}</div>
+	                  <div class="tc-servlabel">${escapeHtml(s)}</div>
+	                </div>
+	              `
+	            )
+	            .join("")}
+	        </div>
+	        <button type="button" class="secondary ghost tc-servmore" data-open-servicios="1">Ver/Editar todos</button>
+	      `;
       const openBtn = inmuebleTecnoSideServiciosList.querySelector("[data-open-servicios]");
       if (openBtn) {
         openBtn.onclick = (event) => {
@@ -41017,20 +41014,22 @@ const renderInmuebleTecnocloudPanels = ({
   }
 };
 
-const inmuebleServicioIconFor = (label) => {
+const inmuebleServicioIconKeyFor = (label) => {
   const key = normalizeSimple(label || "");
-  if (key.includes("bañ") || key.includes("bano") || key.includes("aseo")) return "🛁";
-  if (key.includes("cocin")) return "🍳";
-  if (key.includes("calef")) return "🔥";
-  if (key.includes("ascens")) return "🛗";
-  if (key.includes("terraza") || key.includes("balcon") || key.includes("balcón")) return "🌤";
-  if (key.includes("garaje") || key.includes("parking")) return "🚗";
-  if (key.includes("traster")) return "📦";
-  if (key.includes("piscin")) return "🏊";
-  if (key.includes("jardin") || key.includes("jardín")) return "🌿";
-  if (key.includes("aire") || key.includes("a/a") || key.includes("acond")) return "❄️";
-  return "＋";
+  if (key.includes("bañ") || key.includes("bano") || key.includes("aseo")) return "bathtub";
+  if (key.includes("cocin")) return "kitchen";
+  if (key.includes("calef")) return "flame";
+  if (key.includes("ascens")) return "elevator";
+  if (key.includes("terraza") || key.includes("balcon") || key.includes("balcón")) return "sun";
+  if (key.includes("garaje") || key.includes("parking")) return "car";
+  if (key.includes("traster")) return "box";
+  if (key.includes("piscin")) return "pool";
+  if (key.includes("jardin") || key.includes("jardín")) return "leaf";
+  if (key.includes("aire") || key.includes("a/a") || key.includes("acond")) return "snowflake";
+  return "plus";
 };
+
+const inmuebleServicioIconFor = (label, size = 18) => renderIco(inmuebleServicioIconKeyFor(label), size);
 
 const renderInmueblePersonasTab = ({ inmueble = {}, captacion = {}, propietarios = [], compradores = [] } = {}) => {
   if (!inmueblePersonasTabList) return;
@@ -41123,7 +41122,7 @@ const renderInmuebleServiciosTab = ({ servicios = [] } = {}) => {
         .map(
           (s) => `
             <div class="tc-servitem" role="listitem">
-              <div class="tc-servico" aria-hidden="true">${escapeHtml(inmuebleServicioIconFor(s))}</div>
+              <div class="tc-servico" aria-hidden="true">${inmuebleServicioIconFor(s, 18)}</div>
               <div class="tc-servlabel">${escapeHtml(s)}</div>
             </div>
           `
@@ -67038,10 +67037,11 @@ if (adminBackBtn) {
 }
 
 if (adminPasswordToggle && adminPasswordInput) {
+  setPasswordToggleIcon(adminPasswordToggle, adminPasswordInput.type === "password");
   adminPasswordToggle.addEventListener("click", () => {
     const isHidden = adminPasswordInput.type === "password";
     adminPasswordInput.type = isHidden ? "text" : "password";
-    adminPasswordToggle.textContent = isHidden ? "🙈" : "👁";
+    setPasswordToggleIcon(adminPasswordToggle, adminPasswordInput.type === "password");
   });
 }
 
