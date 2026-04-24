@@ -41576,16 +41576,125 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/usuarios_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            user_id = payload.get("id")
+            user_id = str(payload.get("id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            confirm = str(payload.get("confirm") or "").strip().upper()
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
+
+            # Si no llega el workspace, intentamos inferirlo desde memberships (compat).
+            if not workspace_id:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(
+                        "SELECT workspace_id FROM workspace_miembros WHERE usuario_id = ?",
+                        (user_id,),
+                    ).fetchall()
+                    ws_ids = [str(r["workspace_id"] if isinstance(r, dict) else r[0] or "").strip() for r in (rows or [])]
+                    ws_ids = [w for w in ws_ids if w]
+                except Exception:
+                    ws_ids = []
+                if len(ws_ids) == 1:
+                    workspace_id = ws_ids[0]
+
+            # Permisos: admin global o admin/owner del workspace.
+            if workspace_id:
+                if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            else:
+                # Sin workspace inferido: solo permitimos a superadmin/privileged (evita borrados cruzados).
+                if not workspace_actor_is_privileged(conn, session):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+
+            # No hacemos borrado físico: desactivamos el usuario para evitar cascadas y pérdidas accidentales.
+            if confirm and confirm not in {"DESACTIVAR", "ELIMINAR", "BORRAR"}:
+                json_response(self, {"error": "confirm inválido (usa DESACTIVAR)"}, status=400)
+                return
+
+            # 1) Desactivar usuario + limpiar invites legacy.
+            conn.execute(
+                """
+                UPDATE usuarios
+                SET activo = 0,
+                    invite_token = NULL,
+                    invite_expires_at = NULL,
+                    invite_sent_at = NULL,
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (user_id,),
+            )
+
+            # 2) Revocar invites nuevos.
+            try:
+                ensure_auth_invites_table(conn)
+                conn.execute(
+                    """
+                    UPDATE auth_invites
+                    SET revoked_at = COALESCE(NULLIF(revoked_at,''), datetime('now'))
+                    WHERE user_id = ?
+                      AND used_at IS NULL
+                    """,
+                    (user_id,),
+                )
+            except Exception:
+                pass
+
+            # 3) Desvincular del workspace (si sabemos cuál).
+            if workspace_id:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ?",
+                        (workspace_id, user_id),
+                    )
+                except Exception:
+                    pass
+
             conn.commit()
-            json_response(self, {"ok": True})
+
+            # 4) Revocar sesiones (persistido + memoria).
+            try:
+                auth_conn = open_auth_store_conn(with_row_factory=False)
+                try:
+                    auth_conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", [str(user_id)])
+                    auth_conn.commit()
+                finally:
+                    auth_conn.close()
+            except Exception:
+                pass
+            try:
+                with AUTH_SESSIONS_LOCK:
+                    tokens = [t for t, s in AUTH_SESSIONS.items() if str(s.get("user_id") or "") == str(user_id)]
+                    for t in tokens:
+                        AUTH_SESSIONS.pop(t, None)
+                        AUTH_SESSION_DB_REFRESH_AT.pop(t, None)
+            except Exception:
+                pass
+
+            # 5) Auditoría.
+            try:
+                log_user_admin_audit(
+                    conn,
+                    action="usuarios_desactivar",
+                    workspace_id=workspace_id or "",
+                    target_user_id=user_id,
+                    actor_session=session,
+                    payload={"id": user_id, "workspace_id": workspace_id or "", "confirm": confirm or ""},
+                )
+            except Exception:
+                pass
+
+            json_response(self, {"ok": True, "id": user_id, "workspace_id": workspace_id, "mode": "deactivated"})
             return
         elif parsed.path == "/api/empresa_update":
             session = getattr(self, "auth_session", None) or self._current_session()
