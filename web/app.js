@@ -11419,23 +11419,50 @@ const renderWorkspaceRrhhHub = () => {
     : [];
   const pendingTeamAusenciasCount = pendingTeamAusencias.length;
 
-	  const renderTabs = () => `
-	    <div class="workspace-rrhh-tabs">
-	      ${[
-	        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
-	        { key: "horario", label: "Horario" },
-	        { key: "turnos", label: "Turnos" },
-	        { key: "ausencias", label: "Vacaciones" },
-	        { key: "gastos", label: "Gastos" },
-	        { key: "docs", label: "Documentación" },
-	      ]
-        .map(
-          (item) => `
-            <button type="button" class="tab${item.key === tab ? " active" : ""}" data-rrhh-tab="${item.key}">
-              ${escapeHtml(item.label)}${manager && item.key === "ausencias" && pendingTeamAusenciasCount ? ` <span class="rrhh-tab-badge">${pendingTeamAusenciasCount}</span>` : ""}
+  const rrhhTabIcon = (key) => {
+    switch (key) {
+      case "equipo":
+      case "plantilla":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/><path d="M22 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+      case "horario":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case "turnos":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 7h16v14H4V7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 11h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+      case "ausencias":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 7h16v14H4V7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 11h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m9 16 2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case "gastos":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 7.5a6.5 6.5 0 0 0-6-3.5c-3 0-5.6 1.9-6.4 4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 12h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 15h8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 16.5A6.5 6.5 0 0 1 13 20c-3 0-5.6-1.9-6.4-4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+      case "docs":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l3 3v15H7V3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+      default:
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M7 10h10M7 14h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+    }
+  };
+
+  const renderTabs = () => `
+    <div class="tc-modulebar tc-modulebar--micro workspace-rrhh-tabs">
+      ${[
+        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
+        { key: "horario", label: "Horario" },
+        { key: "turnos", label: "Turnos" },
+        { key: "ausencias", label: "Vacaciones" },
+        { key: "gastos", label: "Gastos" },
+        { key: "docs", label: "Documentación" },
+      ]
+        .map((item) => {
+          const isActive = item.key === tab;
+          const badge =
+            manager && item.key === "ausencias" && pendingTeamAusenciasCount
+              ? `<span class="tc-notify-badge" aria-label="${pendingTeamAusenciasCount} solicitudes pendientes">${pendingTeamAusenciasCount}</span>`
+              : "";
+          return `
+            <button type="button" class="tab tc-module${isActive ? " active" : ""}" data-rrhh-tab="${item.key}" title="${escapeHtml(item.label)}">
+              <span class="tc-mod-ico" aria-hidden="true">${rrhhTabIcon(item.key)}</span>
+              <span class="tc-mod-label">${escapeHtml(item.label)}</span>
+              ${badge}
             </button>
-          `
-        )
+          `;
+        })
         .join("")}
     </div>
   `;
