@@ -9833,8 +9833,7 @@ const renderWorkspaceCompanies = (rows = []) => {
           const empresaId = String(empresa?.id || "").trim();
           const checked = enabled.has(empresaId);
           const isDefault = empresaId && empresaId === pickDefault;
-          const logoRaw = String(empresa?.logo_url || "").trim();
-          const logo = buildPhotoSrc(logoRaw);
+          const logo = String(empresa?.logo_url || "").trim();
           return `
           <div class="crm-mini-row" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
             <label style="display:flex;align-items:center;gap:10px">
