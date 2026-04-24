@@ -22513,6 +22513,11 @@ const openAdmin = () => {
   loadUsuarios()
     .then(() => {
       renderUsuariosSelect();
+      const target = String(state.adminTargetUserId || "").trim();
+      if (target && Array.isArray(state.usersList) && state.usersList.some((u) => String(u.id || "") === target)) {
+        state.adminSelectedUserId = target;
+      }
+      state.adminTargetUserId = "";
       renderUsuariosTable();
     })
     .catch(() => {
