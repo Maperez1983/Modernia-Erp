@@ -9976,6 +9976,7 @@ const renderWorkspaceMembers = (rows = []) => {
   if (!workspaceMembers) return;
   const authUser = getAuthScopeUser();
   const canManage = Boolean(authUser && canManageCurrentWorkspace());
+  const canOpenAdmin = Boolean(authUser && canAccessAdminPanel(authUser));
   if (!state.currentWorkspaceId) {
     workspaceMembers.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
     return;
@@ -9995,6 +9996,7 @@ const renderWorkspaceMembers = (rows = []) => {
             <div class="muted">Rol: ${escapeHtml(row.rol || "Miembro")}</div>
           </div>
           <div class="workspace-company-chip-actions">
+            ${canOpenAdmin ? `<button type="button" class="secondary ghost" data-workspace-member-view="${escapeHtml(String(row.usuario_id || ""))}">Ver ficha</button>` : ""}
             <button type="button" class="secondary ghost" data-workspace-member-remove="${escapeHtml(String(row.usuario_id || ""))}">Quitar</button>
           </div>
         </div>
@@ -10092,6 +10094,14 @@ const renderWorkspaceMembers = (rows = []) => {
       } catch (error) {
         alert(error?.message || "No se pudo quitar.");
       }
+    });
+  });
+  workspaceMembers.querySelectorAll("[data-workspace-member-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const usuarioId = String(btn.dataset.workspaceMemberView || "").trim();
+      if (!usuarioId) return;
+      state.adminTargetUserId = usuarioId;
+      openAdmin();
     });
   });
 };
