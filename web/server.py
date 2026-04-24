@@ -28491,8 +28491,6 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
 
 def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled=False, limit=200):
     company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not company_ids:
-        return {"rows": []}
     # Importante (multi-tenant): los usuarios visibles en RRHH/Registro horario deben ser
     # los miembros del workspace, no el listado global del sistema.
     #
@@ -28529,15 +28527,17 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
         # Solo hacemos fallback al listado global en instalaciones legacy de 1 workspace.
         if workspace_count != 1:
             return {"rows": []}
-    company_rows = conn.execute(
-        f"""
-        SELECT id, nombre
-        FROM empresas
-        WHERE id IN ({",".join("?" for _ in company_ids)})
-        """,
-        company_ids,
-    ).fetchall()
-    company_name_map = {str(row["id"]): str(row["nombre"] or "") for row in company_rows}
+    company_name_map = {}
+    if company_ids:
+        company_rows = conn.execute(
+            f"""
+            SELECT id, nombre
+            FROM empresas
+            WHERE id IN ({",".join("?" for _ in company_ids)})
+            """,
+            company_ids,
+        ).fetchall()
+        company_name_map = {str(row["id"]): str(row["nombre"] or "") for row in company_rows}
     where = ["COALESCE(u.activo, 1) = 1"]
     params = list(member_params)
     if only_enabled:
@@ -28565,14 +28565,14 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
     default_company_id = str(empresa_id or "").strip() or (company_ids[0] if company_ids else "")
     payload_rows = []
     for row in rows:
-        mapped_company_id = infer_workspace_time_company_id(conn, workspace_id, service_raw=row["servicio"] or "", empresa_id=empresa_id)
-        if not mapped_company_id:
-            mapped_company_id = default_company_id
-        if not mapped_company_id:
-            continue
+        mapped_company_id = ""
+        if company_ids:
+            mapped_company_id = infer_workspace_time_company_id(conn, workspace_id, service_raw=row["servicio"] or "", empresa_id=empresa_id)
+            if not mapped_company_id:
+                mapped_company_id = default_company_id
         payload = dict(row)
         payload["empresa_id"] = mapped_company_id
-        payload["empresa_nombre"] = company_name_map.get(str(mapped_company_id), "")
+        payload["empresa_nombre"] = company_name_map.get(str(mapped_company_id), "") if mapped_company_id else ""
         payload_rows.append(payload)
     return {"rows": payload_rows}
 
@@ -45066,6 +45066,19 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except Exception:
                     member_ok = False
+                # Si un admin/owner está vinculando un usuario existente, lo auto-añadimos como miembro del workspace.
+                # Esto evita el “doble paso” de tener que ir a Configuración->Miembros antes de poder vincular en RRHH.
+                if (not member_ok) and workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                    try:
+                        now_ts = datetime.now(timezone.utc).isoformat()
+                        ensure_workspace_member(conn, workspace_id, usuario_id_value, role="Miembro", now=now_ts)
+                        try:
+                            conn.commit()
+                        except Exception:
+                            pass
+                        member_ok = True
+                    except Exception:
+                        member_ok = False
                 # Excepción: el superadmin puede guardar su propia ficha en cualquier workspace aunque no esté en
                 # workspace_miembros (su acceso global ya está controlado por allowlist).
                 if (not member_ok) and is_privileged and actor_user_id and usuario_id_value == actor_user_id:
