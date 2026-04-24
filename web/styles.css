@@ -1836,11 +1836,50 @@ body.crm-fin #companySummary {
   box-shadow: 0 14px 26px rgba(43, 43, 43, 0.06);
 }
 
+/* En tema unificado (Verifika²), el launcher del workspace debe verse como el resto del sistema. */
+body.theme-operativa .workspace-home-card {
+  border-radius: var(--v2-card-radius);
+  border: 1px solid var(--v2-card-border);
+  background: var(--v2-card-bg);
+  box-shadow: var(--v2-card-shadow);
+}
+
+body.theme-operativa .workspace-home-card:hover {
+  border-color: var(--v2-card-border-hover);
+  box-shadow: var(--v2-card-shadow-hover);
+}
+
 .workspace-home-card-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+}
+
+.workspace-home-card-title {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.workspace-home-icon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.68));
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  color: rgba(var(--ink-rgb), 0.92);
+  box-shadow: 0 14px 26px rgba(var(--ink-rgb), 0.10);
+}
+
+.workspace-home-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
 }
 
 .workspace-home-card-head h4 {
@@ -1867,6 +1906,16 @@ body.crm-fin #companySummary {
 .workspace-home-count {
   background: rgba(95, 122, 97, 0.12);
   color: var(--muted);
+}
+
+body.theme-operativa .workspace-home-kicker {
+  background: rgba(var(--gold-rgb), 0.12);
+  color: rgba(var(--ink-rgb), 0.82);
+}
+
+body.theme-operativa .workspace-home-count {
+  background: rgba(var(--ink-rgb), 0.06);
+  color: rgba(var(--ink-rgb), 0.70);
 }
 
 .workspace-home-chip-list {
@@ -5174,6 +5223,13 @@ body.tc-resizing {
   background: rgba(212, 175, 55, 0.18);
   border: 1px solid rgba(212, 175, 55, 0.25);
   font-size: 18px;
+}
+
+#crmSection .crm-insert-ico svg {
+  width: 18px;
+  height: 18px;
+  stroke: rgba(var(--ink-rgb), 0.92);
+  fill: none;
 }
 
 #crmSection .crm-insert-label {

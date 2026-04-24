@@ -7939,7 +7939,7 @@ const WORKSPACE_LAUNCHERS = {
     },
   },
   financiacion: {
-    label: "Financiación",
+    label: "Financiaciones",
     actionLabel: "Ver pipeline",
     action: () => {
       if (isTenantWorkspaceMode()) {
@@ -8026,6 +8026,18 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceView("rrhh", workspaceRrhhHub);
     },
   },
+  simuladores: {
+    label: "Simuladores",
+    actionLabel: "Abrir",
+    action: () => {
+      const hub = document.getElementById("simuladoresHub");
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceEngine("simuladores", hub, { forceTenantView: true });
+        return;
+      }
+      focusWorkspaceEngine("simuladores", hub);
+    },
+  },
   automatizaciones: {
     label: "Automatizaciones",
     actionLabel: "Gestionar",
@@ -8057,20 +8069,21 @@ const getWorkspaceModuleLabel = (moduleKey = "") => {
 
 const WORKSPACE_HOME_CONTAINERS = [
   {
-    key: "crm360",
-    title: "Clientes",
-    kicker: "CRM base",
-    description: "Ficha 360, relación con clientes finales y punto de entrada común del grupo.",
-    requireAny: ["crm360"],
-    modules: ["crm360", "documental", "portal_cliente"],
-    planned: [],
-    action: WORKSPACE_LAUNCHERS.crm360?.action || null,
-    actionLabel: "Abrir clientes",
+    key: "inmobiliaria",
+    title: "Inmobiliaria",
+    kicker: "Vertical",
+    icon: "building-home",
+    description: "Pipeline, inmuebles, compraventas, alquileres y visitas.",
+    requireAny: ["inmobiliaria"],
+    modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones", "copilot"],
+    action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
+    actionLabel: "Abrir inmobiliaria",
   },
   {
     key: "gestoria",
     title: "Gestoría",
-    kicker: "Subservicio",
+    kicker: "Vertical",
+    icon: "file-check",
     description: "Renta, modelos, seguimiento de trabajos y control documental de asesoría.",
     requireAny: ["gestoria"],
     modules: ["gestoria", "documental", "facturacion", "automatizaciones", "copilot"],
@@ -8080,7 +8093,8 @@ const WORKSPACE_HOME_CONTAINERS = [
   {
     key: "seguros",
     title: "Seguros",
-    kicker: "Subservicio",
+    kicker: "Vertical",
+    icon: "shield",
     description: "Cartera, renovaciones, oportunidades y seguimiento comercial.",
     requireAny: ["seguros"],
     modules: ["seguros", "documental", "automatizaciones", "copilot"],
@@ -8088,49 +8102,21 @@ const WORKSPACE_HOME_CONTAINERS = [
     actionLabel: "Abrir seguros",
   },
   {
-    key: "inmobiliaria",
-    title: "Inmobiliaria",
-    kicker: "Subservicio",
-    description: "Pipeline, inmuebles, compraventas, alquileres y visitas.",
-    requireAny: ["inmobiliaria"],
-    modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones", "copilot"],
-    action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
-    actionLabel: "Abrir inmobiliaria",
-  },
-  {
     key: "financiacion",
-    title: "Financiación",
-    kicker: "Subservicio",
+    title: "Financiaciones",
+    kicker: "Vertical",
+    icon: "bank",
     description: "Pipeline hipotecario, expedientes, firmas y bancos.",
     requireAny: ["financiacion"],
     modules: ["financiacion", "documental", "portal_cliente", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.financiacion?.action || null,
-    actionLabel: "Abrir financiación",
-  },
-  {
-    key: "reformas",
-    title: "Reformas",
-    kicker: "Subservicio",
-    description: "Obras, seguimiento comercial y documentación técnica.",
-    requireAny: ["reformas"],
-    modules: ["reformas", "documental", "facturacion", "automatizaciones", "copilot"],
-    action: WORKSPACE_LAUNCHERS.reformas?.action || null,
-    actionLabel: "Abrir reformas",
-  },
-  {
-    key: "fincas",
-    title: "Fincas",
-    kicker: "Subservicio",
-    description: "Comunidades, incidencias, juntas y seguimiento.",
-    requireAny: ["fincas"],
-    modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
-    action: WORKSPACE_LAUNCHERS.fincas?.action || null,
-    actionLabel: "Abrir fincas",
+    actionLabel: "Abrir financiaciones",
   },
   {
     key: "rrhh",
     title: "RRHH",
-    kicker: "Transversal",
+    kicker: "Vertical",
+    icon: "users",
     description: "Plantilla, ausencias, gastos y documentación del equipo.",
     requireAny: ["rrhh", "registro_horario"],
     modules: ["rrhh", "registro_horario"],
@@ -8139,15 +8125,54 @@ const WORKSPACE_HOME_CONTAINERS = [
     actionLabel: "Abrir RRHH",
   },
   {
-    key: "shared",
-    title: "Transversales comunes",
+    key: "fincas",
+    title: "Fincas",
+    kicker: "Vertical",
+    icon: "building-gear",
+    description: "Comunidades, incidencias, juntas y seguimiento.",
+    requireAny: ["fincas"],
+    modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
+    action: WORKSPACE_LAUNCHERS.fincas?.action || null,
+    actionLabel: "Abrir fincas",
+  },
+  {
+    key: "simuladores",
+    title: "Simuladores",
+    kicker: "Vertical",
+    icon: "spark",
+    description: "IRPF/IRNR, plusvalía y escenarios comparativos con informe.",
+    requireAny: ["simuladores"],
+    modules: ["simuladores"],
+    planned: [],
+    action: WORKSPACE_LAUNCHERS.simuladores?.action || null,
+    actionLabel: "Abrir simuladores",
+  },
+  // Secciones técnicas/transversales: solo admins (no son verticales operativos).
+  {
+    key: "crm360",
+    title: "Clientes",
     kicker: "Transversal",
-    description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
+    icon: "users",
+    description: "Ficha 360 y punto de entrada común del grupo.",
+    requireAny: ["crm360"],
+    modules: ["crm360", "documental", "portal_cliente"],
+    planned: [],
+    adminOnly: true,
+    action: WORKSPACE_LAUNCHERS.crm360?.action || null,
+    actionLabel: "Abrir clientes",
+  },
+  {
+    key: "shared",
+    title: "Transversales",
+    kicker: "Configuración",
+    icon: "layers",
+    description: "Documental, facturación, portal, automatizaciones y Copilot.",
     requireAny: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     planned: [],
+    adminOnly: true,
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
-    actionLabel: "Configurar transversales",
+    actionLabel: "Configurar",
   },
 ];
 
@@ -10212,6 +10237,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
         // Siempre respetamos los módulos habilitados del workspace.
         if (enabledKeys.has("rrhh")) tenantEnabledKeys.add("rrhh");
         if (enabledKeys.has("registro_horario")) tenantEnabledKeys.add("registro_horario");
+        if (enabledKeys.has("simuladores")) tenantEnabledKeys.add("simuladores");
 	      if (services.includes("inmobiliaria") && enabledKeys.has("inmobiliaria")) tenantEnabledKeys.add("inmobiliaria");
 	      if (services.includes("seguros") && enabledKeys.has("seguros")) tenantEnabledKeys.add("seguros");
 	      if (services.includes("gestoria") && enabledKeys.has("gestoria")) tenantEnabledKeys.add("gestoria");
@@ -10223,29 +10249,38 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	      tenantEnabledKeys = enabledKeys;
 	    }
 	  }
+		  const canSeeAdminSections = Boolean(!isTenantWorkspaceMode() || !tenantNonAdmin);
 		  workspaceLauncher.innerHTML = `
 		    <div id="workspaceHomeAlerts"></div>
 		    <div class="workspace-home-grid">
 		      ${WORKSPACE_HOME_CONTAINERS
 		        .map((container) => {
+              if (container.adminOnly && !canSeeAdminSections) return "";
               const requiredOk = !Array.isArray(container.requireAny)
                 || !container.requireAny.length
                 || container.requireAny.some((moduleKey) => tenantEnabledKeys.has(moduleKey));
               if (!requiredOk) return "";
-		          const availableModules = container.modules.filter((moduleKey) => tenantEnabledKeys.has(moduleKey));
-		          if (!availableModules.length && container.key !== "shared") return "";
-		          if (!availableModules.length && container.key === "shared") return "";
-		          return `
-		            <article class="workspace-home-card" ${typeof container.action === "function" ? `data-workspace-home-action="${container.key}" role="button" tabindex="0"` : ""}>
-	              <div class="workspace-home-card-head">
-	                <div>
-	                  <span class="workspace-home-kicker">${container.kicker}</span>
-	                  <h4>${container.title}</h4>
-	                </div>
-                <span class="workspace-home-count">${numberFormatter.format(availableModules.length)} módulos</span>
-              </div>
-              <p class="muted">${container.description}</p>
-	              <div class="workspace-home-chip-list">
+			          const availableModules = container.modules.filter((moduleKey) => tenantEnabledKeys.has(moduleKey));
+			          if (!availableModules.length && container.key !== "shared") return "";
+			          if (!availableModules.length && container.key === "shared") return "";
+	              const iconKey = String(container.icon || "").trim();
+	              const iconHtml = iconKey
+	                ? `<span class="workspace-home-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><use href="#ico-${escapeHtml(iconKey)}"></use></svg></span>`
+	                : "";
+			          return `
+			            <article class="workspace-home-card" ${typeof container.action === "function" ? `data-workspace-home-action="${container.key}" role="button" tabindex="0"` : ""}>
+			              <div class="workspace-home-card-head">
+			                <div class="workspace-home-card-title">
+                        ${iconHtml}
+			                  <div>
+			                    <span class="workspace-home-kicker">${container.kicker}</span>
+			                    <h4>${container.title}</h4>
+			                  </div>
+			                </div>
+	                <span class="workspace-home-count">${numberFormatter.format(availableModules.length)} módulos</span>
+	              </div>
+	              <p class="muted">${container.description}</p>
+			              <div class="workspace-home-chip-list">
 	                ${availableModules
 	                  .map((moduleKey) => `<span class="workspace-home-chip">${getWorkspaceModuleLabel(moduleKey)}</span>`)
 	                  .join("")}
