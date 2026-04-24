@@ -29770,7 +29770,14 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
             except Exception:
                 is_default = False
 
-            should_autojoin = bool(single_workspace or has_persona or (is_default and (time_enabled or has_service)))
+            # IMPORTANTE: en modo multi-tenant no auto-vinculamos usuarios "por defecto" solo por tener servicios
+            # o fichaje activo. Eso provoca contaminación de miembros entre workspaces (usuarios acaban apareciendo
+            # en RRHH/Equipo de un workspace al que no pertenecen).
+            #
+            # Auto-vinculación segura:
+            # - instalaciones legacy con un único workspace
+            # - o evidencia explícita de pertenencia (tiene ficha/registro personal dentro del workspace)
+            should_autojoin = bool(single_workspace or has_persona)
             if should_autojoin:
                 try:
                     ensure_workspace_core_tables(conn)
