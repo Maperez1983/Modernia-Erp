@@ -979,6 +979,12 @@ APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "E
 WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
+# Superadmin estricto (allowlist). Si APP_SUPERADMIN_ENFORCE=1, las acciones "global admin"
+# solo se permiten a los usuarios en la allowlist.
+APP_SUPERADMIN_ENFORCE = os.environ.get("APP_SUPERADMIN_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+APP_SUPERADMIN_USERNAMES = os.environ.get("APP_SUPERADMIN_USERNAMES", "").strip()
+APP_SUPERADMIN_EMAILS = os.environ.get("APP_SUPERADMIN_EMAILS", "").strip()
+APP_SUPERADMIN_IDS = os.environ.get("APP_SUPERADMIN_IDS", "").strip()
 # Compat/backfill legacy: si un workspace no tiene empresas asociadas, opcionalmente auto-vincula todas las activas.
 # En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
 WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -29490,11 +29496,70 @@ def workspace_session_is_privileged(session):
         return True
     return False
 
+def _parse_csv_tokens(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return set()
+    parts = []
+    for chunk in re.split(r"[,\n; ]+", raw):
+        t = str(chunk or "").strip()
+        if t:
+            parts.append(t)
+    return {p for p in parts if p}
+
+def is_superadmin_actor(conn, session):
+    """
+    Superadmin por allowlist (env vars). Usado para permisos globales y bypass de membership.
+    """
+    if not session:
+        return False
+    allow_ids = _parse_csv_tokens(APP_SUPERADMIN_IDS)
+    allow_users = {normalize_lookup_text(x) for x in _parse_csv_tokens(APP_SUPERADMIN_USERNAMES)}
+    allow_emails = {normalize_email(x) for x in _parse_csv_tokens(APP_SUPERADMIN_EMAILS)}
+
+    sid = str(session.get("user_id") or "").strip()
+    susr = normalize_lookup_text(session.get("usuario") or "")
+    semail = normalize_email(session.get("email") or "")
+
+    # Si falta info en sesión, intentamos refrescar desde DB.
+    if conn and sid and (not susr or not semail):
+        try:
+            row = conn.execute(
+                "SELECT usuario, email, activo FROM usuarios WHERE id = ? LIMIT 1",
+                (sid,),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                if int(row_value(row, "activo", 1) or 0) != 1:
+                    return False
+            except Exception:
+                pass
+            if not susr:
+                susr = normalize_lookup_text(row_value(row, "usuario") or "")
+            if not semail:
+                semail = normalize_email(row_value(row, "email") or "")
+
+    if allow_ids and sid and sid in allow_ids:
+        return True
+    if allow_users and susr and susr in allow_users:
+        return True
+    if allow_emails and semail and semail in allow_emails:
+        return True
+    return False
+
 def workspace_actor_is_privileged(conn, session):
     """
     Determina permisos usando la sesión y, si hace falta, refrescando contra la DB.
     Evita falsos 403 si el usuario fue promovido a admin y su sesión aún no refleja rol/servicio.
     """
+    # Modo estricto: solo superadmin allowlisted puede hacer acciones globales.
+    if APP_SUPERADMIN_ENFORCE:
+        return is_superadmin_actor(conn, session)
+    # Modo compat: superadmin allowlisted siempre tiene privilegios globales.
+    if is_superadmin_actor(conn, session):
+        return True
     if workspace_session_is_privileged(session):
         return True
     if not session or not conn:
