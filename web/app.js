@@ -13518,7 +13518,11 @@ const renderWorkspaceRrhhHub = () => {
             state.currentWorkspaceData.timeEmployees = removeLocal(state.currentWorkspaceData.timeEmployees);
           }
         }
-        const respUser = await apiPost("/api/usuarios_delete", { id: userId });
+        const respUser = await apiPost("/api/usuarios_delete", {
+          workspace_id: state.currentWorkspaceId,
+          id: userId,
+          confirm: "DESACTIVAR",
+        });
         if (respUser?.error) throw new Error(respUser.error);
         if (Array.isArray(state.usersList)) {
           state.usersList = state.usersList.filter((u) => String(u?.id || "").trim() !== userId);
@@ -13809,7 +13813,7 @@ const renderWorkspaceRrhhHub = () => {
       inviteBtn.disabled = true;
       if (accessStatus) accessStatus.textContent = "Enviando invitación...";
       try {
-        const resp = await apiPost("/api/usuarios_invitar", { id: userId });
+        const resp = await apiPost("/api/usuarios_invitar", { workspace_id: state.currentWorkspaceId, id: userId });
         if (resp?.error) throw new Error(resp.error);
         const link = String(resp?.invite_link || "").trim();
         if (inviteLinkEl) {
@@ -14616,7 +14620,7 @@ const renderWorkspaceRrhhHub = () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ id: userId }),
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id: userId }),
         }).then((res) => res.json());
         if (data?.error) throw new Error(data.error);
         if (data?.sent) {
@@ -14647,7 +14651,7 @@ const renderWorkspaceRrhhHub = () => {
         const data = await fetch("/api/usuarios_delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId }),
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id: userId, confirm: "DESACTIVAR" }),
         }).then((res) => res.json());
         if (data?.error) throw new Error(data.error);
         state.workspaceRrhhSelectedUserId = "";
@@ -30232,7 +30236,7 @@ const renderAdminUserDetail = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ id: user.id }),
+        body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id: user.id }),
       }).then((res) => res.json());
       if (data.error) {
         status.textContent = data.error;
@@ -30256,7 +30260,7 @@ const renderAdminUserDetail = () => {
       const data = await fetch("/api/usuarios_delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id }),
+        body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id: user.id, confirm: "DESACTIVAR" }),
       }).then((res) => res.json());
       if (data.error) {
         status.textContent = data.error;

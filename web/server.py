@@ -1669,6 +1669,61 @@ def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
         pass
     return {"user_id": user_id, "usuario": usuario, "email": email, "token": token, "expires_at": expires_at}
 
+
+def ensure_user_admin_audit_table(conn):
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_admin_audit (
+              id TEXT PRIMARY KEY,
+              at TEXT NOT NULL,
+              workspace_id TEXT,
+              action TEXT NOT NULL,
+              actor_user_id TEXT,
+              actor_usuario TEXT,
+              actor_email TEXT,
+              target_user_id TEXT,
+              payload_json TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_admin_audit_at ON user_admin_audit(at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_admin_audit_ws_at ON user_admin_audit(workspace_id, at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_admin_audit_target ON user_admin_audit(target_user_id, at)")
+    except Exception:
+        return
+
+
+def log_user_admin_audit(conn, *, action, workspace_id, target_user_id=None, actor_session=None, payload=None, now=None):
+    try:
+        ensure_user_admin_audit_table(conn)
+        now_ts = now or datetime.now(timezone.utc).isoformat()
+        actor_user_id = str((actor_session or {}).get("user_id") or "").strip()
+        actor_usuario = str((actor_session or {}).get("usuario") or "").strip()
+        actor_email = normalize_email((actor_session or {}).get("email") or "")
+        conn.execute(
+            """
+            INSERT INTO user_admin_audit (
+              id, at, workspace_id, action, actor_user_id, actor_usuario, actor_email, target_user_id, payload_json
+            ) VALUES (
+              ?, datetime(?), ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                now_ts,
+                str(workspace_id or "").strip() or None,
+                str(action or "").strip(),
+                actor_user_id or None,
+                actor_usuario or None,
+                actor_email or None,
+                str(target_user_id or "").strip() or None,
+                json.dumps(payload or {}, ensure_ascii=False, default=str),
+            ),
+        )
+    except Exception:
+        return
+
 def normalize_person_name(value):
     if not value:
         return ""
