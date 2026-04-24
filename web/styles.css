@@ -11474,25 +11474,26 @@ body.crm-context-inmo #crmSection .crm-side-new .crm-side-ico {
   color: rgba(var(--ink-rgb), 0.98);
 }
 
-body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
+/* En cualquier vertical CRM, los módulos deben mantener el mismo formato (solo estilo). */
+body.crm-context-vertical #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
   border-color: rgba(var(--gold-rgb), 0.28);
   background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.96), rgba(15, 39, 66, 0.92));
   color: rgba(255, 255, 255, 0.98);
 }
 
-body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module:hover {
+body.crm-context-vertical #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module:hover {
   border-color: rgba(var(--gold-rgb), 0.38);
 }
 
-body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module.active {
+body.crm-context-vertical #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module.active {
   outline: 3px solid rgba(var(--gold-rgb), 0.28);
 }
 
-body.crm-context-inmo #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn {
+body.crm-context-vertical #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn {
   border-color: rgba(var(--gold-rgb), 0.28);
 }
 
-body.crm-context-inmo #crmSection .crm-lightning-topbar {
+body.crm-context-vertical #crmSection .crm-lightning-topbar {
   border-color: rgba(var(--gold-rgb), 0.18);
 }
 
