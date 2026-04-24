@@ -28507,23 +28507,27 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
     workspace_count = 0
     try:
         ensure_workspace_core_tables(conn)
-        members_count = int(
-            (conn.execute("SELECT COUNT(*) FROM workspace_miembros WHERE workspace_id = ?", (workspace_id,)).fetchone() or [0])[0]
-            or 0
-        )
+        row = conn.execute(
+            "SELECT COUNT(*) AS total FROM workspace_miembros WHERE workspace_id = ?",
+            (workspace_id,),
+        ).fetchone()
+        members_count = int(row_value(row, "total", 0) or row_value(row, 0) or 0)
     except Exception:
         members_count = 0
     try:
-        workspace_count = int((conn.execute("SELECT COUNT(*) FROM workspaces").fetchone() or [0])[0] or 0)
+        row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+        workspace_count = int(row_value(row, "total", 0) or row_value(row, 0) or 0)
     except Exception:
+        # Si no podemos determinarlo, asumimos multi-tenant para evitar fugas.
         workspace_count = 0
     if members_count > 0:
         join_sql = "JOIN workspace_miembros mem ON mem.usuario_id = u.id"
         member_where = " AND mem.workspace_id = ?"
         member_params = [workspace_id]
     else:
-        # Si hay varios workspaces, no devolvemos usuarios globales (evita contaminación).
-        if workspace_count > 1:
+        # Si hay varios workspaces (o no podemos verificar), no devolvemos usuarios globales (evita contaminación).
+        # Solo hacemos fallback al listado global en instalaciones legacy de 1 workspace.
+        if workspace_count != 1:
             return {"rows": []}
     company_rows = conn.execute(
         f"""
@@ -35269,7 +35273,7 @@ def _load_brand_logo(logo_url=None, max_width=520):
             try:
                 if raw.startswith("s3://"):
                     safe_key = _normalize_s3_key(raw[5:])
-                elif raw.startswith("/api/s3_redirect") or raw.startswith("/api/s3_url"):
+                elif raw.startswith("/api/s3_redirect") or raw.startswith("/api/s3_url") or raw.startswith("/api/s3_uri"):
                     parsed = urllib.parse.urlparse(raw)
                     key = urllib.parse.parse_qs(parsed.query or "").get("key", [""])[0]
                     safe_key = _normalize_s3_key(key)
@@ -57266,7 +57270,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, payload)
             return
 
-        if path == "/api/s3_url":
+        if path == "/api/s3_url" or path == "/api/s3_uri":
             key = params.get("key", [""])[0]
             if not key:
                 json_response(self, {"error": "key requerido"}, status=400)
