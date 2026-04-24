@@ -11112,11 +11112,9 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
   }
 
 	  // Asegura que la lista global de usuarios esté cargada para mostrar "Usuarios del sistema" y la pestaña Usuarios.
-	  if (manager && (!Array.isArray(state.usersList) || !state.usersList.length)) {
-	    const users = await safeWorkspaceApi("/api/usuarios", { rows: [] });
-	    if (isStale()) return;
-	    state.usersList = users?.rows || [];
-	  }
+	  // Nota: en modo multi-workspace estricto, un gestor NO superadmin no puede listar usuarios globales.
+	  // Usaremos los usuarios del workspace (workspace_registro_usuarios) que ya cargamos más abajo.
+	  if (manager && !Array.isArray(state.usersList)) state.usersList = [];
 
   const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
   const visibleEmployees = manager
@@ -11223,6 +11221,17 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 		  if (isStale()) return;
 
 		  state.workspaceTimeUsers = timeUsers?.rows || [];
+		  // Si no eres superadmin (panel admin global), en RRHH solo trabajamos con usuarios del workspace.
+		  // Esto evita el caso "el usuario existe pero la ficha sale vacía" por no poder leer /api/usuarios.
+		  try {
+		    const authUser = getAuthScopeUser();
+		    const canSeeGlobalUsers = Boolean(authUser && canAccessAdminPanel(authUser));
+		    if (manager && !canSeeGlobalUsers) {
+		      state.usersList = state.workspaceTimeUsers || [];
+		    }
+		  } catch {
+		    if (manager) state.usersList = state.workspaceTimeUsers || [];
+		  }
 		  state.workspaceRrhhProfileRow = profile?.row || null;
 		  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
 		  state.workspaceRrhhAusenciasAllRows = ausenciasAll?.rows || [];
