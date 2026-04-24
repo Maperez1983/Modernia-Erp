@@ -45066,6 +45066,10 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except Exception:
                     member_ok = False
+                # Excepción: el superadmin puede guardar su propia ficha en cualquier workspace aunque no esté en
+                # workspace_miembros (su acceso global ya está controlado por allowlist).
+                if (not member_ok) and is_privileged and actor_user_id and usuario_id_value == actor_user_id:
+                    member_ok = True
                 if not member_ok:
                     json_response(self, {"error": "Usuario no pertenece a este workspace."}, status=409)
                     return
