@@ -2752,6 +2752,7 @@ const actionModalClientes = document.getElementById("actionModalClientes");
 const actionModalServicioSelect = document.getElementById("actionModalServicioSelect");
 const actionModalFecha = document.getElementById("actionModalFecha");
 const actionModalHora = document.getElementById("actionModalHora");
+const actionModalHoraFin = document.getElementById("actionModalHoraFin");
 const actionModalTipo = document.getElementById("actionModalTipo");
 const actionModalResponsable = document.getElementById("actionModalResponsable");
 const actionModalEstado = document.getElementById("actionModalEstado");
@@ -4517,6 +4518,14 @@ const ensureModalDataLoaded = async () => {
     }
     populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
     populateActionModalResponsables(actionModalServicioSelect?.value || "");
+  } catch (err) {
+    // No bloquees la apertura del modal si falla la carga de listas (agenda debe seguir siendo operativa).
+    try {
+      console.warn("ensureModalDataLoaded failed", err);
+    } catch {}
+    try {
+      setUiToast("Aviso", "No se pudo cargar la lista de usuarios/clientes. Puedes escribir el cliente manualmente.");
+    } catch {}
   } finally {
     modalLoading = false;
   }
@@ -4544,7 +4553,7 @@ const syncActionModalClienteButtons = () => {
 
 const openActionEditor = (ev, context = null) => {
   if (!actionModal) return;
-  ensureModalDataLoaded();
+  void ensureModalDataLoaded();
   void ensureActionModalClientesReady();
   currentActionEdit = ev;
   state.actionModalContext = context && typeof context === "object" ? context : null;
@@ -4565,6 +4574,7 @@ const openActionEditor = (ev, context = null) => {
   }
   if (actionModalFecha) actionModalFecha.value = ev.dateKey || "";
   if (actionModalHora) actionModalHora.value = ev.time || "";
+  if (actionModalHoraFin) actionModalHoraFin.value = ev.timeEnd || "";
   if (actionModalTipo) actionModalTipo.value = ev.tipo || "";
   if (actionModalNotas) actionModalNotas.value = ev.notas || "";
   if (actionModalRecordatorio) {
@@ -4597,7 +4607,7 @@ const openActionEditor = (ev, context = null) => {
 
 const openActionCreator = (dateValue, timeValue, serviceValue, context = null) => {
   if (!actionModal) return;
-  ensureModalDataLoaded();
+  void ensureModalDataLoaded();
   void ensureActionModalClientesReady();
   currentActionEdit = null;
   state.actionModalContext = context && typeof context === "object" ? context : null;
@@ -4610,6 +4620,11 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   }
   if (actionModalFecha) actionModalFecha.value = dateValue || formatAgendaDate(new Date());
   if (actionModalHora) actionModalHora.value = timeValue || "";
+  if (actionModalHoraFin) {
+    // Google Calendar-like: si se crea con hora, proponemos +60min.
+    const defaultEnd = timeValue ? addMinutesToAgendaTime(timeValue, 60) : "";
+    actionModalHoraFin.value = defaultEnd;
+  }
   if (actionModalTipo) actionModalTipo.value = "";
   if (actionModalNotas) actionModalNotas.value = "";
   if (actionModalRecordatorio) actionModalRecordatorio.value = "";
@@ -4658,7 +4673,19 @@ let lastAgendaEvents = [];
 
 const parseAgendaDate = (value) => {
   if (!value) return null;
-  const date = new Date(value);
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  // IMPORTANT: `new Date('YYYY-MM-DD')` se interpreta como UTC en muchos motores.
+  // Para agenda tipo Google Calendar queremos tratar fechas como locales (sin desplazamientos).
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mm = Number(m[2]);
+    const d = Number(m[3]);
+    const date = new Date(y, mm - 1, d);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
@@ -4667,6 +4694,58 @@ const formatAgendaDate = (date) => {
   if (Number.isNaN(d.getTime())) return "";
   const pad2 = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+const parseAgendaTimeMinutes = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return (h * 60) + min;
+};
+
+const normalizeAgendaTimeString = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return raw;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return raw;
+  if (h < 0 || h > 23 || min < 0 || min > 59) return raw;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+};
+
+const formatAgendaTimeFromMinutes = (minutes) => {
+  if (!Number.isFinite(minutes)) return "";
+  const total = ((Math.round(minutes) % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+
+const addMinutesToAgendaTime = (timeRaw, deltaMinutes) => {
+  const start = parseAgendaTimeMinutes(timeRaw);
+  if (start === null) return "";
+  const delta = Number(deltaMinutes || 0);
+  if (!Number.isFinite(delta)) return "";
+  return formatAgendaTimeFromMinutes(start + delta);
+};
+
+const normalizeAgendaTimeRange = (startRaw, endRaw) => {
+  const start = String(startRaw || "").trim();
+  const end = String(endRaw || "").trim();
+  if (!start) return { label: "Todo el día", start: "", end: "" };
+  if (!end) return { label: start, start, end: "" };
+  const startMin = parseAgendaTimeMinutes(start);
+  const endMin = parseAgendaTimeMinutes(end);
+  if (startMin === null || endMin === null) return { label: `${start}–${end}`, start, end };
+  if (endMin <= startMin) return { label: start, start, end: "" };
+  return { label: `${start}–${end}`, start, end };
 };
 
 const getWeekStart = (date) => {
@@ -4738,7 +4817,8 @@ const buildAgendaEvents = (rows = [], serviceId = "", serviceLabel = "") => {
         inmueble_id: row.inmueble_id || "",
         date,
         dateKey: formatAgendaDate(date),
-        time: row.hora || "",
+        time: normalizeAgendaTimeString(row.hora || ""),
+        timeEnd: normalizeAgendaTimeString(row.hora_fin || ""),
         tipo: row.tipo || "",
         cliente: row.cliente || "",
         responsable: row.responsable || "",
@@ -4936,34 +5016,53 @@ const renderAgendaCalendar = (container, events, label = "") => {
   const body = document.createElement("div");
   body.className = "agenda-body";
 
-  const updateActionDate = (id, fecha, hora = "") => {
+  const updateActionDate = async (id, fecha, hora) => {
     if (readOnly) return;
     if (!id || !fecha) return;
-    fetch("/api/acciones_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, fecha, hora }),
-    })
-      .then(() => {
-        const target = events.find((ev) => ev.id === id);
-        if (target) {
-          const newDate = parseAgendaDate(fecha);
-          if (newDate) {
-            target.date = newDate;
-            target.dateKey = formatAgendaDate(newDate);
-          }
-          if (hora) {
-            target.time = hora;
-          }
+    const target = events.find((ev) => ev.id === id) || null;
+    const payload = { id, fecha, usuario: getCurrentUser() };
+    // IMPORTANTE: si `hora` NO se envía, backend no la borra. Así al arrastrar de día a día se conserva.
+    const horaNorm = typeof hora === "string" ? String(hora || "").trim() : "";
+    if (horaNorm) {
+      payload.hora = normalizeAgendaTimeString(horaNorm);
+      // Conserva duración al mover dentro del día.
+      const startPrev = parseAgendaTimeMinutes(target?.time || "");
+      const endPrev = parseAgendaTimeMinutes(target?.timeEnd || "");
+      if (startPrev !== null && endPrev !== null && endPrev > startPrev) {
+        const duration = endPrev - startPrev;
+        payload.hora_fin = formatAgendaTimeFromMinutes(parseAgendaTimeMinutes(payload.hora) + duration);
+      }
+    }
+    try {
+      await apiPost("/api/acciones_update", payload);
+      if (target) {
+        const newDate = parseAgendaDate(fecha);
+        if (newDate) {
+          target.date = newDate;
+          target.dateKey = formatAgendaDate(newDate);
         }
-        renderAgendaCalendar(container, events, label);
-      })
-      .catch(() => {});
+        if (horaNorm) {
+          target.time = payload.hora;
+          if (payload.hora_fin) target.timeEnd = payload.hora_fin;
+        }
+      }
+      renderAgendaCalendar(container, events, label);
+    } catch (err) {
+      try {
+        setUiToast("No se pudo mover la cita", String(err?.message || "Error desconocido"));
+      } catch {}
+    }
   };
 
   const makeEventRow = (ev, compact = false) => {
     const row = document.createElement("div");
     const estadoKey = normalizeSimple(ev.estado || "pendiente") || "pendiente";
+    const timeMeta = normalizeAgendaTimeRange(ev.time || "", ev.timeEnd || "");
+    const titleText = formatNombreCliente(ev.cliente || "") || String(ev.tipo || "").trim() || "Acción";
+    const serviceText = String(ev.serviceLabel || ev.service || "").trim();
+    const responsableText = String(ev.responsable || "").trim() || "Sin responsable";
+    const estadoText = String(ev.estado || "").trim() || "Pendiente";
+    const notesText = String(ev.notas || "").trim();
     row.className = compact
       ? `agenda-week-row agenda-event estado-${estadoKey}`
       : `agenda-day-row agenda-event estado-${estadoKey}`;
@@ -4971,11 +5070,11 @@ const renderAgendaCalendar = (container, events, label = "") => {
     row.dataset.id = ev.id || "";
     row.dataset.date = ev.dateKey;
     row.innerHTML = `
-      <div class="agenda-time">${ev.time || "-"}</div>
+      <div class="agenda-time">${escapeHtml(timeMeta.label || "-")}</div>
       <div class="agenda-info">
-        <div class="agenda-title">${ev.cliente || ev.tipo || "Acción"}</div>
-        <div class="agenda-meta">${ev.serviceLabel || ev.service || ""} · ${ev.responsable || "Sin responsable"} · ${ev.estado || "Pendiente"}</div>
-        ${compact ? "" : `<div class="agenda-notes">${ev.notas || ""}</div>`}
+        <div class="agenda-title">${escapeHtml(titleText)}</div>
+        <div class="agenda-meta">${escapeHtml(serviceText)} · ${escapeHtml(responsableText)} · ${escapeHtml(estadoText)}</div>
+        ${compact || !notesText ? "" : `<div class="agenda-notes">${escapeHtml(notesText)}</div>`}
       </div>
     `;
     if (ev.inmueble_id) {
@@ -4995,6 +5094,9 @@ const renderAgendaCalendar = (container, events, label = "") => {
       });
       row.addEventListener("dragstart", (event) => {
         event.dataTransfer.setData("text/plain", ev.id || "");
+        try {
+          event.dataTransfer.effectAllowed = "move";
+        } catch {}
       });
     }
     return row;
@@ -60760,6 +60862,7 @@ if (actionModalSave) {
       id: currentActionEdit ? currentActionEdit.id : undefined,
       fecha: actionModalFecha ? actionModalFecha.value : currentActionEdit?.dateKey,
       hora: actionModalHora ? actionModalHora.value : currentActionEdit?.time,
+      hora_fin: actionModalHoraFin ? actionModalHoraFin.value : currentActionEdit?.timeEnd,
       tipo: actionModalTipo ? actionModalTipo.value.trim() : currentActionEdit?.tipo,
       responsable: actionModalResponsable ? actionModalResponsable.value : currentActionEdit?.responsable,
       estado: actionModalEstado ? actionModalEstado.value : currentActionEdit?.estado,
@@ -60770,6 +60873,30 @@ if (actionModalSave) {
       cliente_id: clienteData.cliente_id,
       cliente_nombre: clienteData.cliente_nombre,
     };
+    payload.hora = normalizeAgendaTimeString(payload.hora || "");
+    payload.hora_fin = normalizeAgendaTimeString(payload.hora_fin || "");
+    if (payload.hora_fin && !payload.hora) {
+      if (actionModalStatus) actionModalStatus.textContent = "Indica primero la hora de inicio.";
+      return;
+    }
+    if (payload.hora) {
+      const startMin = parseAgendaTimeMinutes(payload.hora);
+      if (startMin === null) {
+        if (actionModalStatus) actionModalStatus.textContent = "Hora de inicio inválida.";
+        return;
+      }
+      if (payload.hora_fin) {
+        const endMin = parseAgendaTimeMinutes(payload.hora_fin);
+        if (endMin === null) {
+          if (actionModalStatus) actionModalStatus.textContent = "Hora fin inválida.";
+          return;
+        }
+        if (endMin <= startMin) {
+          if (actionModalStatus) actionModalStatus.textContent = "La hora fin debe ser posterior a la hora de inicio.";
+          return;
+        }
+      }
+    }
     if (!String(payload.responsable || "").trim()) {
       payload.responsable = getCurrentUser();
     }

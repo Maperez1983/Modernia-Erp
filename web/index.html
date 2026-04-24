@@ -9588,6 +9588,10 @@
             Hora
             <input id="actionModalHora" type="time" />
           </label>
+          <label>
+            Hora fin
+            <input id="actionModalHoraFin" type="time" />
+          </label>
 	          <label>
 	            Tipo
 	            <input id="actionModalTipo" list="actionModalTipoList" placeholder="Cita / Llamada / Tarea..." autocomplete="off" />
@@ -9953,11 +9957,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-									    <script src="app.js?v=660"></script>
+										    <script src="app.js?v=661"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-								        const TARGET_SW = "/sw.js?v=217";
+									        const TARGET_SW = "/sw.js?v=218";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
