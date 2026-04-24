@@ -5607,13 +5607,31 @@
               <p class="muted">Pólizas, seguimiento y oportunidades.</p>
             </div>
           </div>
-          <div class="tabs" id="segurosTabs">
-            <button class="tab active" type="button" data-seguros-tab="dashboard">Dashboard Seguros</button>
-            <button class="tab" type="button" data-seguros-tab="bdt">Pólizas cargadas</button>
-            <button class="tab" type="button" data-seguros-tab="alta">Alta pólizas</button>
-            <button class="tab" type="button" data-seguros-tab="gestion">Gestión</button>
-            <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
-            <button class="tab" type="button" data-seguros-tab="contabilidad">Contabilidad Seguros</button>
+          <div class="tc-modulebar tc-modulebar--micro" id="segurosTabs" role="navigation" aria-label="Seguros">
+            <button class="tab tc-module active" type="button" data-seguros-tab="dashboard" title="Dashboard">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+              <span class="tc-mod-label">Dashboard</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="bdt" title="Pólizas cargadas">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
+              <span class="tc-mod-label">Pólizas</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="alta" title="Alta pólizas">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-plus"></use></svg></span>
+              <span class="tc-mod-label">Alta</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="gestion" title="Gestión">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clipboard"></use></svg></span>
+              <span class="tc-mod-label">Gestión</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="campanas" title="Campañas">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-megaphone"></use></svg></span>
+              <span class="tc-mod-label">Campañas</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="contabilidad" title="Contabilidad">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
+              <span class="tc-mod-label">Conta</span>
+            </button>
           </div>
           <datalist id="segurosCompaniasList">
             <option value="Allianz"></option>
@@ -7447,13 +7465,31 @@
           </div>
         </div>
           <div id="hipotecaSection" class="hidden">
-          <div id="hipotecaTabs" class="tabs">
-            <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
-            <button class="tab" type="button" data-hipoteca-section="alta">Workflow</button>
-            <button class="tab" type="button" data-hipoteca-section="asesoramiento">Asesoramiento</button>
-            <button class="tab" type="button" data-hipoteca-section="agenda">Agenda</button>
-            <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
-            <button class="tab" type="button" data-hipoteca-section="contabilidad">Contabilidad</button>
+          <div id="hipotecaTabs" class="tc-modulebar tc-modulebar--micro" role="navigation" aria-label="Financiaciones">
+            <button class="tab tc-module active" type="button" data-hipoteca-section="dashboard" title="Dashboard">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+              <span class="tc-mod-label">Dashboard</span>
+            </button>
+            <button class="tab tc-module" type="button" data-hipoteca-section="alta" title="Workflow">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clipboard"></use></svg></span>
+              <span class="tc-mod-label">Workflow</span>
+            </button>
+            <button class="tab tc-module" type="button" data-hipoteca-section="asesoramiento" title="Asesoramiento">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+              <span class="tc-mod-label">Asesoram.</span>
+            </button>
+            <button class="tab tc-module" type="button" data-hipoteca-section="agenda" title="Agenda">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+              <span class="tc-mod-label">Agenda</span>
+            </button>
+            <button class="tab tc-module" type="button" data-hipoteca-section="bdt" title="BDT">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
+              <span class="tc-mod-label">BDT</span>
+            </button>
+            <button class="tab tc-module" type="button" data-hipoteca-section="contabilidad" title="Contabilidad">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
+              <span class="tc-mod-label">Conta</span>
+            </button>
           </div>
           <div id="hipotecaDashboardPanel" class="form-card">
             <div class="dashboard-head">
@@ -8673,12 +8709,27 @@
             <div class="form-card hidden" id="clienteProfesionalOperativaBlock">
               <h3>Áreas de gestoría</h3>
               <p class="muted">Cada pestaña corresponde a una línea de trabajo activa para este cliente.</p>
-              <div class="tabs" id="gestoriaModuleTabs">
-                <button class="tab" type="button" data-gestoria-module="contabilidad">Contabilidad</button>
-                <button class="tab" type="button" data-gestoria-module="fiscal">Fiscal</button>
-                <button class="tab" type="button" data-gestoria-module="laboral">Laboral</button>
-                <button class="tab" type="button" data-gestoria-module="renta">Renta</button>
-                <button class="tab" type="button" data-gestoria-module="admin">Gestiones administrativas</button>
+              <div class="tc-modulebar tc-modulebar--micro" id="gestoriaModuleTabs" role="navigation" aria-label="Áreas de gestoría">
+                <button class="tab tc-module" type="button" data-gestoria-module="contabilidad" title="Contabilidad">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
+                  <span class="tc-mod-label">Conta</span>
+                </button>
+                <button class="tab tc-module" type="button" data-gestoria-module="fiscal" title="Fiscal">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file-check"></use></svg></span>
+                  <span class="tc-mod-label">Fiscal</span>
+                </button>
+                <button class="tab tc-module" type="button" data-gestoria-module="laboral" title="Laboral">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+                  <span class="tc-mod-label">Laboral</span>
+                </button>
+                <button class="tab tc-module" type="button" data-gestoria-module="renta" title="Renta">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-receipt"></use></svg></span>
+                  <span class="tc-mod-label">Renta</span>
+                </button>
+                <button class="tab tc-module" type="button" data-gestoria-module="admin" title="Gestiones administrativas">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-settings"></use></svg></span>
+                  <span class="tc-mod-label">Admin</span>
+                </button>
               </div>
               <div id="gestoriaModuleContabilidad">
                 <div class="tabs" id="gestoriaContaInnerTabs">
@@ -9342,11 +9393,23 @@
             <div class="form-card">
               <h3>Áreas de servicio</h3>
               <p class="muted">Trabajo operativo agrupado por servicio para no mezclar configuración, documentos y contabilidad.</p>
-              <div class="tabs" id="clienteOperativaTabs">
-                <button class="tab" type="button" data-operativa-tab="gestoria">Gestoría</button>
-                <button class="tab" type="button" data-operativa-tab="seguros">Seguros</button>
-                <button class="tab" type="button" data-operativa-tab="inmobiliaria">Inmobiliaria</button>
-                <button class="tab" type="button" data-operativa-tab="financiaciones">Financiaciones</button>
+              <div class="tc-modulebar tc-modulebar--micro" id="clienteOperativaTabs" role="navigation" aria-label="Áreas de servicio">
+                <button class="tab tc-module" type="button" data-operativa-tab="gestoria" title="Gestoría">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+                  <span class="tc-mod-label">Gestoría</span>
+                </button>
+                <button class="tab tc-module" type="button" data-operativa-tab="seguros" title="Seguros">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
+                  <span class="tc-mod-label">Seguros</span>
+                </button>
+                <button class="tab tc-module" type="button" data-operativa-tab="inmobiliaria" title="Inmobiliaria">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
+                  <span class="tc-mod-label">Inmo</span>
+                </button>
+                <button class="tab tc-module" type="button" data-operativa-tab="financiaciones" title="Financiaciones">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
+                  <span class="tc-mod-label">Fin</span>
+                </button>
               </div>
             </div>
             <div id="clienteOperativaGestoriaPanel" class="hidden">
@@ -9433,11 +9496,23 @@
                   <span id="clienteDocsUploadStatus" class="muted"></span>
                 </div>
               </form>
-              <div class="tabs" id="clienteDocsTabs">
-                <button class="tab active" type="button" data-docs-tab="seguros">Seguros</button>
-                <button class="tab" type="button" data-docs-tab="gestoria">Gestoría</button>
-                <button class="tab" type="button" data-docs-tab="financiaciones">Financiaciones</button>
-                <button class="tab" type="button" data-docs-tab="inmobiliaria">Inmobiliaria</button>
+              <div class="tc-modulebar tc-modulebar--micro" id="clienteDocsTabs" role="navigation" aria-label="Docs por servicio">
+                <button class="tab tc-module active" type="button" data-docs-tab="seguros" title="Seguros">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
+                  <span class="tc-mod-label">Seguros</span>
+                </button>
+                <button class="tab tc-module" type="button" data-docs-tab="gestoria" title="Gestoría">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+                  <span class="tc-mod-label">Gestoría</span>
+                </button>
+                <button class="tab tc-module" type="button" data-docs-tab="financiaciones" title="Financiaciones">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
+                  <span class="tc-mod-label">Fin</span>
+                </button>
+                <button class="tab tc-module" type="button" data-docs-tab="inmobiliaria" title="Inmobiliaria">
+                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
+                  <span class="tc-mod-label">Inmo</span>
+                </button>
               </div>
               <div id="clienteDocsSeguros" class="hidden"></div>
               <div id="clienteDocsGestoria" class="hidden"></div>
