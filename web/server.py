@@ -42276,6 +42276,45 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True})
             return
+        elif parsed.path == "/api/workspace_member_set":
+            # Variante admin-safe: asigna un usuario concreto (por id) a un workspace,
+            # evitando ambigüedad cuando hay cuentas duplicadas con el mismo email/usuario.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            user_id = str(payload.get("usuario_id") or payload.get("user_id") or "").strip()
+            role = _normalize_workspace_member_role(payload.get("role") or payload.get("rol") or "Miembro")
+            if not workspace_id or not user_id:
+                json_response(self, {"error": "workspace_id y usuario_id requeridos"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
+            # valida existencia del usuario
+            u = conn.execute("SELECT id FROM usuarios WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+            if not u:
+                json_response(self, {"error": "Usuario no encontrado"}, status=404)
+                return
+            existing = conn.execute(
+                "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE workspace_miembros SET rol = ?, updated_at = datetime(?) WHERE id = ?",
+                    (role, now, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (os.urandom(16).hex(), workspace_id, user_id, role, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/workspace_member_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()

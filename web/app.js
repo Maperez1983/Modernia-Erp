@@ -30221,6 +30221,183 @@ const renderAdminUserDetail = () => {
     }
   });
 
+  // --- Workspaces & duplicates helper (admin) ---
+  const membershipBox = document.createElement("div");
+  membershipBox.className = "span-2";
+  membershipBox.innerHTML = `
+    <div class="form-card" style="margin: 0;">
+      <h4>Workspaces y duplicados</h4>
+      <p class="muted">Asigna este usuario a workspaces concretos y elimina accesos incorrectos. Si hay duplicados (mismo email/usuario), se listan aquí.</p>
+      <div class="muted">Cargando…</div>
+    </div>
+  `;
+  form.appendChild(membershipBox);
+
+  const detailSeq = (state.adminUserDetailSeq = Number(state.adminUserDetailSeq || 0) + 1);
+  void (async () => {
+    const isStale = () => detailSeq !== Number(state.adminUserDetailSeq || 0) || user.id !== state.adminSelectedUserId;
+    const login = String(user.usuario || user.email || "").trim();
+    // Asegura catálogo de workspaces (para admins privilegiados, /api/workspaces devuelve todos)
+    if (!Array.isArray(state.workspaces) || !state.workspaces.length) {
+      const ws = await safeWorkspaceApi("/api/workspaces", null);
+      if (!isStale() && ws?.rows) state.workspaces = ws.rows || [];
+    }
+    if (isStale()) return;
+
+    const wsRows = Array.isArray(state.workspaces) ? state.workspaces : [];
+    const wsNameById = new Map(wsRows.map((w) => [String(w.id || "").trim(), String(w.nombre || w.slug || "").trim()]));
+
+    let lookup = null;
+    if (login) {
+      lookup = await safeWorkspaceApi(`/api/admin_user_lookup?login=${encodeURIComponent(login)}`, null);
+    }
+    if (isStale()) return;
+
+    const items = (lookup && lookup.items) ? lookup.items : [];
+    const current = items.find((it) => String(it.id || "") === String(user.id || "")) || null;
+    const memberships = Array.isArray(current?.memberships) ? current.memberships : [];
+
+    const roleOptions = ["Owner", "Admin", "Miembro", "Lectura"];
+    const sortedMemberships = [...memberships].sort((a, b) => String(a.workspace_id || "").localeCompare(String(b.workspace_id || "")));
+
+    const duplicatesHtml = items.length > 1
+      ? `
+        <div style="margin-top:10px;">
+          <h5>Duplicados detectados (${items.length})</h5>
+          <div class="muted">Mismo login/email devuelve varias cuentas. Revisa memberships y desactiva/elimina la incorrecta.</div>
+          <div class="admin-users-list" style="margin-top:8px;">
+            ${items.map((it) => {
+              const id = String(it.id || "");
+              const name = `${String((state.usersList || []).find((u) => String(u.id || "") === id)?.nombre || "")} ${String((state.usersList || []).find((u) => String(u.id || "") === id)?.apellido || "")}`.trim() || (it.usuario || it.email || id);
+              const mcount = Array.isArray(it.memberships) ? it.memberships.length : 0;
+              return `
+                <button type="button" class="admin-user-item ${id === String(user.id || "") ? "active" : ""}" data-admin-dup-pick="${escapeHtml(id)}">
+                  <div class="admin-user-name">${escapeHtml(name)}</div>
+                  <div class="admin-user-meta">${escapeHtml(it.usuario || "-")} · ${escapeHtml(it.email || "-")}</div>
+                  <div class="admin-user-meta">Workspaces: ${numberFormatter.format(mcount)}</div>
+                </button>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `
+      : "";
+
+    const membershipsHtml = `
+      <div style="margin-top:10px;">
+        <h5>Accesos de este usuario</h5>
+        ${sortedMemberships.length ? `
+          <div class="workspace-chip-list">
+            ${sortedMemberships.map((m) => {
+              const wsId = String(m.workspace_id || "").trim();
+              const wsName = wsNameById.get(wsId) || wsId || "-";
+              const rol = String(m.rol || "Miembro").trim() || "Miembro";
+              return `
+                <div class="workspace-chip workspace-company-chip">
+                  <div>
+                    <strong>${escapeHtml(wsName)}</strong>
+                    <div class="muted">Rol: ${escapeHtml(rol)}</div>
+                  </div>
+                  <div class="workspace-company-chip-actions">
+                    <button type="button" class="secondary ghost" data-admin-ws-remove="${escapeHtml(wsId)}">Quitar</button>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        ` : `<p class="muted">Este usuario no tiene workspaces asignados.</p>`}
+      </div>
+    `;
+
+    const addHtml = `
+      <div style="margin-top:12px;">
+        <h5>Añadir / cambiar acceso</h5>
+        <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <label style="min-width:280px;flex:1">
+            Workspace
+            <select id="adminUserWsPick">
+              <option value="">Selecciona workspace…</option>
+              ${wsRows.map((w) => `<option value="${escapeHtml(String(w.id || ""))}">${escapeHtml(String(w.nombre || w.slug || w.id || ""))}</option>`).join("")}
+            </select>
+          </label>
+          <label style="min-width:180px">
+            Rol
+            <select id="adminUserWsRole">
+              ${roleOptions.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
+            </select>
+          </label>
+          <button type="button" id="adminUserWsAddBtn" class="secondary">Aplicar</button>
+          <span id="adminUserWsStatus" class="muted"></span>
+        </div>
+      </div>
+    `;
+
+    membershipBox.innerHTML = `
+      <div class="form-card" style="margin: 0;">
+        <h4>Workspaces y duplicados</h4>
+        <p class="muted">Usa este bloque para corregir rápidamente “usuarios que aparecen donde no deben”.</p>
+        ${membershipsHtml}
+        ${addHtml}
+        ${duplicatesHtml}
+      </div>
+    `;
+
+    // Bind actions
+    membershipBox.querySelectorAll("[data-admin-ws-remove]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const wsId = String(btn.dataset.adminWsRemove || "").trim();
+        if (!wsId) return;
+        if (!window.confirm("¿Quitar este acceso al workspace?")) return;
+        const statusEl = membershipBox.querySelector("#adminUserWsStatus");
+        if (statusEl) statusEl.textContent = "Quitando…";
+        try {
+          const resp = await postJsonWithDbRetry("/api/workspace_member_delete", { workspace_id: wsId, usuario_id: user.id });
+          if (resp?.error) throw new Error(resp.error);
+          // Re-render detail
+          renderAdminUserDetail();
+        } catch (err) {
+          if (statusEl) statusEl.textContent = err?.message || "No se pudo quitar.";
+        }
+      });
+    });
+    const addBtnEl = membershipBox.querySelector("#adminUserWsAddBtn");
+    if (addBtnEl) {
+      addBtnEl.addEventListener("click", async () => {
+        const wsPick = membershipBox.querySelector("#adminUserWsPick");
+        const rolePick = membershipBox.querySelector("#adminUserWsRole");
+        const wsId = String(wsPick?.value || "").trim();
+        const role = String(rolePick?.value || "Miembro").trim();
+        const statusEl = membershipBox.querySelector("#adminUserWsStatus");
+        if (!wsId) {
+          if (statusEl) statusEl.textContent = "Selecciona un workspace.";
+          return;
+        }
+        if (statusEl) statusEl.textContent = "Aplicando…";
+        addBtnEl.disabled = true;
+        try {
+          const resp = await postJsonWithDbRetry("/api/workspace_member_set", { workspace_id: wsId, usuario_id: user.id, role });
+          if (resp?.error) throw new Error(resp.error);
+          renderAdminUserDetail();
+        } catch (err) {
+          if (statusEl) statusEl.textContent = err?.message || "No se pudo aplicar.";
+        } finally {
+          addBtnEl.disabled = false;
+        }
+      });
+    }
+    membershipBox.querySelectorAll("[data-admin-dup-pick]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = String(btn.dataset.adminDupPick || "").trim();
+        if (!id) return;
+        if (state.usersList.some((u) => String(u.id || "") === id)) {
+          state.adminSelectedUserId = id;
+          renderUsuariosTable();
+          renderAdminUserDetail();
+        }
+      });
+    });
+  })();
+
   adminUserDetail.appendChild(form);
 };
 
