@@ -28523,10 +28523,10 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
         member_where = " AND mem.workspace_id = ?"
         member_params = [workspace_id]
     else:
-        # Si hay varios workspaces (o no podemos verificar), no devolvemos usuarios globales (evita contaminación).
-        # Solo hacemos fallback al listado global en instalaciones legacy de 1 workspace.
-        if workspace_count != 1:
-            return {"rows": []}
+        # Modo estricto: si el workspace no tiene miembros, NO hacemos fallback al listado global.
+        # Esto evita que RRHH muestre usuarios de otros workspaces por accidente.
+        # La gestión de miembros se realiza en Workspaces → Usuarios (o Admin global).
+        return {"rows": []}
     company_name_map = {}
     if company_ids:
         company_rows = conn.execute(
