@@ -12544,6 +12544,54 @@ def _parse_renta_pdf_fields(text: str) -> dict:
             return round(float(value), 2)
         return None
 
+    def _normalize_casilla_code(value: object) -> str:
+        digits = re.sub(r"\D", "", str(value or "").strip())
+        if not digits:
+            return ""
+        try:
+            code_num = int(digits)
+        except Exception:
+            return ""
+        if code_num < 10 or code_num > 9999:
+            return ""
+        return str(code_num).zfill(4)
+
+    def _extract_all_casillas_money() -> dict[str, float]:
+        # No usamos \s+ para no unir líneas (evita emparejar una casilla con el importe de la línea anterior).
+        amount_pat = r"([\-]?(?:[0-9]{1,3}(?:[\\. ][0-9]{3})*(?:,[0-9]{2})?|[0-9]+(?:,[0-9]{2})?))"
+        code_any_pat = r"((?:\[)?[0O]*[0-9]{3,4}(?:\])?)"
+        out: dict[str, float] = {}
+        patterns = (
+            rf"(?<![0-9]){code_any_pat}[ \t]+{amount_pat}",
+            rf"{amount_pat}[ \t]+{code_any_pat}(?![0-9])",
+            rf"CASILLA[ \t]*{code_any_pat}[^0-9\-]{{0,10}}{amount_pat}",
+        )
+        for pat in patterns:
+            for m in re.finditer(pat, raw, re.IGNORECASE):
+                groups = m.groups() or ()
+                if len(groups) < 2:
+                    continue
+                if pat.startswith("(?<![0-9])"):
+                    code_raw, amt_raw = groups[0], groups[1]
+                elif pat.startswith("CASILLA"):
+                    code_raw, amt_raw = groups[0], groups[1]
+                else:
+                    amt_raw, code_raw = groups[0], groups[1]
+                code = _normalize_casilla_code(code_raw)
+                if not code:
+                    continue
+                # Evita falsos positivos tipo "MODELO 100 0432 ..." descartando enteros sin separador.
+                if not re.search(r"[\\.,]", str(amt_raw or "")):
+                    continue
+                value = parse_optional_float(amt_raw)
+                if value is None:
+                    continue
+                value = round(float(value), 2)
+                prev = out.get(code)
+                if prev is None or abs(value) > abs(prev):
+                    out[code] = value
+        return out
+
     match = re.search(r"Ejercicio\s*(20[0-9]{2})", raw, re.IGNORECASE)
     if match:
         fields["ejercicio"] = match.group(1)
@@ -12573,6 +12621,16 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         if value is None:
             continue
         fields[key] = value
+
+    casillas_all = _extract_all_casillas_money()
+    if casillas_all:
+        fields["casillas"] = casillas_all
+        for key, code in casillas.items():
+            if key in fields:
+                continue
+            code_norm = _normalize_casilla_code(code)
+            if code_norm and code_norm in casillas_all:
+                fields[key] = casillas_all[code_norm]
 
     if "resultado_declaracion" not in fields:
         match = re.search(
@@ -12922,10 +12980,16 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                             for key in (
                                 "rendimientos_trabajo_total",
                                 "base_imponible_general",
+                                "base_imponible_ahorro",
                                 "base_liquidable_general",
+                                "base_liquidable_ahorro",
                                 "casilla_505",
+                                "cuota_resultante_autoliquidacion",
+                                "pagos_a_cuenta_total",
                                 "resultado_declaracion",
                                 "presentacion_fecha",
+                                "csv",
+                                "expediente",
                             ):
                                 if key not in extracted:
                                     continue
@@ -12940,6 +13004,31 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                                     prev = coerce_renta_money(existing)
                                     if (prev is None or abs(prev) < 0.0001) and abs(float(value)) >= 0.0001:
                                         updated[key] = value
+                            casillas_in = extracted.get("casillas")
+                            if isinstance(casillas_in, dict) and casillas_in:
+                                prev = updated.get("casillas") if isinstance(updated.get("casillas"), dict) else {}
+                                merged = dict(prev or {})
+                                for code, amt in casillas_in.items():
+                                    code_key = str(code or "").strip()
+                                    if not code_key:
+                                        continue
+                                    try:
+                                        value_num = float(amt)
+                                    except Exception:
+                                        continue
+                                    prev_val = merged.get(code_key)
+                                    if prev_val is None:
+                                        merged[code_key] = round(value_num, 2)
+                                        continue
+                                    try:
+                                        prev_num = float(prev_val)
+                                    except Exception:
+                                        merged[code_key] = round(value_num, 2)
+                                        continue
+                                    if abs(value_num) > abs(prev_num):
+                                        merged[code_key] = round(value_num, 2)
+                                if merged:
+                                    updated["casillas"] = merged
                             updated["ocr_status"] = "done"
                             updated["ocr_method"] = str(extracted.get("ocr_method") or "").strip()
                             updated["ocr_score"] = extracted.get("ocr_score")
@@ -12952,8 +13041,14 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                                             "casilla_505",
                                             "resultado_declaracion",
                                             "base_imponible_general",
+                                            "base_imponible_ahorro",
                                             "base_liquidable_general",
+                                            "base_liquidable_ahorro",
                                             "rendimientos_trabajo_total",
+                                            "cuota_resultante_autoliquidacion",
+                                            "pagos_a_cuenta_total",
+                                            "csv",
+                                            "expediente",
                                         )
                                         if extracted.get(k) not in (None, "", [], {})
                                     ]
