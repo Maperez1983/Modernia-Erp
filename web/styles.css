@@ -4586,6 +4586,23 @@ body.tc-resizing {
   height: 74px;
 }
 
+@media (min-width: 1080px) {
+  /* En escritorio, evita scroll lateral: muestra todas las cards en varias filas. */
+  #viewTabs.tc-modulebar {
+    flex-wrap: wrap;
+    overflow-x: hidden;
+  }
+
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs {
+    flex-wrap: wrap;
+    overflow-x: hidden;
+  }
+
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
+    flex-wrap: wrap;
+  }
+}
+
 #workspaceFincasTabs.tc-modulebar .tab.tc-module {
   width: 102px;
   min-width: 102px;
@@ -11579,6 +11596,15 @@ body.crm-context-vertical #crmSection .crm-lightning-topbar {
 
 /* Gestoría: evita mezclar pantallas del CRM inmobiliario dentro del vertical */
 body.crm-context-gestoria #crmSection #crmWorkspaceShell .crm-workspace-view {
+  display: none;
+}
+
+/* Gestoría: el sidebar no aplica (evita desalineado entre topbar y secciones). */
+body.crm-context-gestoria #crmSection .crm-lightning-shell {
+  grid-template-columns: 1fr;
+}
+
+body.crm-context-gestoria #crmSection .crm-lightning-sidebar {
   display: none;
 }
 

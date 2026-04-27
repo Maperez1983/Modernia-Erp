@@ -31116,6 +31116,7 @@ const updateTableVisibility = () => {
   } catch {
     crmContext = "";
   }
+  const isGestoriaContext = currentTab.startsWith("gestoria") || crmContext === "gestoria";
   const isServiceCrm = [
     "crm",
     "gestoria-dash",
@@ -31134,28 +31135,37 @@ const updateTableVisibility = () => {
     currentTab === "seguros-crm" ||
     currentTab === "fin-crm" ||
     currentTab === "fin-sim" ||
-    currentTab.startsWith("gestoria") ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
-    crmContext === "gestoria" ||
     crmContext === "seguros" ||
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
+  // Shell "Tecnocloud-like" (CRM inmobiliaria/seguros/fin). Gestoría NO debería ocultar el tab-bar general.
+  const isTecnocloudShellContext =
+    currentTab === "crm" ||
+    currentTab === "seguros-crm" ||
+    currentTab === "fin-crm" ||
+    currentTab === "fin-sim" ||
+    crmContext === "inmo" ||
+    crmContext === "inmobiliaria" ||
+    crmContext === "seguros" ||
+    crmContext === "fin" ||
+    crmContext === "financiaciones" ||
+    crmContext === "hipotecas" ||
+    isInmuebleDetailOpen;
   const isCrmContext =
     currentTab === "crm" ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
-    crmContext === "gestoria" ||
-    currentTab.startsWith("gestoria") ||
     isInmuebleDetailOpen;
   document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || isInmuebleDetailOpen);
   document.body.classList.toggle(
     "crm-context-inmo",
     currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || isInmuebleDetailOpen
   );
-  document.body.classList.toggle("crm-context-gestoria", currentTab.startsWith("gestoria") || crmContext === "gestoria");
+  document.body.classList.toggle("crm-context-gestoria", isGestoriaContext);
   document.body.classList.toggle("crm-context-seguros", currentTab === "seguros-crm" || crmContext === "seguros");
   document.body.classList.toggle(
     "crm-context-fin",
@@ -31189,7 +31199,7 @@ const updateTableVisibility = () => {
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
     // Dentro del CRM inmobiliario el tab-bar general se considera duplicado (confunde).
-    viewTabs.classList.toggle("hidden", isVerticalCrmContext);
+    viewTabs.classList.toggle("hidden", isTecnocloudShellContext && !isGestoriaContext);
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
