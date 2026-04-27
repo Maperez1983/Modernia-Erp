@@ -28797,6 +28797,20 @@ const resolveClienteFromInput = (inputEl, hiddenEl) => {
   const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
   const nombre = inputEl ? inputEl.value.trim() : "";
   let clienteId = hiddenEl ? hiddenEl.value.trim() : "";
+  // Evita que se "arrastre" el cliente_id anterior si el usuario cambia el texto del cliente.
+  // Si el nombre no coincide con el cliente_id actual, limpiamos el id y volvemos a intentar por nombre.
+  if (clienteId) {
+    if (!nombre) {
+      clienteId = "";
+      if (hiddenEl) hiddenEl.value = "";
+    } else {
+      const current = clientes.find((c) => String(c.id || "").trim() === clienteId) || null;
+      if (current && formatNombreCliente(current.nombre) !== nombre) {
+        clienteId = "";
+        if (hiddenEl) hiddenEl.value = "";
+      }
+    }
+  }
   if (!clienteId && nombre) {
     const match = clientes.find(
       (c) => formatNombreCliente(c.nombre) === nombre
