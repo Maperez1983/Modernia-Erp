@@ -58722,8 +58722,26 @@ class Handler(BaseHTTPRequestHandler):
             estado = params.get("estado", [""])[0]
             ejercicio = params.get("ejercicio", [""])[0]
             limit = params.get("limit", ["50"])[0]
-            items = collect_gestoria_renta_card_items(conn, empresa_id, q=q, estado=estado, limit=limit, ejercicio=ejercicio)
-            json_response(self, {"rows": items})
+            include_docs_raw = params.get("include_docs", [""])[0]
+            include_docs = str(include_docs_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+            try:
+                items = collect_gestoria_renta_card_items(
+                    conn,
+                    empresa_id,
+                    q=q,
+                    estado=estado,
+                    limit=limit,
+                    ejercicio=ejercicio,
+                    include_docs=include_docs,
+                )
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_renta_cards", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudieron cargar las cards de renta."}, status=500)
+                return
+            json_response(self, {"rows": items, "include_docs": include_docs})
             return
 
         if path == "/api/gestoria_renta_dashboard":

@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v289";
+const APP_SW_VERSION = "v290";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -48396,6 +48396,7 @@ const loadGestoriaCrm = async () => {
       q: "",
       estado,
       limit: String(Math.max(200, Number(limit || 0) || 50)),
+      include_docs: "0",
     });
     if (/^20[0-9]{2}$/.test(ejercicio)) {
       rentaParams.set("ejercicio", ejercicio);
