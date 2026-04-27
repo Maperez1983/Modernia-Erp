@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v287";
+const APP_SW_VERSION = "v288";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -55712,9 +55712,12 @@ const renderGestoriaRentaDetail = (entry = {}) => {
           if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Reprocesando OCR...";
           const empresa = resolveCrmGestoriaEmpresa();
           const empresaId = String(empresa?.id || "").trim();
+          const empresaNombre = String(empresa?.nombre || "").trim();
           if (!empresaId) throw new Error("empresa_id requerido");
+          if (!empresaNombre) throw new Error("empresa_nombre requerido");
           const resp = await apiPost("/api/renta_entry_ocr_reprocess", {
             empresa_id: empresaId,
+            empresa_nombre: empresaNombre,
             cliente_id: state.currentClienteId,
             entry_id: entry.id,
             ejercicio: entry.ejercicio,
