@@ -10119,6 +10119,42 @@ def detect_ocr_lang():
             return "eng"
     return "spa+eng"
 
+def _env_first_line(name: str) -> str:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return ""
+    try:
+        raw = str(raw)
+    except Exception:
+        return ""
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("export "):
+            continue
+        return line.strip().strip('"').strip("'")
+    return str(raw).strip().strip('"').strip("'")
+
+
+def resolve_tesseract_cmd() -> str:
+    override = _env_first_line("OCR_TESSERACT_CMD") or _env_first_line("TESSERACT_CMD")
+    if override:
+        if os.path.exists(override):
+            return override
+        found = shutil.which(override)
+        if found and os.path.exists(found):
+            return found
+    for candidate in (
+        shutil.which("tesseract"),
+        "/usr/bin/tesseract",
+        "/opt/homebrew/bin/tesseract",
+        "/usr/local/bin/tesseract",
+    ):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
 
 def run_subprocess(args, **kwargs):
     kwargs.setdefault("timeout", OCR_SUBPROCESS_TIMEOUT_SECONDS)
@@ -13081,6 +13117,10 @@ def ocr_image_external(image_bytes):
         return line.split()[0].strip()
 
     credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_path:
+        fallback = ROOT.parent / "vision-sa.json"
+        if fallback.exists():
+            credentials_path = str(fallback)
     api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     auth_header = None
     if credentials_path and os.path.exists(credentials_path):
@@ -13155,6 +13195,10 @@ def external_ocr_available():
         return line.split()[0].strip()
 
     credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_path:
+        fallback = ROOT.parent / "vision-sa.json"
+        if fallback.exists():
+            credentials_path = str(fallback)
     api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
 
@@ -14611,20 +14655,9 @@ def extract_pdf_text(pdf_path):
         ocr_text, ocr_err = ocrmypdf_extract_text(pdf_path)
         if ocr_text and len(ocr_text.strip()) >= 30:
             return ocr_text, "", "ocrmypdf"
-    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=None)
-    if images:
-        combined = []
-        try:
-            for img_path in images:
-                page_text, ocr_err = ocr_pdf_first_page(img_path)
-                if page_text:
-                    combined.append(page_text)
-            if combined:
-                return "\n".join(combined), "", "tesseract"
-            return "", ocr_err, "tesseract"
-        finally:
-            if tmpdir:
-                shutil.rmtree(tmpdir, ignore_errors=True)
+    ocr_text, ocr_err = ocr_pdf_all_pages(pdf_path, use_external=external_ocr_available())
+    if ocr_text and len(ocr_text.strip()) >= 30:
+        return ocr_text, "", "vision" if external_ocr_available() else "tesseract"
     text, ocr_err = ocr_pdf_first_page(pdf_path)
     if text:
         return text, "", "tesseract"
