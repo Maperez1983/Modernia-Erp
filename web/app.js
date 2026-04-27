@@ -54995,6 +54995,50 @@ const renderGestoriaRentaDetail = (entry = {}) => {
   });
   detail.appendChild(summary);
 
+  // Acciones rápidas: re-encolar OCR (cuando el PDF ya está vinculado).
+  try {
+    const canReprocess = Boolean((entry.doc_key || entry.doc_url || entry.doc_borrador_id || entry.doc_presentada_id) && state.currentClienteId);
+    if (canReprocess) {
+      const actions = document.createElement("div");
+      actions.className = "form-actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary ghost";
+      btn.textContent = "Reprocesar OCR";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Reprocesando OCR...";
+          const resp = await apiPost("/api/renta_entry_ocr_reprocess", {
+            cliente_id: state.currentClienteId,
+            entry_id: entry.id,
+            ejercicio: entry.ejercicio,
+          });
+          if (resp?.error) throw new Error(resp.error);
+          const jobId = resp?.ocr_job_id;
+          if (!jobId) throw new Error("No se pudo iniciar OCR.");
+          await pollOcrJob(
+            jobId,
+            (jobRow) => {
+              if (!gestoriaRentaDocumentoStatus) return;
+              if (jobRow.status === "processing") gestoriaRentaDocumentoStatus.textContent = "Leyendo renta (OCR)...";
+              if (jobRow.status === "queued") gestoriaRentaDocumentoStatus.textContent = "OCR en cola...";
+            },
+            4 * 60 * 1000
+          );
+          if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "OCR aplicado.";
+          loadClienteGestoria(state.currentClienteId);
+        } catch (err) {
+          if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = err?.message || "OCR falló.";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      actions.appendChild(btn);
+      detail.appendChild(actions);
+    }
+  } catch {}
+
   const extra = document.createElement("div");
   extra.className = "inline-list";
   const pushRow = (label, value) => {

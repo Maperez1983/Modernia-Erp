@@ -38770,9 +38770,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/acciones_update",
             "/api/acciones_delete",
             "/api/cliente_gestoria_update",
-            "/api/renta_quick_ocr",
-            "/api/renta_quick_attach",
-            "/api/renta_quick_note",
+	            "/api/renta_quick_ocr",
+	            "/api/renta_quick_attach",
+	            "/api/renta_entry_ocr_reprocess",
+	            "/api/renta_quick_note",
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
             "/api/gestoria_modelos_delete",
@@ -54656,6 +54657,109 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudieron guardar las notas del documento"}, status=500)
                 return
             json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/renta_entry_ocr_reprocess":
+            # Re-encola OCR para una renta ya adjuntada, usando el doc_key existente.
+            # Útil cuando mejoramos extractores (p.ej. Casilla 505) y queremos recalcular sin re-subir PDF.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            entry_id = str(payload.get("entry_id") or payload.get("renta_id") or "").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            if not entry_id and not ejercicio:
+                json_response(self, {"error": "entry_id o ejercicio requerido"}, status=400)
+                return
+            cg_row = conn.execute(
+                "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                (cliente_id,),
+            ).fetchone()
+            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+            entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+            current = None
+            if entry_id:
+                current = next((e for e in entries if str(e.get("id") or "").strip() == entry_id), None)
+            if current is None and ejercicio:
+                current = next((e for e in entries if str(e.get("ejercicio") or "").strip() == ejercicio), None)
+            if not current:
+                json_response(self, {"error": "Renta no encontrada"}, status=404)
+                return
+            entry_id = str(current.get("id") or "").strip()
+            ejercicio = str(current.get("ejercicio") or ejercicio or "").strip()
+            # Preferimos doc_key del entry, y si no, buscamos el doc en gestoria_docs.
+            doc_key = str(current.get("doc_key") or "").strip()
+            doc_url = str(current.get("doc_url") or "").strip()
+            doc_id = str(
+                current.get("doc_presentada_id")
+                or current.get("doc_borrador_id")
+                or payload.get("doc_id")
+                or ""
+            ).strip()
+            if not doc_key and doc_id:
+                try:
+                    row = conn.execute(
+                        "SELECT doc_key, doc_url, nombre FROM gestoria_docs WHERE id = ? LIMIT 1",
+                        (doc_id,),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if row:
+                    doc_key = str(row.get("doc_key") or "").strip()
+                    if not doc_url:
+                        doc_url = str(row.get("doc_url") or "").strip()
+            if not doc_key and doc_url:
+                try:
+                    u = urllib.parse.urlparse(doc_url)
+                    doc_key = urllib.parse.unquote((u.path or "").lstrip("/"))
+                except Exception:
+                    doc_key = ""
+            if not doc_key:
+                json_response(self, {"error": "Documento sin doc_key. Re-sube o re-vincula el PDF."}, status=409)
+                return
+
+            # Permisos: requiere acceso a gestoría del cliente (misma empresa/servicio).
+            # Reusamos el gate general: si no puede leer el cliente, fallará en el siguiente load.
+            try:
+                ensure_ocr_tables(self.ocr_db_path)
+            except Exception:
+                pass
+            ocr_job_id = ""
+            try:
+                ocr_job_id = enqueue_ocr_job(
+                    self.ocr_db_path,
+                    "renta",
+                    {
+                        "cliente_id": cliente_id,
+                        "entry_id": entry_id,
+                        "ejercicio": ejercicio,
+                        "doc_id": doc_id,
+                        "s3_key": doc_key,
+                        "filename": str(current.get("doc_nombre") or f"Renta {ejercicio}.pdf").strip(),
+                        "source_hint": f"renta {ejercicio} reprocess",
+                    },
+                )
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo encolar OCR", "detail": str(exc)}, status=503)
+                return
+
+            # Marcamos la campaña como pendiente OCR (sin machacar valores existentes).
+            updated = dict(current)
+            updated["ocr_job_id"] = ocr_job_id
+            updated["ocr_status"] = "pending"
+            updated["ocr_error"] = ""
+            upsert_cliente_renta_entry(conn, cliente_id, updated, now)
+            try:
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            json_response(self, {"ok": True, "cliente_id": cliente_id, "entry_id": entry_id, "ocr_job_id": ocr_job_id})
             return
         elif parsed.path == "/api/cliente_relaciones":
             cliente_id = str(payload.get("cliente_id") or "").strip()
