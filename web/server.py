@@ -12454,6 +12454,18 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     normalized = normalize_lookup_text(raw)
     fields: dict[str, object] = {}
 
+    def _code_pat(code_value: str) -> str:
+        digits = re.sub(r"\D", "", str(code_value or "").strip())
+        if not digits:
+            return ""
+        try:
+            code_num = int(digits)
+        except Exception:
+            return ""
+        core = str(code_num)
+        core_pat = "".join("[0O]" if ch == "0" else ch for ch in core)
+        return rf"(?:\[)?[0O]*{core_pat}(?:\])?"
+
     def _normalize_nif(value: str) -> str:
         return re.sub(r"[^0-9A-Z]", "", str(value or "").upper().strip())
 
@@ -12506,18 +12518,21 @@ def _parse_renta_pdf_fields(text: str) -> dict:
             code_num = int(digits)
         except Exception:
             return None
-        code_pat = rf"\b0*{code_num}\b"
-        # Números: pueden venir con signos, puntos/espacios y coma.
-        amount_pat = r"([\-]?[0-9][0-9\., ]{0,24})"
+        code_pat = _code_pat(code_text)
+        if not code_pat:
+            return None
+        # Evita capturar el siguiente "código casilla" cuando el OCR deja algo como
+        # "28.993,17 0022" en la misma línea.
+        amount_pat = r"([\-]?(?:[0-9]{1,3}(?:[\\. ][0-9]{3})*(?:,[0-9]{2})?|[0-9]+(?:,[0-9]{2})?))"
         # 1) Importe antes de la casilla
         # Importante: probamos primero "código -> importe" para evitar falsos positivos como
         # "MODELO 100\n0505 ..." donde el "100" podría enganchar con el 0505.
         for pat in (
-            rf"{code_pat}[ \t]*{amount_pat}",
+            rf"(?:^|\s){code_pat}[ \t]*{amount_pat}(?:\s|$)",
             # Variante: "Casilla 505: 12.345,67"
             rf"CASILLA[ \t]*{code_pat}[^0-9\-]{{0,10}}{amount_pat}",
             # Importe antes del código (misma línea o separación corta)
-            rf"{amount_pat}[ \t]+{code_pat}",
+            rf"{amount_pat}[ \t]+{code_pat}(?:\s|$)",
         ):
             m = re.search(pat, raw, re.IGNORECASE)
             if not m:
@@ -12529,11 +12544,28 @@ def _parse_renta_pdf_fields(text: str) -> dict:
             return round(float(value), 2)
         return None
 
+    match = re.search(r"Ejercicio\s*(20[0-9]{2})", raw, re.IGNORECASE)
+    if match:
+        fields["ejercicio"] = match.group(1)
+    match = re.search(r"Expediente/Referencia[^\n\r]*?:\s*([A-Z0-9]+)", raw, re.IGNORECASE)
+    if match:
+        fields["expediente"] = match.group(1)
+    match = re.search(r"(?:C[oó]digo Seguro de Verificaci[oó]n|CSV)\s*:?\s*([A-Z0-9]{8,})", raw, re.IGNORECASE)
+    if match:
+        fields["csv"] = match.group(1)
+
     casillas = {
         "rendimientos_trabajo_total": "0012",
+        "seguridad_social": "0013",
+        "rendimiento_neto_trabajo": "0022",
+        "rendimiento_neto_reducido": "0025",
         "base_imponible_general": "0432",
+        "base_imponible_ahorro": "0460",
         "base_liquidable_general": "0500",
         "casilla_505": "0505",
+        "base_liquidable_ahorro": "0510",
+        "cuota_resultante_autoliquidacion": "0595",
+        "pagos_a_cuenta_total": "0609",
         "resultado_declaracion": "0670",
     }
     for key, code in casillas.items():

@@ -15,3 +15,13 @@ class RentaPdfFieldsTests(unittest.TestCase):
         out = _parse_renta_pdf_fields(text)
         self.assertAlmostEqual(out.get("casilla_505") or 0.0, 12345.67, places=2)
 
+    def test_extracts_casilla_505_with_ocr_letter_o(self):
+        text = "MODELO 100\n12.345,67 [o505]\n"
+        out = _parse_renta_pdf_fields(text)
+        self.assertAlmostEqual(out.get("casilla_505") or 0.0, 12345.67, places=2)
+
+    def test_extracts_base_imponible_and_resultado(self):
+        text = "MODELO 100\n0432 21.624,24\n0670 -518,61\n"
+        out = _parse_renta_pdf_fields(text)
+        self.assertAlmostEqual(out.get("base_imponible_general") or 0.0, 21624.24, places=2)
+        self.assertAlmostEqual(out.get("resultado_declaracion") or 0.0, -518.61, places=2)

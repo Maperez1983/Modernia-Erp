@@ -817,12 +817,17 @@ def run_tesseract_ocr(pdf_path: Path) -> str:
                 if mid_pages > 0 and total_pages >= 5:
                     # Captura páginas intermedias cuando el PDF es largo (las casillas suelen
                     # quedar fuera del bloque de cabecera/cola en algunos escaneados).
-                    mid_center = (total_pages + 1) // 2
-                    mid_start = max(1, mid_center - (mid_pages // 2))
-                    mid_end = min(total_pages, mid_start + mid_pages - 1)
-                    # Evita solapar con head/tail.
-                    mid_start = max(mid_start, head_end + 1)
-                    mid_end = min(mid_end, tail_start - 1)
+                    if total_pages <= 10:
+                        # PDFs cortos: mejor cubrir TODO el centro para no dejar casillas fuera.
+                        mid_start = head_end + 1
+                        mid_end = tail_start - 1
+                    else:
+                        mid_center = (total_pages + 1) // 2
+                        mid_start = max(1, mid_center - (mid_pages // 2))
+                        mid_end = min(total_pages, mid_start + mid_pages - 1)
+                        # Evita solapar con head/tail.
+                        mid_start = max(mid_start, head_end + 1)
+                        mid_end = min(mid_end, tail_start - 1)
                     if mid_start <= mid_end:
                         prefixes.append((Path(tmpdir) / "mid", mid_start, mid_end))
                 if tail_pages > 0 and tail_start > head_end:
