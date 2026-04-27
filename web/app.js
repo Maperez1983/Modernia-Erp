@@ -31174,7 +31174,7 @@ const updateTableVisibility = () => {
     "fin-crm",
     "fin-sim",
   ].includes(currentTab);
-  // "CRM vertical" (modo app): solo Inmobiliaria + Seguros + Fin. Gestoría sigue usando el tab-bar.
+  // "CRM vertical" (modo app): solo Inmobiliaria + Seguros + Fin. Gestoría sigue usando el tab-bar (no es vertical).
   const isVerticalCrmContext =
     currentTab === "crm" ||
     currentTab === "seguros-crm" ||
@@ -31419,12 +31419,7 @@ const updateTableVisibility = () => {
           "crm",
           "seguros-crm",
           "fin-crm",
-          "gestoria-dash",
-          "gestoria-crm",
-          "gestoria-docs",
-          "gestoria-agenda",
-          "gestoria-fact",
-          "gestoria-conta",
+          "fin-sim",
         ].includes(currentTab)
     );
   }
