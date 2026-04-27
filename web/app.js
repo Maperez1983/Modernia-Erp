@@ -2893,6 +2893,8 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmSegurosMount = document.getElementById("crmSegurosMount");
 		const crmViewFin = document.getElementById("crmViewFin");
 		const crmFinMount = document.getElementById("crmFinMount");
+		const crmViewGestoria = document.getElementById("crmViewGestoria");
+		const crmGestoriaMount = document.getElementById("crmGestoriaMount");
 		const crmResumenPulse = document.getElementById("crmResumenPulse");
 		const crmResumenHoy = document.getElementById("crmResumenHoy");
 			const crmResumenAlertas = document.getElementById("crmResumenAlertas");
@@ -19727,16 +19729,17 @@ const syncCrmTecnocloudVerticalNav = () => {
   applyToRoot(crmLightningSidebar);
 
   // No mezclar pantallas: Gestoría NO debe mostrar el workspace del CRM Inmobiliaria.
-  // Reutilizamos el estilo (topbar / módulos), pero el contenido visible debe ser solo Gestoría.
+  // Reutilizamos el estilo (topbar / módulos). La vista activa la decide `setCrmWorkspaceView`.
   if (crmWorkspaceShell) {
-    crmWorkspaceShell.classList.toggle("hidden", isGestoria);
+    crmWorkspaceShell.classList.toggle("hidden", false);
   }
   if (crmLightningSidebar) {
-    // Sidebar estilo "Inmo" solo cuando estás en Inmobiliaria.
-    crmLightningSidebar.classList.toggle("hidden", !isInmo);
+    // Sidebar estilo "Lightning" en Inmobiliaria y Gestoría.
+    crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria));
   }
   if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
-    inmuebleDetail.classList.toggle("hidden", isGestoria);
+    // No mezclar pantallas: el detalle de inmueble es exclusivo de Inmobiliaria.
+    inmuebleDetail.classList.toggle("hidden", !isInmo);
   }
 
   // Topbar: alterna módulos Inmobiliaria vs Gestoría.
@@ -19752,7 +19755,7 @@ const syncCrmTecnocloudVerticalNav = () => {
     }
   } catch {}
 
-  const showInmoChrome = vertical === "inmo";
+  const showInmoChrome = vertical === "inmo" || vertical === "gestoria";
   [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
     if (btn) btn.classList.toggle("hidden", !showInmoChrome);
   });
@@ -21269,6 +21272,9 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
     setUrlParams(currentParams);
   } catch {}
   updateTableVisibility();
+  // Mostrar Gestoría dentro del shell "Lightning" (topbar/sidebar) sin mezclar vistas de Inmobiliaria.
+  setCrmWorkspaceView("gestoria");
+  mountCrmVerticalViews();
   if (targetTab === "gestoria-crm") {
     loadGestoriaCrm();
     return;
@@ -31116,6 +31122,8 @@ const updateTableVisibility = () => {
   } catch {
     crmContext = "";
   }
+  const vertical = typeof resolveCrmTecnocloudVertical === "function" ? resolveCrmTecnocloudVertical() : "";
+  const isInmoVertical = vertical === "inmo";
   const isGestoriaContext = currentTab.startsWith("gestoria") || crmContext === "gestoria";
   const isServiceCrm = [
     "crm",
@@ -31142,6 +31150,12 @@ const updateTableVisibility = () => {
     crmContext === "financiaciones" ||
     crmContext === "hipotecas";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
+  const treatInmuebleDetailAsInmo = isInmoVertical && isInmuebleDetailOpen;
+  // Anti-mezcla: si el usuario venía de Inmobiliaria con el detalle abierto, al entrar en Seguros/Fin
+  // debemos cerrar ese panel para que no “contamine” el vertical.
+  if (!isInmoVertical && isInmuebleDetailOpen && inmuebleDetail) {
+    inmuebleDetail.classList.add("hidden");
+  }
   // Shell "Tecnocloud-like" (CRM inmobiliaria/seguros/fin). Gestoría NO debería ocultar el tab-bar general.
   const isTecnocloudShellContext =
     currentTab === "crm" ||
@@ -31154,16 +31168,16 @@ const updateTableVisibility = () => {
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
     crmContext === "hipotecas" ||
-    isInmuebleDetailOpen;
+    treatInmuebleDetailAsInmo;
   const isCrmContext =
     currentTab === "crm" ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
-    isInmuebleDetailOpen;
-  document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || isInmuebleDetailOpen);
+    treatInmuebleDetailAsInmo;
+  document.body.classList.toggle("crm-context-vertical", isVerticalCrmContext || treatInmuebleDetailAsInmo);
   document.body.classList.toggle(
     "crm-context-inmo",
-    currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || isInmuebleDetailOpen
+    currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria" || treatInmuebleDetailAsInmo
   );
   document.body.classList.toggle("crm-context-gestoria", isGestoriaContext);
   document.body.classList.toggle("crm-context-seguros", currentTab === "seguros-crm" || crmContext === "seguros");
@@ -31546,6 +31560,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
     "legal",
     "seguros",
     "fin",
+    "gestoria",
 	  ]);
   let nextView = allowed.has(view) ? view : "resumen";
   if (nextView === "legal" && !canUseLegalCopilot()) {
@@ -31588,6 +31603,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		    legal: crmViewLegal,
 		    seguros: crmViewSeguros,
 		    fin: crmViewFin,
+		    gestoria: crmViewGestoria,
 		  };
   Object.entries(viewMap).forEach(([key, node]) => {
     if (node) {
@@ -31644,6 +31660,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	    loadSegurosCrm();
 	  } else if (nextView === "fin") {
 	    loadFinCrm();
+	  } else if (nextView === "gestoria") {
+	    // Gestoría usa tabs de servicio (gestoria-*) y sus loaders propios.
 	  } else {
 		  loadCrmCaptaciones();
 		  loadCrmClientes();
@@ -31677,6 +31695,26 @@ const mountCrmVerticalViews = () => {
     if (hipotecaSection) {
       hipotecaSection.classList.toggle("hidden", vertical !== "fin");
     }
+  } catch {}
+  try {
+    const gestoriaSections = [
+      gestoriaDashboardSection,
+      gestoriaCrmSection,
+      gestoriaDocsSection,
+      gestoriaAgendaSection,
+      gestoriaFactSection,
+      gestoriaContaSection,
+    ].filter(Boolean);
+    if (crmGestoriaMount) {
+      gestoriaSections.forEach((node) => {
+        if (node.parentElement !== crmGestoriaMount) {
+          crmGestoriaMount.appendChild(node);
+        }
+      });
+    }
+    // La visibilidad fina la gestiona `updateTableVisibility` por `currentTab`.
+    // Aquí solo evitamos que aparezca contenido Gestoría fuera del vertical activo.
+    gestoriaSections.forEach((node) => node.classList.toggle("hidden", vertical !== "gestoria"));
   } catch {}
 };
 
@@ -48021,13 +48059,42 @@ const loadGestoriaCrm = async () => {
     gestoriaCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const q = gestoriaCrmSearch ? gestoriaCrmSearch.value.trim() : "";
+  const rawQuery = gestoriaCrmSearch ? gestoriaCrmSearch.value.trim() : "";
+  const docQuery = normalizeDocumento(rawQuery);
+  let q = rawQuery;
+  let docClienteNameSet = null;
+  // En vista Gestoría (no renta-cards) permitimos buscar por DNI/NIF aunque la tabla "gestoria" no tenga columna documento.
+  if (!isRentaTab && docQuery && docQuery.length >= 5) {
+    try {
+      const match = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(docQuery)}&limit=16`);
+      const candidates = Array.isArray(match?.rows) ? match.rows : [];
+      const names = [];
+      const nameSet = new Set();
+      candidates.forEach((row) => {
+        const nombre = String(row?.nombre || "").trim();
+        if (!nombre) return;
+        names.push(nombre);
+        nameSet.add(normalizeNombre(nombre));
+        nameSet.add(normalizeNombre(formatNombreCliente(nombre)));
+      });
+      if (nameSet.size) {
+        docClienteNameSet = nameSet;
+        // Si hay 1 match claro, filtramos server-side por nombre para acelerar.
+        q = names.length === 1 ? names[0] : "";
+      } else {
+        q = "";
+      }
+    } catch (_err) {
+      q = "";
+      docClienteNameSet = null;
+    }
+  }
   const tipo = gestoriaCrmTipo ? gestoriaCrmTipo.value : "";
   const subtipo = gestoriaCrmSubtipo ? gestoriaCrmSubtipo.value.trim() : "";
   const estado = gestoriaCrmEstado ? gestoriaCrmEstado.value : "";
   const ejercicio = gestoriaCrmEjercicio ? String(gestoriaCrmEjercicio.value || "").trim() : "";
   const limit = gestoriaCrmLimit ? gestoriaCrmLimit.value : "50";
-  const noFilters = !q && !estado && !tipo && !subtipo;
+  const noFilters = !rawQuery && !estado && !tipo && !subtipo;
   const isFullWithoutFilters = noFilters && state.gestoriaCrmFull;
   const params = new URLSearchParams({
     tabla: "gestoria",
@@ -48044,7 +48111,10 @@ const loadGestoriaCrm = async () => {
   if (estado) {
     params.set("estado", estado);
   }
-  if (isFullWithoutFilters) {
+  // Si estamos buscando por documento y no pudimos reducir por nombre, pedimos un dataset más amplio.
+  if (!isRentaTab && docQuery && docQuery.length >= 5 && !q) {
+    params.set("limit", "200");
+  } else if (isFullWithoutFilters) {
     params.set("limit", "200");
   } else if (noFilters && !state.gestoriaCrmFull) {
     params.set("limit", "200");
@@ -48152,14 +48222,21 @@ const loadGestoriaCrm = async () => {
       });
     }
   }
-    const clienteFilter = gestoriaCrmSearch ? gestoriaCrmSearch.value.trim().toLowerCase() : "";
-    if (clienteFilter) {
-      const clienteIndex = columns.indexOf("cliente");
-      if (clienteIndex >= 0) {
-        rows = rows.filter((row) =>
-          String(row[clienteIndex] || "").toLowerCase().includes(clienteFilter)
+    const clienteIndex = columns.indexOf("cliente");
+    if (!isRentaTab && docClienteNameSet && docClienteNameSet.size && clienteIndex >= 0) {
+      rows = rows.filter((row) => {
+        const nombre = String(row[clienteIndex] || "").trim();
+        if (!nombre) return false;
+        return (
+          docClienteNameSet.has(normalizeNombre(nombre)) ||
+          docClienteNameSet.has(normalizeNombre(formatNombreCliente(nombre)))
         );
-      }
+      });
+    } else if (rawQuery && clienteIndex >= 0) {
+      const clienteFilter = rawQuery.toLowerCase();
+      rows = rows.filter((row) =>
+        String(row[clienteIndex] || "").toLowerCase().includes(clienteFilter)
+      );
     }
     const idIndex = columns.indexOf("id");
     const estadoIndex = columns.indexOf("estado");
