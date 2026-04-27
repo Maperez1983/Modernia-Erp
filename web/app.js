@@ -21289,9 +21289,8 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
     setUrlParams(currentParams);
   } catch {}
   updateTableVisibility();
-  // Mostrar Gestoría dentro del shell "Lightning" (topbar/sidebar) sin mezclar vistas de Inmobiliaria.
-  setCrmWorkspaceView("gestoria");
-  mountCrmVerticalViews();
+  // Gestoría se renderiza con sus secciones propias (gestoriaDashboardSection/gestoriaCrmSection/etc).
+  // No debe montarse dentro del shell "Lightning" del CRM inmobiliario (evita duplicados/solapes).
   if (targetTab === "gestoria-crm") {
     loadGestoriaCrm();
     return;
@@ -31719,26 +31718,6 @@ const mountCrmVerticalViews = () => {
     if (hipotecaSection) {
       hipotecaSection.classList.toggle("hidden", vertical !== "fin");
     }
-  } catch {}
-  try {
-    const gestoriaSections = [
-      gestoriaDashboardSection,
-      gestoriaCrmSection,
-      gestoriaDocsSection,
-      gestoriaAgendaSection,
-      gestoriaFactSection,
-      gestoriaContaSection,
-    ].filter(Boolean);
-    if (crmGestoriaMount) {
-      gestoriaSections.forEach((node) => {
-        if (node.parentElement !== crmGestoriaMount) {
-          crmGestoriaMount.appendChild(node);
-        }
-      });
-    }
-    // La visibilidad fina la gestiona `updateTableVisibility` por `currentTab`.
-    // Aquí solo evitamos que aparezca contenido Gestoría fuera del vertical activo.
-    gestoriaSections.forEach((node) => node.classList.toggle("hidden", vertical !== "gestoria"));
   } catch {}
 };
 
