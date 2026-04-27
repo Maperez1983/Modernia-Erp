@@ -4575,6 +4575,23 @@ body.tc-resizing {
   text-align: left;
 }
 
+#workspaceRrhhHub .workspace-rrhh-tabs.tc-modulebar {
+  flex-wrap: wrap;
+  overflow-x: hidden;
+}
+
+#workspaceRrhhHub .workspace-rrhh-tabs.tc-modulebar .tab.tc-module {
+  width: 112px;
+  min-width: 112px;
+}
+
+#workspaceRrhhHub .workspace-rrhh-tabs.tc-modulebar .tc-mod-label {
+  max-width: 100%;
+  text-align: center;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 #viewTabs.tc-modulebar {
   padding: 4px 0 0;
   gap: 8px;
