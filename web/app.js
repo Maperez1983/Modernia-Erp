@@ -2214,6 +2214,7 @@ const clienteTabDocs = document.getElementById("clienteTabDocs");
 const clienteTabFacturas = document.getElementById("clienteTabFacturas");
 const clienteTabTrabajos = document.getElementById("clienteTabTrabajos");
 const clienteRelacionForm = document.getElementById("clienteRelacionForm");
+const clienteRelacionSearch = document.getElementById("clienteRelacionSearch");
 const clienteRelacionCliente = document.getElementById("clienteRelacionCliente");
 const clienteRelacionReset = document.getElementById("clienteRelacionReset");
 const clienteRelacionStatus = document.getElementById("clienteRelacionStatus");
@@ -37071,13 +37072,29 @@ const populateClienteRelacionSelect = () => {
   if (!clienteRelacionCliente) return;
   const currentId = String(state.currentClienteId || "").trim();
   const currentValue = String(clienteRelacionCliente.value || "").trim();
+  const rawQuery = clienteRelacionSearch ? String(clienteRelacionSearch.value || "").trim() : "";
+  const normalizeText = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const query = normalizeText(rawQuery);
   clienteRelacionCliente.innerHTML = "";
   clienteRelacionCliente.appendChild(createOption("", "Selecciona cliente"));
   (state.clientesList || []).forEach((cliente) => {
     const id = String(cliente.id || "").trim();
     if (!id || id === currentId) return;
+    const nombre = formatNombreCliente(cliente.nombre || "") || "";
+    const nif = String(cliente.nif || cliente.dni || "").trim();
+    if (query) {
+      const haystack = `${normalizeText(nombre)} ${normalizeText(nif)}`.trim();
+      if (!haystack.includes(query)) return;
+    }
+    const label = [nombre || id, nif].filter(Boolean).join(" · ");
     clienteRelacionCliente.appendChild(
-      createOption(id, formatNombreCliente(cliente.nombre || "") || id)
+      createOption(id, label)
     );
   });
   if (currentValue) {
@@ -66479,6 +66496,14 @@ if (clienteRelacionReset) {
       clienteRelacionStatus.textContent = "";
     }
   });
+}
+
+if (clienteRelacionSearch) {
+  const triggerClienteRelacionSearch = () => {
+    populateClienteRelacionSelect();
+  };
+  clienteRelacionSearch.addEventListener("input", triggerClienteRelacionSearch);
+  clienteRelacionSearch.addEventListener("change", triggerClienteRelacionSearch);
 }
 
 if (clienteRelacionForm) {

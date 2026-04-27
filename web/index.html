@@ -8380,6 +8380,7 @@
                 <input type="hidden" name="id" />
                 <label class="span-2">
                   Cliente relacionado
+                  <input id="clienteRelacionSearch" placeholder="Buscar por nombre o DNI/NIF..." autocomplete="off" />
                   <select name="related_cliente_id" id="clienteRelacionCliente" required></select>
                 </label>
                 <label>
@@ -9844,11 +9845,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-											    <script src="app.js?v=684"></script>
+											    <script src="app.js?v=685"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-										        const TARGET_SW = "/sw.js?v=285";
+										        const TARGET_SW = "/sw.js?v=286";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
