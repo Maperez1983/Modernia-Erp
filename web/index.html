@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=238" />
+				    <link rel="stylesheet" href="styles.css?v=239" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -5196,13 +5196,14 @@
             </div>
           </div>
         </div>
-	        <div id="gestoriaDashboardSection" class="hidden">
-	          <div class="crm-header">
-	            <div>
-	              <h3>Gestoría · Dashboard</h3>
-	              <p class="muted">Indicadores clave, alertas, vencimientos y accesos rápidos del despacho.</p>
-	            </div>
-	          </div>
+		        <div id="gestoriaDashboardSection" class="dashboard hidden">
+		          <div class="dashboard-head">
+		            <div>
+		              <h3>Dashboard · Gestoría</h3>
+		              <p class="muted">Indicadores clave, alertas, vencimientos y accesos rápidos del despacho.</p>
+		            </div>
+		            <div class="status"><span></span>Operativa</div>
+		          </div>
 	          <div class="tc-modulebar tc-modulebar--micro" id="gestoriaDashboardTabs" role="navigation" aria-label="Dashboard gestoría">
             <button class="tab tc-module active" type="button" data-gestoria-dashboard-pane="resumen" title="Resumen">
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
@@ -5236,7 +5237,7 @@
                 <p class="muted">Seguimiento mensual y alertas.</p>
               </div>
             </div>
-            <div class="grid crm-kpis">
+	            <div class="grid dashboard-kpis">
               <div class="card kpi-card">
                 <h3>Clientes gestoría</h3>
                 <div class="kpi-value" id="gestoriaKpiTotal">0</div>
@@ -5380,7 +5381,7 @@
                   <button type="button" class="secondary" id="gestoriaDashRentaReload">Actualizar</button>
                 </div>
               </div>
-              <div class="grid crm-kpis" id="gestoriaDashRentaKpis"></div>
+	              <div class="grid dashboard-kpis" id="gestoriaDashRentaKpis"></div>
               <div id="gestoriaDashRentaContent"></div>
             </div>
           </div>
@@ -9873,11 +9874,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-											    <script src="app.js?v=689"></script>
+												    <script src="app.js?v=690"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-										        const TARGET_SW = "/sw.js?v=290";
+											        const TARGET_SW = "/sw.js?v=291";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

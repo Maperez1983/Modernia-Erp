@@ -9379,6 +9379,34 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border: 1px solid rgba(var(--ink-rgb), 0.08);
 }
 
+/* Gestoría dashboard: reutiliza estética de dashboard/charts (como Financiaciones). */
+#gestoriaDashboardSection .tc-modulebar {
+  margin: 10px 0 14px;
+  padding: 6px;
+  border-radius: 16px;
+  border: 1px solid rgba(var(--ink-rgb), 0.10);
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 10px 24px rgba(var(--ink-rgb), 0.06);
+}
+
+#gestoriaDashboardSection .form-card {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(var(--gold-rgb), 0.12), transparent 42%),
+    radial-gradient(circle at 86% 14%, rgba(56, 189, 248, 0.08), transparent 46%),
+    linear-gradient(165deg, rgba(255, 255, 255, 0.96) 0%, rgba(238, 242, 246, 0.90) 100%),
+    var(--cloud);
+  border-radius: 18px;
+  border: 1px solid rgba(var(--ink-rgb), 0.10);
+  border-top: 3px solid rgba(var(--gold-rgb), 0.72);
+  box-shadow: 0 14px 34px rgba(var(--ink-rgb), 0.10);
+}
+
+#gestoriaDashboardSection .form-card h3 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  letter-spacing: 0.2px;
+}
+
 /* CRM resumen: charts más compactos para no comerse la pantalla. */
 #crmResumenYtdBoard .chart-card {
   min-height: 290px;
