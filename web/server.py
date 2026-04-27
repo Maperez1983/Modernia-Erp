@@ -4418,27 +4418,36 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
         filter_script = f"""
 <script>
 (function () {{
-  try {{
-    const norm = (value) => String(value || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\\u0300-\\u036f]/g, "");
-    const params = new URLSearchParams(window.location.search || "");
-    const fromUrl = norm(params.get("section"));
-    const fromServer = norm({json.dumps(section_key)});
-    const section = fromUrl || fromServer;
-    if (!section || ["all", "todo", "todas"].includes(section)) return;
-    const allowed = new Set(["comprador", "vendedor", "cheques", "notaria"]);
-    if (!allowed.has(section)) return;
-    document.querySelectorAll(".page-break").forEach((el) => {{
-      el.style.display = "none";
-    }});
-    document.querySelectorAll("[data-print-section]").forEach((el) => {{
-      const key = norm(el.getAttribute("data-print-section"));
-      if (key !== section) el.style.display = "none";
-    }});
-  }} catch (e) {{}}
+  function applyHipotecaPrintSectionFilter() {{
+    try {{
+      const norm = (value) => String(value || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\\u0300-\\u036f]/g, "");
+      const params = new URLSearchParams(window.location.search || "");
+      const fromUrl = norm(params.get("section"));
+      const fromServer = norm({json.dumps(section_key)});
+      const section = fromUrl || fromServer;
+      if (!section || ["all", "todo", "todas"].includes(section)) return;
+      const allowed = new Set(["comprador", "vendedor", "cheques", "notaria"]);
+      if (!allowed.has(section)) return;
+      document.querySelectorAll(".page-break").forEach((el) => {{
+        el.style.display = "none";
+      }});
+      document.querySelectorAll("[data-print-section]").forEach((el) => {{
+        const key = norm(el.getAttribute("data-print-section"));
+        if (key !== section) el.style.display = "none";
+      }});
+    }} catch (e) {{}}
+  }}
+  // Importante: el HTML se genera en servidor y este script vive en <head>.
+  // Esperamos a que el DOM esté listo para que el filtro realmente encuentre los paneles.
+  if (document.readyState === "loading") {{
+    window.addEventListener("DOMContentLoaded", applyHipotecaPrintSectionFilter, {{ once: true }});
+  }} else {{
+    applyHipotecaPrintSectionFilter();
+  }}
 }})();
 </script>
 """
@@ -4833,12 +4842,12 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
 <body>
   <div class="sheet">
     <div class="hero">
-      <img src="/assets/verifika2/verifika2_wordmark_check_green_transparent.png" alt="Verifika²" />
+      <img src="/assets/grupo_modernia_logo.png" alt="Grupo Modernia" />
       <div>
         <h1>Ficha de Operación Hipotecaria</h1>
         <p>{cliente} · {banco}</p>
       </div>
-      <div class="hero-tag">Financiaciones</div>
+      <div class="hero-tag">Financiaciones Modernia</div>
     </div>
     <div class="content">
       <div class="metrics">
