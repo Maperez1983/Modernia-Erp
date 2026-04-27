@@ -55688,20 +55688,25 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/hipotecas":
             # try to update existing encargo/estudio instead of creating duplicates
-            cliente = payload.get("cliente")
-            fecha_encargo = payload.get("fecha_encargo")
-            precio = payload.get("precio")
-            importe_hipoteca = payload.get("importe_hipoteca")
+            cliente = str(payload.get("cliente") or "").strip()
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
+            precio = parse_optional_float(payload.get("precio"))
+            importe_hipoteca = parse_optional_float(payload.get("importe_hipoteca"))
+            porcentaje = parse_optional_float(payload.get("porcentaje"))
+            entrada = parse_optional_float(payload.get("entrada"))
+            comision = parse_optional_float(payload.get("comision"))
+            anio = parse_optional_int(payload.get("anio"))
             estado_busqueda = ("estudio", "encargo", "pendiente")
             where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
             values = [empresa["id"], *estado_busqueda, cliente]
             if fecha_encargo:
                 where += " AND fecha_encargo = ?"
                 values.append(fecha_encargo)
-            if precio:
+            if precio is not None:
                 where += " AND precio = ?"
                 values.append(precio)
-            if importe_hipoteca:
+            if importe_hipoteca is not None:
                 where += " AND importe_hipoteca = ?"
                 values.append(importe_hipoteca)
             existing = conn.execute(
@@ -55716,13 +55721,11 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
 
             effective_comision = (
-                payload.get("comision")
-                if payload.get("comision") not in (None, "")
-                else (existing_row["comision"] if existing_row else 0)
+                comision if comision is not None else (existing_row["comision"] if existing_row else 0)
             )
             effective_agencia = (
-                payload.get("oficina")
-                or payload.get("inmobiliaria_compra")
+                (payload.get("oficina") or "")
+                or (payload.get("inmobiliaria_compra") or "")
                 or (existing_row["oficina"] if existing_row else "")
                 or (existing_row["inmobiliaria_compra"] if existing_row else "")
             )
@@ -55761,25 +55764,25 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE id = ?
                     """,
                     (
-                        payload.get("cliente_id"),
-                        payload.get("banco"),
+                        cliente_id,
+                        (payload.get("banco") or None),
                         financing_split["precio"] if financing_split else precio,
                         financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
-                        financing_split["porcentaje"] if financing_split else payload.get("porcentaje"),
-                        payload.get("entrada"),
-                        payload.get("comision"),
-                        payload.get("oficina"),
-                        payload.get("fecha_encargo"),
-                        payload.get("encargo"),
-                        payload.get("tipo_hipoteca"),
-                        payload.get("fecha_firma"),
+                        financing_split["porcentaje"] if financing_split else porcentaje,
+                        entrada,
+                        comision,
+                        (payload.get("oficina") or None),
+                        fecha_encargo,
+                        (payload.get("encargo") or None),
+                        (payload.get("tipo_hipoteca") or None),
+                        (payload.get("fecha_firma") or None),
                         commission_split["cesion"],
                         commission_split["comision_juan"],
                         commission_split["comision_modernia"],
-                        payload.get("inmobiliaria_compra"),
-                        payload.get("asesor"),
-                        payload.get("estado"),
-                        payload.get("anio"),
+                        (payload.get("inmobiliaria_compra") or None),
+                        (payload.get("asesor") or None),
+                        (payload.get("estado") or None),
+                        anio,
                         now,
                         existing["id"],
                     ),
@@ -55804,26 +55807,26 @@ class Handler(BaseHTTPRequestHandler):
                     (
                         out_id,
                         empresa["id"],
-                        payload.get("cliente"),
-                        payload.get("cliente_id"),
-                        payload.get("banco"),
-                        financing_split["precio"] if financing_split else payload.get("precio"),
-                        financing_split["importe_hipoteca"] if financing_split else payload.get("importe_hipoteca"),
-                        financing_split["porcentaje"] if financing_split else payload.get("porcentaje"),
-                        payload.get("entrada"),
-                        payload.get("comision"),
-                        payload.get("oficina"),
-                        payload.get("fecha_encargo"),
-                        payload.get("encargo"),
-                        payload.get("tipo_hipoteca"),
-                        payload.get("fecha_firma"),
+                        cliente,
+                        cliente_id,
+                        (payload.get("banco") or None),
+                        financing_split["precio"] if financing_split else precio,
+                        financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
+                        financing_split["porcentaje"] if financing_split else porcentaje,
+                        entrada,
+                        comision,
+                        (payload.get("oficina") or None),
+                        fecha_encargo,
+                        (payload.get("encargo") or None),
+                        (payload.get("tipo_hipoteca") or None),
+                        (payload.get("fecha_firma") or None),
                         commission_split["cesion"],
                         commission_split["comision_juan"],
                         commission_split["comision_modernia"],
-                        payload.get("inmobiliaria_compra"),
-                        payload.get("asesor"),
-                        payload.get("estado"),
-                        payload.get("anio"),
+                        (payload.get("inmobiliaria_compra") or None),
+                        (payload.get("asesor") or None),
+                        (payload.get("estado") or None),
+                        anio,
                         now,
                         now,
                     ),
