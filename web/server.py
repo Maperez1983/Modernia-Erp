@@ -13204,6 +13204,9 @@ def ocr_image_external(image_bytes):
         return "", "OCR externo: sin texto"
 
 def external_ocr_available():
+    flag = (os.environ.get("OCR_EXTERNAL_ENABLED", "1") or "").strip().lower()
+    if flag in {"0", "false", "no", "off"}:
+        return False
     def _resolve_credentials_path():
         candidates = []
         env_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")

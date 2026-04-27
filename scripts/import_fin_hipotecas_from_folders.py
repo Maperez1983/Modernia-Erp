@@ -188,7 +188,13 @@ class Extracted:
     ocr_error: str = ""
 
 
-def _pick_float(text: str, patterns: tuple[str, ...]) -> float | None:
+def _pick_float(
+    text: str,
+    patterns: tuple[str, ...],
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> float | None:
     cleaned = " ".join(str(text or "").replace("\u00a0", " ").split())
     if not cleaned:
         return None
@@ -196,6 +202,22 @@ def _pick_float(text: str, patterns: tuple[str, ...]) -> float | None:
         raw_value = str(raw_value or "").strip()
         if not raw_value:
             return None
+        trans = str.maketrans(
+            {
+                "O": "0",
+                "o": "0",
+                "º": "0",
+                "°": "0",
+                "I": "1",
+                "l": "1",
+                "i": "1",
+                "|": "1",
+                "!": "1",
+                "S": "5",
+                "s": "5",
+            }
+        )
+        raw_value = raw_value.translate(trans)
         raw_value = re.sub(r"[^0-9,\\.]", "", raw_value)
         if not raw_value:
             return None
@@ -212,20 +234,68 @@ def _pick_float(text: str, patterns: tuple[str, ...]) -> float | None:
         try:
             val = float(raw_value)
         except Exception:
-            return None
-        return val if val > 0 else None
+            val = None
+        if val is not None and val > 0:
+            # Caso OCR: "10,0008" => "10.0008" pero realmente es "100008".
+            try:
+                dec_len = 0
+                if "." in raw_value:
+                    dec_len = len(raw_value.split(".", 1)[1])
+                if val < 1000 and dec_len > 2:
+                    digits = re.sub(r"[^0-9]", "", raw_value)
+                    if len(digits) >= 5:
+                        val = float(int(digits))
+            except Exception:
+                pass
+            # OCR mete un 0 final y sube x10: 2201000 -> 220100.
+            try:
+                if val >= 1_000_000 and int(val) % 10 == 0:
+                    val = val / 10.0
+            except Exception:
+                pass
+            return val
+        # Fallback: dígitos puros.
+        digits = re.sub(r"[^0-9]", "", raw_value)
+        if len(digits) >= 4:
+            try:
+                intval = int(digits)
+            except Exception:
+                intval = 0
+            if intval > 0:
+                try:
+                    if intval >= 1_000_000 and (intval % 10 == 0):
+                        intval = intval // 10
+                except Exception:
+                    pass
+                return float(intval)
+        return None
+
+    min_v = float(min_value) if min_value is not None else None
+    max_v = float(max_value) if max_value is not None else None
     for pat in patterns:
-        m = re.search(pat, cleaned, re.IGNORECASE)
-        if not m:
-            continue
-        val = _parse_amount(m.group(1))
-        if val is not None:
+        for m in re.finditer(pat, cleaned, re.IGNORECASE):
+            val = _parse_amount(m.group(1))
+            if val is None:
+                continue
+            if min_v is not None and val < min_v:
+                continue
+            if max_v is not None and val > max_v:
+                continue
             return val
     return None
 
 
 def extract_from_pdf(pdf_path: Path) -> Extracted:
-    text, err = server.ocr_pdf_all_pages(str(pdf_path), use_external=False)
+    # Desactiva OCR externo (Google Vision) para mantener consistencia en importes.
+    prev_external = os.environ.get("OCR_EXTERNAL_ENABLED")
+    os.environ["OCR_EXTERNAL_ENABLED"] = "0"
+    try:
+        text, err = server.ocr_pdf_all_pages(str(pdf_path), use_external=False)
+    finally:
+        if prev_external is None:
+            os.environ.pop("OCR_EXTERNAL_ENABLED", None)
+        else:
+            os.environ["OCR_EXTERNAL_ENABLED"] = prev_external
     text = text or ""
     fields = server.parse_asesoramiento_text(text)
     cliente1_nombre = _clean_person_name(fields.get("cliente1_nombre") or "")
@@ -242,8 +312,11 @@ def extract_from_pdf(pdf_path: Path) -> Extracted:
             r"\bPRECIO\s+VIVIENDA\s*[:\-]?\s*([0-9\.,]+)",
             r"PRECIO\s+DE\s+COMPRAVENTA.*?(?:ESCRITURADO|ESCRITURAC[IO]N|ESCRIT\w*)\s*[:\-]?\s*([0-9\.,]+)",
             r"PRECIO\s+DE\s+COMPRAVENTA\s*[:\-]?\s*([0-9\.,]+)",
+            r"PRECIO.{0,18}ESTIMAD[OA]\s*DE\s*COMPRAVENTA\s*[:\-]?\s*([0-9A-Za-zº°\s,\.]{3,32})",
             r"\bESCRITURADO\s*[:\-]?\s*([0-9\.,]+)",
         ),
+        min_value=10_000,
+        max_value=5_000_000,
     )
     importe = _pick_float(
         text,
@@ -253,7 +326,10 @@ def extract_from_pdf(pdf_path: Path) -> Extracted:
             r"\bCAPITAL\s*[:\-]?\s*([0-9\.,]+)",
             r"\bC[UY]ANTIA\s+DEL\s+PR[ÉE]STAMO\s*[:\-]?\s*([0-9\.,]+)",
             r"\bC[UY]ANTIA\s+DEL\s+PRESTAMO\s*[:\-]?\s*([0-9\.,]+)",
+            r"IMPORTE.{0,40}FINANCIACI[ÓO]N.{0,25}CR[ÉE]DIT[OAIE]\s*[:\-]?\s*[^0-9A-Za-zº°]{0,12}([0-9A-Za-zº°][0-9A-Za-zº°\s,\.]{2,31})",
         ),
+        min_value=5_000,
+        max_value=10_000_000,
     )
     tipo = extract_tipo_interes(text)
 
