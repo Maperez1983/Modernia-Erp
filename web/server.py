@@ -65607,6 +65607,25 @@ class Handler(BaseHTTPRequestHandler):
             if not include_id:
                 visible_columns = [col for col in visible_columns if col != "id"]
             text_columns = [col for col in visible_columns]
+            if tabla == "gestoria":
+                preferred = (
+                    "cliente",
+                    "nombre",
+                    "apellidos",
+                    "nif",
+                    "dni",
+                    "documento",
+                    "email",
+                    "telefono",
+                    "móvil",
+                    "movil",
+                    "tipo",
+                    "perfil",
+                    "estado",
+                )
+                narrowed = [col for col in preferred if col in visible_columns]
+                if narrowed:
+                    text_columns = narrowed
 
             where = []
             values = []

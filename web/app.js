@@ -61495,7 +61495,7 @@ if (gestoriaCrmSearch) {
   const triggerGestoriaSearch = () => {
     scheduleSave("gestoria-crm-search", () => {
       loadGestoriaCrm();
-    }, 250);
+    }, 450);
   };
   gestoriaCrmSearch.addEventListener("input", triggerGestoriaSearch);
   gestoriaCrmSearch.addEventListener("change", triggerGestoriaSearch);
