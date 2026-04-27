@@ -2779,6 +2779,11 @@ const actionModalCreateCliente = document.getElementById("actionModalCreateClien
 const finAgendaTable = document.getElementById("finAgendaTable");
 const finAgendaInfo = document.getElementById("finAgendaInfo");
 const finSimOpenFromAgenda = document.getElementById("finSimOpenFromAgenda");
+const finSimLoadFromAsesoramiento = document.getElementById("finSimLoadFromAsesoramiento");
+const finSimSaveToAsesoramiento = document.getElementById("finSimSaveToAsesoramiento");
+const finSimCalculate = document.getElementById("finSimCalculate");
+const finSimStatus = document.getElementById("finSimStatus");
+const finSimLinkedAsesoramiento = document.getElementById("finSimLinkedAsesoramiento");
 const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
@@ -23822,6 +23827,148 @@ const initFinSimulator = () => {
   form.addEventListener("input", calculate);
   form.addEventListener("change", calculate);
   calculate();
+};
+
+const finSimSetStatus = (message = "", isError = false) => {
+  if (!finSimStatus) return;
+  finSimStatus.textContent = message || "";
+  finSimStatus.style.color = isError ? "#b42318" : "";
+};
+
+const finSimRenderLinkedAsesoramiento = () => {
+  const row = state.finSelectedAsesoramiento;
+  if (finSimLinkedAsesoramiento) {
+    if (!row) {
+      finSimLinkedAsesoramiento.textContent = "Sin expediente seleccionado (elige uno en Workflow/Asesoramiento).";
+    } else {
+      const cliente2 = row.cliente2_nombre ? ` / ${row.cliente2_nombre}` : "";
+      finSimLinkedAsesoramiento.textContent = `Expediente: ${row.cliente1_nombre || "Cliente"}${cliente2} · ${normalizeFinStage(row.estado)}`;
+    }
+  }
+  const hasRow = Boolean(row?.id);
+  if (finSimLoadFromAsesoramiento) finSimLoadFromAsesoramiento.disabled = !hasRow;
+  if (finSimSaveToAsesoramiento) finSimSaveToAsesoramiento.disabled = !hasRow;
+};
+
+const finSimTriggerCalculate = () => {
+  const form = document.getElementById("finSimForm");
+  if (!form) return;
+  form.dispatchEvent(new Event("change", { bubbles: true }));
+};
+
+const finSimParseJson = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+};
+
+const finSimFillForm = (values = {}) => {
+  const form = document.getElementById("finSimForm");
+  if (!form) return;
+  const inputs = form.querySelectorAll("input[name], select[name], textarea[name]");
+  inputs.forEach((el) => {
+    const name = el.name;
+    if (!name) return;
+    if (!(name in values)) return;
+    const val = values[name];
+    if (el.dataset?.money === "1") {
+      const num = typeof val === "number" ? val : toNumber(val);
+      el.value = Number.isFinite(num) ? euroFormatter.format(num) : "";
+      return;
+    }
+    if (el.type === "number") {
+      const raw = String(val ?? "").trim();
+      if (!raw) {
+        el.value = "";
+        return;
+      }
+      const num = typeof val === "number" ? val : Number(raw);
+      el.value = Number.isFinite(num) ? String(num) : "";
+      return;
+    }
+    el.value = val === null || val === undefined ? "" : String(val);
+  });
+  finSimSetStatus("Datos cargados.", false);
+  finSimTriggerCalculate();
+};
+
+const finSimSerializeForm = () => {
+  const form = document.getElementById("finSimForm");
+  if (!form) return {};
+  const data = {};
+  const inputs = form.querySelectorAll("input[name], select[name], textarea[name]");
+  inputs.forEach((el) => {
+    const name = el.name;
+    if (!name) return;
+    if (el.dataset?.money === "1") {
+      const num = toNumber(el.value);
+      data[name] = num === null ? null : num;
+      return;
+    }
+    if (el.type === "number") {
+      const raw = String(el.value || "").trim();
+      if (!raw) {
+        data[name] = null;
+        return;
+      }
+      const num = Number(raw);
+      data[name] = Number.isFinite(num) ? num : null;
+      return;
+    }
+    data[name] = String(el.value || "");
+  });
+  return data;
+};
+
+const finSimValuesFromAsesoramiento = (row) => {
+  if (!row) return {};
+  const base = finSimParseJson(row.sim_params_json) || {};
+  const intervinientes = row.cliente2_nombre ? 2 : 1;
+  const aporte = toNumber(row.aportacion_cv);
+  if (!("sim_intervinientes" in base) && intervinientes) base.sim_intervinientes = intervinientes;
+  if (!("sim_entrada" in base) && Number.isFinite(aporte)) base.sim_entrada = aporte;
+  return base;
+};
+
+const finSimLoadSelectedAsesoramiento = () => {
+  const row = state.finSelectedAsesoramiento;
+  if (!row?.id) {
+    window.alert("Selecciona primero un expediente en Workflow.");
+    return;
+  }
+  finSimFillForm(finSimValuesFromAsesoramiento(row));
+};
+
+const finSimSaveToSelectedAsesoramiento = async () => {
+  const row = state.finSelectedAsesoramiento;
+  if (!row?.id) {
+    window.alert("Selecciona primero un expediente en Workflow.");
+    return;
+  }
+  finSimSetStatus("Guardando…", false);
+  try {
+    const sim = finSimSerializeForm();
+    const payload = {
+      id: row.id,
+      empresa_nombre: resolveCrmFinEmpresaNombre(),
+      sim_params_json: JSON.stringify(sim),
+    };
+    const res = await fetch("/api/fin_asesoramientos_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data?.error) throw new Error(data.error);
+    row.sim_params_json = payload.sim_params_json;
+    finSimSetStatus("Guardado en expediente.", false);
+  } catch (error) {
+    finSimSetStatus(error?.message || "No se pudo guardar.", true);
+  }
 };
 
 const normalizeDateInput = (value) => {
@@ -53234,6 +53381,7 @@ const selectFinAsesoramiento = (row) => {
   }
   updateFinSelectedSummary();
   syncFinAgendaContext();
+  finSimRenderLinkedAsesoramiento();
   const empresa = resolveCrmFinEmpresa();
   if (empresa?.id && (state.hipotecaAltaView || "dashboard") === "agenda") {
     loadFinWorkflowActions(empresa.id);
@@ -69295,6 +69443,27 @@ if (finOpenAgenda) {
 if (finOpenSimFromAsesoramiento) {
   finOpenSimFromAsesoramiento.addEventListener("click", () => {
     setTab("fin-sim");
+    finSimRenderLinkedAsesoramiento();
+    finSimLoadSelectedAsesoramiento();
+  });
+}
+
+if (finSimLoadFromAsesoramiento) {
+  finSimLoadFromAsesoramiento.addEventListener("click", () => {
+    finSimLoadSelectedAsesoramiento();
+  });
+}
+
+if (finSimSaveToAsesoramiento) {
+  finSimSaveToAsesoramiento.addEventListener("click", () => {
+    finSimSaveToSelectedAsesoramiento();
+  });
+}
+
+if (finSimCalculate) {
+  finSimCalculate.addEventListener("click", () => {
+    finSimSetStatus("", false);
+    finSimTriggerCalculate();
   });
 }
 

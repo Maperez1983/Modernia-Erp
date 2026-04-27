@@ -25241,13 +25241,14 @@ def ensure_tables(db_path):
           cliente2_prestamo_entidad TEXT,
           cliente2_prestamo_resto REAL,
           ingresos_conjuntos REAL,
-          entidades_financieras TEXT,
-          avalistas TEXT,
-          aportacion_cv REAL,
-          notas TEXT,
-          notas_ocr TEXT,
-          calidad_ocr TEXT,
-          campos_ocr TEXT,
+	          entidades_financieras TEXT,
+	          avalistas TEXT,
+	          aportacion_cv REAL,
+	          sim_params_json TEXT,
+	          notas TEXT,
+	          notas_ocr TEXT,
+	          calidad_ocr TEXT,
+	          campos_ocr TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -25267,6 +25268,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_resto", "cliente2_prestamo_resto REAL")
     ensure_column(conn, "asesoramientos_financiacion", "calidad_ocr", "calidad_ocr TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "campos_ocr", "campos_ocr TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "sim_params_json", "sim_params_json TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS hipotecas (
@@ -48933,13 +48935,14 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente2_prestamo_entidad",
                 "cliente2_prestamo_resto",
                 "ingresos_conjuntos",
-                "entidades_financieras",
-                "avalistas",
-                "aportacion_cv",
-                "notas",
-                "notas_ocr",
-                "calidad_ocr",
-                "campos_ocr",
+	                "entidades_financieras",
+	                "avalistas",
+	                "aportacion_cv",
+	                "sim_params_json",
+	                "notas",
+	                "notas_ocr",
+	                "calidad_ocr",
+	                "campos_ocr",
             )
             if dup_id:
                 row = conn.execute(
@@ -48980,10 +48983,10 @@ class Handler(BaseHTTPRequestHandler):
                       cliente2_fecha_nacimiento, cliente2_estado_civil, cliente2_regimen, cliente2_hijos, cliente2_profesion,
                       cliente2_tipo_contrato, cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
                       cliente2_prestamo_activo, cliente2_prestamo_entidad, cliente2_prestamo_resto,
-                      ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv,
-                      notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
+	                      ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv, sim_params_json,
+	                      notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+	                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -49032,14 +49035,15 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("cliente2_prestamo_activo"),
                         payload.get("cliente2_prestamo_entidad"),
                         payload.get("cliente2_prestamo_resto"),
-                        payload.get("ingresos_conjuntos"),
-                        payload.get("entidades_financieras"),
-                        payload.get("avalistas"),
-                        payload.get("aportacion_cv"),
-                        payload.get("notas"),
-                        payload.get("notas_ocr"),
-                        payload.get("calidad_ocr"),
-                        payload.get("campos_ocr"),
+	                        payload.get("ingresos_conjuntos"),
+	                        payload.get("entidades_financieras"),
+	                        payload.get("avalistas"),
+	                        payload.get("aportacion_cv"),
+	                        payload.get("sim_params_json"),
+	                        payload.get("notas"),
+	                        payload.get("notas_ocr"),
+	                        payload.get("calidad_ocr"),
+	                        payload.get("campos_ocr"),
                         now,
                         now,
                     ),
@@ -49154,12 +49158,13 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente2_prestamo_resto",
                 "ingresos_conjuntos",
                 "entidades_financieras",
-                "avalistas",
-                "aportacion_cv",
-                "notas",
-                "notas_ocr",
-                "calidad_ocr",
-                "campos_ocr",
+	                "avalistas",
+	                "aportacion_cv",
+	                "sim_params_json",
+	                "notas",
+	                "notas_ocr",
+	                "calidad_ocr",
+	                "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not row_empresa_id:
