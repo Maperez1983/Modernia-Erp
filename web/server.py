@@ -12442,6 +12442,48 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         primary = ordered[0] if ordered else ""
         return primary, ordered
 
+    def _extract_amount_by_code(code_value: str):
+        """
+        OCR/Extractores de PDF no siempre respetan el layout de la AEAT.
+        Aceptamos:
+        - importe ANTES de la casilla (p.ej. "12.345,67 0505")
+        - casilla ANTES del importe (p.ej. "0505 12.345,67")
+        - códigos sin ceros a la izquierda (p.ej. "505" en vez de "0505")
+        """
+        code_text = str(code_value or "").strip()
+        if not code_text:
+            return None
+        # Normalizamos a número cuando es posible (para admitir 505 / 0505).
+        digits = re.sub(r"\D", "", code_text)
+        if not digits:
+            return None
+        try:
+            code_num = int(digits)
+        except Exception:
+            return None
+        code_pat = rf"\b0*{code_num}\b"
+        # Números: pueden venir con signos, puntos/espacios y coma.
+        amount_pat = r"([\-]?[0-9][0-9\., ]{0,24})"
+        # 1) Importe antes de la casilla
+        # Importante: probamos primero "código -> importe" para evitar falsos positivos como
+        # "MODELO 100\n0505 ..." donde el "100" podría enganchar con el 0505.
+        for pat in (
+            rf"{code_pat}[ \t]*{amount_pat}",
+            # Variante: "Casilla 505: 12.345,67"
+            rf"CASILLA[ \t]*{code_pat}[^0-9\-]{{0,10}}{amount_pat}",
+            # Importe antes del código (misma línea o separación corta)
+            rf"{amount_pat}[ \t]+{code_pat}",
+        ):
+            m = re.search(pat, raw, re.IGNORECASE)
+            if not m:
+                continue
+            # En los dos primeros patrones, el grupo 1 es el importe. En el tercero, también.
+            value = parse_optional_float(m.group(1))
+            if value is None:
+                continue
+            return round(float(value), 2)
+        return None
+
     casillas = {
         "rendimientos_trabajo_total": "0012",
         "base_imponible_general": "0432",
@@ -12450,13 +12492,10 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         "resultado_declaracion": "0670",
     }
     for key, code in casillas.items():
-        match = re.search(rf"([\-0-9\., ]+)\s+{code}\b", raw)
-        if not match:
-            continue
-        value = parse_optional_float(match.group(1))
+        value = _extract_amount_by_code(code)
         if value is None:
             continue
-        fields[key] = round(float(value), 2)
+        fields[key] = value
 
     if "resultado_declaracion" not in fields:
         match = re.search(
