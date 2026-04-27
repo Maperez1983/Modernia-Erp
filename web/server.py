@@ -60368,7 +60368,12 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (empresa_id,),
                 ).fetchall()
-                active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row.get("estado"))}
+                active_ids = {
+                    str(row_value(row, "cliente_id", "") or "").strip()
+                    for row in active_rows
+                    if is_gestoria_dashboard_active_state(row_value(row, "estado", ""))
+                }
+                active_ids.discard("")
                 payload["counts"]["activos"] = len(active_ids)
             except Exception as exc:
                 try:
@@ -60388,7 +60393,14 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (empresa_id,),
                 ).fetchall()
-                tipos_map = {row.get("tipo"): int(row.get("total") or 0) for row in tipos if row.get("tipo")}
+                for row in tipos:
+                    tipo = str(row_value(row, "tipo", "") or "").strip()
+                    if not tipo:
+                        continue
+                    try:
+                        tipos_map[tipo] = int(row_value(row, "total", 0) or 0)
+                    except Exception:
+                        tipos_map[tipo] = 0
             except Exception as exc:
                 try:
                     Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
