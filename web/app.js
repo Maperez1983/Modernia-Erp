@@ -4387,12 +4387,53 @@ const syncCurrentUserScope = () => {
 function syncHipotecaBdtManualVisibility() {
   if (!hipotecaBdtManualDetails) return;
   const user = getAuthScopeUser();
-  const visible = !!(user && isPrivilegedUser(user));
+  // El alta manual (cliente + hipoteca) debe estar disponible para usuarios con el servicio de Financiaciones.
+  // Antes estaba restringido a superadmin y dejaba el botón "Alta" sin formulario.
+  const visible = !!(user && userCanAccessService("financiaciones"));
   hipotecaBdtManualDetails.classList.toggle("hidden", !visible);
   if (!visible) {
     hipotecaBdtManualDetails.open = false;
   }
 }
+
+const closeHipotecaAltaManual = () => {
+  if (!hipotecaBdtManualDetails) return;
+  hipotecaBdtManualDetails.open = false;
+};
+
+const openHipotecaAltaManual = ({ clienteNombre = "", focus = "hipoteca", scroll = true } = {}) => {
+  if (!hipotecaBdtManualDetails) return false;
+  try {
+    syncHipotecaBdtManualVisibility();
+  } catch {}
+  if (hipotecaBdtManualDetails.classList.contains("hidden")) return false;
+  hipotecaBdtManualDetails.open = true;
+  const nombre = String(clienteNombre || "").trim();
+  if (nombre && hipotecaForm) {
+    const input = hipotecaForm.querySelector('input[name="cliente"]');
+    if (input) {
+      input.value = nombre;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+  if (!scroll) return true;
+  window.requestAnimationFrame(() => {
+    const target =
+      focus === "cliente"
+        ? (hipotecaClienteForm || hipotecaBdtManualDetails)
+        : (hipotecaForm || hipotecaBdtManualDetails);
+    target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    try {
+      if (focus === "cliente") {
+        hipotecaClienteForm?.querySelector('input[name="nombre"]')?.focus?.();
+      } else {
+        hipotecaForm?.querySelector('input[name="cliente"]')?.focus?.();
+      }
+    } catch {}
+  });
+  return true;
+};
 
 const getServiceFilterParam = () => {
   const user = getAuthScopeUser();
@@ -7184,7 +7225,7 @@ const openWorkspaceSegurosCopilot = () => {
 const openWorkspaceFinCopilot = () => {
   openFinCrm();
   window.setTimeout(() => {
-    setHipotecaAltaView("alta");
+    setHipotecaAltaView("workflow");
     if (finCopilotForm && typeof finCopilotForm.scrollIntoView === "function") {
       finCopilotForm.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -35591,6 +35632,7 @@ const setHipotecaAltaView = (view) => {
   }
   const next =
     view === "alta" ||
+    view === "workflow" ||
     view === "asesoramiento" ||
     view === "agenda" ||
     view === "bdt" ||
@@ -35603,7 +35645,7 @@ const setHipotecaAltaView = (view) => {
     hipotecaDashboardPanel.classList.toggle("hidden", next !== "dashboard");
   }
   if (hipotecaAltaPanel) {
-    hipotecaAltaPanel.classList.toggle("hidden", next !== "alta");
+    hipotecaAltaPanel.classList.toggle("hidden", next !== "workflow");
   }
   if (hipotecaAsesoramientoPanel) {
     hipotecaAsesoramientoPanel.classList.toggle("hidden", next !== "asesoramiento");
@@ -35612,7 +35654,7 @@ const setHipotecaAltaView = (view) => {
     hipotecaAgendaPanel.classList.toggle("hidden", next !== "agenda");
   }
   if (hipotecaBdtPanel) {
-    hipotecaBdtPanel.classList.toggle("hidden", next !== "bdt");
+    hipotecaBdtPanel.classList.toggle("hidden", !(next === "bdt" || next === "alta"));
   }
   if (hipotecaContabilidadPanel) {
     hipotecaContabilidadPanel.classList.toggle("hidden", next !== "contabilidad");
@@ -35631,7 +35673,10 @@ const setHipotecaAltaView = (view) => {
   if (next === "dashboard") {
     loadHipotecaDashboard();
   }
-  if (next === "bdt") {
+  if (next === "workflow") {
+    loadFinCrm();
+  }
+  if (next === "bdt" || next === "alta") {
     loadHipotecaBdt(true);
     loadFinHipotecasRegistradas();
   }
@@ -35644,6 +35689,11 @@ const setHipotecaAltaView = (view) => {
   if (next === "contabilidad") {
     loadHipotecaContabilidadHipotecas().catch(() => {});
     loadHipotecaContabilidad();
+  }
+  if (next === "alta") {
+    openHipotecaAltaManual({ focus: "hipoteca" });
+  } else {
+    closeHipotecaAltaManual();
   }
 };
 
@@ -56095,6 +56145,9 @@ const ensureClienteFinPanel = (container) => {
   let data = container.querySelector("[data-cliente-fin-data]");
   if (form && data) return { form, data };
   container.innerHTML = `
+    <div class="form-actions" style="margin:0 0 10px 0;">
+      <button type="button" class="secondary" data-cliente-fin-open-alta="1" title="Crear una hipoteca para este cliente (Financiaciones)">Cliente financiación</button>
+    </div>
     <div class="cliente-service-form" data-cliente-fin-form="1"></div>
     <div class="cliente-service-data" data-cliente-fin-data="1"></div>
   `;
@@ -56114,6 +56167,22 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
     }
   }
   const clienteNombre = String(cliente?.nombre || "").trim();
+  const openBtn = clienteHipotecaFicha.querySelector("[data-cliente-fin-open-alta]");
+  if (openBtn) {
+    openBtn.onclick = () => {
+      if (!clienteNombre) {
+        window.alert("Indica el nombre del cliente para crear una hipoteca.");
+        return;
+      }
+      openFinCrm();
+      window.setTimeout(() => {
+        try {
+          setHipotecaAltaView("alta");
+          openHipotecaAltaManual({ clienteNombre, focus: "hipoteca" });
+        } catch {}
+      }, 0);
+    };
+  }
   if (!clienteNombre) {
     if (panel.data) {
       panel.data.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";
@@ -59509,13 +59578,7 @@ if (crmInsertList) {
       openFinCrm();
       window.setTimeout(() => {
         try {
-          // El alta de una nueva operación debe usar el formulario BDT (mismos datos de cierre).
           setHipotecaAltaView("alta");
-          if (hipotecaForm) {
-            hipotecaForm.scrollIntoView({ behavior: "smooth", block: "start" });
-            const first = hipotecaForm.querySelector('input[name="cliente"]');
-            first?.focus?.();
-          }
         } catch (_) {}
       }, 0);
     } else if (key === "edificio") {
