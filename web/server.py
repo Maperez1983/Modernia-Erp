@@ -37765,6 +37765,12 @@ class Handler(BaseHTTPRequestHandler):
     _gestoria_docs_recent_cache = {}  # {(empresa_id, limit): (expires_ts, payload_dict)}
     _gestoria_dashboard_lock = threading.Lock()
     _gestoria_dashboard_cache = {}  # {empresa_id: (expires_ts, payload_dict)}
+    _hipoteca_dashboard_lock = threading.Lock()
+    _hipoteca_dashboard_cache = {}  # {(empresa_id, year): (expires_ts, payload_dict)}
+    _fincas_seguros_dash_lock = threading.Lock()
+    _fincas_seguros_dash_cache = {}  # {(empresa_id, year, uploaded_only): (expires_ts, payload_dict)}
+    _dashboard_lock = threading.Lock()
+    _dashboard_cache = {}  # {empresa_id: (expires_ts, payload_dict)}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -62222,6 +62228,23 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            now_ts = time.time()
+            cache_key = (
+                str(empresa_id or "").strip(),
+                requested_year if (requested_year.isdigit() and len(requested_year) == 4) else "",
+            )
+            cached_payload = None
+            try:
+                with Handler._hipoteca_dashboard_lock:
+                    cached = Handler._hipoteca_dashboard_cache.get(cache_key)
+                    if cached and isinstance(cached[1], dict):
+                        # TTL corto: evita avalancha de queries si el front reintenta por 502/503.
+                        if cached[0] > now_ts:
+                            json_response(self, cached[1])
+                            return
+                        cached_payload = cached[1]
+            except Exception:
+                cached_payload = None
             # No ejecutes sync pesado dentro del request: puede tardar mucho y provocar 502/timeouts.
             try:
                 sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id)
@@ -62631,9 +62654,8 @@ class Handler(BaseHTTPRequestHandler):
             conta_year = compute_hipotecas_contabilidad_totals(conn, empresa_id, selected_year)
             conta_total = compute_hipotecas_contabilidad_totals(conn, empresa_id)
 
-            json_response(
-                self,
-                {
+            try:
+                payload = {
                     "current": {
                         "total": current["total"] if current else 0,
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
@@ -62673,9 +62695,28 @@ class Handler(BaseHTTPRequestHandler):
                     "entity_kpis": entities,
                     "series_oficinas": [dict(r) for r in series_oficinas],
                     "hipotecas_sync": sync_state,
-                },
-            )
-            return
+                }
+                try:
+                    with Handler._hipoteca_dashboard_lock:
+                        Handler._hipoteca_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
+                        if len(Handler._hipoteca_dashboard_cache) > 200:
+                            for k, (exp, _val) in list(Handler._hipoteca_dashboard_cache.items())[:80]:
+                                if exp <= now_ts:
+                                    Handler._hipoteca_dashboard_cache.pop(k, None)
+                except Exception:
+                    pass
+                json_response(self, payload)
+                return
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/hipoteca_dashboard:build_payload", exc)
+                except Exception:
+                    pass
+                if cached_payload:
+                    json_response(self, cached_payload)
+                    return
+                json_response(self, {"error": "Base de datos ocupada. Reintenta."}, status=503)
+                return
 
         if path == "/api/hipoteca_bdt":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
@@ -63042,12 +63083,38 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            now_ts = time.time()
+            year_key = year if (year.isdigit() and len(year) == 4) else ""
+            cache_key = (empresa_id, year_key, 1 if uploaded_only else 0)
+            cached_payload = None
+            try:
+                with Handler._fincas_seguros_dash_lock:
+                    cached = Handler._fincas_seguros_dash_cache.get(cache_key)
+                    if cached and isinstance(cached[1], dict):
+                        if cached[0] > now_ts:
+                            json_response(self, cached[1])
+                            return
+                        cached_payload = cached[1]
+            except Exception:
+                cached_payload = None
             try:
                 payload = compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_only)
             except Exception as exc:
                 Handler._record_api_error("/api/fincas_seguros_dashboard", exc)
+                if cached_payload:
+                    json_response(self, cached_payload)
+                    return
                 json_response(self, {"error": "Base de datos ocupada. Reintenta."}, status=503)
                 return
+            try:
+                with Handler._fincas_seguros_dash_lock:
+                    Handler._fincas_seguros_dash_cache[cache_key] = (now_ts + 8.0, payload)
+                    if len(Handler._fincas_seguros_dash_cache) > 400:
+                        for k, (exp, _val) in list(Handler._fincas_seguros_dash_cache.items())[:120]:
+                            if exp <= now_ts:
+                                Handler._fincas_seguros_dash_cache.pop(k, None)
+            except Exception:
+                pass
             json_response(self, payload)
             return
 
@@ -64333,6 +64400,20 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            now_ts = time.time()
+            empresa_key = str(empresa_id or "").strip()
+            cached_payload = None
+            if empresa_key:
+                try:
+                    with Handler._dashboard_lock:
+                        cached = Handler._dashboard_cache.get(empresa_key)
+                        if cached and isinstance(cached[1], dict):
+                            if cached[0] > now_ts:
+                                json_response(self, cached[1])
+                                return
+                            cached_payload = cached[1]
+                except Exception:
+                    cached_payload = None
 
             try:
                 empresa_row = conn.execute(
@@ -64536,33 +64617,41 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     alquileres = []
 
-                json_response(
-                    self,
-                    {
-                        "mode": "inmobiliaria",
-                        "ventas": [dict(r) for r in ventas],
-                        "ingresos": [dict(r) for r in comision_series],
-                        "cierres": [dict(r) for r in volumen_cierre],
-                        "salidas": [dict(r) for r in volumen_salida],
-                        "gastos": [dict(r) for r in volumen_salida],
-                        "captaciones": [dict(r) for r in captaciones_series],
-                        "inmuebles": [dict(r) for r in inmuebles_series],
-                        "visitas": [dict(r) for r in visitas_series],
-                        "plazos": [dict(r) for r in plazos_series],
-                        "alquileres": [dict(r) for r in alquileres],
-                        "summary": {
-                            "compraventas_total": int(summary["compraventas_total"] or 0) if summary else 0,
-                            "ticket_medio": float(summary["ticket_medio"] or 0) if summary else 0,
-                            "plazo_medio_dias": float(summary["plazo_medio_dias"] or 0) if summary else 0,
-                            "desviacion_media_pct": float(summary["desviacion_media_pct"] or 0) if summary else 0,
-                            "visitas_total": int(summary["visitas_total"] or 0) if summary else 0,
-                            "visitas_media": float(summary["visitas_media"] or 0) if summary else 0,
-                            "captaciones_total": int(captacion_summary["captaciones_total"] or 0) if captacion_summary else 0,
-                            "captaciones_activas": int(captacion_summary["captaciones_activas"] or 0) if captacion_summary else 0,
-                            "inmuebles_total": int(inmuebles_total["total"] or 0) if inmuebles_total else 0,
-                        },
+                payload = {
+                    "mode": "inmobiliaria",
+                    "ventas": [dict(r) for r in ventas],
+                    "ingresos": [dict(r) for r in comision_series],
+                    "cierres": [dict(r) for r in volumen_cierre],
+                    "salidas": [dict(r) for r in volumen_salida],
+                    "gastos": [dict(r) for r in volumen_salida],
+                    "captaciones": [dict(r) for r in captaciones_series],
+                    "inmuebles": [dict(r) for r in inmuebles_series],
+                    "visitas": [dict(r) for r in visitas_series],
+                    "plazos": [dict(r) for r in plazos_series],
+                    "alquileres": [dict(r) for r in alquileres],
+                    "summary": {
+                        "compraventas_total": int(summary["compraventas_total"] or 0) if summary else 0,
+                        "ticket_medio": float(summary["ticket_medio"] or 0) if summary else 0,
+                        "plazo_medio_dias": float(summary["plazo_medio_dias"] or 0) if summary else 0,
+                        "desviacion_media_pct": float(summary["desviacion_media_pct"] or 0) if summary else 0,
+                        "visitas_total": int(summary["visitas_total"] or 0) if summary else 0,
+                        "visitas_media": float(summary["visitas_media"] or 0) if summary else 0,
+                        "captaciones_total": int(captacion_summary["captaciones_total"] or 0) if captacion_summary else 0,
+                        "captaciones_activas": int(captacion_summary["captaciones_activas"] or 0) if captacion_summary else 0,
+                        "inmuebles_total": int(inmuebles_total["total"] or 0) if inmuebles_total else 0,
                     },
-                )
+                }
+                if empresa_key:
+                    try:
+                        with Handler._dashboard_lock:
+                            Handler._dashboard_cache[empresa_key] = (now_ts + 8.0, payload)
+                            if len(Handler._dashboard_cache) > 300:
+                                for k, (exp, _val) in list(Handler._dashboard_cache.items())[:100]:
+                                    if exp <= now_ts:
+                                        Handler._dashboard_cache.pop(k, None)
+                    except Exception:
+                        pass
+                json_response(self, payload)
                 return
 
             try:
@@ -64628,15 +64717,23 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 alquileres = []
 
-            json_response(
-                self,
-                {
-                    "ventas": [dict(r) for r in ventas],
-                    "ingresos": [dict(r) for r in ingresos],
-                    "gastos": [dict(r) for r in gastos],
-                    "alquileres": [dict(r) for r in alquileres],
-                },
-            )
+            payload = {
+                "ventas": [dict(r) for r in ventas],
+                "ingresos": [dict(r) for r in ingresos],
+                "gastos": [dict(r) for r in gastos],
+                "alquileres": [dict(r) for r in alquileres],
+            }
+            if empresa_key:
+                try:
+                    with Handler._dashboard_lock:
+                        Handler._dashboard_cache[empresa_key] = (now_ts + 8.0, payload)
+                        if len(Handler._dashboard_cache) > 300:
+                            for k, (exp, _val) in list(Handler._dashboard_cache.items())[:100]:
+                                if exp <= now_ts:
+                                    Handler._dashboard_cache.pop(k, None)
+                except Exception:
+                    pass
+            json_response(self, payload)
             return
 
         if path == "/api/crm_resumen_ytd":
