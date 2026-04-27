@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v284";
+const APP_SW_VERSION = "v285";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -4422,7 +4422,19 @@ const userCanAccessService = (serviceKey) => {
   if (normalized === "gestoria") {
     if (allowed.has("gestoria")) return true;
     try {
-      for (const key of allowed) if (String(key || "").includes("gestoria")) return true;
+      if (
+        allowed.has("fincas") ||
+        allowed.has("administracion fincas") ||
+        allowed.has("administracion de fincas") ||
+        allowed.has("admin de fincas")
+      ) {
+        return true;
+      }
+      for (const key of allowed) {
+        const text = String(key || "");
+        if (text.includes("gestoria") || text.includes("gestoría")) return true;
+        if (text.includes("fincas")) return true;
+      }
     } catch {}
     return false;
   }
