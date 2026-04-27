@@ -32410,23 +32410,17 @@ const ensureHipotecaFichaPanel = () => {
         <button type="button" id="hipotecaFichaClose" class="secondary">Cerrar</button>
       </div>
       <div id="hipotecaFichaTabs" class="tabs" style="margin-bottom: 12px;">
-        <button class="tab active" type="button" data-hipoteca-ficha-tab="cliente">Datos cliente e inmueble</button>
+        <button class="tab active" type="button" data-hipoteca-ficha-tab="cliente">Datos compradores e inmueble</button>
         <button class="tab" type="button" data-hipoteca-ficha-tab="hipoteca">Datos de hipoteca</button>
         <button class="tab" type="button" data-hipoteca-ficha-tab="liquidacion">Ficha de liquidación</button>
       </div>
       <form id="hipotecaFichaForm">
+        <input type="hidden" name="cliente" />
+        <input type="hidden" name="cliente_id" />
         <div id="hipotecaFichaTabCliente" class="stack">
           <div class="form-card">
-            <h4>Cliente (principal) e inmueble</h4>
+            <h4>Inmueble (opcional)</h4>
             <div class="form-grid">
-              <label class="span-2">
-                <span>Cliente</span>
-                <input name="cliente" placeholder="Nombre y apellidos" />
-              </label>
-              <label>
-                <span>Cliente ID (CRM)</span>
-                <input name="cliente_id" placeholder="-" disabled />
-              </label>
               <label>
                 <span>Dirección inmueble</span>
                 <input data-json="cliente_inmueble_json" data-path="inmueble.direccion" placeholder="C/ ..." />
@@ -33608,7 +33602,8 @@ const setLiquidacionMoneyIfEmpty = (panel, path, value) => {
 const autofillHipotecaLiquidacionFromFicha = (panel) => {
   if (!panel) return;
   try {
-    const cliente = String(panel.querySelector('[name="cliente"]')?.value || "").trim();
+    const clienteInput = panel.querySelector('[name="cliente"]');
+    const cliente = String(clienteInput?.value || "").trim();
     const banco = String(panel.querySelector('[name="banco"]')?.value || "").trim();
     const fechaFirma = String(panel.querySelector('[name="fecha_firma"]')?.value || "").trim();
     const precio = panel.querySelector('[name="precio"]')?.value ?? "";
@@ -33623,6 +33618,7 @@ const autofillHipotecaLiquidacionFromFicha = (panel) => {
     const interes = getNestedValue(hipotecaDetalle, "condiciones.interes");
     const cuota = getNestedValue(hipotecaDetalle, "condiciones.cuota");
 
+    if (clienteInput && !cliente && c1Nombre) clienteInput.value = c1Nombre;
     setLiquidacionFieldIfEmpty(panel, "comprador.cliente", cliente || c1Nombre);
     setLiquidacionFieldIfEmpty(panel, "comprador.vivienda", direccion);
     setLiquidacionFieldIfEmpty(panel, "comprador.localidad", localidad);
@@ -34313,7 +34309,9 @@ const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
   panel.classList.add("open");
   window.requestAnimationFrame(() => {
     try {
-      panel.querySelector('[name="cliente"]')?.focus?.();
+      panel
+        .querySelector('[data-json="cliente_inmueble_json"][data-path="comprador.c1.nombre"]')
+        ?.focus?.();
     } catch {}
   });
 };
@@ -34529,6 +34527,13 @@ const saveHipotecaFicha = async (event) => {
   payload.hipoteca_detalle_json = JSON.stringify(hipotecaDetalle || {}, null, 0);
   payload.liquidacion_json = JSON.stringify(liquidacion || {}, null, 0);
 
+  if (!String(payload.cliente || "").trim()) {
+    const prestatarioNombre = String(getNestedValue(clienteInmueble, "prestataria.p1.nombre") || "").trim();
+    const c1Nombre = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
+    const liqCliente = String(getNestedValue(liquidacion, "comprador.cliente") || "").trim();
+    payload.cliente = prestatarioNombre || c1Nombre || liqCliente || "";
+  }
+
   // Sync: si rellenan el precio de compra/capital en Liquidación, reflejarlo en columnas principales.
   if ((payload.precio ?? "") === "") {
     const liqPrecio = toNumber(
@@ -34550,7 +34555,7 @@ const saveHipotecaFicha = async (event) => {
     if (isDraft) {
       const cliente = String(payload.cliente || "").trim();
       if (!cliente) {
-        if (status) status.textContent = "Indica el cliente para crear la hipoteca.";
+        if (status) status.textContent = "Indica al menos el comprador (C1) para crear la hipoteca.";
         return;
       }
       const createPayload = { ...base };
