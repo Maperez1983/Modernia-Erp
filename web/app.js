@@ -34574,16 +34574,11 @@ const saveHipotecaFicha = async (event) => {
       ].forEach((key) => {
         if (payload[key] !== undefined) createPayload[key] = payload[key];
       });
-      const res = await fetch("/api/hipotecas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createPayload),
+      const created = await postJsonWithDbRetry("/api/hipotecas", createPayload, {
+        maxRetries: 3,
+        baseDelayMs: 220,
+        timeoutMs: 25000,
       });
-      const created = await res.json();
-      if (created?.error) {
-        if (status) status.textContent = created.error;
-        return;
-      }
       const newId = String(created?.id || "").trim();
       if (!newId) {
         if (status) status.textContent = "No se pudo obtener el id de la nueva hipoteca.";
@@ -34597,16 +34592,11 @@ const saveHipotecaFicha = async (event) => {
       if (status) status.textContent = created?.created ? "Hipoteca creada. Guardando ficha..." : "Hipoteca encontrada. Guardando ficha...";
     }
 
-    const updateRes = await fetch("/api/hipotecas_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    await postJsonWithDbRetry("/api/hipotecas_update", payload, {
+      maxRetries: 3,
+      baseDelayMs: 220,
+      timeoutMs: 25000,
     });
-    const data = await updateRes.json();
-    if (data?.error) {
-      if (status) status.textContent = data.error;
-      return;
-    }
     if (status) status.textContent = "Cambios guardados.";
     loadHipotecaBdt(true);
     loadFinCrm();
@@ -34615,8 +34605,12 @@ const saveHipotecaFicha = async (event) => {
     setTimeout(() => {
       if (status) status.textContent = "";
     }, 1200);
-  } catch {
-    if (status) status.textContent = "Error al guardar cambios.";
+  } catch (error) {
+    const message = String(error?.message || "").trim();
+    if (status) status.textContent = message || "Error API al guardar cambios.";
+    try {
+      console.error("saveHipotecaFicha error", error);
+    } catch {}
   }
 };
 
