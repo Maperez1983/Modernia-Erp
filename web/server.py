@@ -1229,20 +1229,6 @@ def parse_ocr_psms(raw):
 
 OCR_TESSERACT_PSMS = parse_ocr_psms(os.environ.get("OCR_TESSERACT_PSMS", "6,11"))
 
-def resolve_tesseract_cmd() -> str:
-    configured = str(os.environ.get("OCR_TESSERACT_CMD") or os.environ.get("TESSERACT_CMD") or "").strip()
-    candidates = [
-        configured,
-        shutil.which("tesseract") or "",
-        "/usr/bin/tesseract",
-        "/opt/homebrew/bin/tesseract",
-        "/usr/local/bin/tesseract",
-    ]
-    for cmd in candidates:
-        if cmd and os.path.exists(cmd):
-            return cmd
-    return ""
-
 
 def parse_ocr_dpis(raw, base_dpi):
     value = (raw or "").strip()
@@ -12987,9 +12973,13 @@ def preprocess_image_for_ocr(src_path, out_path=None):
 
 def ocr_image_file(image_path):
     lang = detect_ocr_lang()
-    tesseract_cmd = resolve_tesseract_cmd()
+    tesseract_cmd = (
+        shutil.which("tesseract")
+        or "/opt/homebrew/bin/tesseract"
+        or "/usr/local/bin/tesseract"
+    )
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
-        return "", "tesseract no encontrado (instala Tesseract u ofrece OCR_TESSERACT_CMD)"
+        return "", "tesseract no encontrado en PATH"
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
@@ -14410,11 +14400,15 @@ def ocr_pdf_first_page(pdf_path):
             shutil.rmtree(tmp_generated, ignore_errors=True)
         return "", "imagen no encontrada para OCR"
     lang = detect_ocr_lang()
-    tesseract_cmd = resolve_tesseract_cmd()
+    tesseract_cmd = (
+        shutil.which("tesseract")
+        or "/opt/homebrew/bin/tesseract"
+        or "/usr/local/bin/tesseract"
+    )
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
         if tmp_generated:
             shutil.rmtree(tmp_generated, ignore_errors=True)
-        return "", "tesseract no encontrado (instala Tesseract u ofrece OCR_TESSERACT_CMD)"
+        return "", "tesseract no encontrado en PATH"
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
@@ -14645,7 +14639,11 @@ def ocrmypdf_extract_text(pdf_path):
                 break
     if not cmd or not os.path.exists(cmd):
         return "", "ocrmypdf no encontrado"
-    tesseract_cmd = resolve_tesseract_cmd()
+    tesseract_cmd = (
+        shutil.which("tesseract")
+        or "/opt/homebrew/bin/tesseract"
+        or "/usr/local/bin/tesseract"
+    )
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
         return "", "tesseract no encontrado"
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -57955,7 +57953,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 rows = conn.execute(
                     f"""
-                    SELECT DISTINCT c.id, c.nombre
+                    SELECT DISTINCT c.id, c.nombre, c.nif
                     FROM clientes c
                     JOIN seguros s ON s.cliente_id = c.id
                     WHERE {' AND '.join(where)}
@@ -57969,7 +57967,7 @@ class Handler(BaseHTTPRequestHandler):
                 placeholders = ",".join(["?"] * len(services))
                 rows = conn.execute(
                     f"""
-                    SELECT DISTINCT c.id, c.nombre
+                    SELECT DISTINCT c.id, c.nombre, c.nif
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
                     WHERE LOWER(ce.servicio) IN ({placeholders})
@@ -57979,7 +57977,7 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, nombre FROM clientes ORDER BY nombre"
+                    "SELECT id, nombre, nif FROM clientes ORDER BY nombre"
                 ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return
