@@ -19687,6 +19687,26 @@ const resolveCrmTecnocloudVertical = () => {
   return "inmo";
 };
 
+const syncCrmInsertOptionsForVertical = (vertical = "") => {
+  if (!crmInsertList) return;
+  const v = String(vertical || "").trim();
+  const allowed = new Set();
+  if (v === "fin") {
+    ["actividad", "cliente", "hipoteca"].forEach((k) => allowed.add(k));
+  } else if (v === "seguros") {
+    ["actividad", "cliente"].forEach((k) => allowed.add(k));
+  } else if (v === "gestoria") {
+    ["actividad", "cliente"].forEach((k) => allowed.add(k));
+  } else {
+    ["actividad", "cliente", "captacion", "demanda", "edificio"].forEach((k) => allowed.add(k));
+  }
+  crmInsertList.querySelectorAll("button[data-crm-insert]").forEach((btn) => {
+    const key = String(btn.dataset.crmInsert || "").trim();
+    if (!key) return;
+    btn.classList.toggle("hidden-context", !allowed.has(key));
+  });
+};
+
 const syncCrmTecnocloudVerticalNav = () => {
   const vertical = resolveCrmTecnocloudVertical();
   const isGestoria = vertical === "gestoria";
@@ -19755,7 +19775,7 @@ const syncCrmTecnocloudVerticalNav = () => {
     }
   } catch {}
 
-  const showInmoChrome = vertical === "inmo" || vertical === "gestoria";
+  const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin";
   [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
     if (btn) btn.classList.toggle("hidden", !showInmoChrome);
   });
@@ -19763,6 +19783,7 @@ const syncCrmTecnocloudVerticalNav = () => {
     setCrmQuickNewOpen(false);
     setCrmRecentOpen(false);
   }
+  syncCrmInsertOptionsForVertical(vertical);
 
   if (crmBrandTitle && crmBrandSubtitle) {
     const company = String(state.currentEmpresaName || "").trim();
@@ -21407,6 +21428,15 @@ const openFinCrm = () => {
   state.crmFinEmpresaId = empresa.id;
   setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab("fin-crm");
+  // Anti-mezcla: el detalle de inmueble es exclusivo de Inmobiliaria.
+  try {
+    if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
+      inmuebleDetail.classList.add("hidden");
+    }
+    state.currentInmueble = null;
+    state.currentInmuebleContext = null;
+    state.currentInmuebleId = "";
+  } catch {}
   try {
     const currentParams = new URLSearchParams(window.location.search);
     currentParams.delete("empresa");
@@ -59452,14 +59482,36 @@ if (crmInsertList) {
     } else if (key === "demanda") {
       goToEstudioAlta("demanda");
     } else if (key === "actividad") {
-      openActionCreator("", "", "inmobiliaria", {
+      const vertical = resolveCrmTecnocloudVertical();
+      const servicio =
+        vertical === "fin"
+          ? "financiaciones"
+          : (vertical === "seguros" ? "seguros" : "inmobiliaria");
+      openActionCreator("", "", servicio, {
         lock_service: true,
-        servicio: "inmobiliaria",
+        servicio,
         default_tipo: "Cita",
         default_responsable: getCurrentUser(),
       });
     } else if (key === "cliente") {
       setCrmClienteModalOpen(true);
+    } else if (key === "hipoteca") {
+      openFinCrm();
+      window.setTimeout(() => {
+        try {
+          if (finAsesoramientoForm) finAsesoramientoForm.reset();
+          if (finAsesoramientoId) finAsesoramientoId.value = "";
+          if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = true;
+          setHipotecaAltaView("asesoramiento");
+          if (finAsesoramientoForm) {
+            const dateInput = finAsesoramientoForm.querySelector('[name="fecha"]');
+            if (dateInput && !dateInput.value) {
+              dateInput.value = new Date().toISOString().slice(0, 10);
+            }
+            finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        } catch (_) {}
+      }, 0);
     } else if (key === "edificio") {
       goToEstudioAlta("captacion");
       // Prefill para alta de edificio/complejo (si existe el selector en el formulario).

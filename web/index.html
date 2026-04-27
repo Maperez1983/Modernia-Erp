@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=237" />
+				    <link rel="stylesheet" href="styles.css?v=238" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3011,20 +3011,24 @@
 		                  <div class="crm-insert-search">
 		                    <input id="crmInsertSearch" placeholder="Filtra..." autocomplete="off" />
 		                  </div>
-				                  <div class="crm-insert-list" id="crmInsertList" role="list">
-				                    <button type="button" class="crm-insert-item" data-crm-insert="actividad">
-				                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
-				                      <span class="crm-insert-label">Cita / Actividad</span>
-				                    </button>
-				                    <button type="button" class="crm-insert-item" data-crm-insert="cliente">
-				                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
-				                      <span class="crm-insert-label">Cliente</span>
-				                    </button>
-				                    <button type="button" class="crm-insert-item" data-crm-insert="captacion">
-				                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
-				                      <span class="crm-insert-label">Inmueble</span>
-				                    </button>
-				                    <button type="button" class="crm-insert-item" data-crm-insert="demanda">
+					                  <div class="crm-insert-list" id="crmInsertList" role="list">
+					                    <button type="button" class="crm-insert-item" data-crm-insert="actividad">
+					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+					                      <span class="crm-insert-label">Cita / Actividad</span>
+					                    </button>
+					                    <button type="button" class="crm-insert-item" data-crm-insert="cliente">
+					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+					                      <span class="crm-insert-label">Cliente</span>
+					                    </button>
+					                    <button type="button" class="crm-insert-item" data-crm-insert="hipoteca">
+					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
+					                      <span class="crm-insert-label">Hipoteca / Financiación</span>
+					                    </button>
+					                    <button type="button" class="crm-insert-item" data-crm-insert="captacion">
+					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
+					                      <span class="crm-insert-label">Inmueble</span>
+					                    </button>
+					                    <button type="button" class="crm-insert-item" data-crm-insert="demanda">
 				                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clipboard"></use></svg></span>
 				                      <span class="crm-insert-label">Pedido</span>
 				                    </button>
@@ -9960,11 +9964,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-										    <script src="app.js?v=674"></script>
+										    <script src="app.js?v=675"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-									        const TARGET_SW = "/sw.js?v=275";
+									        const TARGET_SW = "/sw.js?v=276";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
