@@ -22594,7 +22594,7 @@ def sanitize_renta_entries(entries):
     return [sanitize_renta_entry(entry) for entry in entries if isinstance(entry, dict)]
 
 
-def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50, ejercicio=""):
+def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50, ejercicio="", *, include_docs=True):
     def renta_ref_id_for_entry(ejercicio: object, entry_id: object) -> str:
         ejercicio_s = str(ejercicio or "").strip()
         entry_s = str(entry_id or "").strip()
@@ -22616,7 +22616,10 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     limit_val = max(1, min(limit_val, 200))
     # Note: `estado` filtering normalizes accents/spaces; we keep it in Python for portability
     # and to avoid backend-specific collation issues (SQLite vs Postgres).
-    prefetch_limit = min(max(limit_val * 12, 200), 2500)
+    # Prefetch: necesitamos más filas para luego filtrar por `estado` (Python) sin quedarnos cortos.
+    # En dashboard, cuando `include_docs=False`, bajamos el prefetch para evitar timeouts innecesarios.
+    prefetch_mult = 12 if include_docs else 6
+    prefetch_limit = min(max(limit_val * prefetch_mult, 200), 2500)
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
@@ -22751,6 +22754,38 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
 
     if not items:
         return []
+
+    if not include_docs:
+        # Dashboard/overview: no cargamos docs (coste alto) y devolvemos solo el estado de renta.
+        for item in items:
+            try:
+                item["docs"] = []
+                item["doc_count"] = int(item.get("doc_count") or 0)
+                item["preview_doc"] = item.get("preview_doc") or {}
+                latest = item.get("renta_latest") or {}
+                doc_key = str(latest.get("doc_key") or "").strip()
+                doc_url = str(latest.get("doc_url") or "").strip()
+                if doc_key or doc_url:
+                    ejercicio2 = str(latest.get("ejercicio") or "").strip()
+                    entry_id2 = str(latest.get("id") or "").strip()
+                    item["doc_count"] = 1
+                    item["preview_doc"] = {
+                        "id": "",
+                        "cliente_id": item.get("cliente_id") or "",
+                        "nombre": str(latest.get("doc_nombre") or f"Renta {ejercicio2}.pdf").strip(),
+                        "tipo": "Modelo 100",
+                        "fecha": str(latest.get("doc_fecha") or ejercicio2).strip(),
+                        "estado": "",
+                        "notas": "",
+                        "doc_key": doc_key,
+                        "doc_url": doc_url,
+                        "referencia_tipo": "renta",
+                        "referencia_id": renta_ref_id_for_entry(ejercicio2, entry_id2),
+                        "updated_at": "",
+                    }
+            except Exception:
+                continue
+        return items
 
     placeholders = ",".join(["?"] * len(selected_cliente_ids))
     selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
@@ -37728,6 +37763,8 @@ class Handler(BaseHTTPRequestHandler):
     _seguros_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error, last_result}}
     _gestoria_docs_recent_lock = threading.Lock()
     _gestoria_docs_recent_cache = {}  # {(empresa_id, limit): (expires_ts, payload_dict)}
+    _gestoria_dashboard_lock = threading.Lock()
+    _gestoria_dashboard_cache = {}  # {empresa_id: (expires_ts, payload_dict)}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -60258,6 +60295,19 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
+            now_ts = time.time()
+            cache_key = str(empresa_id or "").strip()
+            if cache_key:
+                try:
+                    with Handler._gestoria_dashboard_lock:
+                        cached = Handler._gestoria_dashboard_cache.get(cache_key)
+                        if cached and cached[0] > now_ts and isinstance(cached[1], dict):
+                            json_response(self, cached[1])
+                            return
+                except Exception:
+                    pass
+
             today = datetime.now().date()
             next_30 = today + timedelta(days=30)
             next_14 = today + timedelta(days=14)
@@ -60265,190 +60315,175 @@ class Handler(BaseHTTPRequestHandler):
                 "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
                 "'administracion fincas', 'administración fincas')"
             )
-            total = conn.execute(
-                f"""
-                SELECT COUNT(DISTINCT c.id) AS total
-                FROM clientes c
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                WHERE ce.empresa_id = ? AND {service_filter}
-                """,
-                (empresa_id,),
-            ).fetchone()
-            active_rows = conn.execute(
-                f"""
-                SELECT DISTINCT c.id AS cliente_id, ce.estado
-                FROM clientes c
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                WHERE ce.empresa_id = ?
-                  AND {service_filter}
-                """,
-                (empresa_id,),
-            ).fetchall()
-            active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row["estado"])}
-            tipos = conn.execute(
-                f"""
-                SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
-                FROM cliente_gestoria cg
-                JOIN clientes_empresas ce ON ce.cliente_id = cg.cliente_id
-                WHERE ce.empresa_id = ? AND {service_filter}
-                GROUP BY cg.tipo_cliente
-                """,
-                (empresa_id,),
-            ).fetchall()
-            tipos_map = {row["tipo"]: row["total"] for row in tipos if row["tipo"]}
-            def tipo_count(*labels):
-                return sum(tipos_map.get(label, 0) for label in labels)
-            modelos_mes = conn.execute(
-                f"""
-                SELECT COUNT(*) AS total
-                FROM gestoria_modelos m
-                JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
-                WHERE ce.empresa_id = ? AND {service_filter}
-                  AND m.proxima_fecha IS NOT NULL
-                  AND length(m.proxima_fecha) >= 7
-                  AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
-                """,
-                (empresa_id, today.strftime("%Y-%m")),
-            ).fetchone()
-            modelos = conn.execute(
-                f"""
-                SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
-                FROM gestoria_modelos m
-                JOIN clientes c ON c.id = m.cliente_id
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                WHERE ce.empresa_id = ? AND {service_filter}
-                  AND m.proxima_fecha IS NOT NULL
-                  AND date(m.proxima_fecha) BETWEEN date(?) AND date(?)
-                ORDER BY m.proxima_fecha ASC
-                LIMIT 12
-                """,
-                (empresa_id, today.isoformat(), next_30.isoformat()),
-            ).fetchall()
-            modelos_vencidos = conn.execute(
-                f"""
-                SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
-                FROM gestoria_modelos m
-                JOIN clientes c ON c.id = m.cliente_id
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                WHERE ce.empresa_id = ? AND {service_filter}
-                  AND m.proxima_fecha IS NOT NULL
-                  AND date(m.proxima_fecha) < date(?)
-                  AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
-                ORDER BY m.proxima_fecha ASC
-                LIMIT 12
-                """,
-                (empresa_id, today.isoformat()),
-            ).fetchall()
-            renta_rows = collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=500)
-            rentas_borrador = [
-                row
-                for row in renta_rows
-                if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
-            ]
-            presupuestos_estudio = conn.execute(
-                """
-                SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
-                FROM workspace_presupuestos p
-                LEFT JOIN clientes c ON c.id = p.cliente_id
-                WHERE p.empresa_id = ?
-                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
-                  AND LOWER(COALESCE(p.estado, '')) = 'estudio'
-                ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
-                LIMIT 12
-                """,
-                (empresa_id,),
-            ).fetchall()
-            presupuestos_rechazados = conn.execute(
-                """
-                SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
-                FROM workspace_presupuestos p
-                LEFT JOIN clientes c ON c.id = p.cliente_id
-                WHERE p.empresa_id = ?
-                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
-                  AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
-                ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
-                LIMIT 12
-                """,
-                (empresa_id,),
-            ).fetchall()
-            encargos_pendientes = conn.execute(
-                """
-                SELECT p.fecha, p.fecha_encargo, p.titulo, p.encargo_estado, COALESCE(c.nombre, '') AS cliente
-                FROM workspace_presupuestos p
-                LEFT JOIN clientes c ON c.id = p.cliente_id
-                WHERE p.empresa_id = ?
-                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
-                  AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
-                  AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
-                ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC
-                LIMIT 12
-                """,
-                (empresa_id,),
-            ).fetchall()
-            acciones_pendientes = conn.execute(
-                """
-                SELECT COUNT(*) AS total
-                FROM acciones a
-                WHERE a.empresa_id = ?
-                  AND LOWER(a.servicio) = 'gestoria'
-                  AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                  AND a.fecha IS NOT NULL
-                  AND date(a.fecha) >= date(?)
-                """,
-                (empresa_id, today.isoformat()),
-            ).fetchone()
-            acciones = conn.execute(
-                """
-                SELECT a.fecha, a.hora,
-                       COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                       a.tipo, a.estado
-                FROM acciones a
-                LEFT JOIN clientes c ON c.id = a.cliente_id
-                WHERE a.empresa_id = ?
-                  AND LOWER(a.servicio) = 'gestoria'
-                  AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                  AND a.fecha IS NOT NULL
-                  AND date(a.fecha) BETWEEN date(?) AND date(?)
-                ORDER BY a.fecha ASC, a.hora ASC
-                LIMIT 10
-                """,
-                (empresa_id, today.isoformat(), next_14.isoformat()),
-            ).fetchall()
-            acciones_vencidas = conn.execute(
-                """
-                SELECT a.fecha, a.hora,
-                       COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                       a.tipo, a.estado
-                FROM acciones a
-                LEFT JOIN clientes c ON c.id = a.cliente_id
-                WHERE a.empresa_id = ?
-                  AND LOWER(a.servicio) = 'gestoria'
-                  AND a.fecha IS NOT NULL
-                  AND date(a.fecha) < date(?)
-                  AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                ORDER BY a.fecha ASC, a.hora ASC
-                LIMIT 10
-                """,
-                (empresa_id, today.isoformat()),
-            ).fetchall()
-            json_response(
-                self,
-                {
-                    "counts": {
-                        "total": total["total"] if total else 0,
-                        "activos": len(active_ids),
-                        "autonomos": tipo_count("Autónomo", "Autonomo"),
-                        "empresas": tipo_count("Empresa", "Empresas"),
-                    "puntuales": tipo_count("Puntual", "Puntuales"),
-                    "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
-                    "rentas_pendientes_presentar": len(rentas_borrador),
-                    "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
-                    "presupuestos_estudio": len(presupuestos_estudio),
-                    "encargos_pendientes": len(encargos_pendientes),
+
+            payload = {
+                "counts": {
+                    "total": 0,
+                    "activos": 0,
+                    "autonomos": 0,
+                    "empresas": 0,
+                    "puntuales": 0,
+                    "modelos_mes": 0,
+                    "rentas_pendientes_presentar": 0,
+                    "acciones_pendientes": 0,
+                    "presupuestos_estudio": 0,
+                    "encargos_pendientes": 0,
                 },
-                "modelos": [dict(r) for r in modelos],
-                "modelos_vencidos": [dict(r) for r in modelos_vencidos],
-                "rentas_pendientes": [
+                "modelos": [],
+                "modelos_vencidos": [],
+                "rentas_pendientes": [],
+                "presupuestos_estudio": [],
+                "presupuestos_rechazados": [],
+                "encargos_pendientes": [],
+                "acciones": [],
+                "acciones_vencidas": [],
+            }
+
+            try:
+                total = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id) AS total
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE ce.empresa_id = ? AND {service_filter}
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                payload["counts"]["total"] = int(row_value(total, "total", 0) or 0)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:total", exc)
+                except Exception:
+                    pass
+
+            active_ids = set()
+            try:
+                active_rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT c.id AS cliente_id, ce.estado
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE ce.empresa_id = ?
+                      AND {service_filter}
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row.get("estado"))}
+                payload["counts"]["activos"] = len(active_ids)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:active", exc)
+                except Exception:
+                    pass
+
+            tipos_map = {}
+            try:
+                tipos = conn.execute(
+                    f"""
+                    SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
+                    FROM cliente_gestoria cg
+                    JOIN clientes_empresas ce ON ce.cliente_id = cg.cliente_id
+                    WHERE ce.empresa_id = ? AND {service_filter}
+                    GROUP BY cg.tipo_cliente
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                tipos_map = {row.get("tipo"): int(row.get("total") or 0) for row in tipos if row.get("tipo")}
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
+                except Exception:
+                    pass
+
+            def tipo_count(*labels):
+                return sum(int(tipos_map.get(label, 0) or 0) for label in labels)
+
+            payload["counts"]["autonomos"] = tipo_count("Autónomo", "Autonomo")
+            payload["counts"]["empresas"] = tipo_count("Empresa", "Empresas")
+            payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
+
+            try:
+                modelos_mes = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM gestoria_modelos m
+                    JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
+                    WHERE ce.empresa_id = ? AND {service_filter}
+                      AND m.proxima_fecha IS NOT NULL
+                      AND length(m.proxima_fecha) >= 7
+                      AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
+                    """,
+                    (empresa_id, today.strftime("%Y-%m")),
+                ).fetchone()
+                payload["counts"]["modelos_mes"] = int(row_value(modelos_mes, "total", 0) or 0)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:modelos_mes", exc)
+                except Exception:
+                    pass
+
+            try:
+                modelos = conn.execute(
+                    f"""
+                    SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
+                    FROM gestoria_modelos m
+                    JOIN clientes c ON c.id = m.cliente_id
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE ce.empresa_id = ? AND {service_filter}
+                      AND m.proxima_fecha IS NOT NULL
+                      AND date(m.proxima_fecha) BETWEEN date(?) AND date(?)
+                    ORDER BY m.proxima_fecha ASC
+                    LIMIT 12
+                    """,
+                    (empresa_id, today.isoformat(), next_30.isoformat()),
+                ).fetchall()
+                payload["modelos"] = [dict(r) for r in modelos]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:modelos", exc)
+                except Exception:
+                    pass
+
+            try:
+                modelos_vencidos = conn.execute(
+                    f"""
+                    SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
+                    FROM gestoria_modelos m
+                    JOIN clientes c ON c.id = m.cliente_id
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE ce.empresa_id = ? AND {service_filter}
+                      AND m.proxima_fecha IS NOT NULL
+                      AND date(m.proxima_fecha) < date(?)
+                      AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
+                    ORDER BY m.proxima_fecha ASC
+                    LIMIT 12
+                    """,
+                    (empresa_id, today.isoformat()),
+                ).fetchall()
+                payload["modelos_vencidos"] = [dict(r) for r in modelos_vencidos]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:modelos_vencidos", exc)
+                except Exception:
+                    pass
+
+            rentas_borrador = []
+            try:
+                renta_rows = collect_gestoria_renta_card_items(
+                    conn,
+                    empresa_id,
+                    q="",
+                    estado="",
+                    limit=500,
+                    include_docs=False,
+                )
+                rentas_borrador = [
+                    row
+                    for row in renta_rows
+                    if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
+                ]
+                payload["counts"]["rentas_pendientes_presentar"] = len(rentas_borrador)
+                payload["rentas_pendientes"] = [
                     {
                         "cliente": row.get("nombre"),
                         "ejercicio": (row.get("renta_latest") or {}).get("ejercicio") or "",
@@ -60457,14 +60492,161 @@ class Handler(BaseHTTPRequestHandler):
                         "estado_presentacion": (row.get("renta_latest") or {}).get("estado_presentacion") or "Borrador",
                     }
                     for row in rentas_borrador[:12]
-                ],
-                "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
-                "presupuestos_rechazados": [dict(r) for r in presupuestos_rechazados],
-                "encargos_pendientes": [dict(r) for r in encargos_pendientes],
-                "acciones": [dict(r) for r in acciones],
-                "acciones_vencidas": [dict(r) for r in acciones_vencidas],
-            },
-            )
+                ]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:rentas", exc)
+                except Exception:
+                    pass
+
+            try:
+                presupuestos_estudio = conn.execute(
+                    """
+                    SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+                    FROM workspace_presupuestos p
+                    LEFT JOIN clientes c ON c.id = p.cliente_id
+                    WHERE p.empresa_id = ?
+                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND LOWER(COALESCE(p.estado, '')) = 'estudio'
+                    ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
+                    LIMIT 12
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                payload["presupuestos_estudio"] = [dict(r) for r in presupuestos_estudio]
+                payload["counts"]["presupuestos_estudio"] = len(presupuestos_estudio)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:presupuestos_estudio", exc)
+                except Exception:
+                    pass
+
+            try:
+                presupuestos_rechazados = conn.execute(
+                    """
+                    SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+                    FROM workspace_presupuestos p
+                    LEFT JOIN clientes c ON c.id = p.cliente_id
+                    WHERE p.empresa_id = ?
+                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
+                    ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
+                    LIMIT 12
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                payload["presupuestos_rechazados"] = [dict(r) for r in presupuestos_rechazados]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:presupuestos_rechazados", exc)
+                except Exception:
+                    pass
+
+            try:
+                encargos_pendientes = conn.execute(
+                    """
+                    SELECT p.fecha, p.fecha_encargo, p.titulo, p.encargo_estado, COALESCE(c.nombre, '') AS cliente
+                    FROM workspace_presupuestos p
+                    LEFT JOIN clientes c ON c.id = p.cliente_id
+                    WHERE p.empresa_id = ?
+                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
+                      AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
+                    ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC
+                    LIMIT 12
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                payload["encargos_pendientes"] = [dict(r) for r in encargos_pendientes]
+                payload["counts"]["encargos_pendientes"] = len(encargos_pendientes)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:encargos_pendientes", exc)
+                except Exception:
+                    pass
+
+            try:
+                acciones_pendientes = conn.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM acciones a
+                    WHERE a.empresa_id = ?
+                      AND LOWER(a.servicio) = 'gestoria'
+                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                      AND a.fecha IS NOT NULL
+                      AND date(a.fecha) >= date(?)
+                    """,
+                    (empresa_id, today.isoformat()),
+                ).fetchone()
+                payload["counts"]["acciones_pendientes"] = int(row_value(acciones_pendientes, "total", 0) or 0)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:acciones_pendientes", exc)
+                except Exception:
+                    pass
+
+            try:
+                acciones = conn.execute(
+                    """
+                    SELECT a.fecha, a.hora,
+                           COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                           a.tipo, a.estado
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.empresa_id = ?
+                      AND LOWER(a.servicio) = 'gestoria'
+                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                      AND a.fecha IS NOT NULL
+                      AND date(a.fecha) BETWEEN date(?) AND date(?)
+                    ORDER BY a.fecha ASC, a.hora ASC
+                    LIMIT 10
+                    """,
+                    (empresa_id, today.isoformat(), next_14.isoformat()),
+                ).fetchall()
+                payload["acciones"] = [dict(r) for r in acciones]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:acciones", exc)
+                except Exception:
+                    pass
+
+            try:
+                acciones_vencidas = conn.execute(
+                    """
+                    SELECT a.fecha, a.hora,
+                           COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                           a.tipo, a.estado
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.empresa_id = ?
+                      AND LOWER(a.servicio) = 'gestoria'
+                      AND a.fecha IS NOT NULL
+                      AND date(a.fecha) < date(?)
+                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                    ORDER BY a.fecha ASC, a.hora ASC
+                    LIMIT 10
+                    """,
+                    (empresa_id, today.isoformat()),
+                ).fetchall()
+                payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:acciones_vencidas", exc)
+                except Exception:
+                    pass
+
+            if cache_key:
+                try:
+                    with Handler._gestoria_dashboard_lock:
+                        Handler._gestoria_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
+                        if len(Handler._gestoria_dashboard_cache) > 200:
+                            for k, (exp, _val) in list(Handler._gestoria_dashboard_cache.items())[:80]:
+                                if exp <= now_ts:
+                                    Handler._gestoria_dashboard_cache.pop(k, None)
+                except Exception:
+                    pass
+
+            json_response(self, payload)
             return
 
         if path == "/api/clientes":
