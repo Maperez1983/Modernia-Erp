@@ -227,6 +227,8 @@ header {
 main {
   padding: 26px var(--layout-gutter) 64px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch;
   gap: 24px;
   max-width: var(--layout-max);
   width: 100%;
