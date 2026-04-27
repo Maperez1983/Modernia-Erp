@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v258";
+const APP_SW_VERSION = "v284";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -32419,8 +32419,12 @@ const ensureHipotecaFichaPanel = () => {
         <input type="hidden" name="cliente_id" />
         <div id="hipotecaFichaTabCliente" class="stack">
           <div class="form-card">
-            <h4>Inmueble (opcional)</h4>
+            <h4>Hipotecados e inmueble</h4>
             <div class="form-grid">
+              <label class="span-2">
+                <span>Hipotecados</span>
+                <input id="hipotecaFichaTitulares" placeholder="C1 + C2" disabled />
+              </label>
               <label>
                 <span>Dirección inmueble</span>
                 <input data-json="cliente_inmueble_json" data-path="inmueble.direccion" placeholder="C/ ..." />
@@ -33294,6 +33298,29 @@ const normalizePrestatariaSource = (value) => {
   return raw;
 };
 
+const refreshHipotecaTitularesDisplay = (panel, clienteInmueble = null) => {
+  if (!panel) return;
+  const input = panel.querySelector("#hipotecaFichaTitulares");
+  if (!input) return;
+  const obj =
+    clienteInmueble && typeof clienteInmueble === "object" && !Array.isArray(clienteInmueble)
+      ? clienteInmueble
+      : collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+  const p1Nombre = String(getNestedValue(obj, "prestataria.p1.nombre") || "").trim();
+  const p2Source = normalizePrestatariaSource(getNestedValue(obj, "prestataria.p2.source"));
+  const p2Nombre =
+    p2Source && p2Source !== "none" ? String(getNestedValue(obj, "prestataria.p2.nombre") || "").trim() : "";
+  const titulares = [p1Nombre, p2Nombre].map((v) => String(v || "").trim()).filter(Boolean);
+  if (titulares.length) {
+    input.value = titulares.join(" + ");
+    return;
+  }
+  const c1 = String(getNestedValue(obj, "comprador.c1.nombre") || "").trim();
+  const c2 = String(getNestedValue(obj, "comprador.c2.nombre") || "").trim();
+  const fallback = [c1, c2].filter(Boolean);
+  input.value = fallback.join(" + ");
+};
+
 const syncHipotecaPrestatariaFromClientes = (panel, clienteInmueble) => {
   if (!panel) return;
   const obj = clienteInmueble && typeof clienteInmueble === "object" ? clienteInmueble : {};
@@ -33330,6 +33357,7 @@ const syncHipotecaPrestatariaFromClientes = (panel, clienteInmueble) => {
   const p2Source = getNestedValue(obj, "prestataria.p2.source");
   applyParty("p1", p1Source);
   applyParty("p2", p2Source);
+  refreshHipotecaTitularesDisplay(panel, obj);
 };
 
 const normalizeMoneyLike = (value) => {
@@ -34527,12 +34555,10 @@ const saveHipotecaFicha = async (event) => {
   payload.hipoteca_detalle_json = JSON.stringify(hipotecaDetalle || {}, null, 0);
   payload.liquidacion_json = JSON.stringify(liquidacion || {}, null, 0);
 
-  if (!String(payload.cliente || "").trim()) {
-    const prestatarioNombre = String(getNestedValue(clienteInmueble, "prestataria.p1.nombre") || "").trim();
-    const c1Nombre = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
-    const liqCliente = String(getNestedValue(liquidacion, "comprador.cliente") || "").trim();
-    payload.cliente = prestatarioNombre || c1Nombre || liqCliente || "";
-  }
+  const prestatarioNombre = String(getNestedValue(clienteInmueble, "prestataria.p1.nombre") || "").trim();
+  const c1Nombre = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
+  const liqCliente = String(getNestedValue(liquidacion, "comprador.cliente") || "").trim();
+  payload.cliente = prestatarioNombre || c1Nombre || liqCliente || String(payload.cliente || "").trim() || "";
 
   // Sync: si rellenan el precio de compra/capital en Liquidación, reflejarlo en columnas principales.
   if ((payload.precio ?? "") === "") {
