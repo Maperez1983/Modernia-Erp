@@ -3380,7 +3380,7 @@
 					                    <span class="tc-mod-label">Búsq./Inf.</span>
 					                  </button>
 	                          </div>
-	                          <div class="crm-top-modules hidden" id="crmTopGestoriaModules">
+		                          <div class="crm-top-modules hidden" id="crmTopGestoriaModules">
 	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-dash" title="Dashboard">
 	                              <span class="tc-mod-ico" aria-hidden="true">
 	                                <svg viewBox="0 0 24 24" fill="none"><path d="M4 13h7v7H4zM13 4h7v16h-7zM4 4h7v7H4z" stroke="currentColor" stroke-width="2"/></svg>
@@ -3411,14 +3411,44 @@
 	                              </span>
 	                              <span class="tc-mod-label">Presup.</span>
 	                            </button>
-	                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-conta" title="Contabilidad">
-	                              <span class="tc-mod-ico" aria-hidden="true">
-	                                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10v4H7z" stroke="currentColor" stroke-width="2"/><path d="M6 6h12v16H6z" stroke="currentColor" stroke-width="2"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-	                              </span>
-	                              <span class="tc-mod-label">Conta</span>
-	                            </button>
-	                          </div>
-					                </div>
+		                            <button type="button" class="tab tc-module" data-crm-service-tab="gestoria-conta" title="Contabilidad">
+		                              <span class="tc-mod-ico" aria-hidden="true">
+		                                <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10v4H7z" stroke="currentColor" stroke-width="2"/><path d="M6 6h12v16H6z" stroke="currentColor" stroke-width="2"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+		                              </span>
+		                              <span class="tc-mod-label">Conta</span>
+		                            </button>
+		                          </div>
+		                          <div class="crm-top-modules hidden" id="crmTopFinModules">
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="dashboard" title="Dashboard">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-dashboard"></use></svg></span>
+		                              <span class="tc-mod-label">Dashboard</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="alta" title="Alta BDT">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-plus"></use></svg></span>
+		                              <span class="tc-mod-label">Alta</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="asesoramiento" title="Asesoramiento">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-file"></use></svg></span>
+		                              <span class="tc-mod-label">Asesoram.</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="agenda" title="Agenda">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-calendar"></use></svg></span>
+		                              <span class="tc-mod-label">Agenda</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="bdt" title="BDT">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-layers"></use></svg></span>
+		                              <span class="tc-mod-label">BDT</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-hipoteca-section="contabilidad" title="Contabilidad">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coins"></use></svg></span>
+		                              <span class="tc-mod-label">Conta</span>
+		                            </button>
+		                            <button type="button" class="tab tc-module" data-fin-open-sim="1" title="Simulador fiscal">
+		                              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-spark"></use></svg></span>
+		                              <span class="tc-mod-label">Sim</span>
+		                            </button>
+		                          </div>
+						                </div>
 
 				                <div class="crm-lightning-topbar-right">
 				                  <div class="crm-top-actions" aria-label="Accesos directos">
@@ -9964,11 +9994,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-										    <script src="app.js?v=675"></script>
+											    <script src="app.js?v=678"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-									        const TARGET_SW = "/sw.js?v=276";
+										        const TARGET_SW = "/sw.js?v=279";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

@@ -19754,8 +19754,8 @@ const syncCrmTecnocloudVerticalNav = () => {
     crmWorkspaceShell.classList.toggle("hidden", false);
   }
   if (crmLightningSidebar) {
-    // Sidebar estilo "Lightning" en Inmobiliaria y Gestoría.
-    crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria));
+    // Sidebar estilo "Lightning" en Inmobiliaria, Gestoría y Financiaciones.
+    crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria || vertical === "fin"));
   }
   if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
     // No mezclar pantallas: el detalle de inmueble es exclusivo de Inmobiliaria.
@@ -19766,13 +19766,20 @@ const syncCrmTecnocloudVerticalNav = () => {
   try {
     const inmoModules = document.getElementById("crmTopModules");
     const gestoriaModules = document.getElementById("crmTopGestoriaModules");
-    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria");
+    const finModules = document.getElementById("crmTopFinModules");
+    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria" || vertical === "fin");
     if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria");
+    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin");
     if (gestoriaModules) {
       gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
         btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
       });
     }
+  } catch {}
+
+  // Financiaciones: usar módulos "card" en topbar, no micro-tabs internos.
+  try {
+    if (hipotecaTabs) hipotecaTabs.classList.toggle("hidden", vertical === "fin");
   } catch {}
 
   const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin";
@@ -35618,6 +35625,14 @@ const setHipotecaAltaView = (view) => {
   hipotecaTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
   });
+  try {
+    const finModules = document.getElementById("crmTopFinModules");
+    if (finModules) {
+      finModules.querySelectorAll("button.tab").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
+      });
+    }
+  } catch {}
   if (next === "dashboard") {
     loadHipotecaDashboard();
   }
@@ -59499,16 +59514,12 @@ if (crmInsertList) {
       openFinCrm();
       window.setTimeout(() => {
         try {
-          if (finAsesoramientoForm) finAsesoramientoForm.reset();
-          if (finAsesoramientoId) finAsesoramientoId.value = "";
-          if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = true;
-          setHipotecaAltaView("asesoramiento");
-          if (finAsesoramientoForm) {
-            const dateInput = finAsesoramientoForm.querySelector('[name="fecha"]');
-            if (dateInput && !dateInput.value) {
-              dateInput.value = new Date().toISOString().slice(0, 10);
-            }
-            finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+          // El alta de una nueva operación debe usar el formulario BDT (mismos datos de cierre).
+          setHipotecaAltaView("alta");
+          if (hipotecaForm) {
+            hipotecaForm.scrollIntoView({ behavior: "smooth", block: "start" });
+            const first = hipotecaForm.querySelector('input[name="cliente"]');
+            first?.focus?.();
           }
         } catch (_) {}
       }, 0);
@@ -69658,6 +69669,25 @@ if (hipotecaTabs) {
     });
   });
 }
+
+try {
+  const crmTopFinModules = document.getElementById("crmTopFinModules");
+  if (crmTopFinModules) {
+    crmTopFinModules.querySelectorAll("button.tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.finOpenSim) {
+          openFinServiceTab("fin-sim");
+          return;
+        }
+        const section = String(btn.dataset.hipotecaSection || "").trim();
+        if (section) {
+          openFinCrm();
+          setHipotecaAltaView(section);
+        }
+      });
+    });
+  }
+} catch {}
 
 	if (hipotecaBdtRefresh) {
 	  hipotecaBdtRefresh.addEventListener("click", () => {
