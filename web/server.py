@@ -55731,6 +55731,8 @@ class Handler(BaseHTTPRequestHandler):
                 precio if precio not in (None, "") else (existing_row["precio"] if existing_row else None),
                 importe_hipoteca if importe_hipoteca not in (None, "") else (existing_row["importe_hipoteca"] if existing_row else None),
             )
+            out_id = ""
+            created_flag = False
 
             if existing:
                 conn.execute(
@@ -55782,7 +55784,11 @@ class Handler(BaseHTTPRequestHandler):
                         existing["id"],
                     ),
                 )
+                out_id = existing["id"]
+                created_flag = False
             else:
+                out_id = os.urandom(16).hex()
+                created_flag = True
                 conn.execute(
                     """
                     INSERT INTO hipotecas (
@@ -55796,7 +55802,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     """,
                     (
-                        os.urandom(16).hex(),
+                        out_id,
                         empresa["id"],
                         payload.get("cliente"),
                         payload.get("cliente_id"),
@@ -55841,7 +55847,10 @@ class Handler(BaseHTTPRequestHandler):
                 (estado, fecha_firma, payload.get("anio"), now, hipoteca_id),
             )
         conn.commit()
-        json_response(self, {"ok": True})
+        if parsed.path == "/api/hipotecas":
+            json_response(self, {"ok": True, "id": out_id, "created": created_flag})
+        else:
+            json_response(self, {"ok": True})
     def handle_api(self, parsed):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)

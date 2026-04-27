@@ -1614,6 +1614,7 @@ const state = {
   gestoriaCrmView: "crm",
   segurosTab: "dashboard",
   hipotecaAltaView: "dashboard",
+  pendingHipotecaDraft: null,
   finSelectedAsesoramientoId: "",
   finSelectedAsesoramiento: null,
   finAsesoramientosRows: [],
@@ -4376,63 +4377,10 @@ const syncCurrentUserScope = () => {
   if (!user) {
     state.currentUserServices = [];
     state.currentUserServiceLabel = "";
-    syncHipotecaBdtManualVisibility();
     return;
   }
   state.currentUserServiceLabel = user.servicio || "";
   state.currentUserServices = expandServiceAliases(parseServiceList(user.servicio || ""));
-  syncHipotecaBdtManualVisibility();
-};
-
-function syncHipotecaBdtManualVisibility() {
-  if (!hipotecaBdtManualDetails) return;
-  const user = getAuthScopeUser();
-  // El alta manual (cliente + hipoteca) debe estar disponible para usuarios con el servicio de Financiaciones.
-  // Antes estaba restringido a superadmin y dejaba el botón "Alta" sin formulario.
-  const visible = !!(user && userCanAccessService("financiaciones"));
-  hipotecaBdtManualDetails.classList.toggle("hidden", !visible);
-  if (!visible) {
-    hipotecaBdtManualDetails.open = false;
-  }
-}
-
-const closeHipotecaAltaManual = () => {
-  if (!hipotecaBdtManualDetails) return;
-  hipotecaBdtManualDetails.open = false;
-};
-
-const openHipotecaAltaManual = ({ clienteNombre = "", focus = "hipoteca", scroll = true } = {}) => {
-  if (!hipotecaBdtManualDetails) return false;
-  try {
-    syncHipotecaBdtManualVisibility();
-  } catch {}
-  if (hipotecaBdtManualDetails.classList.contains("hidden")) return false;
-  hipotecaBdtManualDetails.open = true;
-  const nombre = String(clienteNombre || "").trim();
-  if (nombre && hipotecaForm) {
-    const input = hipotecaForm.querySelector('input[name="cliente"]');
-    if (input) {
-      input.value = nombre;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  }
-  if (!scroll) return true;
-  window.requestAnimationFrame(() => {
-    const target =
-      focus === "cliente"
-        ? (hipotecaClienteForm || hipotecaBdtManualDetails)
-        : (hipotecaForm || hipotecaBdtManualDetails);
-    target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    try {
-      if (focus === "cliente") {
-        hipotecaClienteForm?.querySelector('input[name="nombre"]')?.focus?.();
-      } else {
-        hipotecaForm?.querySelector('input[name="cliente"]')?.focus?.();
-      }
-    } catch {}
-  });
-  return true;
 };
 
 const getServiceFilterParam = () => {
@@ -21496,7 +21444,10 @@ const openFinCrm = () => {
   } catch {}
   updateTableVisibility();
   setCrmMode("fin");
-  setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
+  {
+    const desired = state.hipotecaAltaView || "dashboard";
+    setHipotecaAltaView(desired === "alta" ? "bdt" : desired);
+  }
   setCrmWorkspaceView("fin");
   try {
     const user = getAuthScopeUser();
@@ -34117,6 +34068,8 @@ const downloadHipotecasFirmadasExcel = () => {
   window.location.href = url;
 };
 
+const HIPOTECA_FICHA_DRAFT_ID = "__new__";
+
 const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
   if (!panel) return;
   const buttons = [
@@ -34126,11 +34079,13 @@ const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
     panel.querySelector("#hipotecaFichaPdfNotaria"),
   ].filter(Boolean);
   if (!buttons.length) return;
+  const recordId = String(panel.dataset.recordId || "").trim();
+  const isDraft = recordId === HIPOTECA_FICHA_DRAFT_ID;
   // La impresión se controla por la “Revisión Excel” (cuadre y datos mínimos),
   // no por el estado de la operación (muchas históricas están en ESTUDIO).
   buttons.forEach((btn) => {
-    btn.disabled = false;
-    btn.title = "";
+    btn.disabled = isDraft;
+    btn.title = isDraft ? "Guarda la hipoteca para generar el PDF." : "";
   });
 };
 
@@ -34303,9 +34258,89 @@ const setupHipotecaFichaComputedInputs = (panel) => {
   panel._hipotecaFichaUpdateComputed();
 };
 
+const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
+  const panel = ensureHipotecaFichaPanel();
+  if (!panel) return;
+  panel.dataset.recordId = HIPOTECA_FICHA_DRAFT_ID;
+  delete panel.dataset.pdfReviewBlocked;
+  delete panel.dataset.pdfReviewBlockedReason;
+  const meta = panel.querySelector("#hipotecaFichaMeta");
+  const nombre = String(clienteNombre || "").trim();
+  if (meta) meta.textContent = nombre ? `${nombre} · Nueva hipoteca` : "Nueva hipoteca";
+  setHipotecaFichaTab("cliente");
+
+  // Reset columnas base.
+  HIPOTECA_FICHA_COLUMN_FIELDS.forEach((field) => {
+    const control = panel.querySelector(`[name="${field}"]`);
+    if (!control || control.disabled) return;
+    if (control.tagName === "SELECT") {
+      control.value = "";
+    } else {
+      control.value = "";
+    }
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const clienteInput = panel.querySelector('[name="cliente"]');
+  if (clienteInput) clienteInput.value = nombre;
+  const clienteIdInput = panel.querySelector('[name="cliente_id"]');
+  if (clienteIdInput) clienteIdInput.value = "";
+  const estadoSelect = panel.querySelector('[name="estado"]');
+  if (estadoSelect && !String(estadoSelect.value || "").trim()) {
+    setSelectValueCaseInsensitive(estadoSelect, "Pendiente");
+  }
+  const encargoSelect = panel.querySelector('[name="encargo"]');
+  if (encargoSelect && !String(encargoSelect.value || "").trim()) {
+    setSelectValueCaseInsensitive(encargoSelect, "Pendiente");
+  }
+  const fechaEncargoInput = panel.querySelector('[name="fecha_encargo"]');
+  if (fechaEncargoInput && !String(fechaEncargoInput.value || "").trim()) {
+    fechaEncargoInput.value = today;
+  }
+
+  // JSON inicial.
+  const clienteInmueble = {};
+  const hipotecaDetalle = {};
+  const liquidacion = {};
+  if (nombre) {
+    setNestedValue(clienteInmueble, "comprador.c1.nombre", nombre);
+    setNestedValue(clienteInmueble, "prestataria.p1.source", "c1");
+    setNestedValue(clienteInmueble, "prestataria.p2.source", "none");
+    setNestedValue(liquidacion, "comprador.cliente", nombre);
+  }
+
+  fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
+  fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
+  fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  setHipotecaLiquidacionTab(panel.dataset.liqTab || "comprador");
+  syncHipotecaFichaPdfState(panel, {});
+  syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
+  autofillHipotecaLiquidacionFromFicha(panel);
+  refreshHipotecaLiquidacionComputedControls(panel);
+  setupHipotecaFichaMoneyInputs(panel);
+  setupHipotecaFichaDomicilioSync(panel);
+  setupHipotecaFichaComputedInputs(panel);
+  updateHipotecaRegistroDatalist(panel);
+  updateHipotecaNotariasDatalist(panel);
+  setupHipotecaPrestamoCuotasAuto(panel);
+
+  const status = panel.querySelector("#hipotecaFichaStatus");
+  if (status) status.textContent = "";
+  panel.classList.remove("hidden");
+  panel.classList.add("open");
+  window.requestAnimationFrame(() => {
+    try {
+      panel.querySelector('[name="cliente"]')?.focus?.();
+    } catch {}
+  });
+};
+
 const openHipotecaFicha = async (recordId, prefetched = null) => {
   const target = String(recordId || "").trim();
   if (!target) return;
+  if (target === HIPOTECA_FICHA_DRAFT_ID) {
+    openHipotecaFichaDraft();
+    return;
+  }
   const panel = ensureHipotecaFichaPanel();
   if (!panel) return;
   panel.dataset.recordId = target;
@@ -34470,20 +34505,26 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   panel.classList.add("open");
 };
 
-const saveHipotecaFicha = (event) => {
+const saveHipotecaFicha = async (event) => {
   event.preventDefault();
   const panel = ensureHipotecaFichaPanel();
   if (!panel) return;
   const recordId = String(panel.dataset.recordId || "").trim();
   if (!recordId) return;
+  const isDraft = recordId === HIPOTECA_FICHA_DRAFT_ID;
   const status = panel.querySelector("#hipotecaFichaStatus");
-  if (status) status.textContent = "Guardando cambios...";
+  if (status) status.textContent = isDraft ? "Creando hipoteca..." : "Guardando cambios...";
   const empresa = resolveCrmFinEmpresa();
-  const payload = {
-    id: recordId,
+  const base = {
     empresa_id: empresa?.id || "",
     empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
   };
+
+  const payload = {
+    id: isDraft ? "" : recordId,
+    ...base,
+  };
+
   HIPOTECA_FICHA_COLUMN_FIELDS.forEach((field) => {
     const control = panel.querySelector(`[name="${field}"]`);
     if (!control || control.disabled) return;
@@ -34503,8 +34544,8 @@ const saveHipotecaFicha = (event) => {
   payload.cliente_inmueble_json = JSON.stringify(clienteInmueble || {}, null, 0);
   payload.hipoteca_detalle_json = JSON.stringify(hipotecaDetalle || {}, null, 0);
   payload.liquidacion_json = JSON.stringify(liquidacion || {}, null, 0);
+
   // Sync: si rellenan el precio de compra/capital en Liquidación, reflejarlo en columnas principales.
-  // Esto evita reabrir fichas con `precio` vacío aunque el JSON esté completo.
   if ((payload.precio ?? "") === "") {
     const liqPrecio = toNumber(
       getNestedValue(liquidacion, "comprador.precio_compra") ?? getNestedValue(liquidacion, "comprador.escriturado")
@@ -34520,29 +34561,84 @@ const saveHipotecaFicha = (event) => {
     const tipoInteres = String(getNestedValue(hipotecaDetalle, "preferencias.tipo_interes") || "").trim();
     if (tipoInteres) payload.tipo_hipoteca = tipoInteres;
   }
-  fetch("/api/hipotecas_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data?.error) {
-        if (status) status.textContent = data.error;
+
+  try {
+    if (isDraft) {
+      const cliente = String(payload.cliente || "").trim();
+      if (!cliente) {
+        if (status) status.textContent = "Indica el cliente para crear la hipoteca.";
         return;
       }
-      if (status) status.textContent = "Cambios guardados.";
-      loadHipotecaBdt(true);
-      loadFinCrm();
-      loadHipotecaDashboard();
-      loadHomeHipotecaStats().then(() => renderCompanyCards());
-      setTimeout(() => {
-        if (status) status.textContent = "";
-      }, 1200);
-    })
-    .catch(() => {
-      if (status) status.textContent = "Error al guardar cambios.";
+      const createPayload = { ...base };
+      // Endpoint legacy: crea (o reutiliza) una hipoteca en BDT y nos devuelve el id.
+      [
+        "cliente",
+        "cliente_id",
+        "banco",
+        "oficina",
+        "inmobiliaria_compra",
+        "asesor",
+        "estado",
+        "encargo",
+        "tipo_hipoteca",
+        "fecha_encargo",
+        "fecha_firma",
+        "precio",
+        "importe_hipoteca",
+        "porcentaje",
+        "entrada",
+        "comision",
+        "cesion",
+        "comision_juan",
+        "comision_modernia",
+        "anio",
+      ].forEach((key) => {
+        if (payload[key] !== undefined) createPayload[key] = payload[key];
+      });
+      const res = await fetch("/api/hipotecas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createPayload),
+      });
+      const created = await res.json();
+      if (created?.error) {
+        if (status) status.textContent = created.error;
+        return;
+      }
+      const newId = String(created?.id || "").trim();
+      if (!newId) {
+        if (status) status.textContent = "No se pudo obtener el id de la nueva hipoteca.";
+        return;
+      }
+      panel.dataset.recordId = newId;
+      payload.id = newId;
+      const meta = panel.querySelector("#hipotecaFichaMeta");
+      if (meta) meta.textContent = `${cliente || "Hipoteca"} · ID ${newId.slice(0, 8)}`;
+      syncHipotecaFichaPdfState(panel, payload);
+      if (status) status.textContent = created?.created ? "Hipoteca creada. Guardando ficha..." : "Hipoteca encontrada. Guardando ficha...";
+    }
+
+    const updateRes = await fetch("/api/hipotecas_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    const data = await updateRes.json();
+    if (data?.error) {
+      if (status) status.textContent = data.error;
+      return;
+    }
+    if (status) status.textContent = "Cambios guardados.";
+    loadHipotecaBdt(true);
+    loadFinCrm();
+    loadHipotecaDashboard();
+    loadHomeHipotecaStats().then(() => renderCompanyCards());
+    setTimeout(() => {
+      if (status) status.textContent = "";
+    }, 1200);
+  } catch {
+    if (status) status.textContent = "Error al guardar cambios.";
+  }
 };
 
 	const setSelectValueCaseInsensitive = (selectEl, rawValue) => {
@@ -35691,9 +35787,9 @@ const setHipotecaAltaView = (view) => {
     loadHipotecaContabilidad();
   }
   if (next === "alta") {
-    openHipotecaAltaManual({ focus: "hipoteca" });
-  } else {
-    closeHipotecaAltaManual();
+    const pending = state.pendingHipotecaDraft;
+    state.pendingHipotecaDraft = null;
+    openHipotecaFichaDraft({ clienteNombre: pending?.clienteNombre || "" });
   }
 };
 
@@ -35708,7 +35804,10 @@ const updateHipotecaAltaTabs = () => {
   if (!finVisible) {
     return;
   }
-  setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
+  {
+    const desired = state.hipotecaAltaView || "dashboard";
+    setHipotecaAltaView(desired === "alta" ? "bdt" : desired);
+  }
 };
 
 const drawSignedBarChart = (canvas, labels, values, color) => {
@@ -56167,22 +56266,22 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
     }
   }
   const clienteNombre = String(cliente?.nombre || "").trim();
-  const openBtn = clienteHipotecaFicha.querySelector("[data-cliente-fin-open-alta]");
-  if (openBtn) {
-    openBtn.onclick = () => {
-      if (!clienteNombre) {
-        window.alert("Indica el nombre del cliente para crear una hipoteca.");
-        return;
-      }
-      openFinCrm();
-      window.setTimeout(() => {
-        try {
-          setHipotecaAltaView("alta");
-          openHipotecaAltaManual({ clienteNombre, focus: "hipoteca" });
-        } catch {}
-      }, 0);
-    };
-  }
+	  const openBtn = clienteHipotecaFicha.querySelector("[data-cliente-fin-open-alta]");
+	  if (openBtn) {
+	    openBtn.onclick = () => {
+	      if (!clienteNombre) {
+	        window.alert("Indica el nombre del cliente para crear una hipoteca.");
+	        return;
+	      }
+	      state.pendingHipotecaDraft = { clienteNombre };
+	      openFinCrm();
+	      window.setTimeout(() => {
+	        try {
+	          setHipotecaAltaView("alta");
+	        } catch {}
+	      }, 0);
+	    };
+	  }
   if (!clienteNombre) {
     if (panel.data) {
       panel.data.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";

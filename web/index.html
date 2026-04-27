@@ -7848,163 +7848,9 @@
               <button type="button" id="hipotecaBdtVincularBtn" class="secondary">Vincular cliente</button>
               <span id="hipotecaBdtVincularStatus" class="muted"></span>
             </div>
-	            <div id="hipotecaBdtTable"></div>
-	            <div class="footer" id="hipotecaBdtInfo"></div>
-              <details id="hipotecaBdtManualDetails" class="form-card hidden" style="margin: 14px 0 18px 0; padding: 14px;">
-                <summary style="cursor:pointer; font-weight:600;">Alta manual complementaria</summary>
-                <p class="muted" style="margin: 10px 0 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
-	            <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
-	              <h4 style="margin-bottom: 6px;">Crear cliente</h4>
-              <p class="muted" style="margin-bottom: 10px;">Alta rápida en Clientes y vínculo automático con Financiaciones.</p>
-              <form id="hipotecaClienteForm">
-                <div class="form-grid">
-                  <label>
-                    Tipo persona
-                    <select id="hipotecaClienteTipoPersona" name="tipo_persona">
-                      <option value="Física">Física</option>
-                      <option value="Jurídica">Jurídica</option>
-                    </select>
-                  </label>
-                  <label data-hipoteca-persona="fisica">
-                    Apellido 1
-                    <input name="apellido1" />
-                  </label>
-                  <label data-hipoteca-persona="fisica">
-                    Apellido 2
-                    <input name="apellido2" />
-                  </label>
-                  <label>
-                    Nombre / Razón social
-                    <input name="nombre" required />
-                  </label>
-                  <label>
-                    DNI/NIF/CIF
-                    <input name="nif" />
-                  </label>
-                  <label>
-                    Teléfono
-                    <input name="telefono" />
-                  </label>
-                  <label>
-                    Email
-                    <input name="email" type="email" />
-                  </label>
-                  <label>
-                    Población
-                    <input name="poblacion" />
-                  </label>
-                  <label>
-                    Provincia
-                    <input name="provincia" />
-                  </label>
-                </div>
-                <div class="form-actions">
-                  <button type="submit">Crear cliente</button>
-                  <span id="hipotecaClienteFormStatus" class="muted"></span>
-                </div>
-              </form>
-            </div>
-            <h4 style="margin-bottom: 6px;">Alta BDT Hipotecas</h4>
-            <p class="muted" style="margin-bottom: 10px;">Registro de operación hipotecaria.</p>
-            <form id="hipotecaForm">
-              <div class="form-grid">
-                <label>
-                  Cliente
-                  <input name="cliente" required />
-                </label>
-                <label>
-                  Banco
-                  <input name="banco" list="bankList" />
-                </label>
-                <label>
-                  Oficina / Inmobiliaria compra
-                  <input name="oficina" list="officeList" />
-                </label>
-                <label>
-                  Precio
-                  <input name="precio" type="number" step="0.01" />
-                </label>
-                <label>
-                  Importe hipoteca
-                  <input name="importe_hipoteca" type="number" step="0.01" />
-                </label>
-                <label>
-                  Porcentaje
-                  <input name="porcentaje" type="number" step="0.01" readonly />
-                </label>
-                <label>
-                  Entrada
-                  <input name="entrada" type="number" step="0.01" />
-                </label>
-                <label>
-                  Comisión
-                  <input name="comision" type="number" step="0.01" />
-                </label>
-                <label>
-                  Comisión Juan
-                  <input name="comision_juan" type="number" step="0.01" readonly />
-                </label>
-                <label>
-                  Cesión a inmobiliarias
-                  <input name="cesion" type="number" step="0.01" readonly />
-                  <small id="hipotecaCesionHint" class="muted">Aplicando 20% general.</small>
-                </label>
-                <label>
-                  Comisión neta oficina
-                  <input id="hipotecaComisionNeta" type="number" step="0.01" readonly />
-                </label>
-                <label>
-                  Fecha encargo
-                  <input name="fecha_encargo" type="date" />
-                </label>
-                <label>
-                  Encargo
-                  <select name="encargo">
-                    <option value=""></option>
-                    <option>Sí</option>
-                    <option>No</option>
-                    <option>Pendiente</option>
-                  </select>
-                </label>
-                <label>
-                  Tipo hipoteca
-                  <select name="tipo_hipoteca">
-                    <option value=""></option>
-                    <option>Fija</option>
-                    <option>Variable</option>
-                    <option>Mixta</option>
-                    <option>Puente</option>
-                    <option>Subrogación</option>
-                    <option>Novación</option>
-                    <option>Autopromotor</option>
-                    <option>Otro</option>
-                  </select>
-                </label>
-                <label>
-                  Fecha firma
-                  <input name="fecha_firma" type="date" />
-                </label>
-                <input name="inmobiliaria_compra" type="hidden" />
-                <label>
-                  Asesor
-                  <input name="asesor" />
-                </label>
-                <label>
-                  Estado
-                  <select name="estado">
-                    <option>Pendiente</option>
-                    <option>Firmado</option>
-                    <option>Indemnización</option>
-                  </select>
-                </label>
-              </div>
-              <div class="form-actions">
-                <button type="submit">Guardar</button>
-                <span id="hipotecaFormStatus" class="muted"></span>
-              </div>
-            </form>
-              </details>
-            <datalist id="bankList">
+		            <div id="hipotecaBdtTable"></div>
+		            <div class="footer" id="hipotecaBdtInfo"></div>
+	            <datalist id="bankList">
               <option value="Banco Santander"></option>
               <option value="BBVA"></option>
               <option value="CaixaBank"></option>
@@ -9998,7 +9844,7 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-											    <script src="app.js?v=679"></script>
+											    <script src="app.js?v=680"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
