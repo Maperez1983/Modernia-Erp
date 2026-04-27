@@ -13021,6 +13021,19 @@ def preprocess_image_for_ocr(src_path, out_path=None):
 def ocr_image_file(image_path):
     lang = detect_ocr_lang()
     tesseract_cmd = resolve_tesseract_cmd()
+    # Si OCR externo está disponible, lo intentamos primero para evitar depender del PATH de tesseract
+    # (especialmente en entornos tipo launchd/worker).
+    if external_ocr_available():
+        try:
+            vision_bytes = prepare_image_bytes_for_vision(image_path)
+            if vision_bytes:
+                text, err = ocr_image_external(vision_bytes)
+                if text and text.strip():
+                    return text, ""
+                if err and not (tesseract_cmd and os.path.exists(tesseract_cmd)):
+                    return "", err
+        except Exception:
+            pass
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
         return "", "tesseract no encontrado (configura OCR_TESSERACT_CMD o instala tesseract)"
     env = os.environ.copy()
@@ -14475,6 +14488,24 @@ def ocr_pdf_first_page(pdf_path):
         if tmp_generated:
             shutil.rmtree(tmp_generated, ignore_errors=True)
         return "", "imagen no encontrada para OCR"
+    # Preferimos OCR externo si está disponible para evitar depender de tesseract como fallback.
+    if external_ocr_available():
+        try:
+            vision_bytes = prepare_image_bytes_for_vision(img_path)
+            if vision_bytes:
+                text, err = ocr_image_external(vision_bytes)
+                if text and text.strip():
+                    if tmp_generated:
+                        shutil.rmtree(tmp_generated, ignore_errors=True)
+                    return text, ""
+                # Si no tenemos tesseract, devolvemos el error externo en vez de "tesseract missing".
+                tesseract_cmd = resolve_tesseract_cmd()
+                if not (tesseract_cmd and os.path.exists(tesseract_cmd)) and err:
+                    if tmp_generated:
+                        shutil.rmtree(tmp_generated, ignore_errors=True)
+                    return "", err
+        except Exception:
+            pass
     lang = detect_ocr_lang()
     tesseract_cmd = resolve_tesseract_cmd()
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
