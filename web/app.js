@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v288";
+const APP_SW_VERSION = "v289";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -36629,6 +36629,16 @@ const renderFinDashboard = (empresaId) => {
           title: "Hipotecas en estudio",
           value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
           note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+        },
+        {
+          title: "Pendientes de firma",
+          value: numberFormatter.format(data?.current?.pendientes_firma || 0),
+          note: `Total: ${numberFormatter.format(totals?.pendientes_firma || 0)}`,
+        },
+        {
+          title: "Encargos",
+          value: numberFormatter.format(data?.current?.encargos || 0),
+          note: `Total: ${numberFormatter.format(totals?.encargos || 0)}`,
         },
         {
           title: "Rentabilidad negocio",

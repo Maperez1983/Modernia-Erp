@@ -62647,6 +62647,8 @@ class Handler(BaseHTTPRequestHandler):
                 " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             )
             estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
+            encargo_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('encargo', 'encargado', 'encargada')"
+            pendientes_firma_expr = f"NOT ({closed_expr})"
 
             # julianday() existe en SQLite pero NO en Postgres.
             if db_is_postgres_enabled():
@@ -62815,6 +62817,60 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND """
                 + estudio_expr
+                + """
+                """,
+                (empresa_id,),
+            ).fetchone()
+
+            pendientes_firma_anio = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ = ?
+                  AND """
+                + pendientes_firma_expr
+                + """
+                """,
+                (empresa_id, selected_year),
+            ).fetchone()
+
+            pendientes_firma_total = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + pendientes_firma_expr
+                + """
+                """,
+                (empresa_id,),
+            ).fetchone()
+
+            encargos_anio = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ = ?
+                  AND """
+                + encargo_expr
+                + """
+                """,
+                (empresa_id, selected_year),
+            ).fetchone()
+
+            encargos_total = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + encargo_expr
                 + """
                 """,
                 (empresa_id,),
@@ -63020,6 +63076,8 @@ class Handler(BaseHTTPRequestHandler):
                         "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
                         "firmadas_mes": firmadas_mes["total"] if firmadas_mes else 0,
                         "operaciones_estudio": estudio_anio["total"] if estudio_anio else 0,
+                        "pendientes_firma": pendientes_firma_anio["total"] if pendientes_firma_anio else 0,
+                        "encargos": encargos_anio["total"] if encargos_anio else 0,
                         "ingresos": conta_year["ingresos"],
                         "gastos": conta_year["gastos"],
                         "resultado": conta_year["resultado"],
@@ -63033,6 +63091,8 @@ class Handler(BaseHTTPRequestHandler):
                         "volumen_total": totals["volumen_total"] if totals else 0,
                         "plazo_medio_dias": totals["plazo_medio_dias"] if totals else 0,
                         "operaciones_estudio": estudio_total["total"] if estudio_total else 0,
+                        "pendientes_firma": pendientes_firma_total["total"] if pendientes_firma_total else 0,
+                        "encargos": encargos_total["total"] if encargos_total else 0,
                         "ingresos": conta_total["ingresos"],
                         "gastos": conta_total["gastos"],
                         "resultado": conta_total["resultado"],
