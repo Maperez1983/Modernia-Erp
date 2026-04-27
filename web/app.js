@@ -1230,14 +1230,19 @@ const postJsonWithDbRetry = async (url, payload, options = {}) => {
       } catch (_) {
         data = { error: text || `HTTP ${res.status}` };
       }
-      const errText = String(data?.error || data?.detail || "");
+      const apiError = String(data?.error || "").trim();
+      const apiDetail = String(data?.detail || "").trim();
+      const errText = `${apiError} ${apiDetail}`.trim();
       const locked = /database is locked/i.test(errText) || res.status === 502 || res.status === 503;
       if (!res.ok || data?.error) {
         if (locked && attempt < maxRetries - 1) {
           await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
           continue;
         }
-        throw new Error(data?.error || data?.detail || `HTTP ${res.status}`);
+        if (apiError && apiDetail && normalizeSimple(apiError) === "api error") {
+          throw new Error(apiDetail);
+        }
+        throw new Error(apiError && apiDetail ? `${apiError}: ${apiDetail}` : apiError || apiDetail || `HTTP ${res.status}`);
       }
       return data;
     } catch (err) {
