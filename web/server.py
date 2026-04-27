@@ -12601,7 +12601,18 @@ def process_renta_ocr_job(payload, conn):
             if image_err and not err_detail:
                 err_detail = image_err
         if not text:
-            raise RuntimeError(err_detail or "No se pudo extraer texto")
+            # Degradación controlada: si no hay OCR disponible (p.ej. Render sin tesseract y sin Vision),
+            # no fallamos el job: devolvemos campos vacíos para que el flujo "carga rápida" guarde el PDF
+            # y permita asignación manual.
+            parsed_fields = {}
+            if err_detail:
+                parsed_fields["ocr_error"] = str(err_detail)[:240]
+            parsed_fields["nif_detectado"] = ""
+            parsed_fields["ocr_score"] = 0
+            parsed_fields["ocr_method"] = method or ("vision" if external_ocr_available() else "tesseract")
+            if source_hint:
+                parsed_fields["ocr_source_hint"] = source_hint
+            return {"fields": parsed_fields, "ocr_method": parsed_fields["ocr_method"], "ocr_score": 0}
 
         parsed_fields = _parse_renta_pdf_fields(text)
         score = _score_renta_ocr_text(text)
@@ -13009,13 +13020,9 @@ def preprocess_image_for_ocr(src_path, out_path=None):
 
 def ocr_image_file(image_path):
     lang = detect_ocr_lang()
-    tesseract_cmd = (
-        shutil.which("tesseract")
-        or "/opt/homebrew/bin/tesseract"
-        or "/usr/local/bin/tesseract"
-    )
+    tesseract_cmd = resolve_tesseract_cmd()
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
-        return "", "tesseract no encontrado en PATH"
+        return "", "tesseract no encontrado (configura OCR_TESSERACT_CMD o instala tesseract)"
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
@@ -13092,6 +13099,23 @@ def ocr_image_file(image_path):
                     pass
 
 def ocr_image_external(image_bytes):
+    def _resolve_credentials_path():
+        candidates = []
+        env_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+        if env_path:
+            candidates.append(env_path)
+        # Fallbacks: allow bundling the service account in the repo (local/dev) or in the working dir (Render buildpack).
+        candidates.append(str((ROOT.parent / "vision-sa.json").resolve()))
+        candidates.append(str((ROOT / "vision-sa.json").resolve()))
+        try:
+            candidates.append(str((Path.cwd() / "vision-sa.json").resolve()))
+        except Exception:
+            pass
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return ""
+
     def _env_first_line(name):
         raw = os.environ.get(name)
         if raw in (None, ""):
@@ -13116,11 +13140,7 @@ def ocr_image_external(image_bytes):
             return ""
         return line.split()[0].strip()
 
-    credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
-    if not credentials_path:
-        fallback = ROOT.parent / "vision-sa.json"
-        if fallback.exists():
-            credentials_path = str(fallback)
+    credentials_path = _resolve_credentials_path()
     api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     auth_header = None
     if credentials_path and os.path.exists(credentials_path):
@@ -13171,6 +13191,22 @@ def ocr_image_external(image_bytes):
         return "", "OCR externo: sin texto"
 
 def external_ocr_available():
+    def _resolve_credentials_path():
+        candidates = []
+        env_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+        if env_path:
+            candidates.append(env_path)
+        candidates.append(str((ROOT.parent / "vision-sa.json").resolve()))
+        candidates.append(str((ROOT / "vision-sa.json").resolve()))
+        try:
+            candidates.append(str((Path.cwd() / "vision-sa.json").resolve()))
+        except Exception:
+            pass
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return ""
+
     def _env_first_line(name):
         raw = os.environ.get(name)
         if raw in (None, ""):
@@ -13194,11 +13230,7 @@ def external_ocr_available():
             return ""
         return line.split()[0].strip()
 
-    credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
-    if not credentials_path:
-        fallback = ROOT.parent / "vision-sa.json"
-        if fallback.exists():
-            credentials_path = str(fallback)
+    credentials_path = _resolve_credentials_path()
     api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
 
@@ -14444,15 +14476,11 @@ def ocr_pdf_first_page(pdf_path):
             shutil.rmtree(tmp_generated, ignore_errors=True)
         return "", "imagen no encontrada para OCR"
     lang = detect_ocr_lang()
-    tesseract_cmd = (
-        shutil.which("tesseract")
-        or "/opt/homebrew/bin/tesseract"
-        or "/usr/local/bin/tesseract"
-    )
+    tesseract_cmd = resolve_tesseract_cmd()
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
         if tmp_generated:
             shutil.rmtree(tmp_generated, ignore_errors=True)
-        return "", "tesseract no encontrado en PATH"
+        return "", "tesseract no encontrado (configura OCR_TESSERACT_CMD o instala tesseract)"
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
@@ -14655,13 +14683,15 @@ def extract_pdf_text(pdf_path):
         ocr_text, ocr_err = ocrmypdf_extract_text(pdf_path)
         if ocr_text and len(ocr_text.strip()) >= 30:
             return ocr_text, "", "ocrmypdf"
-    ocr_text, ocr_err = ocr_pdf_all_pages(pdf_path, use_external=external_ocr_available())
+    use_external = bool(external_ocr_available())
+    ocr_text, ocr_err = ocr_pdf_all_pages(pdf_path, use_external=use_external)
     if ocr_text and len(ocr_text.strip()) >= 30:
-        return ocr_text, "", "vision" if external_ocr_available() else "tesseract"
+        return ocr_text, "", "vision" if use_external else "tesseract"
     text, ocr_err = ocr_pdf_first_page(pdf_path)
     if text:
         return text, "", "tesseract"
-    return "", err or img_err or ocr_err, "tesseract"
+    # `img_err` ya no existe aquí: mantenemos compat usando errores disponibles.
+    return "", err or ocr_err, "tesseract"
 
 def ocrmypdf_extract_text(pdf_path):
     cmd = shutil.which("ocrmypdf")
@@ -14672,13 +14702,9 @@ def ocrmypdf_extract_text(pdf_path):
                 break
     if not cmd or not os.path.exists(cmd):
         return "", "ocrmypdf no encontrado"
-    tesseract_cmd = (
-        shutil.which("tesseract")
-        or "/opt/homebrew/bin/tesseract"
-        or "/usr/local/bin/tesseract"
-    )
+    tesseract_cmd = resolve_tesseract_cmd()
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
-        return "", "tesseract no encontrado"
+        return "", "tesseract no encontrado (configura OCR_TESSERACT_CMD o instala tesseract)"
     with tempfile.TemporaryDirectory() as tmpdir:
         out_pdf = os.path.join(tmpdir, "ocr.pdf")
         try:
