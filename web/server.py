@@ -23118,6 +23118,118 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     }
 
 
+def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, limit=12):
+    """
+    Resumen ligero de renta para el dashboard de gestoría.
+
+    Evita `collect_gestoria_renta_card_items()` en el panel/resumen para no provocar timeouts
+    (prefetch alto + parseo de docs). Devuelve:
+    - `count`: número total de campañas en Borrador (ejercicio)
+    - `rows`: preview (top N) para mostrar en el dashboard
+    """
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+    try:
+        limit_val = int(limit)
+    except Exception:
+        limit_val = 12
+    limit_val = max(1, min(limit_val, 100))
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    service_filter_exists = (
+        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id AS cliente_id,
+          c.nombre,
+          c.nif,
+          c.estado AS cliente_estado,
+          cg.renta_detalles,
+          (
+            SELECT ce2.estado
+            FROM clientes_empresas ce2
+            WHERE ce2.empresa_id = ?
+              AND ce2.cliente_id = c.id
+              AND {service_filter_exists}
+            ORDER BY
+              CASE
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'activo' THEN 3
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'alta' THEN 2
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'pendiente' THEN 1
+                ELSE 0
+              END DESC,
+              ce2.updated_at DESC
+            LIMIT 1
+          ) AS servicio_estado
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )
+        ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
+        """,
+        (empresa_id, empresa_id),
+    ).fetchall()
+
+    pending_count = 0
+    preview = []
+    for row in rows:
+        row_dict = dict(row)
+        payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
+        entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
+        entry = None
+        for e in entries:
+            if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                entry = e
+                break
+        if not entry:
+            continue
+        estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
+        if estado != "Borrador":
+            continue
+        pending_count += 1
+        if len(preview) >= limit_val:
+            continue
+        doc_count = 0
+        try:
+            doc_key = str(entry.get("doc_key") or "").strip()
+            doc_url = str(entry.get("doc_url") or "").strip()
+            if doc_key or doc_url:
+                doc_count = 1
+        except Exception:
+            doc_count = 0
+        preview.append(
+            {
+                "cliente_id": str(row_dict.get("cliente_id") or "").strip(),
+                "cliente": str(row_dict.get("nombre") or "").strip(),
+                "ejercicio": ejercicio_val,
+                "nif": str(row_dict.get("nif") or "").strip(),
+                "estado_servicio": str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip(),
+                "estado_presentacion": estado,
+                "doc_count": doc_count,
+            }
+        )
+
+    return {"ejercicio": ejercicio_val, "count": int(pending_count), "rows": preview}
+
+
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
@@ -27305,41 +27417,32 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
         [workspace_id, *empresa_ids],
     ).fetchall()
 
-    renta_index = {}
-    for empresa_id in empresa_ids:
-        for row in collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=500):
-            cliente_id = str(row.get("cliente_id") or "")
-            latest = row.get("renta_latest") or {}
-            current = renta_index.get(cliente_id)
-            current_entry = current.get("renta_latest") if current else {}
-            current_ex = int(current_entry.get("ejercicio") or 0) if current_entry else 0
-            next_ex = int(latest.get("ejercicio") or 0) if latest else 0
-            if not current or next_ex >= current_ex:
-                renta_index[cliente_id] = row
-    rentas_borrador = [
-        row for row in renta_index.values()
-        if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
-    ]
+    rentas_borrador_total = 0
+    rentas_borrador_preview = []
+    try:
+        summaries = []
+        for empresa_id in empresa_ids:
+            summaries.append(compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", limit=12))
+        rentas_borrador_total = sum(int(s.get("count") or 0) for s in summaries)
+        for s in summaries:
+            rentas_borrador_preview.extend(list(s.get("rows") or []))
+        rentas_borrador_preview.sort(key=lambda x: (str(x.get("cliente") or "").lower(), str(x.get("nif") or "")))
+        rentas_borrador_preview = rentas_borrador_preview[:12]
+    except Exception:
+        rentas_borrador_total = 0
+        rentas_borrador_preview = []
 
     return {
         "counts": {
             "total": total["total"] if total else 0,
             "activos": len(active_ids),
             "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
-            "rentas_pendientes_presentar": len(rentas_borrador),
+            "rentas_pendientes_presentar": int(rentas_borrador_total),
             "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
             "presupuestos_estudio": len(presupuestos_estudio),
         },
         "modelos_vencidos": [dict(r) for r in modelos_vencidos],
-        "rentas_pendientes": [
-            {
-                "cliente": row.get("nombre"),
-                "ejercicio": (row.get("renta_latest") or {}).get("ejercicio") or "",
-                "nif": row.get("nif") or "",
-                "estado_presentacion": (row.get("renta_latest") or {}).get("estado_presentacion") or "Borrador",
-            }
-            for row in rentas_borrador[:12]
-        ],
+        "rentas_pendientes": rentas_borrador_preview,
         "acciones_vencidas": [dict(r) for r in acciones_vencidas],
         "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
     }
@@ -60726,35 +60829,13 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            rentas_borrador = []
             try:
-                renta_rows = collect_gestoria_renta_card_items(
-                    conn,
-                    empresa_id,
-                    q="",
-                    estado="",
-                    limit=500,
-                    include_docs=False,
-                )
-                rentas_borrador = [
-                    row
-                    for row in renta_rows
-                    if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
-                ]
-                payload["counts"]["rentas_pendientes_presentar"] = len(rentas_borrador)
-                payload["rentas_pendientes"] = [
-                    {
-                        "cliente": row.get("nombre"),
-                        "ejercicio": (row.get("renta_latest") or {}).get("ejercicio") or "",
-                        "nif": row.get("nif") or "",
-                        "doc_count": row.get("doc_count") or 0,
-                        "estado_presentacion": (row.get("renta_latest") or {}).get("estado_presentacion") or "Borrador",
-                    }
-                    for row in rentas_borrador[:12]
-                ]
+                renta_summary = compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", limit=12)
+                payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
+                payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
                 try:
-                    Handler._record_api_error("/api/gestoria_dashboard:rentas", exc)
+                    Handler._record_api_error("/api/gestoria_dashboard:rentas_summary", exc)
                 except Exception:
                     pass
 

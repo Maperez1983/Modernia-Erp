@@ -22982,8 +22982,8 @@ const updateCompanySummary = (empresaName) => {
   }
   const gestoriaCopyByTab = {
     "gestoria-dash": {
-      subtitle: "Panel del despacho, alertas y foco operativo.",
-      meta: "Área · Panel",
+      subtitle: "Dashboard del despacho, alertas y foco operativo.",
+      meta: "Área · Dashboard",
     },
     "gestoria-crm": {
       subtitle: "Expedientes activos, cartera de clientes y altas.",

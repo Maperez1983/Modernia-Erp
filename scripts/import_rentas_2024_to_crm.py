@@ -62,6 +62,7 @@ PDFTOPPM_TIMEOUT_SECONDS = 45
 RENTA_USE_OCRMYPDF = str(os.environ.get("RENTA_USE_OCRMYPDF", "") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
 RENTA_OCR_HEAD_PAGES = max(1, int(os.environ.get("RENTA_OCR_HEAD_PAGES", "2") or 2))
 RENTA_OCR_TAIL_PAGES = max(0, int(os.environ.get("RENTA_OCR_TAIL_PAGES", "2") or 2))
+RENTA_OCR_MID_PAGES = max(0, int(os.environ.get("RENTA_OCR_MID_PAGES", "2") or 2))
 RENTA_OCR_DPI = max(120, int(os.environ.get("RENTA_OCR_DPI", "300") or 300))
 RENTA_OCR_RESCUE_DPI = max(RENTA_OCR_DPI, int(os.environ.get("RENTA_OCR_RESCUE_DPI", "400") or 400))
 RENTA_OCR_PSMS_RAW = os.environ.get("RENTA_OCR_PSMS", "6,11,4")
@@ -805,6 +806,7 @@ def run_tesseract_ocr(pdf_path: Path) -> str:
                 total_pages = pdf_page_count(pdf_path)
                 head_pages = max(1, int(RENTA_OCR_HEAD_PAGES))
                 tail_pages = max(0, int(RENTA_OCR_TAIL_PAGES))
+                mid_pages = max(0, int(RENTA_OCR_MID_PAGES))
                 if total_pages <= 0:
                     total_pages = head_pages + tail_pages
                 head_end = min(total_pages, head_pages)
@@ -812,6 +814,17 @@ def run_tesseract_ocr(pdf_path: Path) -> str:
 
                 prefixes = []
                 prefixes.append((Path(tmpdir) / "head", 1, head_end))
+                if mid_pages > 0 and total_pages >= 5:
+                    # Captura páginas intermedias cuando el PDF es largo (las casillas suelen
+                    # quedar fuera del bloque de cabecera/cola en algunos escaneados).
+                    mid_center = (total_pages + 1) // 2
+                    mid_start = max(1, mid_center - (mid_pages // 2))
+                    mid_end = min(total_pages, mid_start + mid_pages - 1)
+                    # Evita solapar con head/tail.
+                    mid_start = max(mid_start, head_end + 1)
+                    mid_end = min(mid_end, tail_start - 1)
+                    if mid_start <= mid_end:
+                        prefixes.append((Path(tmpdir) / "mid", mid_start, mid_end))
                 if tail_pages > 0 and tail_start > head_end:
                     prefixes.append((Path(tmpdir) / "tail", tail_start, total_pages))
 
@@ -892,7 +905,13 @@ def run_tesseract_ocr(pdf_path: Path) -> str:
 def get_pdf_text(pdf_path: Path) -> tuple[str, str]:
     text = run_pdftotext(pdf_path)
     if len(compact_spaces(text)) >= 40:
-        return text, "pdftotext"
+        # Algunos PDFs escaneados traen una capa de texto mínima (cabecera/CSV)
+        # que supera el umbral de longitud pero no incluye casillas.
+        upper = norm_text(text)
+        score = score_renta_ocr_text(text)
+        has_casillas = bool(re.search(r"\b0*505\b|\b0*670\b|\b0*432\b|\bresultado de la declaracion\b", upper))
+        if score >= 120 or has_casillas:
+            return text, "pdftotext"
     if RENTA_USE_OCRMYPDF:
         ocrpdf = run_ocrmypdf_text(pdf_path)
         if len(compact_spaces(ocrpdf)) >= 80:
