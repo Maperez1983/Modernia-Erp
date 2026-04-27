@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=235" />
+				    <link rel="stylesheet" href="styles.css?v=236" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -4021,6 +4021,9 @@
               </div>
               <div id="crmViewFin" class="crm-workspace-view hidden">
                 <div id="crmFinMount"></div>
+              </div>
+              <div id="crmViewGestoria" class="crm-workspace-view hidden">
+                <div id="crmGestoriaMount"></div>
               </div>
               <div id="crmViewLegal" class="crm-workspace-view hidden">
                 <div class="crm-summary-grid">
@@ -9957,11 +9960,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-										    <script src="app.js?v=664"></script>
+										    <script src="app.js?v=674"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-									        const TARGET_SW = "/sw.js?v=220";
+									        const TARGET_SW = "/sw.js?v=274";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
