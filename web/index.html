@@ -5203,6 +5203,17 @@
               <p class="muted">Vista principal del despacho: carga, alertas, vencimientos y foco operativo.</p>
             </div>
           </div>
+          <div class="tc-modulebar tc-modulebar--micro" id="gestoriaDashboardTabs" role="navigation" aria-label="Panel gestoría">
+            <button class="tab tc-module active" type="button" data-gestoria-dashboard-pane="resumen" title="Resumen">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+              <span class="tc-mod-label">Resumen</span>
+            </button>
+            <button class="tab tc-module" type="button" data-gestoria-dashboard-pane="renta" title="Renta">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+              <span class="tc-mod-label">Renta</span>
+            </button>
+          </div>
+          <div id="gestoriaDashboardPaneResumen">
           <button type="button" class="gestoria-renta-banner" id="gestoriaRentaCampaignBanner">
             <div class="gestoria-renta-banner-mark" aria-hidden="true">
               <div class="gestoria-renta-banner-gov"></div>
@@ -5354,6 +5365,23 @@
               <h3>Carga por gestor</h3>
               <p class="muted">Gestiones activas por responsable.</p>
               <div id="gestoriaResponsablesTable"></div>
+            </div>
+          </div>
+          </div>
+          <div id="gestoriaDashboardPaneRenta" class="hidden">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Renta · Dashboard</h3>
+                  <p class="muted">KPIs, responsables, pendientes de cobro y facturación por ejercicio.</p>
+                </div>
+                <div class="toolbar">
+                  <select id="gestoriaDashRentaEjercicio" aria-label="Ejercicio renta"></select>
+                  <button type="button" class="secondary" id="gestoriaDashRentaReload">Actualizar</button>
+                </div>
+              </div>
+              <div class="grid crm-kpis" id="gestoriaDashRentaKpis"></div>
+              <div id="gestoriaDashRentaContent"></div>
             </div>
           </div>
         </div>

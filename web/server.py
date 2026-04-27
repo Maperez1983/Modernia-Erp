@@ -22907,6 +22907,217 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     return items
 
 
+def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    service_filter_exists = (
+        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id AS cliente_id,
+          c.nombre,
+          c.nif,
+          c.estado AS cliente_estado,
+          cg.renta_detalles,
+          (
+            SELECT ce2.estado
+            FROM clientes_empresas ce2
+            WHERE ce2.empresa_id = ?
+              AND ce2.cliente_id = c.id
+              AND {service_filter_exists}
+            ORDER BY
+              CASE
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'activo' THEN 3
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'alta' THEN 2
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'pendiente' THEN 1
+                ELSE 0
+              END DESC,
+              ce2.updated_at DESC
+            LIMIT 1
+          ) AS servicio_estado
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )
+        ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
+        """,
+        (empresa_id, empresa_id),
+    ).fetchall()
+
+    campaigns = []
+    missing = []
+    for row in rows:
+        row_dict = dict(row)
+        cliente_id = str(row_dict.get("cliente_id") or "").strip()
+        nombre = str(row_dict.get("nombre") or "").strip()
+        nif = str(row_dict.get("nif") or "").strip()
+        servicio_estado = str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip()
+        payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
+        entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
+        entry = None
+        for e in entries:
+            if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                entry = e
+                break
+        if not entry:
+            missing.append({"cliente_id": cliente_id, "cliente": nombre, "nif": nif, "estado_servicio": servicio_estado})
+            continue
+        estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
+        responsable_raw = str(entry.get("responsable") or "").strip()
+        responsable_label = responsable_raw or "Sin responsable"
+        responsable_key = normalize_lookup_text(responsable_label) or "sin-responsable"
+        precio = coerce_renta_money(entry.get("precio_servicio")) or 0.0
+        cobrada = 1 if parse_boolish(entry.get("cobrada")) else 0
+        forma_cobro = str(entry.get("forma_cobro") or "").strip()
+        remesada = 1 if parse_boolish(entry.get("remesada")) else 0
+        presentacion_fecha = str(entry.get("presentacion_fecha") or "").strip()
+        month = presentacion_fecha[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha) else ""
+        campaigns.append(
+            {
+                "cliente_id": cliente_id,
+                "cliente": nombre,
+                "nif": nif,
+                "estado_servicio": servicio_estado,
+                "ejercicio": ejercicio_val,
+                "estado_presentacion": estado,
+                "presentacion_fecha": presentacion_fecha,
+                "mes": month,
+                "responsable": responsable_raw,
+                "responsable_label": responsable_label,
+                "responsable_key": responsable_key,
+                "precio_servicio": round(float(precio or 0.0), 2),
+                "cobrada": cobrada,
+                "forma_cobro": forma_cobro,
+                "remesada": remesada,
+            }
+        )
+
+    counts = {
+        "clientes_renta": len(rows),
+        "campanas_ejercicio": len(campaigns),
+        "sin_campana": max(len(rows) - len(campaigns), 0),
+        "presentadas": 0,
+        "borrador": 0,
+        "con_precio": 0,
+        "cobradas": 0,
+        "sin_cobrar": 0,
+        "sin_responsable": 0,
+        "facturacion_total": 0.0,
+        "cobrado_total": 0.0,
+        "pendiente_cobro_total": 0.0,
+    }
+    responsables = {}
+    months = {}
+    for item in campaigns:
+        estado = item.get("estado_presentacion") or ""
+        if estado == "Borrador":
+            counts["borrador"] += 1
+        else:
+            counts["presentadas"] += 1
+        precio = float(item.get("precio_servicio") or 0.0)
+        if precio > 0.0001:
+            counts["con_precio"] += 1
+            counts["facturacion_total"] += precio
+            if int(item.get("cobrada") or 0) == 1:
+                counts["cobradas"] += 1
+                counts["cobrado_total"] += precio
+            else:
+                counts["sin_cobrar"] += 1
+                counts["pendiente_cobro_total"] += precio
+        if not str(item.get("responsable") or "").strip():
+            counts["sin_responsable"] += 1
+        key = str(item.get("responsable_key") or "sin-responsable")
+        bucket = responsables.get(key)
+        if not bucket:
+            bucket = {
+                "responsable_key": key,
+                "responsable": item.get("responsable_label") or "Sin responsable",
+                "campanas": 0,
+                "borrador": 0,
+                "presentadas": 0,
+                "sin_cobrar": 0,
+                "facturacion": 0.0,
+                "cobrado": 0.0,
+                "pendiente": 0.0,
+            }
+            responsables[key] = bucket
+        bucket["campanas"] += 1
+        if estado == "Borrador":
+            bucket["borrador"] += 1
+        else:
+            bucket["presentadas"] += 1
+        if precio > 0.0001:
+            bucket["facturacion"] += precio
+            if int(item.get("cobrada") or 0) == 1:
+                bucket["cobrado"] += precio
+            else:
+                bucket["sin_cobrar"] += 1
+                bucket["pendiente"] += precio
+        month = str(item.get("mes") or "").strip()
+        if month:
+            months.setdefault(month, {"mes": month, "campanas": 0, "presentadas": 0, "borrador": 0})
+            months[month]["campanas"] += 1
+            if estado == "Borrador":
+                months[month]["borrador"] += 1
+            else:
+                months[month]["presentadas"] += 1
+
+    unpaid = [
+        item for item in campaigns if float(item.get("precio_servicio") or 0.0) > 0.0001 and int(item.get("cobrada") or 0) != 1
+    ]
+    unpaid.sort(key=lambda x: (-float(x.get("precio_servicio") or 0.0), str(x.get("cliente") or "")))
+    unassigned = [item for item in campaigns if not str(item.get("responsable") or "").strip()]
+    unassigned.sort(key=lambda x: (-float(x.get("precio_servicio") or 0.0), str(x.get("cliente") or "")))
+
+    responsables_list = list(responsables.values())
+    responsables_list.sort(key=lambda x: (-float(x.get("pendiente") or 0.0), -int(x.get("campanas") or 0)))
+    months_list = list(months.values())
+    months_list.sort(key=lambda x: str(x.get("mes") or ""))
+
+    return {
+        "ejercicio": ejercicio_val,
+        "counts": {
+            **counts,
+            "facturacion_total": round(float(counts["facturacion_total"]), 2),
+            "cobrado_total": round(float(counts["cobrado_total"]), 2),
+            "pendiente_cobro_total": round(float(counts["pendiente_cobro_total"]), 2),
+        },
+        "responsables": [
+            {
+                **row,
+                "facturacion": round(float(row.get("facturacion") or 0.0), 2),
+                "cobrado": round(float(row.get("cobrado") or 0.0), 2),
+                "pendiente": round(float(row.get("pendiente") or 0.0), 2),
+            }
+            for row in responsables_list
+        ],
+        "unpaid": unpaid[:400],
+        "unassigned": unassigned[:400],
+        "missing": missing[:400],
+        "months": months_list,
+    }
+
+
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
@@ -58378,6 +58589,24 @@ class Handler(BaseHTTPRequestHandler):
             limit = params.get("limit", ["50"])[0]
             items = collect_gestoria_renta_card_items(conn, empresa_id, q=q, estado=estado, limit=limit, ejercicio=ejercicio)
             json_response(self, {"rows": items})
+            return
+
+        if path == "/api/gestoria_renta_dashboard":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ejercicio = params.get("ejercicio", [""])[0]
+            try:
+                payload = compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=ejercicio)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_renta_dashboard", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo calcular el dashboard de renta."}, status=500)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/acciones":

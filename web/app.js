@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v285";
+const APP_SW_VERSION = "v286";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -2312,6 +2312,13 @@ const gestoriaAltaPersonaFields = gestoriaAltaForm
   ? gestoriaAltaForm.querySelectorAll('[data-gestoria-persona="fisica"]')
   : [];
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
+const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
+const gestoriaDashboardPaneResumen = document.getElementById("gestoriaDashboardPaneResumen");
+const gestoriaDashboardPaneRenta = document.getElementById("gestoriaDashboardPaneRenta");
+const gestoriaDashRentaEjercicio = document.getElementById("gestoriaDashRentaEjercicio");
+const gestoriaDashRentaReload = document.getElementById("gestoriaDashRentaReload");
+const gestoriaDashRentaKpis = document.getElementById("gestoriaDashRentaKpis");
+const gestoriaDashRentaContent = document.getElementById("gestoriaDashRentaContent");
 const gestoriaDocsSection = document.getElementById("gestoriaDocsSection");
 const gestoriaContaSection = document.getElementById("gestoriaContaSection");
 const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
@@ -48637,9 +48644,389 @@ const loadGestoriaDocsWorkspace = () => {
   loadGestoriaAuditoria();
 };
 
+const initGestoriaDashboardTabs = () => {
+  if (!gestoriaDashboardTabs || gestoriaDashboardTabs.dataset.ready === "1") return;
+  gestoriaDashboardTabs.dataset.ready = "1";
+  gestoriaDashboardTabs.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-gestoria-dashboard-pane]");
+    if (!btn) return;
+    setGestoriaDashboardPane(btn.dataset.gestoriaDashboardPane);
+  });
+};
+
+const setGestoriaDashboardPane = (paneKey = "resumen") => {
+  const key = paneKey === "renta" ? "renta" : "resumen";
+  state.gestoriaDashboardPane = key;
+  if (gestoriaDashboardTabs) {
+    gestoriaDashboardTabs.querySelectorAll("[data-gestoria-dashboard-pane]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.gestoriaDashboardPane === key);
+    });
+  }
+  if (gestoriaDashboardPaneResumen) gestoriaDashboardPaneResumen.classList.toggle("hidden", key !== "resumen");
+  if (gestoriaDashboardPaneRenta) gestoriaDashboardPaneRenta.classList.toggle("hidden", key !== "renta");
+  if (key === "renta") {
+    loadGestoriaRentaDashboard().catch(() => {});
+  }
+};
+
+const ensureGestoriaDashRentaEjercicioOptions = (selected = "") => {
+  if (!gestoriaDashRentaEjercicio) return;
+  const current = String(selected || gestoriaDashRentaEjercicio.value || "").trim();
+  const base = new Date().getFullYear() - 1;
+  const years = [base, base - 1, base - 2, base - 3].map((y) => String(y));
+  gestoriaDashRentaEjercicio.innerHTML = "";
+  years.forEach((y) => gestoriaDashRentaEjercicio.appendChild(createOption(y, y)));
+  gestoriaDashRentaEjercicio.value = years.includes(current) ? current : years[0];
+};
+
+const openClienteRentaFromDashboard = (clienteId) => {
+  const id = String(clienteId || "").trim();
+  if (!id) return;
+  state.pendingClienteOpen = {
+    id,
+    clienteTab: "servicios",
+    operativaTab: "gestoria",
+    gestoriaModule: "renta",
+  };
+  openClienteDetail(id);
+};
+
+const renderGestoriaRentaDashboard = (payload) => {
+  if (!gestoriaDashRentaKpis || !gestoriaDashRentaContent) return;
+  const counts = payload?.counts || {};
+  const ejercicio = String(payload?.ejercicio || "").trim();
+  const responsables = Array.isArray(payload?.responsables) ? payload.responsables : [];
+  const unpaid = Array.isArray(payload?.unpaid) ? payload.unpaid : [];
+  const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
+  const missing = Array.isArray(payload?.missing) ? payload.missing : [];
+  const months = Array.isArray(payload?.months) ? payload.months : [];
+
+  const formatMoney = (value) => euroFormatter.format(Number(value || 0));
+
+  const setView = (view) => {
+    state.gestoriaRentaDashView = view;
+    renderGestoriaRentaDashboard(payload);
+  };
+  const view = String(state.gestoriaRentaDashView || "overview");
+
+  const addKpi = ({ title, value, note, onClick }) => {
+    const el = document.createElement(onClick ? "button" : "div");
+    if (onClick) el.type = "button";
+    el.className = "card kpi-card";
+    el.innerHTML = `
+      <h3>${title}</h3>
+      <div class="kpi-value">${value}</div>
+      <div class="muted">${note || ""}</div>
+    `;
+    if (onClick) el.addEventListener("click", onClick);
+    gestoriaDashRentaKpis.appendChild(el);
+  };
+
+  gestoriaDashRentaKpis.innerHTML = "";
+  addKpi({
+    title: "Rentas encargadas",
+    value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
+    note: `Ejercicio ${ejercicio || ""}`.trim(),
+    onClick: () => setView("overview"),
+  });
+  addKpi({
+    title: "Realizadas",
+    value: numberFormatter.format(Number(counts.presentadas || 0)),
+    note: "Presentadas.",
+    onClick: () => setView("overview"),
+  });
+  addKpi({
+    title: "Borradores",
+    value: numberFormatter.format(Number(counts.borrador || 0)),
+    note: "Pendientes de presentar.",
+    onClick: () => setView("overview"),
+  });
+  addKpi({
+    title: "Sin cobrar",
+    value: numberFormatter.format(Number(counts.sin_cobrar || 0)),
+    note: formatMoney(counts.pendiente_cobro_total || 0),
+    onClick: () => setView("unpaid"),
+  });
+  addKpi({
+    title: "Sin responsable",
+    value: numberFormatter.format(Number(counts.sin_responsable || 0)),
+    note: "Campañas sin asignación.",
+    onClick: () => setView("unassigned"),
+  });
+  addKpi({
+    title: "Rentas sin campaña",
+    value: numberFormatter.format(Number(counts.sin_campana || 0)),
+    note: `Clientes renta: ${numberFormatter.format(Number(counts.clientes_renta || 0))}`,
+    onClick: () => setView("missing"),
+  });
+  addKpi({
+    title: "Facturación renta",
+    value: formatMoney(counts.facturacion_total || 0),
+    note: `Cobrado: ${formatMoney(counts.cobrado_total || 0)}`,
+    onClick: () => setView("responsables"),
+  });
+
+  const buildCampaignTable = (items, { title, hint, emptyText } = {}) => {
+    const card = document.createElement("div");
+    card.className = "form-card";
+    const head = document.createElement("div");
+    head.className = "section-head";
+    const headLeft = document.createElement("div");
+    const h3 = document.createElement("h3");
+    h3.textContent = title || "Listado";
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = hint || "";
+    headLeft.appendChild(h3);
+    headLeft.appendChild(p);
+    head.appendChild(headLeft);
+    const headRight = document.createElement("div");
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "secondary ghost";
+    backBtn.textContent = "Volver";
+    backBtn.addEventListener("click", () => setView("overview"));
+    headRight.appendChild(backBtn);
+    head.appendChild(headRight);
+    card.appendChild(head);
+
+    if (!items.length) {
+      card.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: emptyText || "Sin items." }));
+      return card;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Cliente", "NIF", "Estado", "Fecha", "Responsable", "Precio", "Cobro", "Abrir"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    items.slice(0, 250).forEach((item) => {
+      const tr = document.createElement("tr");
+      const fecha = formatCell("fecha", item.presentacion_fecha || "") || item.presentacion_fecha || "-";
+      const cobro = Number(item.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
+      [
+        item.cliente || "-",
+        item.nif || "-",
+        item.estado_presentacion || "-",
+        fecha,
+        item.responsable_label || "Sin responsable",
+        item.precio_servicio != null ? formatMoney(item.precio_servicio) : "-",
+        cobro,
+      ].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Abrir renta";
+      btn.addEventListener("click", () => openClienteRentaFromDashboard(item.cliente_id));
+      actionTd.appendChild(btn);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return card;
+  };
+
+  const buildResponsablesTable = (items) => {
+    const card = document.createElement("div");
+    card.className = "form-card";
+    card.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h3>Renta por responsable</h3>
+          <p class="muted">Pendiente ordenado por importe.</p>
+        </div>
+        <div>
+          <button type="button" class="secondary ghost" id="gestoriaRentaDashBackBtn2">Volver</button>
+        </div>
+      </div>
+    `;
+    card.querySelector("#gestoriaRentaDashBackBtn2")?.addEventListener("click", () => setView("overview"));
+    if (!items.length) {
+      card.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Sin responsables." }));
+      return card;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Responsable", "Campañas", "Presentadas", "Borrador", "Sin cobrar", "Facturación", "Cobrado", "Pendiente"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    items.forEach((row) => {
+      const tr = document.createElement("tr");
+      [
+        row.responsable || "Sin responsable",
+        numberFormatter.format(Number(row.campanas || 0)),
+        numberFormatter.format(Number(row.presentadas || 0)),
+        numberFormatter.format(Number(row.borrador || 0)),
+        numberFormatter.format(Number(row.sin_cobrar || 0)),
+        formatMoney(row.facturacion || 0),
+        formatMoney(row.cobrado || 0),
+        formatMoney(row.pendiente || 0),
+      ].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return card;
+  };
+
+  const root = document.createElement("div");
+  if (view === "unpaid") {
+    root.appendChild(
+      buildCampaignTable(unpaid, {
+        title: "Rentas sin cobrar",
+        hint: "Campañas con precio asignado y no marcadas como cobradas.",
+        emptyText: "No hay rentas sin cobrar.",
+      })
+    );
+  } else if (view === "unassigned") {
+    root.appendChild(
+      buildCampaignTable(unassigned, {
+        title: "Rentas sin responsable",
+        hint: "Campañas sin responsable asignado.",
+        emptyText: "No hay campañas sin responsable.",
+      })
+    );
+  } else if (view === "missing") {
+    root.appendChild(
+      buildCampaignTable(
+        missing.map((m) => ({ ...m, estado_presentacion: "-", presentacion_fecha: "", responsable_label: "-", precio_servicio: 0, cobrada: 0 })),
+        {
+          title: `Clientes sin campaña (${ejercicio || ""})`.trim(),
+          hint: "Cliente con módulo renta activo pero sin campaña creada para el ejercicio.",
+          emptyText: "No hay clientes sin campaña.",
+        }
+      )
+    );
+  } else if (view === "responsables") {
+    root.appendChild(buildResponsablesTable(responsables));
+  } else {
+    const split = document.createElement("div");
+    split.className = "crm-split";
+    const topUnpaid = buildCampaignTable(unpaid.slice(0, 12), {
+      title: "Top sin cobrar",
+      hint: "Pendientes de cobro (top 12).",
+      emptyText: "No hay rentas sin cobrar.",
+    });
+    const topUnassigned = buildCampaignTable(unassigned.slice(0, 12), {
+      title: "Top sin responsable",
+      hint: "Sin asignación (top 12).",
+      emptyText: "No hay campañas sin responsable.",
+    });
+    // En overview quitamos el botón Volver (ya estamos en el root).
+    topUnpaid.querySelector("button.secondary.ghost")?.remove();
+    topUnassigned.querySelector("button.secondary.ghost")?.remove();
+    split.appendChild(topUnpaid);
+    split.appendChild(topUnassigned);
+    root.appendChild(split);
+    if (months.length) {
+      const monthCard = document.createElement("div");
+      monthCard.className = "form-card";
+      monthCard.innerHTML = `<h3>Presentadas por mes</h3><p class="muted">Distribución según fecha de presentación.</p>`;
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Mes", "Campañas", "Presentadas", "Borrador"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      months.forEach((row) => {
+        const tr = document.createElement("tr");
+        [
+          row.mes || "-",
+          numberFormatter.format(Number(row.campanas || 0)),
+          numberFormatter.format(Number(row.presentadas || 0)),
+          numberFormatter.format(Number(row.borrador || 0)),
+        ].forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      monthCard.appendChild(table);
+      root.appendChild(monthCard);
+    }
+    const respPreview = buildResponsablesTable(responsables.slice(0, 12));
+    respPreview.querySelector("#gestoriaRentaDashBackBtn2")?.remove();
+    root.appendChild(respPreview);
+  }
+
+  gestoriaDashRentaContent.innerHTML = "";
+  gestoriaDashRentaContent.appendChild(root);
+};
+
+const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa || !gestoriaDashRentaEjercicio || !gestoriaDashRentaReload) return;
+  ensureGestoriaDashRentaEjercicioOptions();
+  if (gestoriaDashRentaEjercicio.dataset.bound !== "1") {
+    gestoriaDashRentaEjercicio.dataset.bound = "1";
+    gestoriaDashRentaEjercicio.addEventListener("change", () => loadGestoriaRentaDashboard({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashRentaReload.dataset.bound !== "1") {
+    gestoriaDashRentaReload.dataset.bound = "1";
+    gestoriaDashRentaReload.addEventListener("click", () => loadGestoriaRentaDashboard({ force: true }).catch(() => {}));
+  }
+  const ejercicio = String(gestoriaDashRentaEjercicio.value || "").trim();
+  const cacheAgeMs = Date.now() - Number(state.gestoriaRentaDashCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
+  if (
+    !force &&
+    state.gestoriaRentaDashCache &&
+    state.gestoriaRentaDashCache.empresaId === empresa.id &&
+    String(state.gestoriaRentaDashCache.ejercicio || "") === String(ejercicio || "") &&
+    isFreshCache
+  ) {
+    renderGestoriaRentaDashboard(state.gestoriaRentaDashCache.payload);
+    return;
+  }
+  gestoriaDashRentaReload.disabled = true;
+  gestoriaDashRentaReload.textContent = "Cargando...";
+  try {
+    const data = await api(`/api/gestoria_renta_dashboard?empresa_id=${empresa.id}&ejercicio=${encodeURIComponent(ejercicio)}`);
+    if (data?.error) throw new Error(String(data.error));
+    state.gestoriaRentaDashCache = { empresaId: empresa.id, ejercicio, payload: data, ts: Date.now() };
+    if (!state.gestoriaRentaDashView) state.gestoriaRentaDashView = "overview";
+    renderGestoriaRentaDashboard(data);
+  } catch (err) {
+    gestoriaDashRentaContent.innerHTML = `<p class="muted">No se pudo cargar Renta: ${String(err?.message || err || "").trim()}</p>`;
+  } finally {
+    gestoriaDashRentaReload.disabled = false;
+    gestoriaDashRentaReload.textContent = "Actualizar";
+  }
+};
+
 const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
+  initGestoriaDashboardTabs();
+  setGestoriaDashboardPane(state.gestoriaDashboardPane || "resumen");
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
   Promise.all([
