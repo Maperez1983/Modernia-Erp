@@ -7993,18 +7993,25 @@
             <div class="footer" id="hipotecaContabilidadInfo"></div>
           </div>
         </div>
-        <div id="finSimSection" class="hidden">
-          <div class="form-card" id="finSimCard">
-            <div class="section-head">
-              <div>
-                <h3>Simulador de hipotecas y gastos</h3>
-                <p class="muted">Cálculo de gastos, cuotas y ratios (igual que en Excel).</p>
-              </div>
-            </div>
-            <form id="finSimForm" class="form-grid">
-              <div class="form-section">Parámetros generales</div>
-              <label>
-                Promoción nueva (s/n)
+	        <div id="finSimSection" class="hidden">
+	          <div class="form-card" id="finSimCard">
+	            <div class="section-head">
+	              <div>
+	                <h3>Simulador de hipotecas y gastos</h3>
+	                <p class="muted">Cálculo de gastos, cuotas y ratios (igual que en Excel).</p>
+	              </div>
+	              <div class="crm-actions">
+	                <button type="button" id="finSimLoadFromAsesoramiento" class="secondary" disabled>Cargar expediente</button>
+	                <button type="button" id="finSimSaveToAsesoramiento" class="secondary" disabled>Guardar en expediente</button>
+	                <button type="button" id="finSimCalculate" class="ghost">Calcular</button>
+	                <span id="finSimStatus" class="muted"></span>
+	              </div>
+	            </div>
+	            <p id="finSimLinkedAsesoramiento" class="muted" style="margin: 10px 0 0;"></p>
+	            <form id="finSimForm" class="form-grid">
+	              <div class="form-section">Parámetros generales</div>
+	              <label>
+	                Promoción nueva (s/n)
                 <select name="sim_promo_nueva">
                   <option>N</option>
                   <option>S</option>
@@ -9874,11 +9881,11 @@
 		    <script src="app-auth.js?v=12"></script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=692"></script>
+												    <script src="app.js?v=694"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=293";
+											        const TARGET_SW = "/sw.js?v=295";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
