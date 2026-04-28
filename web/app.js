@@ -44875,12 +44875,17 @@ const renderCrmAgendaCalendar = (rows = []) => {
       if (end !== null) maxs.push(end);
       if (start !== null && end === null) maxs.push(start + 30);
     });
-    let startH = defaultStart;
-    let endH = defaultEnd;
-    if (mins.length) startH = Math.floor(Math.min(...mins) / 60);
-    if (maxs.length) endH = Math.ceil(Math.max(...maxs) / 60);
-    startH = clamp(startH - 1, 6, 20);
-    endH = clamp(endH + 1, startH + 2, 23);
+
+    // UX: en vista Día/Semana no recortes la parrilla al rango de eventos
+    // (parece que “faltan horas”). Mostramos un rango base (08:00–20:00)
+    // y solo lo ampliamos si hay eventos fuera de ese rango.
+    let startH = Number.isFinite(defaultStart) ? defaultStart : 8;
+    let endH = Number.isFinite(defaultEnd) ? defaultEnd : 20;
+    if (mins.length) startH = Math.min(startH, Math.floor(Math.min(...mins) / 60) - 1);
+    if (maxs.length) endH = Math.max(endH, Math.ceil(Math.max(...maxs) / 60) + 1);
+
+    startH = clamp(startH, 0, 22);
+    endH = clamp(endH, startH + 2, 24);
     return { startHour: startH, endHour: endH };
   };
 
