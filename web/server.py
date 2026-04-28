@@ -15107,8 +15107,15 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
         return probe_text, full_err or "", "pdftotext"
 
     # 2) OCR progresivo sobre páginas (normalmente 1-4).
-    # Por defecto evitamos OCR externo en rentas: puede introducir latencias grandes (red/cupos).
-    use_external = bool(external_ocr_available()) and prefer_vision
+    # En producción (Render) puede NO existir `tesseract`. En ese caso, si hay OCR externo
+    # disponible, debemos usarlo sí o sí; si no, el OCR no devuelve texto y no detecta NIF.
+    tesseract_cmd = resolve_tesseract_cmd()
+    tesseract_available = bool(tesseract_cmd and os.path.exists(tesseract_cmd))
+
+    # Por defecto evitamos OCR externo en rentas (latencia/cupos), salvo:
+    # - el operador fuerza `RENTA_OCR_PREFER_VISION=1`
+    # - o no hay tesseract y necesitamos Vision para que funcione.
+    use_external = bool(external_ocr_available()) and (prefer_vision or not tesseract_available)
     images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=max(1, fast_pages), dpi=fast_dpi)
     if images:
         combined = []
