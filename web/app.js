@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v291";
+const APP_SW_VERSION = "v298";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -31816,13 +31816,17 @@ const setCrmWorkspaceView = (view = "resumen") => {
   syncCrmGlobalSearchUi(nextView);
   syncCrmGlobalSearchTargetValue(nextView);
 
-  if (crmWorkspaceShell && inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
+  // Si veníamos de la ficha del inmueble (panel aparte), al cambiar de vista CRM
+  // debe cerrarse SIEMPRE; si no, se queda “debajo” de la Agenda u otras vistas.
+  if (inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
     inmuebleDetail.classList.add("hidden");
-    crmWorkspaceShell.classList.remove("hidden");
-    try {
-      updateTableVisibility();
-    } catch {}
   }
+  if (crmWorkspaceShell) {
+    crmWorkspaceShell.classList.remove("hidden");
+  }
+  try {
+    updateTableVisibility();
+  } catch {}
 
 	if (nextView === "captaciones") {
 	  loadCrmCaptaciones();
@@ -33351,7 +33355,7 @@ const ensureHipotecaFichaPanel = () => {
       unique.add(key);
       out.push(v);
     });
-    el.innerHTML = out.map((v) => `<option value="${escapeAttr(v)}"></option>`).join("");
+    el.innerHTML = out.map((v) => `<option value="${escapeHtml(v)}"></option>`).join("");
   };
 
   const cloneOptionsFrom = (sourceId) => {
@@ -33404,7 +33408,7 @@ const ensureHipotecaFichaPanel = () => {
         seen.add(key);
         return true;
       });
-    bancoSelect.innerHTML = `<option value=""></option>${cleaned.map((v) => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join("")}`;
+    bancoSelect.innerHTML = `<option value=""></option>${cleaned.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}`;
   }
 
   const clearStatus = () => {
