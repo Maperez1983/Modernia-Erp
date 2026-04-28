@@ -18035,6 +18035,53 @@ def ensure_cliente_servicio_link(conn, cliente_id, empresa_id, servicio, now, es
     )
 
 
+def resolve_empresa_id_for_cliente_servicio(conn, cliente_id, servicio_key, *, prefer_active=True):
+    """
+    Intenta resolver una empresa para un cliente+servicio:
+    - Si ya hay 1 vinculación (clientes_empresas), la usa.
+    - Si no, usa sugerencias por servicio (WORKSPACE_SERVICE_COMPANY_SUGGESTIONS) si existen en `empresas`.
+    """
+    cliente_id = str(cliente_id or "").strip()
+    servicio_key = normalize_service_key(servicio_key or "")
+    if servicio_key == "hipotecas":
+        servicio_key = "financiaciones"
+    if not cliente_id or not servicio_key:
+        return ""
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT ce.empresa_id
+            FROM clientes_empresas ce
+            JOIN empresas e ON e.id = ce.empresa_id
+            WHERE ce.cliente_id = ?
+              AND LOWER(COALESCE(ce.servicio, '')) = LOWER(?)
+              AND (? = 0 OR COALESCE(e.activo, 1) = 1)
+            """,
+            (cliente_id, servicio_key, 1 if prefer_active else 0),
+        ).fetchall()
+    except Exception:
+        rows = []
+    empresa_ids = [str((r["empresa_id"] if isinstance(r, dict) else (r[0] if r else "")) or "").strip() for r in (rows or [])]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if len(empresa_ids) == 1:
+        return empresa_ids[0]
+    # Fallback por sugerencias del servicio.
+    for name in (WORKSPACE_SERVICE_COMPANY_SUGGESTIONS.get(servicio_key, []) or []):
+        try:
+            row = conn.execute(
+                "SELECT id FROM empresas WHERE nombre = ? AND COALESCE(activo, 1) = 1 LIMIT 1",
+                (name,),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                return str(row["id"] or "").strip()
+            except Exception:
+                return str(row[0] or "").strip()
+    return ""
+
+
 def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=None):
     if not nombre and not nif:
         return None
@@ -39677,6 +39724,64 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_delete",
         }:
             try:
+                if not str(payload.get("servicio") or "").strip():
+                    # Deducción por endpoint: ayuda a no depender de que el frontend mande `servicio`.
+                    path_service = {
+                        # Gestoría
+                        "/api/cliente_gestoria_update": "gestoria",
+                        "/api/gestoria": "gestoria",
+                        "/api/gestoria_update": "gestoria",
+                        "/api/gestoria_trabajos": "gestoria",
+                        "/api/gestoria_trabajos_update": "gestoria",
+                        "/api/gestoria_trabajos_delete": "gestoria",
+                        "/api/gestoria_docs": "gestoria",
+                        "/api/gestoria_docs_update": "gestoria",
+                        "/api/gestoria_docs_delete": "gestoria",
+                        "/api/gestoria_contabilidad": "gestoria",
+                        "/api/gestoria_contabilidad_update": "gestoria",
+                        "/api/gestoria_contabilidad_delete": "gestoria",
+                        "/api/gestoria_factura_ocr": "gestoria",
+                        "/api/renta_quick_ocr": "gestoria",
+                        "/api/renta_quick_attach": "gestoria",
+                        "/api/renta_entry_ocr_reprocess": "gestoria",
+                        "/api/renta_quick_note": "gestoria",
+                        # Inmobiliaria
+                        "/api/captaciones": "inmobiliaria",
+                        "/api/captaciones_update": "inmobiliaria",
+                        "/api/captacion_update": "inmobiliaria",
+                        "/api/captacion_delete": "inmobiliaria",
+                        "/api/captacion_convert": "inmobiliaria",
+                        "/api/compraventas": "inmobiliaria",
+                        "/api/inmueble_update": "inmobiliaria",
+                        "/api/inmueble_delete": "inmobiliaria",
+                        "/api/inmueble_docs": "inmobiliaria",
+                        "/api/demandas": "inmobiliaria",
+                        "/api/visitas": "inmobiliaria",
+                        "/api/acciones": "inmobiliaria",
+                        "/api/acciones_update": "inmobiliaria",
+                        "/api/acciones_delete": "inmobiliaria",
+                        # Seguros
+                        "/api/seguros": "seguros",
+                        "/api/seguros_update": "seguros",
+                        "/api/seguros_delete": "seguros",
+                        "/api/seguros_campanas": "seguros",
+                        "/api/seguros_campanas_update": "seguros",
+                        "/api/seguros_campanas_delete": "seguros",
+                        "/api/seguros_ocr": "seguros",
+                        "/api/seguros_ocr_async": "seguros",
+                        # Financiaciones/hipotecas
+                        "/api/hipotecas": "financiaciones",
+                        "/api/hipotecas_update": "financiaciones",
+                        "/api/hipotecas_delete": "financiaciones",
+                        "/api/fin_asesoramientos": "financiaciones",
+                        "/api/fin_asesoramientos_update": "financiaciones",
+                        "/api/fin_asesoramientos_convert": "financiaciones",
+                        "/api/fin_asesoramiento_ocr": "financiaciones",
+                        "/api/fin_asesoramiento_ocr_guided": "financiaciones",
+                        "/api/fin_asesoramiento_ocr_auto": "financiaciones",
+                    }.get(parsed.path)
+                    if path_service:
+                        payload["servicio"] = path_service
                 if not str(payload.get("empresa_id") or "").strip():
                     conn = get_db(self.db_path)
                     self._track_conn(conn)
@@ -54832,6 +54937,35 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            # Evita "cliente con servicio sin empresa": si activan módulos de gestoría o guardan renta_detalles,
+            # aseguramos el vínculo clientes_empresas para Gestoría.
+            try:
+                should_link = any(
+                    str(updates.get(key) or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+                    for key in (
+                        "mod_fiscal",
+                        "mod_laboral",
+                        "mod_contable",
+                        "mod_renta",
+                        "mod_registro",
+                        "mod_trafico",
+                        "mod_puntuales",
+                    )
+                ) or ("renta_detalles" in updates)
+                if should_link:
+                    empresa_id = str(payload.get("empresa_id") or "").strip()
+                    if not empresa_id:
+                        empresa_id = resolve_empresa_id_for_cliente_servicio(conn, cliente_id, "gestoria")
+                    if empresa_id:
+                        ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "gestoria", now, estado="Activo")
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/renta_campaign_document":
             cliente_id = str(payload.get("cliente_id") or "").strip()
             entry_id = str(payload.get("entry_id") or "").strip()
