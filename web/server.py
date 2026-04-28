@@ -63204,12 +63204,69 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, selected_year),
             ).fetchall()
 
+            def normalize_bank_label(value: object) -> str:
+                raw = str(value or "").strip()
+                norm = normalize_lookup_text(raw)
+                if not norm:
+                    return raw
+                rules = (
+                    ("sabadell", "Banco Sabadell"),
+                    ("santander", "Banco Santander"),
+                    ("bbva", "BBVA"),
+                    ("caixabank", "CaixaBank"),
+                    ("bankinter", "Bankinter"),
+                    ("unicaja", "Unicaja Banco"),
+                    ("abanca", "Abanca"),
+                    ("ibercaja", "Ibercaja Banco"),
+                    ("kutxabank", "Kutxabank"),
+                    ("cajamar", "Cajamar Caja Rural"),
+                    ("openbank", "Openbank"),
+                    ("ing", "ING"),
+                    ("myinvestor", "MyInvestor"),
+                    ("caja rural de granada", "Caja Rural de Granada"),
+                    ("laboral kutxa", "Laboral Kutxa"),
+                    ("deutsche bank", "Deutsche Bank España"),
+                )
+                for needle, canonical in rules:
+                    if needle and needle in norm:
+                        return canonical
+                return raw
+
+            def merge_bank_rows(rows):
+                merged = {}
+                aliases = {}
+                for r in rows or []:
+                    raw_label = str(r.get("label") or "").strip()
+                    canonical = normalize_bank_label(raw_label)
+                    bucket = merged.get(canonical)
+                    if not bucket:
+                        bucket = {"label": canonical, "total": 0}
+                        merged[canonical] = bucket
+                    try:
+                        bucket["total"] += int(r.get("total") or 0)
+                    except Exception:
+                        bucket["total"] += 0
+                    aliases.setdefault(canonical, set()).add(raw_label)
+                out = sorted(list(merged.values()), key=lambda x: int(x.get("total") or 0), reverse=True)
+                return out, aliases
+
+            entity_total_merged, entity_total_aliases = merge_bank_rows([dict(r) for r in entity_total_rows])
+            entity_year_merged, entity_year_aliases = merge_bank_rows([dict(r) for r in entity_year_rows])
+
+            entity_total_rows = entity_total_merged[:8]
             entity_total_map = {str(row["label"]): dict(row) for row in entity_total_rows}
             commission_by_bank_year = compute_hipotecas_commission_by_bank(conn, empresa_id, selected_year)
             entities = []
-            for row in entity_year_rows:
-                label = str(row["label"] or "").strip()
+            for row in entity_year_merged[:12]:
+                label = str(row.get("label") or "").strip()
                 base = entity_total_map.get(label, {"total": 0})
+                raw_aliases = sorted(list((entity_year_aliases.get(label) or set()) | (entity_total_aliases.get(label) or set())))
+                where_bank = "banco = ?"
+                bank_values = [label]
+                if raw_aliases:
+                    placeholders = ",".join(["?"] * len(raw_aliases))
+                    where_bank = f"banco IN ({placeholders})"
+                    bank_values = raw_aliases
                 metrics = conn.execute(
                     """
                     SELECT
@@ -63219,7 +63276,9 @@ class Handler(BaseHTTPRequestHandler):
                     + """) AS plazo_medio_dias
                     FROM hipotecas
                     WHERE empresa_id = ?
-                      AND banco = ?
+                      AND """
+                    + where_bank
+                    + """
                       AND """
                     + signed_year_expr
                     + """ = ?
@@ -63227,12 +63286,12 @@ class Handler(BaseHTTPRequestHandler):
                     + signed_closed_expr
                     + """
                     """,
-                    (empresa_id, label, selected_year),
+                    tuple([empresa_id] + bank_values + [selected_year]),
                 ).fetchone()
                 entities.append(
                     {
                         "label": label,
-                        "year_total": row["total"] or 0,
+                        "year_total": row.get("total") or 0,
                         "total": base.get("total") or 0,
                         "volumen_total": metrics["volumen_total"] if metrics and metrics["volumen_total"] is not None else 0,
                         "plazo_medio_dias": metrics["plazo_medio_dias"] if metrics and metrics["plazo_medio_dias"] is not None else 0,
