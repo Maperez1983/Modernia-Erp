@@ -19622,6 +19622,10 @@ const resolveCurrentInmuebleEmpresa = () => {
 const resolveCurrentInmuebleEmpresaNombre = () =>
   resolveCurrentInmuebleEmpresa()?.nombre || resolveCrmInmoEmpresaNombre() || "";
 
+// Compat: algunos flujos (Agenda/Acciones) esperan helpers "EmpresaId/EmpresaNombre".
+const resolveCurrentInmuebleEmpresaId = () =>
+  resolveCurrentInmuebleEmpresa()?.id || resolveCrmInmoEmpresaId() || "";
+
 const resolveCrmSegurosEmpresaNombre = () => resolveCrmSegurosEmpresa()?.nombre || FINCAS_COMPANY;
 const resolveCrmGestoriaEmpresaNombre = () => resolveCrmGestoriaEmpresa()?.nombre || FINCAS_COMPANY;
 const resolveCrmFinEmpresaNombre = () => resolveCrmFinEmpresa()?.nombre || FIN_COMPANY;
