@@ -1118,6 +1118,51 @@ WORKSPACE_SERVICE_COMPANY_SUGGESTIONS = {
     "inversion": ["Inversure"],
 }
 
+
+def infer_empresa_id_for_payload(conn, payload):
+    """
+    Best-effort para reducir errores por `empresa_id requerido` cuando el frontend no envía contexto.
+    Solo completa `empresa_id` si se puede inferir desde `empresa_nombre` o `servicio`.
+    """
+    if not isinstance(payload, dict):
+        return ""
+    current = str(payload.get("empresa_id") or "").strip()
+    if current:
+        return current
+    nombre = str(payload.get("empresa_nombre") or payload.get("empresa") or "").strip()
+    if nombre:
+        try:
+            row = conn.execute(
+                "SELECT id FROM empresas WHERE nombre = ? AND COALESCE(activo, 1) = 1 LIMIT 1",
+                (nombre,),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                return str(row["id"] or "").strip()
+            except Exception:
+                return str(row[0] or "").strip()
+    servicio_raw = str(payload.get("servicio") or "").strip()
+    servicio_key = normalize_service_key(servicio_raw)
+    if servicio_key == "hipotecas":
+        servicio_key = "financiaciones"
+    candidates = WORKSPACE_SERVICE_COMPANY_SUGGESTIONS.get(servicio_key, []) if servicio_key else []
+    for name in candidates or []:
+        try:
+            row = conn.execute(
+                "SELECT id FROM empresas WHERE nombre = ? AND COALESCE(activo, 1) = 1 LIMIT 1",
+                (name,),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                return str(row["id"] or "").strip()
+            except Exception:
+                return str(row[0] or "").strip()
+    return ""
+
 # Defaults elegidos para mantener el comportamiento anterior de autoselección en UI.
 WORKSPACE_SERVICE_COMPANY_DEFAULTS = {
     "inmobiliaria": "Estudio Velazquez 2012 SL",
@@ -39610,6 +39655,36 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
             return
+
+        # Reduce fallos por falta de empresa_id: si viene `empresa_nombre` o `servicio`,
+        # inferimos la empresa activa para escribir/consultar sin depender del selector UI.
+        # Nota: no aplica a endpoints de administración de workspaces/empresas que deben ser explícitos.
+        if parsed.path not in {
+            "/api/login",
+            "/api/logout",
+            "/api/auth_set_password",
+            "/api/workspace_empresa_link",
+            "/api/workspace_empresa_unlink",
+            "/api/workspace_member_upsert",
+            "/api/workspace_member_set",
+            "/api/workspace_member_delete",
+            "/api/workspace_members_reset",
+            "/api/workspace_update",
+            "/api/workspace_delete",
+            "/api/workspace_module_update",
+            "/api/empresa_create",
+            "/api/empresa_update",
+            "/api/empresa_delete",
+        }:
+            try:
+                if not str(payload.get("empresa_id") or "").strip():
+                    conn = get_db(self.db_path)
+                    self._track_conn(conn)
+                    inferred = infer_empresa_id_for_payload(conn, payload)
+                    if inferred:
+                        payload["empresa_id"] = inferred
+            except Exception:
+                pass
 
         if parsed.path == "/api/logout":
             token = self._parse_cookies().get(SESSION_COOKIE_NAME, "")
