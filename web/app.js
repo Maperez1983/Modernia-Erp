@@ -33640,6 +33640,30 @@ const syncHipotecaPrestatariaFromClientes = (panel, clienteInmueble) => {
   refreshHipotecaTitularesDisplay(panel, obj);
 };
 
+const normalizeHipotecaPrestatariaForSave = (clienteInmueble) => {
+  const obj = clienteInmueble && typeof clienteInmueble === "object" ? clienteInmueble : {};
+  const c1 = getNestedValue(obj, "comprador.c1") || {};
+  const c2 = getNestedValue(obj, "comprador.c2") || {};
+  const apply = (partyKey) => {
+    const src = normalizePrestatariaSource(getNestedValue(obj, `prestataria.${partyKey}.source`));
+    if (src === "none") {
+      setNestedValue(obj, `prestataria.${partyKey}.nombre`, "");
+      setNestedValue(obj, `prestataria.${partyKey}.nif`, "");
+      return;
+    }
+    if (src === "c1" || src === "c2") {
+      const ref = src === "c1" ? c1 : c2;
+      setNestedValue(obj, `prestataria.${partyKey}.nombre`, String(ref?.nombre || "").trim());
+      setNestedValue(obj, `prestataria.${partyKey}.nif`, String(ref?.nif || "").trim());
+      return;
+    }
+    // manual o vacío -> no tocar
+  };
+  apply("p1");
+  apply("p2");
+  return obj;
+};
+
 const normalizeMoneyLike = (value) => {
   const parsed = toNumber(value);
   return parsed === null ? "" : parsed;
@@ -34761,6 +34785,22 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
       });
     });
   }
+  if (panel.dataset.prestatariaClienteSyncListeners !== "1") {
+    panel.dataset.prestatariaClienteSyncListeners = "1";
+    panel
+      .querySelectorAll(
+        [
+          '[data-json="cliente_inmueble_json"][data-path^="comprador.c1."]',
+          '[data-json="cliente_inmueble_json"][data-path^="comprador.c2."]',
+        ].join(",")
+      )
+      .forEach((el) => {
+        el.addEventListener("change", () => {
+          const fresh = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+          syncHipotecaPrestatariaFromClientes(panel, fresh);
+        });
+      });
+  }
   if (panel.dataset.liquidacionAutofillListeners !== "1") {
     panel.dataset.liquidacionAutofillListeners = "1";
     panel.querySelector('[name="cliente"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
@@ -34828,7 +34868,7 @@ const saveHipotecaFicha = async (event) => {
     payload[field] = value;
   });
 
-  const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+  const clienteInmueble = normalizeHipotecaPrestatariaForSave(collectHipotecaFichaJson(panel, "cliente_inmueble_json"));
   const hipotecaDetalle = collectHipotecaFichaJson(panel, "hipoteca_detalle_json");
   const liquidacion = computeHipotecaLiquidacionComputed(collectHipotecaFichaJson(panel, "liquidacion_json"));
   payload.cliente_inmueble_json = JSON.stringify(clienteInmueble || {}, null, 0);
@@ -55678,7 +55718,7 @@ const submitGestoriaRentaQuick = async () => {
       jobId,
       (jobRow) => {
         if (!gestoriaRentaQuickStatus) return;
-        if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR detectando DNI/NIF...";
+        if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR procesando…";
         if (jobRow.status === "queued") gestoriaRentaQuickStatus.textContent = "OCR en cola...";
       },
       4 * 60 * 1000
