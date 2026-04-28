@@ -12793,7 +12793,8 @@ def process_renta_ocr_job(payload, conn):
             tmp_file.write(raw_bytes)
             tmp_path = tmp_file.name
         if mime == "application/pdf":
-            text, err_detail, method = extract_pdf_text(tmp_path)
+            # OCR de renta: prioriza rutas rápidas (1-2 páginas) para evitar jobs muy lentos.
+            text, err_detail, method = extract_renta_pdf_text(tmp_path, source_hint=source_hint)
         else:
             method = "vision" if external_ocr_available() else "tesseract"
             image_text = ""
@@ -14805,6 +14806,65 @@ def ocr_pdf_first_page(pdf_path):
         if tmp_generated:
             shutil.rmtree(tmp_generated, ignore_errors=True)
 
+
+def ocr_image_tesseract_fast(img_path: str, *, psms=(6, 11), user_dpi: int = 220):
+    """
+    OCR rápido para imágenes (una sola pasada de tesseract).
+
+    Se usa para flujos donde prima la latencia (p.ej. OCR de rentas) y queremos evitar:
+    - probar múltiples `--psm`
+    - forzar `user_defined_dpi=300` independientemente de cómo se renderizó el PDF
+    """
+    if not img_path or not os.path.exists(img_path):
+        return "", "imagen no encontrada para OCR"
+    lang = detect_ocr_lang()
+    tesseract_cmd = resolve_tesseract_cmd()
+    if not tesseract_cmd or not os.path.exists(tesseract_cmd):
+        return "", "tesseract no encontrado (configura OCR_TESSERACT_CMD o instala tesseract)"
+    env = os.environ.copy()
+    if os.path.isdir(TESSDATA_DIR):
+        env["TESSDATA_PREFIX"] = TESSDATA_DIR
+    try:
+        candidates = []
+        for psm in (psms or (6,)):
+            try:
+                result = run_subprocess(
+                    [
+                        tesseract_cmd,
+                        img_path,
+                        "stdout",
+                        "-l",
+                        lang,
+                        "--oem",
+                        "1",
+                        "--psm",
+                        str(int(psm)),
+                        "-c",
+                        f"user_defined_dpi={int(user_dpi)}",
+                        "-c",
+                        "preserve_interword_spaces=1",
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    text=True,
+                )
+                candidates.append(result.stdout or "")
+            except subprocess.CalledProcessError:
+                continue
+        if not candidates:
+            return "", "tesseract: sin salida"
+        best = max(
+            candidates,
+            key=lambda t: (len((t or "").strip()), sum(ch.isdigit() for ch in (t or ""))),
+        )
+        return best, ""
+    except subprocess.CalledProcessError as err:
+        return "", f"tesseract: {err.stderr.strip()}"
+    except Exception as err:
+        return "", f"tesseract: {err}"
+
 def pdftotext_extract(pdf_path, pages=None):
     cmd = (
         shutil.which("pdftotext")
@@ -14970,6 +15030,117 @@ def extract_pdf_text(pdf_path):
         return text, "", "tesseract"
     # `img_err` ya no existe aquí: mantenemos compat usando errores disponibles.
     return "", err or ocr_err, "tesseract"
+
+_RENTA_NIF_RE = re.compile(
+    r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
+    re.IGNORECASE,
+)
+
+
+def extract_renta_pdf_text(pdf_path, *, source_hint=""):
+    """
+    OCR específico para Modelo 100 (rentas).
+
+    Objetivo: evitar el camino lento de OCR multi-página por defecto (pdftoppm + OCR de
+    hasta `OCR_PDF_MAX_PAGES` a DPI alto), que puede tardar minutos y hacer que el job
+    parezca "atascado" en UI.
+    """
+    min_chars = int(os.getenv("RENTA_OCR_MIN_CHARS", "30") or 30)
+    # Por defecto: intentamos 1-2 páginas primero, y ampliamos hasta 4 si faltan casillas clave.
+    fast_pages = int(os.getenv("RENTA_OCR_FAST_PAGES", "4") or 4)
+    fast_dpi = int(os.getenv("RENTA_OCR_FAST_DPI", str(OCR_PDF_DPI)) or OCR_PDF_DPI)
+    tesseract_user_dpi = int(os.getenv("RENTA_OCR_TESSERACT_DPI", "300") or 300)
+    soft_timeout_s = float(os.getenv("RENTA_OCR_SOFT_TIMEOUT_SECONDS", "180") or 180)
+    started_at = time.time()
+    allow_slow_fallback = (
+        str(os.getenv("RENTA_OCR_ALLOW_SLOW_FALLBACK", "0") or "0").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    prefer_vision = (
+        str(os.getenv("RENTA_OCR_PREFER_VISION", "0") or "0").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+
+    def ok_text(value: str) -> bool:
+        return bool(value and len(str(value).strip()) >= min_chars)
+
+    def has_nif(value: str) -> bool:
+        return bool(_RENTA_NIF_RE.search(str(value or "")))
+
+    # 1) Texto embebido (rápido). Si el PDF NO está escaneado, `pdftotext` es lo más
+    # fiable (incluye casillas/tabla) y además es rápido incluso con varias páginas.
+    #
+    # Hacemos una "sonda" con 1 página para no perder tiempo si es un PDF imagen.
+    probe_text, err = pdftotext_extract(pdf_path, pages=1)
+    if ok_text(probe_text) and (has_nif(probe_text) or _score_renta_ocr_text(probe_text) >= 120):
+        full_text, full_err = pdftotext_extract(pdf_path, pages=None)
+        if ok_text(full_text):
+            return full_text, "", "pdftotext"
+        # Si falla el full, usamos la sonda como degradación.
+        return probe_text, full_err or "", "pdftotext"
+
+    # 2) OCR progresivo sobre páginas (normalmente 1-4).
+    # Por defecto evitamos OCR externo en rentas: puede introducir latencias grandes (red/cupos).
+    use_external = bool(external_ocr_available()) and prefer_vision
+    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=max(1, fast_pages), dpi=fast_dpi)
+    if images:
+        combined = []
+        last_err = ""
+        try:
+            for idx, img_path in enumerate(images):
+                if soft_timeout_s > 0 and (time.time() - started_at) > soft_timeout_s:
+                    if combined:
+                        joined = "\n".join(combined)
+                        return joined, "OCR renta: timeout (parcial)", "vision" if use_external else "tesseract"
+                    return "", "OCR renta: timeout", "vision" if use_external else "tesseract"
+                page_text = ""
+                ocr_err = ""
+                if use_external:
+                    vision_bytes = prepare_image_bytes_for_vision(img_path)
+                    if vision_bytes:
+                        page_text, ocr_err = ocr_image_external(vision_bytes)
+                if not page_text:
+                    page_text, ocr_err = ocr_image_tesseract_fast(
+                        img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                    )
+                if page_text:
+                    combined.append(page_text)
+                    joined = "\n".join(combined)
+                    # Cortamos pronto si ya tenemos casillas (0505, etc.) o un score alto.
+                    # Esto evita procesar 4 páginas cuando con 2 es suficiente.
+                    try:
+                        parsed = _parse_renta_pdf_fields(joined)
+                        casillas = parsed.get("casillas") if isinstance(parsed, dict) else None
+                        # Heurística: si ya hemos extraído varias casillas (códigos de 4 dígitos),
+                        # es muy probable que tengamos datos suficientes.
+                        if casillas and isinstance(casillas, dict) and idx >= 2:
+                            casilla_keys = [str(k) for k in casillas.keys()]
+                            casilla_4 = [k for k in casilla_keys if re.fullmatch(r"[0-9]{4}", k or "")]
+                            if len(casilla_4) >= 6:
+                                return joined, "", "vision" if use_external else "tesseract"
+                    except Exception:
+                        pass
+                elif ocr_err:
+                    last_err = ocr_err
+            if combined:
+                joined = "\n".join(combined)
+                return joined, "", "vision" if use_external else "tesseract"
+            # Sin texto: devolvemos error, o seguimos con fallback lento si está permitido.
+            if not allow_slow_fallback:
+                return "", last_err or img_err or err, "vision" if use_external else "tesseract"
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+    else:
+        if not allow_slow_fallback:
+            return "", img_err or err, "vision" if use_external else "tesseract"
+
+    # 3) Fallback lento (multi-página + DPI por defecto) solo si se habilita explícitamente.
+    # Útil para casos extremos, pero en producción puede tardar demasiado.
+    text, err_detail, method = extract_pdf_text(pdf_path)
+    if text:
+        return text, err_detail or "", method
+    return "", err_detail or err or img_err, method
 
 def ocrmypdf_extract_text(pdf_path):
     cmd = shutil.which("ocrmypdf")
