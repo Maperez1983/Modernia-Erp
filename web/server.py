@@ -40024,14 +40024,25 @@ class Handler(BaseHTTPRequestHandler):
                         json_response(self, {"error": err or "No autorizado"}, status=403)
                         return
         empresa = None
-        if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete") and empresa_nombre:
-            empresa = conn.execute(
-                "SELECT id FROM empresas WHERE nombre = ?",
-                (empresa_nombre,),
-            ).fetchone()
-            if not empresa:
-                json_response(self, {"error": "Empresa no encontrada"}, status=400)
-                return
+        if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete"):
+            payload_empresa_id = str(payload.get("empresa_id") or "").strip()
+            # En acciones, preferimos `empresa_id` si viene; evita 502 si el frontend no envía `empresa_nombre`.
+            if payload_empresa_id:
+                empresa = conn.execute(
+                    "SELECT id FROM empresas WHERE id = ? LIMIT 1",
+                    (payload_empresa_id,),
+                ).fetchone()
+                if not empresa:
+                    json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                    return
+            elif empresa_nombre:
+                empresa = conn.execute(
+                    "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+                    (empresa_nombre,),
+                ).fetchone()
+                if not empresa:
+                    json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                    return
         if (not empresa_scope_exempt) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
@@ -40106,7 +40117,7 @@ class Handler(BaseHTTPRequestHandler):
             # `empresa_nombre` puede venir vacío en endpoints no-CRM (p.ej. S3 presign)
             # o en operaciones de master-data (empresas del workspace). En esos casos no
             # hacemos lookup y auditamos sin empresa_id.
-            if empresa_nombre:
+            if empresa_nombre and not empresa:
                 empresa = conn.execute(
                     "SELECT id FROM empresas WHERE nombre = ?",
                     (empresa_nombre,),
