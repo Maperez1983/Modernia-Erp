@@ -32707,11 +32707,11 @@ const ensureHipotecaFichaPanel = () => {
             <div class="form-grid">
               <label class="span-2">
                 <span>Banco / entidad</span>
-                <input name="banco" list="bankList" />
+                <input name="banco" list="hipotecaBankList" />
               </label>
               <label class="span-2">
                 <span>Oficina / Inmobiliaria compra</span>
-                <input name="oficina" list="officeList" />
+                <input name="oficina" list="hipotecaOfficeList" />
               </label>
               <input name="inmobiliaria_compra" type="hidden" />
               <label>
@@ -33328,9 +33328,65 @@ const ensureHipotecaFichaPanel = () => {
       </form>
       <datalist id="hipotecaRegistroList"></datalist>
       <datalist id="notariaMalagaList"></datalist>
+      <datalist id="hipotecaBankList"></datalist>
+      <datalist id="hipotecaOfficeList"></datalist>
     </div>
   `;
   document.body.appendChild(panel);
+
+  const fillDatalist = (datalistId, values = []) => {
+    const el = panel.querySelector(`#${datalistId}`);
+    if (!el || el.dataset.ready === "1") return;
+    el.dataset.ready = "1";
+    const unique = new Set();
+    const out = [];
+    (values || []).forEach((value) => {
+      const v = String(value || "").trim();
+      if (!v) return;
+      const key = v.toLowerCase();
+      if (unique.has(key)) return;
+      unique.add(key);
+      out.push(v);
+    });
+    el.innerHTML = out.map((v) => `<option value="${escapeAttr(v)}"></option>`).join("");
+  };
+
+  const cloneOptionsFrom = (sourceId) => {
+    const source = document.getElementById(sourceId);
+    if (!source) return [];
+    return Array.from(source.querySelectorAll("option"))
+      .map((opt) => String(opt.value || "").trim())
+      .filter(Boolean);
+  };
+
+  const fallbackBanks = [
+    "Banco Santander",
+    "BBVA",
+    "CaixaBank",
+    "Banco Sabadell",
+    "Bankinter",
+    "Unicaja Banco",
+    "Abanca",
+    "Ibercaja Banco",
+    "Kutxabank",
+    "Cajamar Caja Rural",
+    "ING",
+    "Openbank",
+    "MyInvestor",
+    "UCI",
+    "Caja Rural de Granada",
+  ];
+  const fallbackOffices = [
+    "MALAGA OESTE",
+    "MALAGA CENTRO",
+    "MÁLAGA NORTE",
+    "MALAGA NORTE",
+    "VALLE DEL GUADALHORCE",
+    "PARTICULAR",
+  ];
+
+  fillDatalist("hipotecaBankList", cloneOptionsFrom("bankList").concat(fallbackBanks));
+  fillDatalist("hipotecaOfficeList", cloneOptionsFrom("officeList").concat(fallbackOffices));
 
   const clearStatus = () => {
     const status = panel.querySelector("#hipotecaFichaStatus");
