@@ -35756,93 +35756,99 @@ const loadHipotecaDashboard = () => {
       });
       renderHipotecaEntityKpis(data?.entity_kpis || [], currentYear);
 
-      const seriesYears = buildYearIndex([data?.series_totales || []]);
-      drawBarChart(
-        hipotecaFirmadasChart,
-        seriesYears,
-        [
-          {
-            label: "Hipotecas",
-            values: alignSeries(seriesYears, data?.series_totales || []),
-            color: "#824c45",
-            format: (value) => numberFormatter.format(value),
-          },
-        ],
-        { legend: false, showValues: true, tooltip: true }
-      );
+      // Importante: cuando el dashboard se abre desde un tab, los <canvas> pueden medir 0px
+      // en el primer frame (Safari/iOS). Retrasamos el dibujo 2 frames para asegurar layout.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const seriesYears = buildYearIndex([data?.series_totales || []]);
+          drawBarChart(
+            hipotecaFirmadasChart,
+            seriesYears,
+            [
+              {
+                label: "Hipotecas",
+                values: alignSeries(seriesYears, data?.series_totales || []),
+                color: "#824c45",
+                format: (value) => numberFormatter.format(value),
+              },
+            ],
+            { legend: false, showValues: true, tooltip: true }
+          );
 
-      const volumenYears = buildYearIndex([data?.series_volumen || []]);
-      drawBarChart(
-        hipotecaComisionChart,
-        volumenYears,
-        [
-          {
-            label: "Volumen",
-            values: alignSeries(volumenYears, data?.series_volumen || []),
-            color: "#d7b04c",
-            format: (value) => euroFormatter.format(value),
-          },
-        ],
-        { legend: false, showValues: true, tooltip: true }
-      );
+          const volumenYears = buildYearIndex([data?.series_volumen || []]);
+          drawBarChart(
+            hipotecaComisionChart,
+            volumenYears,
+            [
+              {
+                label: "Volumen",
+                values: alignSeries(volumenYears, data?.series_volumen || []),
+                color: "#d7b04c",
+                format: (value) => euroFormatter.format(value),
+              },
+            ],
+            { legend: false, showValues: true, tooltip: true }
+          );
 
-      const plazoYears = buildYearIndex([data?.series_plazo || []]);
-      drawBarChart(
-        hipotecaPorcentajeChart,
-        plazoYears,
-        [
-	          {
-	            label: "Días",
-	            values: alignSeries(plazoYears, data?.series_plazo || []),
-	            color: "#0B1D33",
-	            format: (value) => formatDaysMetric(value),
-	          },
-        ],
-        { legend: false, showValues: true, tooltip: true }
-      );
+          const plazoYears = buildYearIndex([data?.series_plazo || []]);
+          drawBarChart(
+            hipotecaPorcentajeChart,
+            plazoYears,
+            [
+              {
+                label: "Días",
+                values: alignSeries(plazoYears, data?.series_plazo || []),
+                color: "#0B1D33",
+                format: (value) => formatDaysMetric(value),
+              },
+            ],
+            { legend: false, showValues: true, tooltip: true }
+          );
 
-      const comisionYears = buildYearIndex([data?.series_comision || []]);
-      drawBarChart(
-        hipotecaEntidadChart,
-        comisionYears,
-        [
-          {
-            label: "Comisión cliente",
-            values: alignSeries(comisionYears, data?.series_comision || []),
-            color: "#334155",
-            format: (value) => euroFormatter.format(value),
-          },
-        ],
-        { legend: false, showValues: true, tooltip: true }
-      );
+          const comisionYears = buildYearIndex([data?.series_comision || []]);
+          drawBarChart(
+            hipotecaEntidadChart,
+            comisionYears,
+            [
+              {
+                label: "Comisión cliente",
+                values: alignSeries(comisionYears, data?.series_comision || []),
+                color: "#334155",
+                format: (value) => euroFormatter.format(value),
+              },
+            ],
+            { legend: false, showValues: true, tooltip: true }
+          );
 
-      const oficinaLabels = (data?.series_oficinas || []).map((item) => item.label);
-      const oficinaValues = (data?.series_oficinas || []).map((item) => Number(item.total || 0));
-      drawBarChart(
-        hipotecaOficinaChart,
-        oficinaLabels.length ? oficinaLabels : ["Sin datos"],
-        [
-          {
-            label: "Oficina",
-            values: oficinaValues.length ? oficinaValues : [0],
-            color: "#5f6f5b",
-            format: (value) => numberFormatter.format(value),
-          },
-        ],
-        {
-          legend: false,
-          showValues: true,
-          tooltip: true,
-          rotateLabels: true,
-          axisBottomPadding: 132,
-          axisLabelMaxChars: 14,
-          labelSkipStep: oficinaLabels.length >= 10 ? 2 : 1,
-          labelRotationAngle: Math.PI / 3.0,
-        }
-      );
-      if (hipotecaDashboardInfo) {
-        hipotecaDashboardInfo.textContent = "Actualizado.";
-      }
+          const oficinaLabels = (data?.series_oficinas || []).map((item) => item.label);
+          const oficinaValues = (data?.series_oficinas || []).map((item) => Number(item.total || 0));
+          drawBarChart(
+            hipotecaOficinaChart,
+            oficinaLabels.length ? oficinaLabels : ["Sin datos"],
+            [
+              {
+                label: "Oficina",
+                values: oficinaValues.length ? oficinaValues : [0],
+                color: "#5f6f5b",
+                format: (value) => numberFormatter.format(value),
+              },
+            ],
+            {
+              legend: false,
+              showValues: true,
+              tooltip: true,
+              rotateLabels: true,
+              axisBottomPadding: 132,
+              axisLabelMaxChars: 14,
+              labelSkipStep: oficinaLabels.length >= 10 ? 2 : 1,
+              labelRotationAngle: Math.PI / 3.0,
+            }
+          );
+          if (hipotecaDashboardInfo) {
+            hipotecaDashboardInfo.textContent = "Actualizado.";
+          }
+        });
+      });
     })
     .catch((error) => {
       const message = error?.data?.error || error?.message || "No se pudo cargar el dashboard.";
