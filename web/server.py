@@ -39041,7 +39041,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self._enforce_service_access(parsed.path, params=get_params):
                 return
             try:
-                self._ensure_db_ready()
+                # Algunos endpoints no dependen del DB principal (Postgres/SQLite) y deben seguir
+                # funcionando aunque el backend esté en bootstrap o saturado (p.ej. polling de OCR).
+                if parsed.path not in {"/api/ocr_job"}:
+                    self._ensure_db_ready()
                 self.handle_api(parsed)
             except DbUnavailableError as exc:
                 json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
