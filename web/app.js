@@ -32707,7 +32707,7 @@ const ensureHipotecaFichaPanel = () => {
             <div class="form-grid">
               <label class="span-2">
                 <span>Banco / entidad</span>
-                <input name="banco" list="hipotecaBankList" />
+                <select name="banco" id="hipotecaFichaBancoSelect"></select>
               </label>
               <label class="span-2">
                 <span>Oficina / Inmobiliaria compra</span>
@@ -33328,7 +33328,6 @@ const ensureHipotecaFichaPanel = () => {
       </form>
       <datalist id="hipotecaRegistroList"></datalist>
       <datalist id="notariaMalagaList"></datalist>
-      <datalist id="hipotecaBankList"></datalist>
       <datalist id="hipotecaOfficeList"></datalist>
     </div>
   `;
@@ -33385,8 +33384,24 @@ const ensureHipotecaFichaPanel = () => {
     "PARTICULAR",
   ];
 
-  fillDatalist("hipotecaBankList", cloneOptionsFrom("bankList").concat(fallbackBanks));
   fillDatalist("hipotecaOfficeList", cloneOptionsFrom("officeList").concat(fallbackOffices));
+
+  const bancoSelect = panel.querySelector("#hipotecaFichaBancoSelect");
+  if (bancoSelect && bancoSelect.dataset.ready !== "1") {
+    bancoSelect.dataset.ready = "1";
+    const banks = cloneOptionsFrom("bankList").concat(fallbackBanks);
+    const seen = new Set();
+    const cleaned = banks
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)
+      .filter((v) => {
+        const key = v.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    bancoSelect.innerHTML = `<option value=""></option>${cleaned.map((v) => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join("")}`;
+  }
 
   const clearStatus = () => {
     const status = panel.querySelector("#hipotecaFichaStatus");
@@ -36191,16 +36206,19 @@ const renderDashboard = (empresaName, empresaId) => {
             title: `Compraventas ${currentYear}`,
             value: numberFormatter.format(ventasYear),
             note: `${numberFormatter.format(summary.compraventas_total || 0)} operaciones en CRM`,
+            crmView: "compraventas",
           },
           {
             title: `Comisión ganada ${currentYear}`,
             value: euroFormatter.format(ingresosYear),
             note: `Cierre anual ${euroFormatter.format(cierresYear)}`,
+            crmView: "compraventas",
           },
           {
             title: `Visitas de venta ${currentYear}`,
             value: numberFormatter.format(visitasYear),
             note: `Media histórica ${Number(summary.visitas_media || 0).toFixed(1)} por operación`,
+            crmView: "visitas",
           },
           {
             title: `Tiempo medio de venta ${currentYear}`,
@@ -36208,21 +36226,25 @@ const renderDashboard = (empresaName, empresaId) => {
             note: summary.plazo_medio_dias
               ? `Media histórica ${Number(summary.plazo_medio_dias).toFixed(1)} días`
               : "Sin fecha de encargo suficiente",
+            crmView: "compraventas",
           },
           {
             title: "Pipeline activo",
             value: numberFormatter.format(summary.captaciones_activas || 0),
             note: `${numberFormatter.format(captacionesYear)} registradas en ${currentYear}`,
+            crmView: "captaciones",
           },
           {
             title: "Inmuebles CRM",
             value: numberFormatter.format(summary.inmuebles_total || 0),
             note: `${numberFormatter.format(inmueblesYear)} incorporados en ${currentYear}`,
+            crmView: "inmuebles",
           },
           {
             title: "Desviación media",
             value: `${Number(summary.desviacion_media_pct || 0).toFixed(2)}%`,
             note: `Salida ${euroFormatter.format(salidasYear)} vs cierre ${euroFormatter.format(cierresYear)}`,
+            crmView: "compraventas",
           },
         ]
       : [
@@ -36230,27 +36252,39 @@ const renderDashboard = (empresaName, empresaId) => {
             title: `Ventas ${currentYear}`,
             value: numberFormatter.format(ventasYear),
             note: "Operaciones COMPRAVENTA",
+            crmView: "compraventas",
           },
           {
             title: `Facturado ${currentYear}`,
             value: euroFormatter.format(ingresosYear),
             note: "Ingresos BDT",
+            crmView: "compraventas",
           },
           {
             title: `Gastos ${currentYear}`,
             value: euroFormatter.format(gastosYear),
             note: "Gastos BDT",
+            crmView: "compraventas",
           },
           {
             title: `Alquileres ${currentYear}`,
             value: numberFormatter.format(alquileresYear),
             note: `${euroFormatter.format(facturadoAlquileresYear)} facturados`,
+            crmView: "alquileres",
           },
         ];
 
     kpis.forEach((kpi) => {
       const card = document.createElement("div");
       card.className = "card";
+      const crmView = String(kpi.crmView || "").trim();
+      if (crmView) {
+        card.classList.add("kpi-clickable");
+        card.dataset.crmView = crmView;
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.setAttribute("aria-label", `Abrir ${kpi.title || "detalle"}`);
+      }
       card.innerHTML = `
         <h3>${kpi.title}</h3>
         <div class="muted">${kpi.value}</div>
