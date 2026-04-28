@@ -22888,6 +22888,9 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     renta_ref_owner = {}
     renta_doc_ids_by_cliente = {}
     renta_ref_ids_by_cliente = {}
+    # Prefetch responsable desde trabajos de gestoría (por cliente + ejercicio) para
+    # campañas importadas que no lo traen en el JSON de `renta_detalles`.
+    trabajo_responsable_by_cliente_year = {}
     for row in rows:
         servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
         if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
@@ -22899,6 +22902,36 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             if not entries:
                 continue
         latest = entries[0] if entries else {}
+        try:
+            latest_year = str(latest.get("ejercicio") or "").strip()
+        except Exception:
+            latest_year = ""
+        if latest and not str(latest.get("responsable") or "").strip() and latest_year:
+            cache_key = f"{row['cliente_id']}::{latest_year}"
+            cached = trabajo_responsable_by_cliente_year.get(cache_key)
+            if cached is None:
+                try:
+                    trow = conn.execute(
+                        """
+                        SELECT responsable
+                        FROM gestoria_trabajos
+                        WHERE empresa_id = ?
+                          AND cliente_id = ?
+                          AND tipo_trabajo = 'Declaración en periodo'
+                          AND COALESCE(notas, '') LIKE ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa_id, row["cliente_id"], f"%Renta {latest_year}%"),
+                    ).fetchone()
+                except Exception:
+                    trow = None
+                value = str((trow["responsable"] if trow else "") or "").strip()
+                trabajo_responsable_by_cliente_year[cache_key] = value
+                cached = value
+            if cached:
+                latest = dict(latest)
+                latest["responsable"] = cached
         cliente_id = row["cliente_id"]
         for entry in entries:
             try:
