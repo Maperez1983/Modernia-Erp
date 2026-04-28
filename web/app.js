@@ -22503,6 +22503,13 @@ const openAgenda = () => {
     return;
   }
   setModule("empresas");
+  // Evitar “mezclas”: si venimos de ficha de inmueble (panel CRM), al abrir Agenda general
+  // debe ocultarse siempre, si no queda renderizada debajo.
+  try {
+    if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
+      inmuebleDetail.classList.add("hidden");
+    }
+  } catch {}
   explorerSection.classList.add("hidden");
   setPage("agenda");
   if (agendaSection) {
@@ -67850,10 +67857,11 @@ if (gestoriaRentaDetallesForm) {
       gestoriaRentaDetallesStatus.textContent = "Guardando...";
     }
     const formData = new FormData(gestoriaRentaDetallesForm);
+    const nextRentaPayload = buildGestoriaRentaDetailsPayload(Object.fromEntries(formData.entries()));
     const payload = {
       cliente_id: state.currentClienteId,
       mod_renta: 1,
-      renta_detalles: buildGestoriaRentaDetailsPayload(Object.fromEntries(formData.entries())),
+      renta_detalles: nextRentaPayload,
     };
     fetch("/api/cliente_gestoria_update", {
       method: "POST",
@@ -67866,6 +67874,27 @@ if (gestoriaRentaDetallesForm) {
           gestoriaRentaDetallesStatus.textContent = data.error || "Guardado.";
         }
         if (!data.error) {
+          // UX: refresca inmediatamente la card/ficha con el payload local, sin esperar al GET.
+          try {
+            const current = state.currentClienteGestoriaData || {};
+            state.currentClienteGestoriaData = {
+              ...current,
+              renta_notes: nextRentaPayload?.notes || current.renta_notes || "",
+              renta_entries: Array.isArray(nextRentaPayload?.entries) ? nextRentaPayload.entries : (current.renta_entries || []),
+              renta_related_relation_id: nextRentaPayload?.related_relation_id || current.renta_related_relation_id || "",
+              renta_related_cliente_id: nextRentaPayload?.related_cliente_id || current.renta_related_cliente_id || "",
+              renta_declaracion_conjunta: Number(nextRentaPayload?.declaracion_conjunta || 0) === 1 ? 1 : 0,
+            };
+            renderGestoriaRentaCards(state.currentClienteGestoriaData);
+            fillGestoriaRentaDetailsForm(state.currentClienteGestoriaData);
+          } catch {}
+          // Invalida caché de cards (vista Gestoría → Renta) para que el resumen se actualice.
+          try {
+            if (state.gestoriaRentaCardsCache) state.gestoriaRentaCardsCache.ts = 0;
+            if (state.currentTab === "gestoria-crm" && state.gestoriaCrmTab === "renta") {
+              loadGestoriaCrm();
+            }
+          } catch {}
           loadClienteGestoria(state.currentClienteId);
         }
       })
