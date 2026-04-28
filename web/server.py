@@ -5252,6 +5252,33 @@ def delete_hipoteca_record(conn, record_id):
     row = conn.execute("SELECT id FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
     if not row:
         return False
+    # En Postgres puede haber constraints / referencias (p.e. contabilidad ligada a hipoteca).
+    # Antes de borrar, limpiamos referencias conocidas para evitar errores de integridad.
+    def _table_exists(name: str) -> bool:
+        try:
+            conn.execute(f"SELECT 1 FROM {name} LIMIT 1")
+            return True
+        except Exception:
+            return False
+
+    try:
+        if _table_exists("gestoria_contabilidad"):
+            conn.execute(
+                """
+                UPDATE gestoria_contabilidad
+                SET hipoteca_id = NULL
+                WHERE hipoteca_id = ?
+                """,
+                (record_id,),
+            )
+    except Exception:
+        pass
+
+    try:
+        if _table_exists("hipotecas_contabilidad_excluidas"):
+            conn.execute("DELETE FROM hipotecas_contabilidad_excluidas WHERE hipoteca_id = ?", (record_id,))
+    except Exception:
+        pass
     try:
         trash_backup_row(conn, "hipotecas", record_id, reason="api/hipotecas_delete", now=datetime.now(timezone.utc).isoformat())
     except Exception:
@@ -50057,14 +50084,23 @@ class Handler(BaseHTTPRequestHandler):
             if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
                 json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
                 return
-            deleted = delete_hipoteca_record(conn, record_id)
-            if not deleted:
-                json_response(self, {"error": "Registro no encontrado"}, status=404)
+            try:
+                deleted = delete_hipoteca_record(conn, record_id)
+                if not deleted:
+                    json_response(self, {"error": "Registro no encontrado"}, status=404)
+                    return
+                audit("hipoteca", record_id, "eliminar", None, payload.get("usuario"))
+                conn.commit()
+                json_response(self, self._ok({"deleted": True}))
                 return
-            audit("hipoteca", record_id, "eliminar", None, payload.get("usuario"))
-            conn.commit()
-            json_response(self, self._ok({"deleted": True}))
-            return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                # Devolver el error real ayuda a depurar (p.e. constraints).
+                json_response(self, {"error": "No se pudo borrar la hipoteca.", "detail": str(exc)}, status=500)
+                return
         elif parsed.path == "/api/gestoria_update":
             record_id = payload.get("id")
             if not record_id:
