@@ -45230,6 +45230,14 @@ const loadCrmAgenda = () => {
   if (!crmAgendaTable && !crmAgendaCalendar) {
     return;
   }
+  // Evitar “mezclas”: en Agenda no debe quedar renderizada la ficha del inmueble
+  // debajo (aunque se haya abierto previamente desde otra vista).
+  if (inmuebleDetail) {
+    inmuebleDetail.classList.add("hidden");
+  }
+  if (crmWorkspaceShell) {
+    crmWorkspaceShell.classList.remove("hidden");
+  }
   ensureCrmAgendaSelectors().catch(() => {});
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
