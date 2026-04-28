@@ -10252,9 +10252,67 @@ def decode_seguros_payload(payload, *, conn=None, session=None):
 def decode_document_payload(payload, *, conn=None, session=None):
     data_uri = payload.get("file_base64") or payload.get("data")
     s3_key = (payload.get("s3_key") or "").strip()
+    local_path = str(payload.get("local_path") or payload.get("file_path") or "").strip()
     raw_bytes = None
     mime = ""
     filename = str(payload.get("filename") or "").strip()
+
+    def _local_roots():
+        raw = os.environ.get("APP_LOCAL_DOC_ROOTS") or ""
+        parts = []
+        for chunk in re.split(r"[;,]", raw):
+            p = str(chunk or "").strip()
+            if p:
+                parts.append(p)
+        return parts
+
+    def _local_path_allowed(path_str: str) -> bool:
+        if not path_str:
+            return False
+        try:
+            p = Path(path_str).expanduser()
+            if not p.is_absolute():
+                return False
+            p = p.resolve()
+        except Exception:
+            return False
+        roots = _local_roots()
+        if not roots:
+            return False
+        for root in roots:
+            try:
+                r = Path(root).expanduser().resolve()
+            except Exception:
+                continue
+            if p == r or r in p.parents:
+                return True
+        return False
+
+    def _read_local_bytes(path_str: str):
+        if not path_str:
+            return None, "", "Ruta local vacía"
+        if not _local_path_allowed(path_str):
+            return None, "", "Ruta local no permitida (configura APP_LOCAL_DOC_ROOTS)"
+        p = Path(path_str).expanduser()
+        try:
+            p = p.resolve()
+        except Exception:
+            return None, "", "Ruta local inválida"
+        if not p.exists() or p.is_dir():
+            return None, "", "Archivo local no encontrado"
+        try:
+            b = p.read_bytes()
+        except Exception as exc:
+            return None, "", f"No se pudo leer archivo local: {exc}"
+        lower = p.name.lower()
+        m = ""
+        if lower.endswith(".pdf"):
+            m = "application/pdf"
+        elif lower.endswith((".jpg", ".jpeg")):
+            m = "image/jpeg"
+        elif lower.endswith(".png"):
+            m = "image/png"
+        return b, m, ""
     if s3_key:
         safe_key = _normalize_s3_key(s3_key)
         if conn is not None and session is not None:
@@ -10262,7 +10320,12 @@ def decode_document_payload(payload, *, conn=None, session=None):
             if not ok:
                 raise ValueError(err or "No autorizado")
         raw_bytes, s3_err = s3_get_object_bytes(safe_key)
+        if not raw_bytes and local_path:
+            raw_bytes, local_mime, _local_err = _read_local_bytes(local_path)
+            if raw_bytes and local_mime:
+                mime = local_mime
         if not raw_bytes:
+            # Nota: el mensaje conserva "S3:" para no romper compat del frontend.
             raise ValueError(f"S3: {s3_err}")
         lower_key = s3_key.lower()
         if lower_key.endswith(".pdf"):
@@ -55315,6 +55378,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Documento sin doc_key. Re-sube o re-vincula el PDF."}, status=409)
                 return
 
+            # Fallback local: si el PDF está en disco (notas) pero no en S3, lo pasamos al worker.
+            local_path = ""
+            if doc_id:
+                try:
+                    row = conn.execute(
+                        "SELECT notas FROM gestoria_docs WHERE id = ? LIMIT 1",
+                        (doc_id,),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if row:
+                    local_path = str(row.get("notas") or "").strip()
+
             # Permisos: requiere acceso a gestoría del cliente (misma empresa/servicio).
             # Reusamos el gate general: si no puede leer el cliente, fallará en el siguiente load.
             try:
@@ -55332,6 +55408,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ejercicio": ejercicio,
                         "doc_id": doc_id,
                         "s3_key": doc_key,
+                        "local_path": local_path,
                         "filename": str(current.get("doc_nombre") or f"Renta {ejercicio}.pdf").strip(),
                         "source_hint": f"renta {ejercicio} reprocess",
                     },
