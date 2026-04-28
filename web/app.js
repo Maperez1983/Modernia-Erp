@@ -21287,6 +21287,10 @@ const openGestoriaCrm = () => {
 
 const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
   if (!userCanAccessService("gestoria")) return;
+  // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
+  if (!state.usersList || !state.usersList.length) {
+    loadUsuarios().catch(() => {});
+  }
   if (isTenantWorkspaceMode()) {
     const companies = state.currentWorkspaceDetail?.companies || [];
     if (!Array.isArray(companies) || !companies.length) {
