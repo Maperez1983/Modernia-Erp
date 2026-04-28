@@ -68552,7 +68552,8 @@ if (inmuebleActividadForm) {
       payload,
       resolveClienteFromInput(inmuebleActividadClienteInput, inmuebleActividadClienteId)
     );
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
+    payload.empresa_id = resolveCurrentInmuebleEmpresaId() || resolveCrmInmoEmpresaId();
+    payload.empresa_nombre = resolveCurrentInmuebleEmpresaNombre() || resolveCrmInmoEmpresaNombre();
     payload.servicio = "inmobiliaria";
     payload.inmueble_id = state.currentInmuebleId;
     fetch("/api/acciones", {
