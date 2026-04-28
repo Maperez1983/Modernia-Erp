@@ -9373,7 +9373,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 .chart-card canvas {
   display: block;
   width: 100%;
-  height: 275px;
+  height: 305px;
   border-radius: 10px;
   background: var(--chart-bg);
   border: 1px solid rgba(var(--ink-rgb), 0.08);

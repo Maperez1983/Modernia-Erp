@@ -35787,7 +35787,16 @@ const loadHipotecaDashboard = () => {
             format: (value) => numberFormatter.format(value),
           },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        {
+          legend: false,
+          showValues: true,
+          tooltip: true,
+          rotateLabels: true,
+          axisBottomPadding: 132,
+          axisLabelMaxChars: 14,
+          labelSkipStep: oficinaLabels.length >= 10 ? 2 : 1,
+          labelRotationAngle: Math.PI / 3.0,
+        }
       );
       if (hipotecaDashboardInfo) {
         hipotecaDashboardInfo.textContent = "Actualizado.";
