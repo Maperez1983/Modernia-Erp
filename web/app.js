@@ -20976,6 +20976,26 @@ const setCrmTopBadge = (el, count) => {
   el.classList.toggle("hidden", n <= 0);
 };
 
+const crmAlertsSnapshotKey = (snapshot = {}) => {
+  try {
+    const s = snapshot && typeof snapshot === "object" ? snapshot : {};
+    const keys = Object.keys(s).sort();
+    return keys.map((k) => `${k}:${Number(s[k] || 0) || 0}`).join("|");
+  } catch {
+    return "";
+  }
+};
+
+const updateCrmAlertsBadge = (snapshot = null) => {
+  if (!crmAlertsBadge) return;
+  const nextSnapshot = snapshot || collectCrmAlertsSnapshot();
+  const key = crmAlertsSnapshotKey(nextSnapshot);
+  const seenKey = String(state.crmAlertsSeenKey || "");
+  const total = Number(nextSnapshot?.total || 0) || 0;
+  // Si el usuario ya abrió la campanita con este mismo estado, ocultamos el badge.
+  setCrmTopBadge(crmAlertsBadge, seenKey && key && seenKey === key ? 0 : total);
+};
+
 const collectCrmAlertsSnapshot = () => {
   const clientesRows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
   const demandasRows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
@@ -21135,6 +21155,9 @@ const openCrmAlertsModal = () => {
   const body = modal.querySelector("[data-crm-modal-body]");
   if (!body) return;
   const snapshot = collectCrmAlertsSnapshot();
+  // Marcar como visto: al abrir la campanita, el badge se pone a 0 hasta que cambien las alertas.
+  state.crmAlertsSeenKey = crmAlertsSnapshotKey(snapshot);
+  updateCrmAlertsBadge(snapshot);
   const tiles = [
     snapshot.noticiasSinVerificarCount ? { title: "Noticias sin verificar", meta: `${snapshot.noticiasSinVerificarCount}`, sub: "Valorar/verificar para avanzar pipeline.", quick: "captaciones:quick_noticia_sin_verificar" } : null,
     snapshot.sinProximaAccionCount ? { title: "Sin próxima acción", meta: `${snapshot.sinProximaAccionCount}`, sub: "Planifica siguientes pasos.", quick: "captaciones:quick_sin_proxima_accion" } : null,
@@ -40764,7 +40787,7 @@ const renderCrmResumenDashboard = () => {
   // Alertas (Tecnocloud-like).
   try {
     const snapshot = collectCrmAlertsSnapshot();
-    setCrmTopBadge(crmAlertsBadge, snapshot.total);
+    updateCrmAlertsBadge(snapshot);
   } catch {}
 
   renderCrmHomeAgendaPreview();
