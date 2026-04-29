@@ -12605,34 +12605,13 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         return re.sub(r"[^0-9A-Z]", "", str(value or "").upper().strip())
 
     def _extract_nifs() -> tuple[str, list[str]]:
-        patterns = [
-            r"(?:NIF|DNI|NIE)\s*(?:DEL\s+DECLARANTE|DECLARANTE|DEL\s+CONTRIBUYENTE|CONTRIBUYENTE)?\s*[:\-]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])",
-            r"(?:DECLARANTE)\s*[:\-]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])",
-        ]
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for pat in patterns:
-            m = re.search(pat, normalized, re.IGNORECASE)
-            if m:
-                candidate = _normalize_nif(m.group(1))
-                if candidate and candidate not in seen:
-                    seen.add(candidate)
-                    ordered.append(candidate)
-        global_candidates = re.findall(
-            r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
-            normalized,
-            re.IGNORECASE,
-        )
-        for cand in global_candidates:
-            candidate = _normalize_nif(cand)
-            if not candidate or candidate in seen:
-                continue
-            seen.add(candidate)
-            ordered.append(candidate)
-            if len(ordered) >= 6:
-                break
-        primary = ordered[0] if ordered else ""
-        return primary, ordered
+        # Nuevo extractor tolerante a OCR: separadores, letras omitidas, etc.
+        primary, ordered = _find_best_nif_in_text(raw)
+        if primary:
+            return primary, ordered
+        # Fallback: intenta con el texto normalizado.
+        primary2, ordered2 = _find_best_nif_in_text(normalized)
+        return primary2, ordered2
 
     def _extract_amount_by_code(code_value: str):
         """
@@ -15062,6 +15041,136 @@ _RENTA_NIF_RE = re.compile(
     r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z]|[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
     re.IGNORECASE,
 )
+
+def _normalize_nif_ocr(value: str) -> str:
+    if not value:
+        return ""
+    raw = str(value).strip().upper()
+    if not raw:
+        return ""
+    raw = raw.replace(" ", "").replace("-", "").replace(".", "")
+    raw = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(raw) > 12:
+        raw = raw[:12]
+    def fix_digits(chunk: str) -> str:
+        table = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5"})
+        return str(chunk or "").translate(table)
+    if not raw:
+        return ""
+    # DNI/NIE/CIF: no convertir la primera letra a dígito (evita CIF 'B'->'8')
+    if raw[0].isdigit():
+        if len(raw) >= 9:
+            return f"{fix_digits(raw[:8])}{raw[8]}"
+        return fix_digits(raw)
+    if raw[0] in "XYZ":
+        if len(raw) >= 9:
+            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+        return f"{raw[0]}{fix_digits(raw[1:])}"
+    if raw[0] in "ABCDEFGHJNPQRSUVW":
+        if len(raw) >= 9:
+            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+        return f"{raw[0]}{fix_digits(raw[1:])}"
+    return raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5")
+
+
+def _is_valid_nif(value: str) -> bool:
+    if not value:
+        return False
+    value = str(value).strip().upper()
+    return bool(
+        re.fullmatch(r"[0-9]{8}[A-Z]", value)
+        or re.fullmatch(r"[XYZ][0-9]{7}[A-Z]", value)
+        or re.fullmatch(r"[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]", value)
+    )
+
+
+def _normalize_nif_candidate(value: str, *, infer_control_letter: bool = True) -> str:
+    if not value:
+        return ""
+    candidate = _normalize_nif_ocr(value)
+    if not candidate:
+        return ""
+    dni_letters = "TRWAGMYFPDXBNJZSQVHLCKE"
+    def infer_dni(digits8: str) -> str:
+        try:
+            return f"{digits8}{dni_letters[int(digits8) % 23]}"
+        except Exception:
+            return ""
+    def infer_nie(prefix: str, digits7: str) -> str:
+        try:
+            prefix_map = {"X": "0", "Y": "1", "Z": "2"}
+            base = prefix_map.get(prefix, "")
+            if not base:
+                return ""
+            num = f"{base}{digits7}"
+            return f"{prefix}{digits7}{dni_letters[int(num) % 23]}"
+        except Exception:
+            return ""
+    if infer_control_letter:
+        if re.fullmatch(r"[0-9]{8}", candidate):
+            inferred = infer_dni(candidate)
+            if inferred:
+                candidate = inferred
+        elif re.fullmatch(r"[0-9]{8}[0-9]", candidate):
+            inferred = infer_dni(candidate[:8])
+            if inferred:
+                candidate = inferred
+        elif re.fullmatch(r"[XYZ][0-9]{7}", candidate):
+            inferred = infer_nie(candidate[0], candidate[1:])
+            if inferred:
+                candidate = inferred
+        elif re.fullmatch(r"[XYZ][0-9]{7}[0-9]", candidate):
+            inferred = infer_nie(candidate[0], candidate[1:8])
+            if inferred:
+                candidate = inferred
+    if _is_valid_nif(candidate):
+        return candidate
+    if len(candidate) >= 9:
+        trimmed = candidate[:9]
+        if _is_valid_nif(trimmed):
+            return trimmed
+    return ""
+
+
+def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
+    """
+    Extrae NIF/DNI/NIE/CIF tolerando separadores y OCR imperfecto.
+    Devuelve (primario, lista ordenada).
+    """
+    text_value = str(text_value or "")
+    if not text_value.strip():
+        return "", []
+    upper = text_value.upper()
+    # 1) Prioriza contexto cercano a etiquetas.
+    # Captura tolerante tras etiqueta. Evita depender de layouts exactos.
+    label_pat = re.compile(
+        r"(?:NIF|DNI|NIE|CIF)"
+        r"(?:\\s+DEL\\s+DECLARANTE|\\s+DECLARANTE|\\s+DEL\\s+CONTRIBUYENTE|\\s+CONTRIBUYENTE)?"
+        r"[^A-Z0-9]{0,6}"
+        r"([A-Z0-9][A-Z0-9\\.\\-\\s]{5,22})"
+    )
+    seen = set()
+    ordered = []
+    for m in label_pat.finditer(upper):
+        cand = _normalize_nif_candidate(m.group(1), infer_control_letter=True)
+        if cand and cand not in seen:
+            seen.add(cand)
+            ordered.append(cand)
+            if len(ordered) >= 3:
+                break
+    # 2) Búsqueda global: secuencias tipo DNI con separadores o sin letra.
+    global_pat = re.compile(r"\\b([A-Z]?\\s*[0-9OIlLSB][0-9OIlLSB\\.\\-\\s]{6,14}[A-Z0-9]?)\\b")
+    for m in global_pat.finditer(upper):
+        token = m.group(1)
+        cand = _normalize_nif_candidate(token, infer_control_letter=True)
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        ordered.append(cand)
+        if len(ordered) >= 8:
+            break
+    primary = ordered[0] if ordered else ""
+    return primary, ordered
 
 
 def extract_renta_pdf_text(pdf_path, *, source_hint=""):
