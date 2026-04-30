@@ -9878,14 +9878,107 @@
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
 			    <script src="ui-foundation.js?v=4"></script>
-		    <script src="app-auth.js?v=13"></script>
+		    <script src="app-auth.js?v=14"></script>
+        <script>
+          (function () {
+            // Standalone auth bootstrap:
+            // Si `app.js` no llega a ejecutarse (errores en JS, SW cache roto, cold start),
+            // seguimos permitiendo login y mostramos un error útil en la card.
+            if (window.__authStandaloneBootstrapped) return;
+            window.__authStandaloneBootstrapped = true;
+
+            const loginOverlay = document.getElementById("authLoginOverlay");
+            const activateOverlay = document.getElementById("authActivateOverlay");
+            const loginForm = document.getElementById("authLoginForm");
+            const loginUser = document.getElementById("authLoginUser");
+            const loginPass = document.getElementById("authLoginPass");
+            const loginStatus = document.getElementById("authLoginStatus");
+
+            const setStatus = (msg) => {
+              try { if (loginStatus) loginStatus.textContent = msg || ""; } catch {}
+            };
+
+            // Si el body se queda en auth-pending, garantizamos que se vea el login.
+            try {
+              if (document.body && document.body.classList.contains("auth-pending")) {
+                loginOverlay && loginOverlay.classList.remove("hidden");
+                activateOverlay && activateOverlay.classList.add("hidden");
+                document.body.classList.add("auth-locked");
+              }
+            } catch {}
+
+            // Si en 2s no ha cargado `app.js`, avisamos (no bloquea el login).
+            setTimeout(() => {
+              try {
+                if (!window.__APP_JS_LOADED) {
+                  setStatus("No cargó la app completa. Prueba recargar con ?nosw=1 (limpia cache) e inténtalo de nuevo.");
+                }
+              } catch {}
+            }, 2000);
+
+            const waitHealthOnce = async () => {
+              try {
+                await fetch("/api/health", { cache: "no-store", credentials: "same-origin" });
+              } catch {}
+            };
+
+            const fetchMe = async () => {
+              try {
+                const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
+                if (!res.ok) return null;
+                const data = await res.json().catch(() => null);
+                return data?.user || null;
+              } catch {
+                return null;
+              }
+            };
+
+            if (loginForm && loginUser && loginPass) {
+              loginForm.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const usuario = String(loginUser.value || "").trim();
+                const password = String(loginPass.value || "");
+                if (!usuario || !password) {
+                  setStatus("Introduce usuario/email y contraseña.");
+                  return;
+                }
+                setStatus("Accediendo…");
+                await waitHealthOnce();
+                try {
+                  const res = await fetch("/api/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ usuario, password }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok || data?.error) {
+                    setStatus(data?.error || "No se pudo iniciar sesión.");
+                    return;
+                  }
+                  // Verifica que la cookie funciona (api/me debe devolver usuario).
+                  const me = await fetchMe();
+                  if (!me) {
+                    setStatus("Sesión creada pero el navegador no mantiene la cookie. Prueba ?nosw=1 y revisa bloqueos de cookies.");
+                    return;
+                  }
+                  setStatus("Acceso correcto. Cargando…");
+                  try { document.body.classList.remove("auth-pending"); } catch {}
+                  setTimeout(() => window.location.reload(), 200);
+                } catch {
+                  setStatus("Error de conexión al iniciar sesión.");
+                }
+              }, { passive: false });
+            }
+          })();
+        </script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=701"></script>
+												    <script src="app.js?v=702"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=304";
+											        const TARGET_SW = "/sw.js?v=305";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";

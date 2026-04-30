@@ -1,5 +1,6 @@
 // Render puede tener cold starts que superan 15s en la primera petición.
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
+try { window.__APP_JS_LOADED = true; } catch {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
@@ -69891,6 +69892,7 @@ UI?.boot(state);
 renderCompanyCards();
 showAuthOverlay("Conectando con el servidor… (si es la primera visita puede tardar unos segundos)");
 ensureAuthAndBoot();
+try { window.__APP_JS_BOOTED = true; } catch {}
 
 // Si el service worker se actualiza, algunos navegadores (sobre todo iOS/Safari) pueden quedarse con un app.js viejo.
 // Cuando recibimos la activación del SW, forzamos una recarga única.
