@@ -10196,6 +10196,11 @@ body.auth-locked {
   overflow: hidden;
 }
 
+/* Fail-safe: evita pantalla en blanco si JS no arranca y el body queda en `auth-pending`. */
+body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
+  display: flex !important;
+}
+
 .auth-login-overlay {
   position: fixed;
   inset: 0;
