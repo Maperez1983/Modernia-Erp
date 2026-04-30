@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v311";
+const APP_SW_VERSION = "v312";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -18057,9 +18057,11 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   const rawTotal = String(totalInput?.value || "").trim();
   let subtotal = suggestedSubtotal;
 
-  const hasSubtotal = Boolean(rawSubtotal);
-  const hasTotal = Boolean(rawTotal);
-  const useManualTotal = !options.forceAuto && hasTotal && (manualSource === "total" || (!hasSubtotal && manualSource !== "subtotal"));
+  const subtotalManual = Boolean(subtotalInput?.dataset?.manual === "1" || manualSource === "subtotal");
+  const totalManual = Boolean(totalInput?.dataset?.manual === "1" || manualSource === "total");
+  const hasSubtotal = Boolean(rawSubtotal) && subtotalManual;
+  const hasTotal = Boolean(rawTotal) && totalManual;
+  const useManualTotal = !options.forceAuto && hasTotal;
   const useManualSubtotal = !options.forceAuto && hasSubtotal && !useManualTotal;
 
   if (options.forceAuto) {
@@ -18081,16 +18083,6 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
     subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
     if (subtotalInput) subtotalInput.dataset.manual = "1";
     if (totalInput) delete totalInput.dataset.manual;
-  } else if (hasSubtotal) {
-    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
-    if (subtotalInput) subtotalInput.dataset.manual = "1";
-    if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
-  } else if (hasTotal) {
-    subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
-    if (totalInput) totalInput.dataset.manual = "1";
-    if (subtotalInput) subtotalInput.dataset.manual = "1";
-    if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
-    if (subtotalInput) subtotalInput.value = formatEurosCompact(subtotal);
   } else {
     if (subtotalInput) {
       delete subtotalInput.dataset.manual;
