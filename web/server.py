@@ -13612,7 +13612,9 @@ def ocr_image_external(image_bytes):
             msg = msg.replace(api_key, "***")
         return "", f"OCR externo: {msg}"
     try:
-        text = res["responses"][0].get("fullTextAnnotation", {}).get("text", "")
+        text = res["responses"][0].get("fullTextAnnotation", {}).get("text", "") or ""
+        if not str(text).strip():
+            return "", "OCR externo: sin texto"
         return text, ""
     except Exception:
         return "", "OCR externo: sin texto"
@@ -15610,9 +15612,12 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
                     if vision_bytes:
                         page_text, ocr_err = ocr_image_external(vision_bytes)
                 if not page_text:
-                    page_text, ocr_err = ocr_image_tesseract_fast(
-                        img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
-                    )
+                    if tesseract_available:
+                        page_text, ocr_err2 = ocr_image_tesseract_fast(
+                            img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                        )
+                        if ocr_err2 and not ocr_err:
+                            ocr_err = ocr_err2
                 if page_text:
                     combined.append(page_text)
                     joined = "\n".join(combined)
@@ -15643,9 +15648,12 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
                                     if vision_bytes:
                                         page_text, ocr_err = ocr_image_external(vision_bytes)
                                 if not page_text:
-                                    page_text, ocr_err = ocr_image_tesseract_fast(
-                                        img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
-                                    )
+                                    if tesseract_available:
+                                        page_text, ocr_err2 = ocr_image_tesseract_fast(
+                                            img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                                        )
+                                        if ocr_err2 and not ocr_err:
+                                            ocr_err = ocr_err2
                                 if page_text:
                                     combined.append(page_text)
                                     if not _needs_more_casillas("\n".join(combined)):
@@ -15678,9 +15686,12 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
                                         if vision_bytes:
                                             page_text, ocr_err = ocr_image_external(vision_bytes)
                                     if not page_text:
-                                        page_text, ocr_err = ocr_image_tesseract_fast(
-                                            img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
-                                        )
+                                        if tesseract_available:
+                                            page_text, ocr_err2 = ocr_image_tesseract_fast(
+                                                img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                                            )
+                                            if ocr_err2 and not ocr_err:
+                                                ocr_err = ocr_err2
                                     if page_text:
                                         combined.append(page_text)
                                         if not _needs_more_casillas("\n".join(combined)):
