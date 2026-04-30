@@ -2997,7 +2997,10 @@ def normalize_workspace_slug(value):
 
 
 def normalize_service_key(value):
-    text = normalize_lookup_text(value)
+    raw = str(value or "")
+    text = normalize_lookup_text(raw)
+    if not text:
+        return ""
     aliases = {
         "GESTORIA": "gestoria",
         "SEGUROS": "seguros",
@@ -3009,7 +3012,25 @@ def normalize_service_key(value):
         "ADMIN DE FINCAS": "fincas",
         "FINCAS": "fincas",
     }
-    return aliases.get(text, text.lower().strip())
+    if text in aliases:
+        return aliases[text]
+    # Compat: en algunos sitios guardamos el "servicio" como etiqueta larga (p.ej. nombre comercial)
+    # en vez de clave ("Fincas Velazquez", "Financiaciones Modernia", "Administración Fincas - X", ...).
+    # Para no romper permisos ni scoping, inferimos por palabras clave.
+    try:
+        if "FINCAS" in text or "COMUNIDAD" in text:
+            return "fincas"
+        if "GESTOR" in text:
+            return "gestoria"
+        if "SEGURO" in text:
+            return "seguros"
+        if "INMOB" in text or "COMPRAVENTA" in text or "ALQUILER" in text:
+            return "inmobiliaria"
+        if "FINANC" in text or "HIPOTEC" in text or "LCCI" in text:
+            return "financiaciones"
+    except Exception:
+        pass
+    return text.lower().strip()
 
 
 def ensure_workspace_core_tables(conn):
