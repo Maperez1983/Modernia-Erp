@@ -14921,6 +14921,9 @@ def ocr_image_tesseract_fast(img_path: str, *, psms=(6, 11), user_dpi: int = 220
             candidates,
             key=lambda t: (len((t or "").strip()), sum(ch.isdigit() for ch in (t or ""))),
         )
+        best = best or ""
+        if not best.strip():
+            return "", "tesseract: sin texto"
         return best, ""
     except subprocess.CalledProcessError as err:
         return "", f"tesseract: {err.stderr.strip()}"
@@ -47622,15 +47625,20 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             tipo = str(payload.get("tipo") or "").strip() or "Documento"
-            if not workspace_id or not persona_id:
-                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             if session and not workspace_session_is_privileged(session):
                 user_id = str(session.get("user_id") or "").strip()
-                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
-                if not own_persona or own_persona != persona_id:
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
+                if not persona_id:
+                    persona_id = own_persona
+                if not own_persona or (persona_id and own_persona != persona_id):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
+            if not persona_id:
+                json_response(self, {"error": "persona_id requerido"}, status=400)
+                return
             persona_row = conn.execute(
                 "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
                 (workspace_id, persona_id),
@@ -58347,17 +58355,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/workspace_rrhh_profile":
             workspace_id = params.get("workspace_id", [""])[0]
             persona_id = (params.get("persona_id", [""])[0] or "").strip()
-            if not workspace_id or not persona_id:
-                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
             if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
-                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
-                if not own_persona or own_persona != persona_id:
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
+                if not persona_id:
+                    persona_id = own_persona
+                if not own_persona or (persona_id and own_persona != persona_id):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
+            if can_manage and not persona_id:
+                json_response(self, {"error": "persona_id requerido"}, status=400)
+                return
             json_response(self, {"row": fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}})
             return
 
@@ -58390,7 +58403,7 @@ class Handler(BaseHTTPRequestHandler):
             can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
             if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
-                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
                 empresa_id = ""
                 if not persona_id:
                     json_response(self, {"rows": []})
@@ -58423,7 +58436,7 @@ class Handler(BaseHTTPRequestHandler):
             can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
             if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
-                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
                 empresa_id = ""
                 if not persona_id:
                     json_response(self, {"rows": []})
@@ -58442,7 +58455,7 @@ class Handler(BaseHTTPRequestHandler):
             can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
             if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
-                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
                 empresa_id = ""
                 if not persona_id:
                     json_response(self, {"rows": []})

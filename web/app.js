@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v309";
+const APP_SW_VERSION = "v311";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -2019,6 +2019,7 @@ const workspaceFincasBudgetMapActions = document.getElementById("workspaceFincas
 const workspaceFincasBudgetMapLink = document.getElementById("workspaceFincasBudgetMapLink");
 const workspaceFincasBudgetMapWrap = document.getElementById("workspaceFincasBudgetMapWrap");
 const workspaceFincasBudgetMap = document.getElementById("workspaceFincasBudgetMap");
+const workspaceFincasBudgetBrandCompany = document.getElementById("workspaceFincasBudgetBrandCompany");
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
 const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
 const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
@@ -11322,7 +11323,9 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	  // UX: para ver/editar ausencias de una persona, mostramos su histórico completo (sin filtrar por mes).
 	  // Solo filtramos por mes cuando el gestor activa "Ver todo el equipo".
 	  const ausenciasMonthQuery = allowUnscoped ? `&month=${encodeURIComponent(month)}` : "";
-	  const canFetchPersonaData = Boolean(allowUnscoped || scopePersonaId);
+	  // Empleado: aunque no tengamos persona_id aún (ficha no vinculada), el backend puede resolver/auto-vincular
+	  // la persona del usuario actual. Así el usuario siempre ve su documentación y solicitudes.
+	  const canFetchPersonaData = Boolean(allowUnscoped || scopePersonaId || !manager);
 
   // Evita “arrastrar” datos de otra persona: usa caché por persona si existe, o limpia solo esa parte.
 	  if (scopePersonaId) {
@@ -11347,7 +11350,9 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 
 		  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
 		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, vacSummary, ausenciasAll, turnos] = await Promise.all([
-		    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
+		    manager
+		      ? (scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} })
+		      : safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}`, { row: {} }),
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
@@ -13314,26 +13319,42 @@ const renderWorkspaceRrhhHub = () => {
     <div class="workspace-rrhh-panel-card">
       <div class="section-head">
         <div>
-          <h4>Documentos ${scopeAll ? "· Equipo" : ""}</h4>
-          <p class="muted">Contratos, DNI, certificados y formaciones del equipo.</p>
+          <h4>${manager ? `Documentación ${scopeAll ? "· Equipo" : ""}` : "Mi documentación"}</h4>
+          <p class="muted">${manager ? "Contratos, nóminas, DNI, certificados y formaciones del equipo." : "Aquí verás tu contrato, nóminas y documentos personales."}</p>
         </div>
       </div>
       <form id="workspaceRrhhDocForm" class="form-grid">
         <input type="hidden" name="id" />
         <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-        <label class="span-2">
-          Persona
-          <select name="persona_id" ${manager ? "" : "disabled"} required>
-            ${(manager ? employees : employees.filter((row) => String(row.id || "") === selectedPersonaId))
-              .filter(Boolean)
-              .map((row) => `<option value="${row.id || ""}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`)
-              .join("")}
-          </select>
-        </label>
+        ${
+          manager
+            ? `
+              <label class="span-2">
+                Persona
+                <select name="persona_id" required>
+                  ${(employees || [])
+                    .filter(Boolean)
+                    .map((row) => `<option value="${row.id || ""}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`)
+                    .join("")}
+                </select>
+              </label>
+            `
+            : `
+              <input type="hidden" name="persona_id" value="${escapeHtml(selectedPersonaId || "")}" />
+            `
+        }
         <label>
           Tipo
-          <input name="tipo" value="Documento" />
+          <input name="tipo" value="Documento" list="rrhhDocTypeList" />
         </label>
+        <datalist id="rrhhDocTypeList">
+          <option value="Contrato"></option>
+          <option value="Nómina"></option>
+          <option value="DNI/NIE"></option>
+          <option value="Certificado"></option>
+          <option value="Formación"></option>
+          <option value="Otros"></option>
+        </datalist>
         <label>
           Nombre
           <input name="nombre" placeholder="Contrato, DNI, certificado..." />
@@ -15139,7 +15160,7 @@ const renderWorkspaceRrhhHub = () => {
         const form = new FormData(docForm);
         const payload = Object.fromEntries(form.entries());
         payload.permanente = docForm.querySelector('[name="permanente"]').checked ? "1" : "0";
-        if (!manager) payload.persona_id = selectedPersonaId;
+        if (!manager) payload.persona_id = selectedPersonaId || payload.persona_id || "";
         if (!String(payload.id || "").trim() && !String(payload.doc_key || "").trim() && !String(payload.doc_url || "").trim()) {
           throw new Error("Sube un archivo antes de guardar el documento.");
         }
@@ -17336,6 +17357,29 @@ const syncWorkspaceFincasBudgetMap = () => {
   } catch {}
   workspaceFincasBudgetMapWrap.classList.remove("hidden");
   workspaceFincasBudgetMap.setAttribute("src", `https://www.google.com/maps?hl=es&z=16&output=embed&q=${q}`);
+  try {
+    const latInput = workspaceFincasBudgetQuickForm.querySelector('[name="map_lat"]');
+    const lonInput = workspaceFincasBudgetQuickForm.querySelector('[name="map_lon"]');
+    const prevQuery = String(workspaceFincasBudgetQuickForm.dataset.geocodeQuery || "").trim();
+    const nextQuery = normalizedAddr.toLowerCase();
+    if (nextQuery && nextQuery !== prevQuery) {
+      workspaceFincasBudgetQuickForm.dataset.geocodeQuery = nextQuery;
+      if (latInput) latInput.value = "";
+      if (lonInput) lonInput.value = "";
+    }
+    if (nextQuery && (!latInput?.value || !lonInput?.value)) {
+      fetchWithTimeout(`/api/geocode_lookup?q=${encodeURIComponent(normalizedAddr)}`, { credentials: "same-origin" }, 9000)
+        .then((res) => res.json())
+        .then((data) => {
+          const lat = Number(data?.lat);
+          const lon = Number(data?.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          if (latInput) latInput.value = String(lat.toFixed(6));
+          if (lonInput) lonInput.value = String(lon.toFixed(6));
+        })
+        .catch(() => {});
+    }
+  } catch {}
 };
 
 const fillWorkspaceFincasCommunityForm = (record = null) => {
@@ -17904,6 +17948,10 @@ const syncWorkspaceFincasBudgetBranding = () => {
   if (!workspaceFincasBudgetCompanyLogo && !workspaceFincasBudgetColegioLogo) return;
   const empresaId = String(workspaceFincasBudgetQuickForm?.querySelector('[name="empresa_id"]')?.value || "").trim();
   const company = state.empresas.find((row) => String(row.id || "") === empresaId) || null;
+  if (workspaceFincasBudgetBrandCompany) {
+    const label = String(company?.nombre || company?.razon_social || company?.name || "").trim();
+    workspaceFincasBudgetBrandCompany.textContent = label ? `Emite: ${label}` : "";
+  }
   const src = buildPhotoSrc(company?.logo_url || "") || "/assets/logos/fincas-velazquez.png";
   if (workspaceFincasBudgetCompanyLogo) {
     workspaceFincasBudgetCompanyLogo.src = src;
@@ -18355,6 +18403,8 @@ const buildWorkspacePresupuestoUpdatePayloadFromRow = (row = {}, overrides = {})
     solicitante_email: calc.solicitante_email || row.cliente_email || "",
     carta_presentacion: calc.carta_presentacion || "",
     colegiado_numero: calc.colegiado_numero || "3079",
+    map_lat: String(values.map_lat || "").trim(),
+    map_lon: String(values.map_lon || "").trim(),
     servicios_incluidos: serviciosIncluidos,
     lineas: Array.isArray(row.lineas) ? row.lineas : [],
   };
