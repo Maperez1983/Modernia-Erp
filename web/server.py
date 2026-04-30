@@ -15361,8 +15361,9 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
     parezca "atascado" en UI.
     """
     min_chars = int(os.getenv("RENTA_OCR_MIN_CHARS", "30") or 30)
-    # Por defecto: intentamos 1-2 páginas primero, y ampliamos hasta 4 si faltan casillas clave.
-    fast_pages = int(os.getenv("RENTA_OCR_FAST_PAGES", "4") or 4)
+    # Por defecto: intentamos pocas páginas primero, y ampliamos si faltan casillas clave.
+    # Nota: algunos Modelo 100 colocan 0505/0670 fuera de las 2-4 primeras páginas (anexos/orden distinto).
+    fast_pages = int(os.getenv("RENTA_OCR_FAST_PAGES", "6") or 6)
     # Subimos el DPI por defecto para mejorar la detección de DNI/NIF en PDFs escaneados.
     fast_dpi = int(os.getenv("RENTA_OCR_FAST_DPI", "300") or 300)
     tesseract_user_dpi = int(os.getenv("RENTA_OCR_TESSERACT_DPI", "300") or 300)
@@ -15370,6 +15371,10 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
     started_at = time.time()
     allow_slow_fallback = (
         str(os.getenv("RENTA_OCR_ALLOW_SLOW_FALLBACK", "0") or "0").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    allow_ocrmypdf_fallback = (
+        str(os.getenv("RENTA_OCR_ALLOW_OCRMYPDF_FALLBACK", "1") or "1").strip().lower()
         in ("1", "true", "yes", "on")
     )
     prefer_vision = (
@@ -15455,6 +15460,28 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
                     last_err = ocr_err
             if combined:
                 joined = "\n".join(combined)
+                # Fallback adicional (rápido pero más robusto): si OCR por páginas no capturó casillas
+                # clave, intenta `ocrmypdf` (si está disponible). Esto ayuda en PDFs con layout raro
+                # o cuando la cabecera/tablas no quedan bien en las primeras páginas.
+                if allow_ocrmypdf_fallback and (time.time() - started_at) < max(0.0, soft_timeout_s - 20):
+                    try:
+                        parsed = _parse_renta_pdf_fields(joined)
+                        casillas = parsed.get("casillas") if isinstance(parsed, dict) else None
+                        need_more = True
+                        if casillas and isinstance(casillas, dict):
+                            # Si ya tenemos 0505 o 0670, normalmente basta.
+                            if "0505" in casillas or "0670" in casillas:
+                                need_more = False
+                        if need_more:
+                            full_text, ocr_err = ocrmypdf_extract_text(pdf_path)
+                            if full_text and len(full_text.strip()) >= min_chars:
+                                parsed2 = _parse_renta_pdf_fields(full_text)
+                                cas2 = parsed2.get("casillas") if isinstance(parsed2, dict) else None
+                                if cas2 and isinstance(cas2, dict):
+                                    if "0505" in cas2 or "0670" in cas2 or len(cas2) >= 6:
+                                        return full_text, "", "ocrmypdf"
+                    except Exception:
+                        pass
                 return joined, "", "vision" if use_external else "tesseract"
             # Sin texto: devolvemos error, o seguimos con fallback lento si está permitido.
             if not allow_slow_fallback:
