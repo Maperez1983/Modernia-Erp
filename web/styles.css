@@ -8121,6 +8121,64 @@ body.crm-context-inmo .crm-resumen-compact-note {
   max-width: 34px;
 }
 
+
+/* Budget (Fincas): franja de marca + orden de secciones */
+.budget-brand-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdfa;
+  margin: 10px 0 14px;
+}
+
+.budget-brand-logos {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.budget-brand-logos img {
+  display: block;
+  width: auto;
+  height: 44px;
+  max-width: 220px;
+  object-fit: contain;
+  object-position: left center;
+  flex-shrink: 0;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+#workspaceFincasBudgetQuickForm h4 {
+  grid-column: 1 / -1;
+  margin: 12px 0 -2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(217, 211, 199, 0.8);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: 0.2px;
+}
+
+#workspaceFincasBudgetQuickForm h4:first-of-type {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 560px) {
+  .budget-brand-logos img {
+    height: 36px;
+    max-width: 180px;
+  }
+}
+
 .company-initials {
   width: 20px;
   height: 20px;
