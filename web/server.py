@@ -15200,6 +15200,32 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
     if not text_value.strip():
         return "", []
     upper = text_value.upper()
+    def _looks_like_date_digits(digits8: str) -> bool:
+        """
+        Heurística para descartar falsos NIFs creados a partir de fechas OCR:
+        p.ej. "06-05-2025 a las" -> "06052025A".
+        """
+        if not digits8 or not re.fullmatch(r"[0-9]{8}", digits8):
+            return False
+        try:
+            dd = int(digits8[0:2])
+            mm = int(digits8[2:4])
+            yyyy = int(digits8[4:8])
+        except Exception:
+            return False
+        if yyyy < 1900 or yyyy > 2099:
+            return False
+        if mm < 1 or mm > 12:
+            return False
+        if dd < 1 or dd > 31:
+            return False
+        return True
+
+    def _is_date_like_nif(value: str) -> bool:
+        v = re.sub(r"[^0-9A-Z]", "", str(value or "").upper())
+        if re.fullmatch(r"[0-9]{8}[A-Z]", v or ""):
+            return _looks_like_date_digits(v[:8])
+        return False
     # 1) Prioriza contexto cercano a etiquetas (DECLARANTE/CONTRIBUYENTE).
     # Importante: en muchos PDFs aparece también "NIF Presentador"; NO debe ser el primario.
     def _clean_cap(value: str) -> str:
@@ -15237,19 +15263,36 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
         r"[^A-Z0-9]{0,40}"
         + _CAP
     )
-    seen = set()
-    ordered = []
+    def _token_contains_date(value: str) -> bool:
+        """
+        Evita falsos positivos de CIF/NIF a partir de textos como:
+        - "EL 31-12-2024" -> se normaliza a "E13112202" por OCR (L->1, etc.)
+        - "31/12/2024" en cualquier token capturado por el patrón global
+        """
+        v = str(value or "").upper()
+        return bool(re.search(r"\b[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}\b", v))
+
+    # Construimos listas por "fuente" para escoger un primario robusto.
+    # Orden de preferencia para primario:
+    # 1) DECLARANTE / CONTRIBUYENTE
+    # 2) Etiqueta genérica NIF/DNI/NIE/CIF (no presentador)
+    # 3) NIF PRESENTADOR (en rentas suele ser el del propio cliente)
+    # 4) Búsqueda global (último recurso; muy propensa a falsos positivos)
+    seen: set[str] = set()
+    decl_nifs: list[str] = []
+    label_nifs: list[str] = []
     presentador_nifs: list[str] = []
+    global_nifs: list[str] = []
     # DECLARANTE/CONTRIBUYENTE primero.
     for m in decl_pat.finditer(upper):
         cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
         if cand and cand not in seen:
             seen.add(cand)
-            ordered.append(cand)
-            if len(ordered) >= 3:
+            decl_nifs.append(cand)
+            if len(decl_nifs) >= 3:
                 break
     # Luego etiquetas genéricas (pero evitando capturar inmediatamente tras "PRESENTADOR").
-    if len(ordered) < 3:
+    if len(decl_nifs) < 3:
         for m in generic_label_pat.finditer(upper):
             # Si cerca aparece "PRESENTADOR", lo dejamos para más tarde.
             start = max(0, m.start() - 20)
@@ -15259,46 +15302,53 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
             cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
             if cand and cand not in seen:
                 seen.add(cand)
-                ordered.append(cand)
-                if len(ordered) >= 3:
+                label_nifs.append(cand)
+                if len(label_nifs) >= 3:
                     break
-    # Presentador al final (solo si no hay otro).
+    # Presentador (en rentas suele ser el NIF del propio contribuyente cuando la
+    # declaración se presentó online; si hay NIF del declarante, prevalece ese).
     for m in pres_pat.finditer(upper):
         cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
         if cand and cand not in presentador_nifs:
             presentador_nifs.append(cand)
-        if cand and cand not in seen:
-            seen.add(cand)
-            ordered.append(cand)
-            if len(ordered) >= 4:
-                break
     # 2) Búsqueda global: primero NIFs "limpios" y luego secuencias con OCR/separadores.
     for m in _RENTA_NIF_RE.finditer(upper):
         token = m.group(1)
-        cand = _normalize_nif_candidate(token, infer_control_letter=True)
+        cand = _normalize_nif_candidate(token, infer_control_letter=False)
+        if cand and _is_date_like_nif(cand):
+            continue
         if cand and cand not in seen:
             seen.add(cand)
-            ordered.append(cand)
-            if len(ordered) >= 6:
+            global_nifs.append(cand)
+            if len(global_nifs) >= 6:
                 break
     global_pat = re.compile(r"\b([A-Z]?[ \t]*[0-9OILSB][0-9OILSB.\- \t]{6,14}[A-Z0-9]?)\b")
     for m in global_pat.finditer(upper):
         token = m.group(1)
-        cand = _normalize_nif_candidate(token, infer_control_letter=True)
+        if _token_contains_date(token):
+            continue
+        cand = _normalize_nif_candidate(token, infer_control_letter=False)
+        if cand and _is_date_like_nif(cand):
+            continue
         if cand and cand not in seen:
             seen.add(cand)
-            ordered.append(cand)
-            if len(ordered) >= 10:
+            global_nifs.append(cand)
+            if len(global_nifs) >= 10:
                 break
-    # Si el NIF del presentador aparece también como NIF genérico (muy habitual en OCR),
-    # lo relegamos al final para evitar asociarlo como "principal" cuando hay otros NIFs
-    # en el documento (declarante/cónyuge, etc.).
-    if ordered and presentador_nifs:
-        pres_set = set(presentador_nifs)
-        non_pres = [v for v in ordered if v not in pres_set]
-        if non_pres:
-            ordered = non_pres + [v for v in ordered if v in pres_set]
-    primary = ordered[0] if ordered else ""
+    # Monta lista final manteniendo preferencia y sin duplicados.
+    ordered: list[str] = []
+    for group in (decl_nifs, label_nifs, presentador_nifs, global_nifs):
+        for v in group:
+            if v and v not in ordered:
+                ordered.append(v)
+
+    # Primario: declarante > etiqueta genérica > presentador > global.
+    primary = (
+        (decl_nifs[0] if decl_nifs else "")
+        or (label_nifs[0] if label_nifs else "")
+        or (presentador_nifs[0] if presentador_nifs else "")
+        or (global_nifs[0] if global_nifs else "")
+    )
     return primary, ordered
 
 
