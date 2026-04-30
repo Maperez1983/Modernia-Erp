@@ -10266,6 +10266,13 @@ def s3_config():
 
 def s3_client():
     global S3_BOTO3_AVAILABLE
+    # Evita que boto3 intente resolver credenciales vía Instance Metadata (IMDS),
+    # lo que en algunos hosts puede bloquear la request y acabar en 502 (proxy timeout).
+    try:
+        if str(os.environ.get("AWS_EC2_METADATA_DISABLED") or "").strip() == "":
+            os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+    except Exception:
+        pass
     try:
         import boto3
         from botocore.config import Config
@@ -10281,8 +10288,25 @@ def s3_client():
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "virtual"},
+            connect_timeout=int(os.environ.get("AWS_CONNECT_TIMEOUT", "3") or 3),
+            read_timeout=int(os.environ.get("AWS_READ_TIMEOUT", "5") or 5),
         ),
     )
+
+
+def s3_has_credentials() -> bool:
+    """
+    Preflight rápido para evitar cuelgues de boto3/botocore intentando descubrir credenciales.
+    """
+    # Credenciales típicas por env (o sesión asumida). Si no hay nada, respondemos 400.
+    if str(os.environ.get("AWS_ACCESS_KEY_ID") or "").strip() and str(os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip():
+        return True
+    if str(os.environ.get("AWS_SESSION_TOKEN") or "").strip() and str(os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip():
+        return True
+    # Shared config/credentials file (opcional).
+    if str(os.environ.get("AWS_PROFILE") or "").strip():
+        return True
+    return False
 
 
 def s3_safe_key(prefix, filename):
@@ -41938,6 +41962,13 @@ class Handler(BaseHTTPRequestHandler):
             filename = payload.get("filename") or "archivo.pdf"
             content_type = payload.get("content_type") or "application/pdf"
             prefix = payload.get("prefix") or "seguros"
+            if not s3_has_credentials():
+                json_response(
+                    self,
+                    {"error": "S3 sin credenciales (configura AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY o AWS_PROFILE)"},
+                    status=400,
+                )
+                return
             client = s3_client()
             if not client:
                 bucket, region = s3_config()
@@ -41979,6 +42010,13 @@ class Handler(BaseHTTPRequestHandler):
             content_type = payload.get("content_type") or "application/pdf"
             prefix = payload.get("prefix") or "docs"
             file_size = int(payload.get("size") or 0)
+            if not s3_has_credentials():
+                json_response(
+                    self,
+                    {"error": "S3 sin credenciales (configura AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY o AWS_PROFILE)"},
+                    status=400,
+                )
+                return
             client = s3_client()
             if not client:
                 bucket, region = s3_config()
