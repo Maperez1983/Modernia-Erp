@@ -12643,7 +12643,16 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         except Exception:
             return ""
         core = str(code_num)
-        core_pat = "".join("[0O]" if ch == "0" else ch for ch in core)
+        # El OCR puede confundir dígitos con letras parecidas (0/O, 1/I/L, 5/S, 8/B, 2/Z).
+        # Aceptamos esas variantes SOLO para localizar el código de casilla.
+        digit_map = {
+            "0": "[0O]",
+            "1": "[1IL]",
+            "2": "[2Z]",
+            "5": "[5S]",
+            "8": "[8B]",
+        }
+        core_pat = "".join(digit_map.get(ch, ch) for ch in core)
         return rf"(?:\[)?[0O]*{core_pat}(?:\])?"
 
     def _normalize_nif(value: str) -> str:
@@ -12704,7 +12713,21 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         return None
 
     def _normalize_casilla_code(value: object) -> str:
-        digits = re.sub(r"\D", "", str(value or "").strip())
+        raw_code = str(value or "").strip().upper()
+        # Normaliza confusiones comunes de OCR dentro del código de casilla.
+        raw_code = raw_code.translate(
+            str.maketrans(
+                {
+                    "O": "0",
+                    "I": "1",
+                    "L": "1",
+                    "Z": "2",
+                    "S": "5",
+                    "B": "8",
+                }
+            )
+        )
+        digits = re.sub(r"\D", "", raw_code)
         if not digits:
             return ""
         try:
@@ -12718,7 +12741,7 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     def _extract_all_casillas_money() -> dict[str, float]:
         # No usamos \s+ para no unir líneas (evita emparejar una casilla con el importe de la línea anterior).
         amount_pat = r"([\-]?(?:[0-9]{1,3}(?:[\\. ][0-9]{3})*(?:,[0-9]{2})?|[0-9]+(?:,[0-9]{2})?))"
-        code_any_pat = r"((?:\[)?[0O]*[0-9]{3,4}(?:\])?)"
+        code_any_pat = r"((?:\[)?[0O]*[0-9OILZSB]{3,4}(?:\])?)"
         out: dict[str, float] = {}
         patterns = (
             rf"(?<![0-9]){code_any_pat}[ \t]+{amount_pat}",
@@ -12835,9 +12858,71 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     if presentacion:
         fields["presentacion_fecha"] = presentacion
 
+    def _compact_spaces(value: object) -> str:
+        return " ".join(str(value or "").strip().split())
+
+    def _extract_presentador_block() -> tuple[str, str]:
+        """
+        Algunos Modelo 100 incluyen el bloque del presentador con:
+        - NIF del presentador
+        - Apellidos y Nombre / Razón social
+
+        En muchos casos el presentador ES el contribuyente (cliente), así que lo usamos como fallback
+        cuando no podemos localizar "Primer declarante" con claridad.
+        """
+        m = re.search(
+            r"Presentador\s+NIF\s+Presentador\s*:?\s*([A-Z0-9][A-Z0-9 .-]{6,20})",
+            raw,
+            re.IGNORECASE,
+        )
+        presentador_nif = _normalize_nif(m.group(1)) if m else ""
+        m2 = re.search(
+            r"Presentador\s+NIF\s+Presentador[\s\S]{0,260}?Apellidos\s+y\s+Nombre\s*/\s*Raz[oó]n\s+social\s*:?\s*([^\n\r]{3,120})",
+            raw,
+            re.IGNORECASE,
+        )
+        presentador_nombre = ""
+        if m2:
+            presentador_nombre = _compact_spaces(m2.group(1))
+            presentador_nombre = re.split(r"\bEn\s+calidad\b", presentador_nombre, flags=re.IGNORECASE)[0].strip()
+        return presentador_nif, presentador_nombre
+
+    def _extract_cliente_nombre() -> str:
+        # 1) Intento directo: etiqueta estándar de AEAT (suele aparecer junto a presentador o declarante).
+        m = re.search(
+            r"Apellidos\s+y\s+Nombre\s*/\s*Raz[oó]n\s+social\s*:?\s*([^\n\r]{3,120})",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            candidate = _compact_spaces(m.group(1))
+            candidate = re.split(r"\bEn\s+calidad\b", candidate, flags=re.IGNORECASE)[0].strip()
+            if candidate:
+                return candidate
+        # 2) Fallback: usa el bloque del presentador si existe.
+        _p_nif, p_nombre = _extract_presentador_block()
+        if p_nombre:
+            return p_nombre
+        return ""
+
+    presentador_nif, presentador_nombre = _extract_presentador_block()
+    if presentador_nif:
+        fields["presentador_nif"] = presentador_nif
+    if presentador_nombre:
+        fields["presentador_nombre"] = presentador_nombre
+
+    cliente_nombre = _extract_cliente_nombre()
+    if cliente_nombre:
+        fields["cliente_nombre"] = cliente_nombre
+        fields["cliente_nombre_source"] = "ocr"
+
     nif_primary, nif_list = _extract_nifs()
     if nif_primary:
         fields["nif_detectado"] = nif_primary
+        # Conveniencia: muchas partes del sistema esperan `cliente_nif`.
+        if _RENTA_NIF_RE.search(nif_primary):
+            fields.setdefault("cliente_nif", nif_primary)
+            fields.setdefault("cliente_nif_source", "ocr")
     if nif_list:
         fields["nifs_detectados"] = nif_list
 
