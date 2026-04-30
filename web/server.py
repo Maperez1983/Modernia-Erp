@@ -23315,7 +23315,8 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             return entry_s
         return f"renta-{ejercicio_s}-{entry_s}" if ejercicio_s else entry_s
 
-    q_norm = str(q or "").strip().lower()
+    q_raw = str(q or "").strip()
+    q_lookup = normalize_lookup_text(q_raw)
     estado_norm = normalize_lookup_text(estado or "")
     ejercicio_raw = str(ejercicio or "").strip()
     ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
@@ -23324,12 +23325,27 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     except Exception:
         limit_val = 50
     limit_val = max(1, min(limit_val, 200))
+
+    # Protección: no buscamos por 1–2 letras (demasiados resultados y lento).
+    if q_lookup and len(q_lookup) < 3:
+        return []
     # Note: `estado` filtering normalizes accents/spaces; we keep it in Python for portability
     # and to avoid backend-specific collation issues (SQLite vs Postgres).
-    # Prefetch: necesitamos más filas para luego filtrar por `estado` (Python) sin quedarnos cortos.
-    # En dashboard, cuando `include_docs=False`, bajamos el prefetch para evitar timeouts innecesarios.
-    prefetch_mult = 12 if include_docs else 6
-    prefetch_limit = min(max(limit_val * prefetch_mult, 200), 2500)
+    # Prefetch:
+    # - sin filtros: solo necesitamos un "top N" reciente, así que evitamos bajar 1200+ filas innecesarias
+    # - con `estado`/`ejercicio`: filtramos en Python y necesitamos margen
+    # - con búsqueda (`q`): no podemos usar SQL `LIKE` con colación portable (acentos), así que prefetch amplio
+    if q_lookup:
+        prefetch_limit = min(max(limit_val * 40, 500), 15000)
+        order_by = "LOWER(COALESCE(c.nombre, '')) ASC, COALESCE(c.updated_at, c.created_at) DESC"
+    elif estado_norm or ejercicio_val:
+        prefetch_mult = 12 if include_docs else 6
+        prefetch_limit = min(max(limit_val * prefetch_mult, 200), 2500)
+        order_by = "COALESCE(c.updated_at, c.created_at) DESC, LOWER(COALESCE(c.nombre, '')) ASC"
+    else:
+        prefetch_mult = 4 if include_docs else 3
+        prefetch_limit = min(max(limit_val * prefetch_mult, 200), 600)
+        order_by = "COALESCE(c.updated_at, c.created_at) DESC, LOWER(COALESCE(c.nombre, '')) ASC"
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
@@ -23349,19 +23365,6 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
           )""",
     ]
     values = [empresa_id]
-    if q_norm:
-        like = f"%{q_norm}%"
-        where.append(
-            "("
-            "LOWER(COALESCE(c.nombre, '')) LIKE ? OR "
-            "LOWER(COALESCE(c.nif, '')) LIKE ? OR "
-            "LOWER(COALESCE(c.email, '')) LIKE ? OR "
-            "LOWER(COALESCE(c.telefono, '')) LIKE ? OR "
-            "LOWER(COALESCE(c.poblacion, '')) LIKE ? OR "
-            "LOWER(COALESCE(c.provincia, '')) LIKE ?"
-            ")"
-        )
-        values.extend([like, like, like, like, like, like])
     where_clause = " AND ".join(where) if where else "1=1"
 
     rows = conn.execute(
@@ -23394,14 +23397,14 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
               ce2.updated_at DESC
             LIMIT 1
           ) AS servicio_estado
-        FROM cliente_gestoria cg
-        JOIN clientes c ON c.id = cg.cliente_id
-        WHERE {where_clause}
-        ORDER BY COALESCE(c.updated_at, c.created_at) DESC, LOWER(COALESCE(c.nombre, '')) ASC
-        LIMIT ?
-        """,
-        tuple([empresa_id] + values + [prefetch_limit]),
-    ).fetchall()
+	        FROM cliente_gestoria cg
+	        JOIN clientes c ON c.id = cg.cliente_id
+	        WHERE {where_clause}
+	        ORDER BY {order_by}
+	        LIMIT ?
+	        """,
+	        tuple([empresa_id] + values + [prefetch_limit]),
+	    ).fetchall()
     items = []
     selected_cliente_ids = []
     renta_doc_id_owner = {}
@@ -23415,6 +23418,25 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
         if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
             continue
+        if q_lookup:
+            try:
+                haystacks = (
+                    row["nombre"],
+                    row["nif"],
+                    row["email"],
+                    row["telefono"],
+                    row["poblacion"],
+                    row["provincia"],
+                )
+                matched = False
+                for value in haystacks:
+                    if q_lookup in normalize_lookup_text(value or ""):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+            except Exception:
+                continue
         renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         if ejercicio_val:

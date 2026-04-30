@@ -48744,6 +48744,9 @@ const loadGestoriaCrm = async () => {
     params.set("limit", limit);
   }
   if (state.gestoriaCrmTab === "renta") {
+    const effectiveQuery = rawQuery;
+    const hasSearch = Boolean(String(effectiveQuery || "").trim());
+    const searchKey = normalizeLookupText(effectiveQuery || "");
     const cacheAgeMs = Date.now() - Number(state.gestoriaRentaCardsCache?.ts || 0);
     const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
     if (
@@ -48751,10 +48754,11 @@ const loadGestoriaCrm = async () => {
       state.gestoriaRentaCardsCache.empresaId === empresa.id &&
       String(state.gestoriaRentaCardsCache.estado || "") === String(estado || "") &&
       String(state.gestoriaRentaCardsCache.ejercicio || "") === String(ejercicio || "") &&
-      isFreshCache
+      isFreshCache &&
+      !hasSearch
     ) {
       const cachedRows = state.gestoriaRentaCardsCache.rows || [];
-      renderGestoriaRentaCrmCards(cachedRows, { query: q, totalHint: state.gestoriaRentaCardsCache.totalHint });
+      renderGestoriaRentaCrmCards(cachedRows, { query: effectiveQuery, totalHint: state.gestoriaRentaCardsCache.totalHint });
       if (gestoriaCrmTable) {
         gestoriaCrmTable.innerHTML = "";
         gestoriaCrmTable.classList.add("hidden");
@@ -48771,17 +48775,41 @@ const loadGestoriaCrm = async () => {
     }
     const rentaParams = new URLSearchParams({
       empresa_id: empresa.id,
-      q: "",
+      q: hasSearch ? String(effectiveQuery || "").trim() : "",
       estado,
-      limit: String(Math.max(200, Number(limit || 0) || 50)),
-      include_docs: "0",
+      // Rendimiento: sin búsqueda cargamos dataset moderado; con búsqueda pedimos resultados filtrados.
+      limit: hasSearch ? "200" : String(Math.max(200, Number(limit || 0) || 50)),
+      // Necesitamos `preview_doc` para el botón PDF (doc_key/doc_url).
+      include_docs: "1",
     });
     if (/^20[0-9]{2}$/.test(ejercicio)) {
       rentaParams.set("ejercicio", ejercicio);
     }
+    // Evita spamear el servidor con 1–2 letras.
+    if (hasSearch && String(searchKey || "").length < 3) {
+      const cachedRows = state.gestoriaRentaCardsCache?.rows || [];
+      renderGestoriaRentaCrmCards(cachedRows, { query: effectiveQuery, totalHint: state.gestoriaRentaCardsCache?.totalHint });
+      if (gestoriaCrmTable) {
+        gestoriaCrmTable.innerHTML = "";
+        gestoriaCrmTable.classList.add("hidden");
+      }
+      if (gestoriaCrmSummary) {
+        gestoriaCrmSummary.classList.remove("hidden");
+      }
+      if (gestoriaCrmInfo) gestoriaCrmInfo.textContent = "Escribe 3+ caracteres para buscar en toda la base.";
+      if (gestoriaCrmToggleView) {
+        gestoriaCrmToggleView.classList.add("hidden");
+      }
+      return;
+    }
     let rentaData = null;
     try {
+      if (gestoriaCrmInfo) {
+        gestoriaCrmInfo.textContent = hasSearch ? "Buscando…" : "Cargando rentas…";
+      }
+      const seq = (state.gestoriaRentaCardsSearchSeq = Number(state.gestoriaRentaCardsSearchSeq || 0) + 1);
       rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
+      if (seq !== Number(state.gestoriaRentaCardsSearchSeq || 0)) return;
     } catch (err) {
       if (gestoriaCrmInfo) {
         gestoriaCrmInfo.textContent = (err && err.message) ? String(err.message) : "No se pudo cargar Renta.";
@@ -48789,15 +48817,28 @@ const loadGestoriaCrm = async () => {
       return;
     }
     const rentaRows = rentaData.rows || [];
-    state.gestoriaRentaCardsCache = {
-      empresaId: empresa.id,
-      estado: String(estado || ""),
-      ejercicio: String(ejercicio || ""),
-      rows: rentaRows,
-      totalHint: Array.isArray(rentaData.rows) ? rentaData.rows.length : 0,
-      ts: Date.now(),
-    };
-    renderGestoriaRentaCrmCards(rentaRows, { query: q, totalHint: state.gestoriaRentaCardsCache.totalHint });
+    const totalHint = Array.isArray(rentaData.rows) ? rentaData.rows.length : 0;
+    if (hasSearch) {
+      state.gestoriaRentaCardsSearchCache = {
+        empresaId: empresa.id,
+        estado: String(estado || ""),
+        ejercicio: String(ejercicio || ""),
+        q: String(searchKey || ""),
+        rows: rentaRows,
+        totalHint,
+        ts: Date.now(),
+      };
+    } else {
+      state.gestoriaRentaCardsCache = {
+        empresaId: empresa.id,
+        estado: String(estado || ""),
+        ejercicio: String(ejercicio || ""),
+        rows: rentaRows,
+        totalHint,
+        ts: Date.now(),
+      };
+    }
+    renderGestoriaRentaCrmCards(rentaRows, { query: effectiveQuery, totalHint });
     if (gestoriaCrmTable) {
       gestoriaCrmTable.innerHTML = "";
       gestoriaCrmTable.classList.add("hidden");
