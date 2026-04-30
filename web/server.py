@@ -39079,8 +39079,28 @@ class Handler(BaseHTTPRequestHandler):
         proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
         return proto == "https" or bool(os.environ.get("RENDER"))
 
+    def _session_cookie_domain(self):
+        forced = (os.environ.get("APP_SESSION_COOKIE_DOMAIN") or "").strip()
+        if forced:
+            return forced
+        try:
+            host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").strip().lower()
+            host = host.split(",", 1)[0].strip()
+            if ":" in host:
+                host = host.split(":", 1)[0].strip()
+            if not host:
+                return None
+            if host == "verifika2.com" or host.endswith(".verifika2.com"):
+                return ".verifika2.com"
+        except Exception:
+            return None
+        return None
+
     def _build_session_cookie(self, value, max_age=None):
         parts = [f"{SESSION_COOKIE_NAME}={value}", "Path=/", "HttpOnly", "SameSite=Lax"]
+        domain = self._session_cookie_domain()
+        if domain:
+            parts.append(f"Domain={domain}")
         if max_age is not None:
             parts.append(f"Max-Age={int(max_age)}")
         if self._session_cookie_secure():

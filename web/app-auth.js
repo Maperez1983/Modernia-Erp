@@ -264,7 +264,22 @@
         const returnUrl = String(deps.state?.postAuthReturnUrl || "").trim();
         deps.state.postAuthReturnUrl = "";
         if (returnUrl && returnUrl !== window.location.href) {
-          window.location.assign(returnUrl);
+          // Si el returnUrl es de otro subdominio (app.verifika2.com vs crm.verifika2.com),
+          // normalizamos al host actual para evitar perder cookies host-only y entrar en bucle de login.
+          try {
+            const url = new URL(returnUrl, window.location.href);
+            const cur = new URL(window.location.href);
+            const sameSite =
+              url.hostname === cur.hostname ||
+              (url.hostname.endsWith(".verifika2.com") && cur.hostname.endsWith(".verifika2.com"));
+            if (sameSite && url.hostname !== cur.hostname) {
+              url.protocol = cur.protocol;
+              url.host = cur.host;
+            }
+            window.location.assign(url.toString());
+          } catch {
+            window.location.assign(returnUrl);
+          }
           return;
         }
       } catch {}
