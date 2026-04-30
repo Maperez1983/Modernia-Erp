@@ -11195,7 +11195,21 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
     if (!user?.id) return "";
     const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
     const match = employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "") === String(user.id || ""));
-    return match?.id || "";
+    if (match?.id) return match.id;
+    // Fallback: si aún no está vinculado usuario↔persona, inferimos por email/usuario (si es único).
+    const email = String(user.email || "").trim().toLowerCase();
+    const usuario = String(user.usuario || "").trim().toLowerCase();
+    const candidates = employees.filter((row) => {
+      const rowEmail = String(row?.email || "").trim().toLowerCase();
+      const rowUsuario = String(row?.usuario || row?.login || "").trim().toLowerCase();
+      if (email && rowEmail && rowEmail === email) return true;
+      if (usuario && rowUsuario && rowUsuario === usuario) return true;
+      return false;
+    });
+    if (candidates.length === 1) {
+      return String(candidates[0]?.id || "").trim();
+    }
+    return "";
   };
 
   const refreshWorkspaceRrhh = async () => {
@@ -12125,7 +12139,9 @@ const renderWorkspaceRrhhHub = () => {
                   <div>
                     <strong>${escapeHtml(row.tipo || "Documento")}${row.nombre ? ` · ${escapeHtml(row.nombre)}` : ""}</strong>
                     <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
-                    ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Abrir archivo</a></div>` : ""}
+                    ${(row.doc_url || row.doc_key)
+                      ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || \"\"))}">Abrir archivo</button></div>`
+                      : ""}
                   </div>
                   <div class="workspace-rrhh-row-actions">
                     <button type="button" class="secondary ghost button-inline" data-rrhh-doc-edit="${row.id || ""}">Editar</button>
@@ -13355,7 +13371,9 @@ const renderWorkspaceRrhhHub = () => {
                       <strong>${escapeHtml(row.tipo || "Documento")}${row.nombre ? ` · ${escapeHtml(row.nombre)}` : ""}</strong>
                       <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
                       <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
-                      ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Abrir archivo</a></div>` : ""}
+                      ${(row.doc_url || row.doc_key)
+                        ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || \"\"))}">Abrir archivo</button></div>`
+                        : ""}
                     </div>
                     <div class="workspace-rrhh-row-actions">
                       <button type="button" class="secondary ghost button-inline" data-rrhh-doc-edit="${row.id || ""}">Editar</button>
@@ -15102,6 +15120,10 @@ const renderWorkspaceRrhhHub = () => {
           const upload = await uploadFileToS3(file, "rrhh", status);
           docForm.querySelector('[name="doc_key"]').value = upload?.key || "";
           docForm.querySelector('[name="doc_url"]').value = upload?.public_url || "";
+          const nombreEl = docForm.querySelector('[name="nombre"]');
+          if (nombreEl && !String(nombreEl.value || "").trim()) {
+            nombreEl.value = String(file.name || "").trim();
+          }
           if (status) status.textContent = "Archivo subido.";
         } catch (err) {
           if (status) status.textContent = err.message || "No se pudo subir.";
@@ -15152,6 +15174,15 @@ const renderWorkspaceRrhhHub = () => {
       form.querySelector('[name="doc_key"]').value = row.doc_key || "";
       form.querySelector('[name="doc_url"]').value = row.doc_url || "";
       form.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-doc-open]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.rrhhDocOpen || "";
+      const row = (state.workspaceRrhhDocsRows || []).find((r) => String(r.id || "") === String(id));
+      if (!row) return;
+      openS3File(String(row.doc_key || ""), String(row.doc_url || ""));
     });
   });
 };

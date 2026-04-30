@@ -31790,19 +31790,22 @@ def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_
 
 
 def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, persona_id=None, limit=200):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     where = [f"d.workspace_id = ?"]
     params = [workspace_id]
-    # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
-    if empresa_ids:
-        where.append(f"(COALESCE(d.empresa_id, '') = '' OR COALESCE(d.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)}))")
-        params.extend(empresa_ids)
-    else:
-        where.append("COALESCE(d.empresa_id, '') = ''")
     pid = str(persona_id or "").strip()
     if pid:
+        # Si pedimos por persona, NO filtramos por empresa: un trabajador debe ver siempre su documentación
+        # aunque su ficha/empresa se haya creado fuera del contexto actual o esté pendiente de vincular.
         where.append("d.persona_id = ?")
         params.append(pid)
+    else:
+        empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+        # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
+        if empresa_ids:
+            where.append(f"(COALESCE(d.empresa_id, '') = '' OR COALESCE(d.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)}))")
+            params.extend(empresa_ids)
+        else:
+            where.append("COALESCE(d.empresa_id, '') = ''")
     rows = conn.execute(
         f"""
         SELECT
