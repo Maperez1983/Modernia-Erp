@@ -9907,14 +9907,14 @@
               }
             } catch {}
 
-            // Si en 2s no ha cargado `app.js`, avisamos (no bloquea el login).
+            // Si en unos segundos no ha cargado `app.js`, avisamos (no bloquea el login).
             setTimeout(() => {
               try {
                 if (!window.__APP_JS_LOADED) {
                   setStatus("No cargó la app completa. Prueba recargar con ?nosw=1 (limpia cache) e inténtalo de nuevo.");
                 }
               } catch {}
-            }, 2000);
+            }, 6000);
 
             const waitHealthOnce = async () => {
               try {
@@ -9974,15 +9974,41 @@
         </script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=702"></script>
+												    <script src="app.js?v=703"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=305";
+											        const TARGET_SW = "/sw.js?v=306";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
+              const keepSw = (params.get("keep_sw") || "").trim() === "1";
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
 		          const cleared = (params.get("swcleared") || "").trim() === "1";
+
+              // Safety: algunos navegadores se quedan con JS corrupto en cache del SW y provocan bucles de login.
+              // Por defecto desactivamos el SW y limpiamos caches una vez. Se puede reactivar con `?keep_sw=1`.
+              if (!keepSw && !cleared) {
+                Promise.allSettled([
+                  navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
+                  (typeof caches !== "undefined" && caches && caches.keys)
+                    ? caches.keys().then((keys) => Promise.allSettled(
+                        keys
+                          .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
+                          .map((k) => caches.delete(k))
+                      ))
+                    : Promise.resolve(),
+                ]).finally(() => {
+                  params.set("swcleared", "1");
+                  params.delete("sw");
+                  params.delete("nosw");
+                  const url = new URL(window.location.href);
+                  url.search = params.toString();
+                  window.location.replace(url.toString());
+                });
+                return;
+              }
+
+              if (!keepSw) return;
 	          if (disableSw) {
 	            Promise.allSettled([
 	              navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
