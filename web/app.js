@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v298";
+const APP_SW_VERSION = "v309";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -12141,7 +12141,7 @@ const renderWorkspaceRrhhHub = () => {
                     <strong>${escapeHtml(row.tipo || "Documento")}${row.nombre ? ` · ${escapeHtml(row.nombre)}` : ""}</strong>
                     <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
                     ${(row.doc_url || row.doc_key)
-                      ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || \"\"))}">Abrir archivo</button></div>`
+                      ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || ""))}">Abrir archivo</button></div>`
                       : ""}
                   </div>
                   <div class="workspace-rrhh-row-actions">
@@ -13373,7 +13373,7 @@ const renderWorkspaceRrhhHub = () => {
                       <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
                       <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
                       ${(row.doc_url || row.doc_key)
-                        ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || \"\"))}">Abrir archivo</button></div>`
+                        ? `<div class="muted"><button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || ""))}">Abrir archivo</button></div>`
                         : ""}
                     </div>
                     <div class="workspace-rrhh-row-actions">
