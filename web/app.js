@@ -5498,6 +5498,7 @@ const renderCompanyCards = () => {
 		      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
 		      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
 		      const rrhhHref = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
+          const rrhhDocsHref = `${rrhhHref}&rrhh_tab=docs`;
       const displayName =
         employee?.nombre
         || homePersona?.nombre
@@ -5543,8 +5544,8 @@ const renderCompanyCards = () => {
 		      card.className = "company-card personal-card";
 		      card.dataset.action = "rrhh-home";
 		      if (personaId) card.dataset.rrhhPersona = personaId;
-	      card.innerHTML = `
-	        <div class="company-card-head">
+		      card.innerHTML = `
+		        <div class="company-card-head">
           <div class="rrhh-avatar">
             ${photoUrl ? `<img src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
           </div>
@@ -5556,6 +5557,7 @@ const renderCompanyCards = () => {
 		        </div>
 		        <div class="workspace-home-card-actions">
 		          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+              <a class="secondary ghost button-inline" href="${rrhhDocsHref}" data-action="rrhh-home">Documentación</a>
 		          <button type="button" class="secondary ghost button-inline" data-action="time-punch">${timeLabel}</button>
 		        </div>
 		      `;
@@ -22483,6 +22485,12 @@ const syncHoldingUrlParams = () => {
   if (state.currentWorkspaceView === "rrhh" && String(state.workspaceRrhhEntry || "").trim() === "self") {
     params.set("rrhh", "self");
   }
+  if (state.currentWorkspaceView === "rrhh") {
+    const tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab || "");
+    if (tab && tab !== "plantilla") {
+      params.set("rrhh_tab", tab);
+    }
+  }
   if (state.currentWorkspaceView === "motores" && state.currentWorkspaceEngineView) {
     params.set("engine", state.currentWorkspaceEngineView);
   }
@@ -22521,6 +22529,9 @@ const openHolding = (options = {}) => {
   const requestedRrhh = (("rrhh" in options) ? String(options.rrhh || "") : String(urlParams.get("rrhh") || ""))
     .trim()
     .toLowerCase();
+  const requestedRrhhTab = (("rrhh_tab" in options) ? String(options.rrhh_tab || "") : String(urlParams.get("rrhh_tab") || ""))
+    .trim()
+    .toLowerCase();
   if (mode === "tenant" && !canManageWorkspace) {
     const viewKey = normalizeSimple(requestedView);
     if (viewKey && !["operations", "rrhh", "fincas", "motores"].includes(viewKey)) {
@@ -22531,6 +22542,9 @@ const openHolding = (options = {}) => {
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? resolveDefaultTenantWorkspaceSlug() : "");
   state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";
   state.workspaceRrhhJumpPersonaId = requestedPersona;
+  if (requestedRrhhTab && normalizeSimple(requestedView) === "rrhh") {
+    state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(requestedRrhhTab);
+  }
   const engineKey = normalizeSimple(requestedEngine);
   if (engineKey === "rrhh") {
     // Compatibilidad: URLs antiguas que apuntaban a motores->rrhh ahora abren la vista RRHH.
