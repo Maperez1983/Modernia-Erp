@@ -12798,6 +12798,28 @@ def _parse_renta_pdf_fields(text: str) -> dict:
             re.IGNORECASE,
         )
         if match:
+            # Evita falsos positivos: en algunos OCR aparece el texto "resultado de la declaración"
+            # dentro de bloques de "cuotas" (no el resultado final 0670).
+            try:
+                tail = normalized[match.end() : match.end() + 140]
+                if "CUOTA" in tail or "BASE LIQUIDABLE" in tail or "CORRESPONDIENTE" in tail:
+                    match = None
+            except Exception:
+                pass
+        if match:
+            value = parse_optional_float(match.group(1))
+            if value is not None:
+                fields["resultado_declaracion"] = round(float(value), 2)
+
+    if "resultado_declaracion" not in fields:
+        # Algunos modelos (o determinadas páginas) muestran:
+        # "Resultado a ingresar o devolver: -709,00"
+        match = re.search(
+            r"Resultado\s+a\s+ingresar\s+o\s+devolver\s*:?\s*([\-]?[0-9][0-9\.,]*)",
+            raw,
+            re.IGNORECASE,
+        )
+        if match:
             value = parse_optional_float(match.group(1))
             if value is not None:
                 fields["resultado_declaracion"] = round(float(value), 2)
@@ -14992,6 +15014,35 @@ def pdfinfo_page_size(pdf_path):
                     return None
     return None
 
+
+def pdfinfo_page_count(pdf_path):
+    cmd = (
+        shutil.which("pdfinfo")
+        or "/opt/homebrew/bin/pdfinfo"
+        or "/usr/local/bin/pdfinfo"
+    )
+    if not cmd or not os.path.exists(cmd):
+        return 0
+    try:
+        result = run_subprocess(
+            [cmd, pdf_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        return 0
+    for line in result.stdout.splitlines():
+        if line.lower().startswith("pages:"):
+            parts = re.findall(r"([0-9]+)", line)
+            if parts:
+                try:
+                    return int(parts[0])
+                except Exception:
+                    return 0
+    return 0
+
 def pdftotext_crop(pdf_path, x, y, w, h):
     cmd = (
         shutil.which("pdftotext")
@@ -15035,7 +15086,7 @@ def pdftotext_crop(pdf_path, x, y, w, h):
         except Exception:
             return ""
 
-def pdftoppm_first_page(pdf_path, pages=None, dpi=None):
+def pdftoppm_first_page(pdf_path, pages=None, dpi=None, start_page=1):
     cmd = (
         shutil.which("pdftoppm")
         or "/opt/homebrew/bin/pdftoppm"
@@ -15046,11 +15097,24 @@ def pdftoppm_first_page(pdf_path, pages=None, dpi=None):
     tmp_base = tempfile.gettempdir()
     tmpdir = tempfile.mkdtemp(dir=tmp_base)
     base = os.path.join(tmpdir, "page")
-    args = [cmd, "-f", "1"]
+    try:
+        start_page_val = int(start_page or 1)
+    except Exception:
+        start_page_val = 1
+    if start_page_val < 1:
+        start_page_val = 1
+    args = [cmd, "-f", str(start_page_val)]
     if pages is None and OCR_PDF_MAX_PAGES > 0:
         pages = OCR_PDF_MAX_PAGES
     if pages and isinstance(pages, int):
-        args.extend(["-l", str(pages)])
+        # `pdftoppm -l` espera el número de la última página, no "cantidad".
+        try:
+            end_page_val = start_page_val + int(pages) - 1
+        except Exception:
+            end_page_val = start_page_val
+        if end_page_val < start_page_val:
+            end_page_val = start_page_val
+        args.extend(["-l", str(end_page_val)])
     render_dpi = dpi or OCR_PDF_DPI
     try:
         run_subprocess(
@@ -15377,6 +15441,10 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
         str(os.getenv("RENTA_OCR_ALLOW_OCRMYPDF_FALLBACK", "1") or "1").strip().lower()
         in ("1", "true", "yes", "on")
     )
+    allow_robust_all_pages = (
+        str(os.getenv("RENTA_OCR_ALLOW_ROBUST_ALL_PAGES", "1") or "1").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
     prefer_vision = (
         str(os.getenv("RENTA_OCR_PREFER_VISION", "0") or "0").strip().lower()
         in ("1", "true", "yes", "on")
@@ -15408,7 +15476,7 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
         # Si falla el full, usamos la sonda como degradación.
         return probe_text, full_err or "", "pdftotext"
 
-    # 2) OCR progresivo sobre páginas (normalmente 1-4).
+    # 2) OCR progresivo sobre páginas (normalmente 1-6, ampliable).
     # En producción (Render) puede NO existir `tesseract`. En ese caso, si hay OCR externo
     # disponible, debemos usarlo sí o sí; si no, el OCR no devuelve texto y no detecta NIF.
     tesseract_cmd = resolve_tesseract_cmd()
@@ -15418,11 +15486,32 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
     # - el operador fuerza `RENTA_OCR_PREFER_VISION=1`
     # - o no hay tesseract y necesitamos Vision para que funcione.
     use_external = bool(external_ocr_available()) and (prefer_vision or not tesseract_available)
-    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=max(1, fast_pages), dpi=fast_dpi)
+    total_pages = 0
+    try:
+        total_pages = pdfinfo_page_count(pdf_path)
+    except Exception:
+        total_pages = 0
+
+    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=max(1, fast_pages), dpi=fast_dpi, start_page=1)
     if images:
         combined = []
         last_err = ""
         try:
+            def _needs_more_casillas(text_value: str) -> bool:
+                try:
+                    parsed = _parse_renta_pdf_fields(text_value)
+                    casillas = parsed.get("casillas") if isinstance(parsed, dict) else None
+                    if casillas and isinstance(casillas, dict):
+                        # Si ya tenemos resultado + 505, normalmente la ficha está completa.
+                        try:
+                            if parsed.get("casilla_505") is not None and parsed.get("resultado_declaracion") is not None:
+                                return False
+                        except Exception:
+                            pass
+                    return True
+                except Exception:
+                    return True
+
             for idx, img_path in enumerate(images):
                 if soft_timeout_s > 0 and (time.time() - started_at) > soft_timeout_s:
                     if combined:
@@ -15442,24 +15531,169 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
                 if page_text:
                     combined.append(page_text)
                     joined = "\n".join(combined)
-                    # Cortamos pronto si ya tenemos casillas (0505, etc.) o un score alto.
-                    # Esto evita procesar 4 páginas cuando con 2 es suficiente.
-                    try:
-                        parsed = _parse_renta_pdf_fields(joined)
-                        casillas = parsed.get("casillas") if isinstance(parsed, dict) else None
-                        # Heurística: si ya hemos extraído varias casillas (códigos de 4 dígitos),
-                        # es muy probable que tengamos datos suficientes.
-                        if casillas and isinstance(casillas, dict) and idx >= 2:
-                            casilla_keys = [str(k) for k in casillas.keys()]
-                            casilla_4 = [k for k in casilla_keys if re.fullmatch(r"[0-9]{4}", k or "")]
-                            if len(casilla_4) >= 6:
-                                return joined, "", "vision" if use_external else "tesseract"
-                    except Exception:
-                        pass
+                    # Cortamos pronto solo cuando ya tenemos los campos clave (p.ej. 0505 + resultado).
+                    # Si cortamos solo por “muchas casillas”, podemos perdernos el resumen final.
+                    if not _needs_more_casillas(joined):
+                        return joined, "", "vision" if use_external else "tesseract"
                 elif ocr_err:
                     last_err = ocr_err
+
+            # Si faltan casillas clave, intenta otro tramo de páginas (sin ir a OCR completo).
+            if combined and _needs_more_casillas("\n".join(combined)):
+                next_pages = int(os.getenv("RENTA_OCR_NEXT_PAGES", "6") or 6)
+                if next_pages > 0 and (time.time() - started_at) < max(0.0, soft_timeout_s - 15):
+                    start_next = max(1, int(fast_pages) + 1)
+                    images2, img_err2, tmpdir2 = pdftoppm_first_page(
+                        pdf_path, pages=next_pages, dpi=fast_dpi, start_page=start_next
+                    )
+                    if images2:
+                        try:
+                            for img_path in images2:
+                                if soft_timeout_s > 0 and (time.time() - started_at) > soft_timeout_s:
+                                    break
+                                page_text = ""
+                                ocr_err = ""
+                                if use_external:
+                                    vision_bytes = prepare_image_bytes_for_vision(img_path)
+                                    if vision_bytes:
+                                        page_text, ocr_err = ocr_image_external(vision_bytes)
+                                if not page_text:
+                                    page_text, ocr_err = ocr_image_tesseract_fast(
+                                        img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                                    )
+                                if page_text:
+                                    combined.append(page_text)
+                                    if not _needs_more_casillas("\n".join(combined)):
+                                        break
+                                elif ocr_err:
+                                    last_err = last_err or ocr_err
+                        finally:
+                            if tmpdir2:
+                                shutil.rmtree(tmpdir2, ignore_errors=True)
+
+            # Si aún faltan casillas, intenta un tramo final (últimas páginas) donde suele estar el resumen/0670.
+            if combined and _needs_more_casillas("\n".join(combined)) and total_pages and total_pages >= 2:
+                tail_pages = int(os.getenv("RENTA_OCR_TAIL_PAGES", "2") or 2)
+                if tail_pages > 0 and (time.time() - started_at) < max(0.0, soft_timeout_s - 15):
+                    tail_start = max(1, int(total_pages) - int(tail_pages) + 1)
+                    # Evita solapar con el primer tramo si el PDF es corto.
+                    if tail_start > 1 and tail_start > int(fast_pages or 1):
+                        images3, img_err3, tmpdir3 = pdftoppm_first_page(
+                            pdf_path, pages=tail_pages, dpi=fast_dpi, start_page=tail_start
+                        )
+                        if images3:
+                            try:
+                                for img_path in images3:
+                                    if soft_timeout_s > 0 and (time.time() - started_at) > soft_timeout_s:
+                                        break
+                                    page_text = ""
+                                    ocr_err = ""
+                                    if use_external:
+                                        vision_bytes = prepare_image_bytes_for_vision(img_path)
+                                        if vision_bytes:
+                                            page_text, ocr_err = ocr_image_external(vision_bytes)
+                                    if not page_text:
+                                        page_text, ocr_err = ocr_image_tesseract_fast(
+                                            img_path, psms=(6, 11), user_dpi=tesseract_user_dpi
+                                        )
+                                    if page_text:
+                                        combined.append(page_text)
+                                        if not _needs_more_casillas("\n".join(combined)):
+                                            break
+                                    elif ocr_err:
+                                        last_err = last_err or ocr_err
+                            finally:
+                                if tmpdir3:
+                                    shutil.rmtree(tmpdir3, ignore_errors=True)
             if combined:
                 joined = "\n".join(combined)
+                # Fallback adicional: para PDFs cortos, intenta un OCR más robusto en todas las páginas
+                # usando `ocr_image_file` (más lento, pero suele rescatar casillas como 0670).
+                if (
+                    allow_robust_all_pages
+                    and total_pages
+                    and int(total_pages) <= int(os.getenv("RENTA_OCR_ROBUST_MAX_PAGES", "10") or 10)
+                    and _needs_more_casillas(joined)
+                    and (time.time() - started_at) < max(0.0, soft_timeout_s - 25)
+                ):
+                    images_full = []
+                    tmpdir_full = ""
+                    try:
+                        robust_dpi = int(os.getenv("RENTA_OCR_ROBUST_DPI", str(fast_dpi)) or fast_dpi)
+                    except Exception:
+                        robust_dpi = fast_dpi
+                    try:
+                        images_full, _img_err_full, tmpdir_full = pdftoppm_first_page(
+                            pdf_path, pages=int(total_pages), dpi=robust_dpi, start_page=1
+                        )
+                    except Exception:
+                        images_full, tmpdir_full = [], ""
+                    if images_full:
+                        robust_chunks = []
+                        try:
+                            for img_path in images_full:
+                                if soft_timeout_s > 0 and (time.time() - started_at) > soft_timeout_s:
+                                    break
+                                page_text = ""
+                                ocr_err = ""
+                                if use_external:
+                                    vision_bytes = prepare_image_bytes_for_vision(img_path)
+                                    if vision_bytes:
+                                        page_text, ocr_err = ocr_image_external(vision_bytes)
+                                if not page_text:
+                                    page_text, ocr_err = ocr_image_file(img_path)
+                                if page_text:
+                                    robust_chunks.append(page_text)
+                            if robust_chunks:
+                                robust_joined = "\n".join(robust_chunks)
+
+                                def _parse_safe(text_value: str) -> dict:
+                                    try:
+                                        parsed = _parse_renta_pdf_fields(text_value)
+                                    except Exception:
+                                        return {}
+                                    return parsed if isinstance(parsed, dict) else {}
+
+                                def _quality_score(text_value: str) -> int:
+                                    parsed = _parse_safe(text_value)
+                                    casillas = parsed.get("casillas")
+                                    cas_n = len(casillas or {}) if isinstance(casillas, dict) else 0
+                                    score = 0
+                                    if parsed.get("casilla_505") is not None:
+                                        score += 4
+                                    if parsed.get("resultado_declaracion") is not None:
+                                        score += 4
+                                    if parsed.get("ejercicio"):
+                                        score += 1
+                                    if parsed.get("presentacion_fecha"):
+                                        score += 1
+                                    if parsed.get("nif_detectado") or parsed.get("nifs_detectados"):
+                                        score += 2
+                                    score += min(10, cas_n // 2)
+                                    score += min(3, len(str(text_value or "").strip()) // 5000)
+                                    return score
+
+                                base_fields = _parse_safe(joined)
+                                alt_fields = _parse_safe(robust_joined)
+                                merged = ""
+                                if (base_fields.get("resultado_declaracion") is None and alt_fields.get("resultado_declaracion") is not None) or (
+                                    base_fields.get("casilla_505") is None and alt_fields.get("casilla_505") is not None
+                                ):
+                                    merged = f"{joined}\n{robust_joined}"
+                                if merged:
+                                    merged_fields = _parse_safe(merged)
+                                    if merged_fields.get("casilla_505") is not None and merged_fields.get("resultado_declaracion") is not None:
+                                        joined = merged
+                                    else:
+                                        # Si el merge no mejora, elige el mejor de ambos.
+                                        if _quality_score(robust_joined) > _quality_score(joined):
+                                            joined = robust_joined
+                                else:
+                                    if _quality_score(robust_joined) > _quality_score(joined):
+                                        joined = robust_joined
+                        finally:
+                            if tmpdir_full:
+                                shutil.rmtree(tmpdir_full, ignore_errors=True)
                 # Fallback adicional (rápido pero más robusto): si OCR por páginas no capturó casillas
                 # clave, intenta `ocrmypdf` (si está disponible). Esto ayuda en PDFs con layout raro
                 # o cuando la cabecera/tablas no quedan bien en las primeras páginas.
