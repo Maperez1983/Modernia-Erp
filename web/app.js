@@ -55776,7 +55776,12 @@ const submitGestoriaRentaQuick = async () => {
     } catch {}
     if (!nif) {
       if (gestoriaRentaQuickStatus) {
-        gestoriaRentaQuickStatus.textContent = "OCR listo. Documento guardado, pero no detectó DNI/NIF.";
+        const method = String(fields.ocr_method || "").trim();
+        const err = String(fields.ocr_error || "").trim();
+        const extra = [method ? `método: ${method}` : "", err ? `error: ${err}` : ""].filter(Boolean).join(" · ");
+        gestoriaRentaQuickStatus.textContent = extra
+          ? `OCR listo. Documento guardado, pero no detectó DNI/NIF (${extra}).`
+          : "OCR listo. Documento guardado, pero no detectó DNI/NIF.";
       }
       renderGestoriaRentaQuickMatches([], {
         nif: "",
