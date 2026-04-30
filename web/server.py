@@ -46296,6 +46296,7 @@ class Handler(BaseHTTPRequestHandler):
             geo_lon = _geo_float("lon")
             geo_acc = _geo_float("acc")
             geo_source = str(geo.get("source") or "").strip() or None
+            geo_has = 1 if (geo_lat is not None or geo_lon is not None or geo_acc is not None or geo_source) else 0
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
@@ -46383,7 +46384,7 @@ class Handler(BaseHTTPRequestHandler):
                         geo_out_lon = COALESCE(?, geo_out_lon),
                         geo_out_acc = COALESCE(?, geo_out_acc),
                         geo_out_source = COALESCE(?, geo_out_source),
-                        geo_out_at = CASE WHEN ? IS NULL THEN geo_out_at ELSE datetime(?) END,
+                        geo_out_at = CASE WHEN ? = 0 THEN geo_out_at ELSE datetime(?) END,
                         updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
@@ -46395,7 +46396,7 @@ class Handler(BaseHTTPRequestHandler):
                         geo_lon,
                         geo_acc,
                         geo_source,
-                        geo_lat,
+                        geo_has,
                         now,
                         now,
                         open_row["id"],
@@ -46652,7 +46653,7 @@ class Handler(BaseHTTPRequestHandler):
                         geo_out_lon = COALESCE(?, geo_out_lon),
                         geo_out_acc = COALESCE(?, geo_out_acc),
                         geo_out_source = COALESCE(?, geo_out_source),
-                        geo_out_at = CASE WHEN ? IS NULL THEN geo_out_at ELSE datetime(?) END,
+                        geo_out_at = CASE WHEN ? = 0 THEN geo_out_at ELSE datetime(?) END,
                         updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
@@ -46664,7 +46665,7 @@ class Handler(BaseHTTPRequestHandler):
                         geo_lon,
                         geo_acc,
                         geo_source,
-                        geo_lat,
+                        geo_has,
                         now,
                         now,
                         row_value(open_row, "id"),
