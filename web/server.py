@@ -13666,6 +13666,73 @@ def external_ocr_available():
     api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
 
+
+def _ocr_tools_status() -> dict:
+    """
+    Diagnóstico ligero de herramientas OCR disponibles en el runtime.
+    No incluye secretos (API keys/tokens), solo flags.
+    """
+    def _first_existing(candidates: list[str]) -> str:
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return ""
+
+    tesseract_cmd = resolve_tesseract_cmd()
+    pdftoppm_cmd = _first_existing(
+        [
+            shutil.which("pdftoppm") or "",
+            "/opt/homebrew/bin/pdftoppm",
+            "/usr/local/bin/pdftoppm",
+        ]
+    )
+    magick_cmd = _first_existing(
+        [
+            shutil.which("magick") or "",
+            shutil.which("convert") or "",
+            "/opt/homebrew/bin/magick",
+            "/usr/local/bin/magick",
+        ]
+    )
+    ocrmypdf_cmd = _first_existing(
+        [
+            shutil.which("ocrmypdf") or "",
+            "/opt/homebrew/bin/ocrmypdf",
+            "/usr/local/bin/ocrmypdf",
+        ]
+    )
+    creds_paths = []
+    try:
+        env_creds = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+        if env_creds:
+            creds_paths.append(env_creds.splitlines()[0].strip().strip('"').strip("'"))
+    except Exception:
+        pass
+    try:
+        creds_paths.append(str((ROOT.parent / "vision-sa.json").resolve()))
+        creds_paths.append(str((ROOT / "vision-sa.json").resolve()))
+    except Exception:
+        pass
+    try:
+        creds_paths.append(str((Path.cwd() / "vision-sa.json").resolve()))
+    except Exception:
+        pass
+    has_creds_file = any(p and os.path.exists(p) for p in creds_paths)
+    has_api_key = bool((os.environ.get("GOOGLE_VISION_API_KEY") or os.environ.get("VISION_API_KEY") or "").strip())
+    return {
+        "tesseract": {"exists": bool(tesseract_cmd and os.path.exists(tesseract_cmd)), "cmd": tesseract_cmd or ""},
+        "pdftoppm": {"exists": bool(pdftoppm_cmd), "cmd": pdftoppm_cmd or ""},
+        "magick": {"exists": bool(magick_cmd), "cmd": magick_cmd or ""},
+        "ocrmypdf": {"exists": bool(ocrmypdf_cmd), "cmd": ocrmypdf_cmd or ""},
+        "vision": {
+            "external_enabled": (os.environ.get("OCR_EXTERNAL_ENABLED", "1") or "").strip().lower() not in {"0", "false", "no", "off"},
+            "has_api_key": has_api_key,
+            "has_credentials_file": has_creds_file,
+            "available": bool(external_ocr_available()),
+        },
+        "docai": {"available": bool(docai_available())},
+    }
+
 def docai_available():
     processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")
     return bool(processor_id)
@@ -39989,6 +40056,24 @@ class Handler(BaseHTTPRequestHandler):
                     "recent_api_errors": Handler._recent_api_errors(limit=12),
                 },
             )
+            return
+        if parsed.path == "/api/ocr_tools":
+            # Diagnóstico de OCR (binarios + flags). Requiere sesión para evitar exponer info
+            # de runtime a Internet abierta.
+            token = (self._parse_cookies().get(SESSION_COOKIE_NAME, "") or "").strip()
+            if not token:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            session = get_auth_session(token)
+            if not session:
+                json_response(
+                    self,
+                    {"error": "Sesión inválida"},
+                    status=401,
+                    cookies=[self._build_session_cookie("", max_age=0)],
+                )
+                return
+            json_response(self, {"ok": True, "tools": _ocr_tools_status()})
             return
         if parsed.path == "/api/me":
             # Fast path: evita abrir DB cuando el front solo está comprobando sesión.
