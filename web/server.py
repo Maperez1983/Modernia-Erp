@@ -12853,15 +12853,26 @@ def process_renta_ocr_job(payload, conn):
             return {"fields": parsed_fields, "ocr_method": parsed_fields["ocr_method"], "ocr_score": 0}
 
         parsed_fields = _parse_renta_pdf_fields(text)
+        if not isinstance(parsed_fields, dict):
+            parsed_fields = {}
+        # Fallback extra: si el parser no detectó NIF pero hay texto OCR, intenta extraerlo
+        # directamente (tolerante a separadores/saltos de línea).
+        if not str(parsed_fields.get("nif_detectado") or "").strip():
+            nif_primary, nif_list = _find_best_nif_in_text(text)
+            if nif_primary:
+                parsed_fields["nif_detectado"] = nif_primary
+            if nif_list:
+                parsed_fields["nifs_detectados"] = nif_list
         score = _score_renta_ocr_text(text)
-        if parsed_fields:
-            parsed_fields["ocr_score"] = score
-            parsed_fields["ocr_method"] = method
-            if source_hint:
-                parsed_fields["ocr_source_hint"] = source_hint
+        parsed_fields["ocr_score"] = score
+        parsed_fields["ocr_method"] = method or ("vision" if external_ocr_available() else "tesseract")
+        if err_detail:
+            parsed_fields["ocr_error"] = str(err_detail)[:240]
+        if source_hint:
+            parsed_fields["ocr_source_hint"] = source_hint
         return {
             "fields": parsed_fields,
-            "ocr_method": method,
+            "ocr_method": parsed_fields.get("ocr_method") or method,
             "ocr_score": score,
         }
     finally:
@@ -15167,9 +15178,24 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
     upper = text_value.upper()
     # 1) Prioriza contexto cercano a etiquetas (DECLARANTE/CONTRIBUYENTE).
     # Importante: en muchos PDFs aparece también "NIF Presentador"; NO debe ser el primario.
-    # Nota: evitamos `\s` dentro del grupo capturado (incluye saltos de línea) para no
-    # "comernos" la etiqueta siguiente cuando el OCR pega líneas.
-    _CAP = r"([A-Z0-9][A-Z0-9.\- \t]{5,22})"
+    def _clean_cap(value: str) -> str:
+        """
+        Limpia el grupo capturado tras una etiqueta NIF/DNI para evitar que el OCR
+        "pegue" la siguiente etiqueta en el mismo match (p.ej. incluye 'NIF ...').
+        Además tolera saltos de línea dentro del NIF (p.ej. '25099562\\nF').
+        """
+        raw = str(value or "")
+        if not raw:
+            return ""
+        raw = raw.replace("\r", " ").replace("\n", " ")
+        # Corta si accidentalmente se ha capturado una nueva etiqueta.
+        parts = re.split(r"\b(?:NIF|DNI|NIE|CIF)\b", raw, maxsplit=1)
+        raw = parts[0] if parts else raw
+        return raw.strip()
+
+    # Permitimos `\s` en el grupo capturado para tolerar saltos de línea, pero lo
+    # limpiamos con `_clean_cap` para evitar over-capture.
+    _CAP = r"([A-Z0-9][A-Z0-9.\-\s]{5,28})"
     decl_pat = re.compile(
         r"(?:NIF|DNI|NIE|CIF)"
         r"(?:\s+DEL\s+DECLARANTE|\s+DECLARANTE|\s+DEL\s+CONTRIBUYENTE|\s+CONTRIBUYENTE)"
@@ -15192,7 +15218,7 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
     presentador_nifs: list[str] = []
     # DECLARANTE/CONTRIBUYENTE primero.
     for m in decl_pat.finditer(upper):
-        cand = _normalize_nif_candidate(m.group(1), infer_control_letter=True)
+        cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
         if cand and cand not in seen:
             seen.add(cand)
             ordered.append(cand)
@@ -15206,7 +15232,7 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
             ctx = upper[start : m.start() + 40]
             if "PRESENTADOR" in ctx:
                 continue
-            cand = _normalize_nif_candidate(m.group(1), infer_control_letter=True)
+            cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
             if cand and cand not in seen:
                 seen.add(cand)
                 ordered.append(cand)
@@ -15214,7 +15240,7 @@ def _find_best_nif_in_text(text_value: str) -> tuple[str, list[str]]:
                     break
     # Presentador al final (solo si no hay otro).
     for m in pres_pat.finditer(upper):
-        cand = _normalize_nif_candidate(m.group(1), infer_control_letter=True)
+        cand = _normalize_nif_candidate(_clean_cap(m.group(1)), infer_control_letter=True)
         if cand and cand not in presentador_nifs:
             presentador_nifs.append(cand)
         if cand and cand not in seen:
@@ -15263,7 +15289,8 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
     min_chars = int(os.getenv("RENTA_OCR_MIN_CHARS", "30") or 30)
     # Por defecto: intentamos 1-2 páginas primero, y ampliamos hasta 4 si faltan casillas clave.
     fast_pages = int(os.getenv("RENTA_OCR_FAST_PAGES", "4") or 4)
-    fast_dpi = int(os.getenv("RENTA_OCR_FAST_DPI", str(OCR_PDF_DPI)) or OCR_PDF_DPI)
+    # Subimos el DPI por defecto para mejorar la detección de DNI/NIF en PDFs escaneados.
+    fast_dpi = int(os.getenv("RENTA_OCR_FAST_DPI", "300") or 300)
     tesseract_user_dpi = int(os.getenv("RENTA_OCR_TESSERACT_DPI", "300") or 300)
     soft_timeout_s = float(os.getenv("RENTA_OCR_SOFT_TIMEOUT_SECONDS", "180") or 180)
     started_at = time.time()
@@ -15282,12 +15309,20 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
     def has_nif(value: str) -> bool:
         return bool(_RENTA_NIF_RE.search(str(value or "")))
 
+    def has_nif_label(value: str) -> bool:
+        return bool(re.search(r"\b(NIF|DNI|NIE|CIF)\b", str(value or ""), re.IGNORECASE))
+
     # 1) Texto embebido (rápido). Si el PDF NO está escaneado, `pdftotext` es lo más
     # fiable (incluye casillas/tabla) y además es rápido incluso con varias páginas.
     #
     # Hacemos una "sonda" con 1 página para no perder tiempo si es un PDF imagen.
     probe_text, err = pdftotext_extract(pdf_path, pages=1)
-    if ok_text(probe_text) and (has_nif(probe_text) or _score_renta_ocr_text(probe_text) >= 120):
+    # Importante: `has_nif()` es estricto (requiere formato válido). Para evitar falsos
+    # negativos en PDFs con texto embebido (puntos/guiones, saltos raros), también aceptamos
+    # la presencia de etiquetas NIF/DNI o un score alto.
+    if ok_text(probe_text) and (
+        has_nif(probe_text) or has_nif_label(probe_text) or _score_renta_ocr_text(probe_text) >= 120
+    ):
         full_text, full_err = pdftotext_extract(pdf_path, pages=None)
         if ok_text(full_text):
             return full_text, "", "pdftotext"
