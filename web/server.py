@@ -12861,6 +12861,76 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     def _compact_spaces(value: object) -> str:
         return " ".join(str(value or "").strip().split())
 
+    def _find_ibans(text_value: str) -> list[str]:
+        raw_value = str(text_value or "")
+        if not raw_value:
+            return []
+        # IBAN España: ES + 22 dígitos (total 24 chars). Aceptamos separadores y espacios.
+        candidates = re.findall(r"\bES[0-9][0-9 \-]{20,32}\b", raw_value, flags=re.IGNORECASE)
+        out = []
+        seen = set()
+        for cand in candidates:
+            iban = re.sub(r"[^A-Z0-9]", "", cand.upper())
+            if not re.fullmatch(r"ES[0-9]{22}", iban):
+                continue
+            if iban in seen:
+                continue
+            seen.add(iban)
+            out.append(iban)
+            if len(out) >= 8:
+                break
+        return out
+
+    def _extract_date_after(label_pat: str, *, max_distance: int = 320) -> str:
+        """
+        Extrae una fecha dd/mm/yyyy (o dd-mm-yyyy) que aparezca después de una etiqueta.
+        Devuelve ISO yyyy-mm-dd o "" si no se encuentra.
+        """
+        m = re.search(label_pat, raw, re.IGNORECASE)
+        if not m:
+            return ""
+        # La fecha puede estar en la misma línea (a la derecha) o en líneas posteriores.
+        snippet = raw[m.start() : m.start() + max_distance]
+        if len(snippet) < max_distance:
+            snippet = snippet + raw[m.end() : m.end() + max_distance]
+        m2 = re.search(r"([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", snippet)
+        if not m2:
+            return ""
+        return _parse_date_ddmmyyyy_to_iso(m2.group(1))
+
+    def _extract_estado_civil() -> str:
+        # Ejemplo típico: "Estado civil (el 31-12-2025) ... Casado/a [o007]"
+        m2 = re.search(r"Estado civil", raw, re.IGNORECASE)
+        window = raw[m2.start() : m2.start() + 420] if m2 else ""
+        if not window:
+            return ""
+        # Captura el literal de estado civil.
+        m3 = re.search(
+            r"\b(Casado/a|Soltero/a|Divorciado/a|Viudo/a|Separado/a(?:\s+legalmente)?)\b",
+            window,
+            re.IGNORECASE,
+        )
+        if not m3:
+            return ""
+        return _compact_spaces(m3.group(0))
+
+    def _extract_hijos_count():
+        # Heurística conservadora: busca "hijos" cerca de un dígito.
+        for pat in (
+            r"(?:N[ºo]|N[úu]mero)?\s*de\s*hijos[^0-9]{0,20}([0-9]{1,2})",
+            r"Hijos[^0-9]{0,20}([0-9]{1,2})\b",
+        ):
+            m = re.search(pat, raw, re.IGNORECASE)
+            if not m:
+                continue
+            try:
+                v = int(m.group(1))
+            except Exception:
+                continue
+            if 0 <= v <= 20:
+                return v
+        return None
+
     def _extract_presentador_block() -> tuple[str, str]:
         """
         Algunos Modelo 100 incluyen el bloque del presentador con:
@@ -12915,6 +12985,27 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     if cliente_nombre:
         fields["cliente_nombre"] = cliente_nombre
         fields["cliente_nombre_source"] = "ocr"
+
+    # Campos relevantes adicionales.
+    estado_civil = _extract_estado_civil()
+    if estado_civil:
+        fields["estado_civil"] = estado_civil
+
+    fecha_nac = _extract_date_after(r"Fecha de nacimiento(?!\s+del\s+c[óo]nyuge)")
+    if fecha_nac:
+        fields["cliente_fecha_nacimiento"] = fecha_nac
+        fields["cliente_fecha_nacimiento_source"] = "ocr"
+    conyuge_fecha_nac = _extract_date_after(r"Fecha de nacimiento del c(?:[óo]nyuge|[eé]nyuge)")
+    if conyuge_fecha_nac:
+        fields["conyuge_fecha_nacimiento"] = conyuge_fecha_nac
+
+    hijos_count = _extract_hijos_count()
+    if hijos_count is not None:
+        fields["hijos_count"] = hijos_count
+
+    ibans = _find_ibans(raw)
+    if ibans:
+        fields["cuentas_detectadas"] = ibans
 
     nif_primary, nif_list = _extract_nifs()
     if nif_primary:
