@@ -25789,6 +25789,16 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   }
   ctx.clearRect(0, 0, width, height);
 
+  const interactive = typeof options.onBarClick === "function";
+  const hitAreas = [];
+  if (canvas.__barChartHandlers) {
+    try {
+      canvas.removeEventListener("click", canvas.__barChartHandlers.click);
+      canvas.removeEventListener("mousemove", canvas.__barChartHandlers.move);
+    } catch {}
+    canvas.__barChartHandlers = null;
+  }
+
   const theme = {
     grid: getCssVar(canvas, "--chart-grid", "rgba(11, 29, 51, 0.08)"),
     axis: getCssVar(canvas, "--chart-axis", "rgba(11, 29, 51, 0.22)"),
@@ -25948,6 +25958,19 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
         (j % 2 === 0 ? theme.gold : theme.ink);
       ctx.fillStyle = barColor;
       fillRoundedRect(ctx, x, y, barWidth, barHeight, Math.min(10, barWidth / 2));
+      if (interactive) {
+        hitAreas.push({
+          x,
+          y,
+          w: barWidth,
+          h: barHeight,
+          labelIndex: i,
+          datasetIndex: j,
+          label: String(label || ""),
+          datasetLabel: String(dataset.label || ""),
+          value,
+        });
+      }
 
       if (options.showValues && barHeight >= 18 && labels.length <= 18 && groupWidth >= 24) {
         const labelText = dataset.format
@@ -25990,6 +26013,29 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       }
     }
   });
+
+  if (interactive && hitAreas.length) {
+    const within = (area, px, py) =>
+      px >= area.x && px <= area.x + area.w && py >= area.y && py <= area.y + area.h;
+    const onMove = (ev) => {
+      const x = ev.offsetX;
+      const y = ev.offsetY;
+      const found = hitAreas.find((area) => within(area, x, y));
+      canvas.style.cursor = found ? "pointer" : "";
+    };
+    const onClick = (ev) => {
+      const x = ev.offsetX;
+      const y = ev.offsetY;
+      const found = hitAreas.find((area) => within(area, x, y));
+      if (!found) return;
+      try {
+        options.onBarClick(found);
+      } catch {}
+    };
+    canvas.__barChartHandlers = { click: onClick, move: onMove };
+    canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("click", onClick);
+  }
 
   const lineSets = datasets.filter((set) => set.type === "line");
   if (lineSets.length) {
@@ -49183,6 +49229,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   const counts = payload?.counts || {};
   const ejercicio = String(payload?.ejercicio || "").trim();
   const responsables = Array.isArray(payload?.responsables) ? payload.responsables : [];
+  const campaigns = Array.isArray(payload?.campaigns) ? payload.campaigns : [];
   const unpaid = Array.isArray(payload?.unpaid) ? payload.unpaid : [];
   const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
   const missing = Array.isArray(payload?.missing) ? payload.missing : [];
@@ -49192,9 +49239,11 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const setView = (view) => {
     state.gestoriaRentaDashView = view;
+    state.gestoriaRentaDashViewParam = "";
     renderGestoriaRentaDashboard(payload);
   };
   const view = String(state.gestoriaRentaDashView || "overview");
+  const viewParam = String(state.gestoriaRentaDashViewParam || "");
 
   const addKpi = ({ title, value, note, onClick }) => {
     const el = document.createElement(onClick ? "button" : "div");
@@ -49220,19 +49269,19 @@ const renderGestoriaRentaDashboard = (payload) => {
     title: "Rentas presentadas",
     value: numberFormatter.format(Number(counts.presentadas || 0)),
     note: "Presentadas.",
-    onClick: () => setView("overview"),
+    onClick: () => setView("presented"),
   });
   addKpi({
     title: "Rentas cobradas",
     value: numberFormatter.format(Number(counts.cobradas || 0)),
     note: `Cobrado: ${formatMoney(counts.cobrado_total || 0)}`,
-    onClick: () => setView("overview"),
+    onClick: () => setView("paid"),
   });
   addKpi({
     title: "Borradores",
     value: numberFormatter.format(Number(counts.borrador || 0)),
     note: "Pendientes de presentar.",
-    onClick: () => setView("overview"),
+    onClick: () => setView("draft"),
   });
   addKpi({
     title: "Sin cobrar",
@@ -49330,6 +49379,32 @@ const renderGestoriaRentaDashboard = (payload) => {
     return card;
   };
 
+  const setViewWithParam = (nextView, param = "") => {
+    state.gestoriaRentaDashView = nextView;
+    state.gestoriaRentaDashViewParam = String(param || "");
+    renderGestoriaRentaDashboard(payload);
+  };
+
+  const resolveCampaignsForView = () => {
+    const base = campaigns.length ? campaigns : [];
+    if (view === "presented") {
+      return base.filter((item) => String(item.estado_presentacion || "").trim() !== "Borrador");
+    }
+    if (view === "draft") {
+      return base.filter((item) => String(item.estado_presentacion || "").trim() === "Borrador");
+    }
+    if (view === "paid") {
+      return base.filter((item) => Number(item.cobrada || 0) === 1);
+    }
+    if (view === "unpaid") return unpaid;
+    if (view === "unassigned") return unassigned;
+    if (view === "responsable" && viewParam) {
+      const key = normalizeLookupText(viewParam) || viewParam;
+      return base.filter((item) => String(item.responsable_key || "") === key);
+    }
+    return [];
+  };
+
   const buildResponsablesTable = (items) => {
     const card = document.createElement("div");
     card.className = "form-card";
@@ -49362,6 +49437,8 @@ const renderGestoriaRentaDashboard = (payload) => {
     const tbody = document.createElement("tbody");
     items.forEach((row) => {
       const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", () => setViewWithParam("responsable", row.responsable_key || ""));
       [
         row.responsable || "Sin responsable",
         numberFormatter.format(Number(row.campanas || 0)),
@@ -49384,20 +49461,37 @@ const renderGestoriaRentaDashboard = (payload) => {
   };
 
   const root = document.createElement("div");
-  if (view === "unpaid") {
+  if (view === "unpaid" || view === "unassigned" || view === "presented" || view === "draft" || view === "paid" || view === "responsable") {
+    const items = resolveCampaignsForView();
+    const title =
+      view === "unpaid"
+        ? "Rentas sin cobrar"
+        : view === "unassigned"
+          ? "Rentas sin responsable"
+          : view === "presented"
+            ? "Rentas presentadas"
+            : view === "draft"
+              ? "Rentas borrador"
+              : view === "paid"
+                ? "Rentas cobradas"
+                : `Rentas · ${viewParam || "Responsable"}`;
+    const hint =
+      view === "unpaid"
+        ? "Campañas con precio asignado y no marcadas como cobradas."
+        : view === "unassigned"
+          ? "Campañas sin responsable asignado."
+          : view === "paid"
+            ? "Campañas marcadas como cobradas."
+            : view === "draft"
+              ? "Pendientes de presentar."
+              : view === "presented"
+                ? "Presentadas en la AEAT."
+                : "Campañas del responsable.";
     root.appendChild(
-      buildCampaignTable(unpaid, {
-        title: "Rentas sin cobrar",
-        hint: "Campañas con precio asignado y no marcadas como cobradas.",
-        emptyText: "No hay rentas sin cobrar.",
-      })
-    );
-  } else if (view === "unassigned") {
-    root.appendChild(
-      buildCampaignTable(unassigned, {
-        title: "Rentas sin responsable",
-        hint: "Campañas sin responsable asignado.",
-        emptyText: "No hay campañas sin responsable.",
+      buildCampaignTable(items, {
+        title,
+        hint,
+        emptyText: "No hay rentas para mostrar.",
       })
     );
   } else if (view === "missing") {
@@ -49516,18 +49610,32 @@ const renderGestoriaRentaDashboard = (payload) => {
               format: (value) => numberFormatter.format(value),
             },
           ],
-          { legend: false, showValues: true, tooltip: true }
+          {
+            legend: false,
+            showValues: true,
+            tooltip: true,
+            onBarClick: (hit) => {
+              const idx = Number(hit?.labelIndex ?? -1);
+              if (idx === 0) setView("presented");
+              else if (idx === 1) setView("draft");
+              else if (idx === 2) setView("paid");
+              else if (idx === 3) setView("unpaid");
+              else if (idx === 4) setView("unassigned");
+            },
+          }
         );
       }
       if (respCanvas) {
         const top = [...responsables]
           .map((row) => ({
             label: row.responsable || "Sin responsable",
+            key: row.responsable_key || "",
             pendiente: Number(row.pendiente || 0),
           }))
           .sort((a, b) => b.pendiente - a.pendiente)
           .slice(0, 10);
         const labels = top.length ? top.map((t) => t.label) : ["Sin datos"];
+        const keys = top.length ? top.map((t) => t.key) : [""];
         const values = top.length ? top.map((t) => t.pendiente) : [0];
         drawBarChart(
           respCanvas,
@@ -49541,7 +49649,16 @@ const renderGestoriaRentaDashboard = (payload) => {
               format: (value) => euroFormatter.format(Number(value || 0)),
             },
           ],
-          { legend: false, showValues: true, tooltip: true }
+          {
+            legend: false,
+            showValues: true,
+            tooltip: true,
+            onBarClick: (hit) => {
+              const idx = Number(hit?.labelIndex ?? -1);
+              if (idx < 0 || idx >= keys.length) return;
+              setViewWithParam("responsable", keys[idx] || "");
+            },
+          }
         );
       }
     });
