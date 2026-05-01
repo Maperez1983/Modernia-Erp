@@ -49217,9 +49217,15 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("overview"),
   });
   addKpi({
-    title: "Realizadas",
+    title: "Rentas presentadas",
     value: numberFormatter.format(Number(counts.presentadas || 0)),
     note: "Presentadas.",
+    onClick: () => setView("overview"),
+  });
+  addKpi({
+    title: "Rentas cobradas",
+    value: numberFormatter.format(Number(counts.cobradas || 0)),
+    note: `Cobrado: ${formatMoney(counts.cobrado_total || 0)}`,
     onClick: () => setView("overview"),
   });
   addKpi({
@@ -49408,6 +49414,31 @@ const renderGestoriaRentaDashboard = (payload) => {
   } else if (view === "responsables") {
     root.appendChild(buildResponsablesTable(responsables));
   } else {
+    // Gráficos resumen (estado + pendientes por responsable) antes de las tablas.
+    const chartGrid = document.createElement("div");
+    chartGrid.className = "crm-split";
+    const buildChartCard = ({ title, hint, canvasAttr }) => {
+      const card = document.createElement("div");
+      card.className = "form-card";
+      card.innerHTML = `<h3>${title}</h3><p class="muted">${hint || ""}</p><canvas style="width:100%;height:320px;" ${canvasAttr}></canvas>`;
+      return card;
+    };
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Estado de rentas",
+        hint: "Resumen por estado del ejercicio seleccionado.",
+        canvasAttr: 'data-renta-chart="estado"',
+      })
+    );
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Pendiente por responsable",
+        hint: "Top responsables por importe pendiente de cobro.",
+        canvasAttr: 'data-renta-chart="responsables"',
+      })
+    );
+    root.appendChild(chartGrid);
+
     const split = document.createElement("div");
     split.className = "crm-split";
     const topUnpaid = buildCampaignTable(unpaid.slice(0, 12), {
@@ -49462,6 +49493,58 @@ const renderGestoriaRentaDashboard = (payload) => {
     const respPreview = buildResponsablesTable(responsables.slice(0, 12));
     respPreview.querySelector("#gestoriaRentaDashBackBtn2")?.remove();
     root.appendChild(respPreview);
+
+    // Pintar charts cuando ya están montados y con tamaño.
+    requestAnimationFrame(() => {
+      const estadoCanvas = root.querySelector('canvas[data-renta-chart="estado"]');
+      const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
+      if (estadoCanvas) {
+        drawBarChart(
+          estadoCanvas,
+          ["Presentadas", "Borrador", "Cobradas", "Sin cobrar", "Sin responsable"],
+          [
+            {
+              label: `Renta ${ejercicio || ""}`.trim(),
+              values: [
+                Number(counts.presentadas || 0),
+                Number(counts.borrador || 0),
+                Number(counts.cobradas || 0),
+                Number(counts.sin_cobrar || 0),
+                Number(counts.sin_responsable || 0),
+              ],
+              color: "#0B1D33",
+              format: (value) => numberFormatter.format(value),
+            },
+          ],
+          { legend: false, showValues: true, tooltip: true }
+        );
+      }
+      if (respCanvas) {
+        const top = [...responsables]
+          .map((row) => ({
+            label: row.responsable || "Sin responsable",
+            pendiente: Number(row.pendiente || 0),
+          }))
+          .sort((a, b) => b.pendiente - a.pendiente)
+          .slice(0, 10);
+        const labels = top.length ? top.map((t) => t.label) : ["Sin datos"];
+        const values = top.length ? top.map((t) => t.pendiente) : [0];
+        drawBarChart(
+          respCanvas,
+          labels,
+          [
+            {
+              label: "Pendiente",
+              values,
+              color: "#F2C14E",
+              colors: labels.map(() => "#F2C14E"),
+              format: (value) => euroFormatter.format(Number(value || 0)),
+            },
+          ],
+          { legend: false, showValues: true, tooltip: true }
+        );
+      }
+    });
   }
 
   gestoriaDashRentaContent.innerHTML = "";
