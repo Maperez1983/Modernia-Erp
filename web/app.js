@@ -12658,8 +12658,8 @@ const renderWorkspaceRrhhHub = () => {
           const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
           const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
           const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
-          const productividadPanel = `
-            <div class="workspace-rrhh-panel-card">
+	          const productividadPanel = `
+	            <div class="workspace-rrhh-panel-card">
               <div class="section-head">
                 <div>
                   <h4>Productividad</h4>
@@ -12686,15 +12686,15 @@ const renderWorkspaceRrhhHub = () => {
                   </select>
                 </div>
               </div>
-              ${canEditEconomicos ? `
-                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-                  <div class="section-head">
-                    <div>
-                      <h4>Calculadora</h4>
-                      <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
-                    </div>
-                  </div>
-                  <div class="form-grid">
+	              ${canEditEconomicos ? `
+	                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+	                  <div class="section-head">
+	                    <div>
+	                      <h4>Calculadora</h4>
+	                      <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
+	                    </div>
+	                  </div>
+	                  <div class="form-grid">
                     <label class="muted">Tipo cálculo
                       <select id="rrhhEconCalcMode">
                         <option value="renta">Renta (30% base imponible)</option>
@@ -12708,18 +12708,49 @@ const renderWorkspaceRrhhHub = () => {
                       <input id="rrhhEconCalcOut" type="text" readonly />
                     </label>
                   </div>
-                  <div class="muted" style="margin-top:8px;">
-                    <label style="display:inline-flex;gap:8px;align-items:center;">
-                      <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
-                      Usar cálculo automático (beta)
-                    </label>
-                  </div>
-                </div>
-              ` : `
-                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
-                </div>
-              `}
+	                  <div class="muted" style="margin-top:8px;">
+	                    <label style="display:inline-flex;gap:8px;align-items:center;">
+	                      <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
+	                      Usar cálculo automático (beta)
+	                    </label>
+	                  </div>
+	                </div>
+	                <details class="workspace-rrhh-panel-card" style="margin-top:12px;">
+	                  <summary style="cursor:pointer;"><strong>Añadir apunte manual</strong> <span class="muted">(admin)</span></summary>
+	                  <div style="margin-top:10px;" class="form-grid">
+	                    <label class="muted">Cliente (nombre)
+	                      <input id="rrhhEconManualClientName" type="text" placeholder="Nombre y apellidos" />
+	                    </label>
+	                    <label class="muted">Cliente (DNI/NIF)
+	                      <input id="rrhhEconManualClientNif" type="text" placeholder="12345678Z" />
+	                    </label>
+	                    <label class="muted">Concepto
+	                      <input id="rrhhEconManualDesc" type="text" placeholder="Ej.: Seguro hogar / Hipoteca / Renta / Gestoría anual" />
+	                    </label>
+	                    <label class="muted">Importe base (sin IVA)
+	                      <input id="rrhhEconManualBase" type="number" step="0.01" placeholder="0.00" />
+	                    </label>
+	                    <label class="muted">% comisión
+	                      <input id="rrhhEconManualPct" type="number" step="0.01" placeholder="10" />
+	                    </label>
+	                    <label class="muted">Fecha
+	                      <input id="rrhhEconManualDate" type="date" />
+	                    </label>
+	                    <label class="muted" style="display:flex;gap:10px;align-items:center;margin-top:22px;">
+	                      <input id="rrhhEconManualPaid" type="checkbox" />
+	                      Cobrado
+	                    </label>
+	                  </div>
+	                  <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+	                    <button type="button" class="secondary" id="rrhhEconManualSave" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">Guardar apunte</button>
+	                    <span id="rrhhEconManualStatus" class="muted"></span>
+	                  </div>
+	                </details>
+	              ` : `
+	                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+	                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
+	                </div>
+	              `}
               <div id="rrhhEconProductividadStatus" class="muted"></div>
               <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
               <div id="rrhhEconProductividadList" class="inline-list"></div>
@@ -13945,22 +13976,39 @@ const renderWorkspaceRrhhHub = () => {
       const yearSel = document.getElementById("rrhhEconProductividadYear");
       const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
       const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-      if (!state.workspaceRrhhEconomicosProductividadAutoEnabled) {
-        if (status) status.textContent = "Cálculo automático desactivado. Usa la calculadora manual.";
-        if (kpisEl) kpisEl.innerHTML = "";
-        if (listEl) listEl.innerHTML = "";
-        return;
-      }
-      if (status) status.textContent = `Cargando productividad (${serviceKey})…`;
+      const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+
+      if (status) status.textContent = `Cargando apuntes (${serviceKey})…`;
       if (kpisEl) kpisEl.innerHTML = "";
       if (listEl) listEl.innerHTML = "";
-      const data = await api(`/api/workspace_rrhh_productividad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
-      if (data?.error) throw new Error(data.error);
-      const k = data?.kpis || {};
-      const items = Array.isArray(data?.items) ? data.items : [];
+
+      const manualResp = await api(`/api/workspace_rrhh_productividad_manual?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
+      if (manualResp?.error) throw new Error(manualResp.error);
+      const manualItems = Array.isArray(manualResp?.items) ? manualResp.items : [];
+
+      let autoItems = [];
+      let autoKpis = {};
+      if (state.workspaceRrhhEconomicosProductividadAutoEnabled) {
+        const data = await api(`/api/workspace_rrhh_productividad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
+        if (data?.error) throw new Error(data.error);
+        autoKpis = data?.kpis || {};
+        autoItems = Array.isArray(data?.items) ? data.items : [];
+        autoItems = autoItems.map((it) => ({ ...(it || {}), source: "auto" }));
+      }
+
+      const items = [...manualItems, ...autoItems];
+      const sums = items.reduce((acc, it) => {
+        const paid = Boolean(it?.cobrada);
+        acc.items += 1;
+        if (paid) acc.cobradas += 1;
+        acc.comision_total += parseMoneyValue(it?.comision || 0);
+        if (paid) acc.comision_cobradas += parseMoneyValue(it?.comision || 0);
+        return acc;
+      }, { items: 0, cobradas: 0, comision_total: 0, comision_cobradas: 0 });
 
       const kpiCards = (() => {
-        if (serviceKey === "renta") {
+        if (serviceKey === "renta" && state.workspaceRrhhEconomicosProductividadAutoEnabled) {
+          const k = autoKpis || {};
           return [
             { label: "Rentas presentadas", value: String(k.presentadas || 0) },
             { label: "Rentas cobradas", value: String(k.cobradas || 0) },
@@ -13969,10 +14017,10 @@ const renderWorkspaceRrhhHub = () => {
           ];
         }
         return [
-          { label: "Items", value: String(k.items || 0) },
-          { label: "Cobrados", value: String(k.cobradas || 0) },
-          { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(k.comision_total || 0)) },
-          { label: "Comisión (cobrados)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
+          { label: "Items", value: String(sums.items || 0) },
+          { label: "Cobrados", value: String(sums.cobradas || 0) },
+          { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(sums.comision_total || 0)) },
+          { label: "Comisión (cobrados)", value: euroFormatter.format(parseMoneyValue(sums.comision_cobradas || 0)) },
         ];
       })();
 
@@ -13997,23 +14045,48 @@ const renderWorkspaceRrhhHub = () => {
             const row = document.createElement("div");
             row.className = "inline-row";
             const left = document.createElement("div");
-            left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || \"\") || it.cliente_nombre || \"-\")}</strong><div class=\"muted\">${escapeHtml(it.cliente_nif || \"-\")}</div>`;
+            left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || "") || it.cliente_nombre || "-")}</strong><div class="muted">${escapeHtml(it.cliente_nif || "-")}</div>`;
             const right = document.createElement("div");
             right.className = "inline-actions";
             const meta = document.createElement("div");
             meta.className = "muted";
-            if (serviceKey === "renta") {
-              meta.textContent = `Renta ${it.ejercicio || \"\"} · ${it.estado_presentacion || \"\"} · ${it.cobrada ? \"Cobrada\" : \"Pendiente\"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            if (String(it?.source || "") === "manual") {
+              const paidLabel = it.cobrada ? "Cobrado" : "Pendiente";
+              const baseLabel = euroFormatter.format(parseMoneyValue(it.importe_base || 0));
+              const pctLabel = `${parseMoneyValue(it.comision_pct || 0)}%`;
+              meta.textContent = `Manual · ${paidLabel} · ${it.descripcion || ""} · Base: ${baseLabel} · Comisión (${pctLabel}): ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            } else if (serviceKey === "renta") {
+              meta.textContent = `Renta ${it.ejercicio || ""} · ${it.estado_presentacion || ""} · ${it.cobrada ? "Cobrada" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "seguros") {
-              meta.textContent = `Seguro ${it.poliza_numero || \"\"} · ${it.compania || \"\"} · ${it.cobrada ? \"Cobrado\" : \"Pendiente\"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+              meta.textContent = `Seguro ${it.poliza_numero || ""} · ${it.compania || ""} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "hipotecas") {
-              meta.textContent = `Hipoteca ${it.banco || \"\"} · ${it.oficina || it.inmobiliaria_compra || \"\"} · ${it.cobrada ? \"Firmada\" : (it.estado || \"Pendiente\")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+              meta.textContent = `Hipoteca ${it.banco || ""} · ${it.oficina || it.inmobiliaria_compra || ""} · ${it.cobrada ? "Firmada" : (it.estado || "Pendiente")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
               meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)} (${String(it.num_cobradas || 0)} cobradas, ${String(it.pendientes || 0)} pendientes)`;
             } else {
-              meta.textContent = `Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+              meta.textContent = `${it.cobrada ? "Cobrado" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             }
             right.appendChild(meta);
+            if (canEditEconomicos && String(it?.source || "") === "manual") {
+              const del = document.createElement("button");
+              del.type = "button";
+              del.className = "secondary danger";
+              del.textContent = "Borrar";
+              del.addEventListener("click", async () => {
+                if (!confirm("¿Borrar este apunte manual?")) return;
+                try {
+                  await apiPost("/api/workspace_rrhh_productividad_manual_delete", {
+                    workspace_id: state.currentWorkspaceId,
+                    persona_id: personaId,
+                    id: it.id,
+                  });
+                  await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+                } catch (error) {
+                  alert(error.message || "No se pudo borrar.");
+                }
+              });
+              right.appendChild(del);
+            }
             if (String(it.cliente_id || "").trim()) {
               const btn = document.createElement("button");
               btn.type = "button";
@@ -14028,7 +14101,61 @@ const renderWorkspaceRrhhHub = () => {
           });
         }
       }
-      if (status) status.textContent = "";
+
+      if (status) {
+        const mCount = manualItems.length;
+        const mPaid = manualItems.reduce((n, it) => n + (it?.cobrada ? 1 : 0), 0);
+        const autoTag = state.workspaceRrhhEconomicosProductividadAutoEnabled ? ` · Auto: ${autoItems.length}` : "";
+        status.textContent = `Manual: ${mCount} (${mPaid} cobrados)${autoTag}`;
+      }
+
+      const saveBtn = document.getElementById("rrhhEconManualSave");
+      if (saveBtn && canEditEconomicos && !saveBtn.dataset.bound) {
+        saveBtn.dataset.bound = "1";
+        saveBtn.addEventListener("click", async () => {
+          const st = document.getElementById("rrhhEconManualStatus");
+          try {
+            if (st) st.textContent = "Guardando…";
+            const clientName = String(document.getElementById("rrhhEconManualClientName")?.value || "").trim();
+            const clientNif = String(document.getElementById("rrhhEconManualClientNif")?.value || "").trim();
+            const desc = String(document.getElementById("rrhhEconManualDesc")?.value || "").trim();
+            const base = parseMoneyValue(document.getElementById("rrhhEconManualBase")?.value || 0);
+            const pctRaw = String(document.getElementById("rrhhEconManualPct")?.value || "").trim();
+            const pctDefault = serviceKey === "renta" ? 30 : 10;
+            const pct = pctRaw ? parseMoneyValue(pctRaw) : pctDefault;
+            const paid = Boolean(document.getElementById("rrhhEconManualPaid")?.checked);
+            const date = String(document.getElementById("rrhhEconManualDate")?.value || "").trim();
+            if (!desc && !clientName && !clientNif) throw new Error("Indica al menos un concepto o cliente.");
+            if (!base || base <= 0) throw new Error("Indica un importe base válido (sin IVA).");
+            const comision = Math.round(((base * pct) / 100) * 100) / 100;
+            await apiPost("/api/workspace_rrhh_productividad_manual_upsert", {
+              workspace_id: state.currentWorkspaceId,
+              persona_id: personaId,
+              service: serviceKey,
+              ejercicio,
+              cliente_nombre: clientName,
+              cliente_nif: clientNif,
+              descripcion: desc,
+              importe_base: base,
+              comision_pct: pct,
+              comision,
+              cobrada: paid ? 1 : 0,
+              fecha: date,
+            });
+            try { document.getElementById("rrhhEconManualClientName").value = ""; } catch {}
+            try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch {}
+            try { document.getElementById("rrhhEconManualDesc").value = ""; } catch {}
+            try { document.getElementById("rrhhEconManualBase").value = ""; } catch {}
+            try { document.getElementById("rrhhEconManualPct").value = ""; } catch {}
+            try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
+            try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
+            if (st) st.textContent = "Guardado.";
+            await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+          } catch (error) {
+            if (st) st.textContent = error.message || "No se pudo guardar.";
+          }
+        });
+      }
     } catch (err) {
       const status = document.getElementById("rrhhEconProductividadStatus");
       if (status) status.textContent = err?.message || "No se pudo cargar productividad.";

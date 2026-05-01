@@ -24729,6 +24729,181 @@ def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona
         )
     return {"kpis": {}, "items": []}
 
+
+def fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, *, service="", ejercicio=""):
+    service_key = str(service or "").strip().lower()
+    ejercicio_val = str(ejercicio or "").strip()
+    if ejercicio_val and not re.match(r"^20[0-9]{2}$", ejercicio_val):
+        ejercicio_val = ""
+    rows = []
+    try:
+        sql = """
+          SELECT
+            id,
+            service,
+            ejercicio,
+            cliente_nombre,
+            cliente_nif,
+            descripcion,
+            importe_base,
+            comision_pct,
+            comision,
+            cobrada,
+            fecha,
+            created_at,
+            updated_at
+          FROM workspace_rrhh_productividad_manual
+          WHERE workspace_id = ?
+            AND persona_id = ?
+        """
+        args = [str(workspace_id or "").strip(), str(persona_id or "").strip()]
+        if service_key:
+            sql += " AND LOWER(COALESCE(service,'')) = ?"
+            args.append(service_key)
+        if ejercicio_val:
+            sql += " AND CAST(COALESCE(ejercicio, 0) AS TEXT) = ?"
+            args.append(ejercicio_val)
+        sql += " ORDER BY COALESCE(fecha, '') DESC, updated_at DESC"
+        rows = conn.execute(sql, tuple(args)).fetchall()
+    except Exception:
+        rows = []
+
+    items = []
+    for row in rows or []:
+        d = dict(row)
+        try:
+            d["service"] = str(d.get("service") or "").strip().lower()
+            d["ejercicio"] = str(d.get("ejercicio") or "").strip()
+            d["cliente_nombre"] = str(d.get("cliente_nombre") or "").strip()
+            d["cliente_nif"] = str(d.get("cliente_nif") or "").strip()
+            d["descripcion"] = str(d.get("descripcion") or "").strip()
+            d["importe_base"] = float(d.get("importe_base") or 0)
+            d["comision_pct"] = float(d.get("comision_pct") or 0)
+            d["comision"] = float(d.get("comision") or 0)
+            d["cobrada"] = 1 if int(d.get("cobrada") or 0) == 1 else 0
+            d["fecha"] = str(d.get("fecha") or "").strip()
+        except Exception:
+            pass
+        d["source"] = "manual"
+        items.append(d)
+    return items
+
+
+def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, payload, *, actor_user_id=""):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    if not workspace_id or not persona_id:
+        raise ValueError("workspace_id y persona_id requeridos")
+
+    raw = payload or {}
+    entry_id = str(raw.get("id") or "").strip()
+    service_key = str(raw.get("service") or "").strip().lower()
+    ejercicio_val = str(raw.get("ejercicio") or "").strip()
+    if ejercicio_val and not re.match(r"^20[0-9]{2}$", ejercicio_val):
+        raise ValueError("ejercicio inválido")
+    if not service_key:
+        raise ValueError("service requerido")
+
+    cliente_nombre = str(raw.get("cliente_nombre") or "").strip()
+    cliente_nif = str(raw.get("cliente_nif") or "").strip()
+    descripcion = str(raw.get("descripcion") or "").strip()
+    fecha = str(raw.get("fecha") or "").strip()
+    cobrada = 1 if str(raw.get("cobrada") or "").strip() in {"1", "true", "True"} else 0
+    try:
+        importe_base = float(raw.get("importe_base") or 0)
+    except Exception:
+        importe_base = 0.0
+    try:
+        comision_pct = float(raw.get("comision_pct") or 0)
+    except Exception:
+        comision_pct = 0.0
+    try:
+        comision = float(raw.get("comision") or 0)
+    except Exception:
+        comision = 0.0
+    if comision <= 0 and importe_base > 0 and comision_pct > 0:
+        comision = round((importe_base * comision_pct) / 100.0, 2)
+
+    now = datetime.utcnow().isoformat()
+    if not entry_id:
+        entry_id = uuid.uuid4().hex
+        conn.execute(
+            """
+            INSERT INTO workspace_rrhh_productividad_manual
+              (id, workspace_id, persona_id, service, ejercicio, cliente_nombre, cliente_nif, descripcion,
+               importe_base, comision_pct, comision, cobrada, fecha, created_at, updated_at, created_by)
+            VALUES
+              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry_id,
+                workspace_id,
+                persona_id,
+                service_key,
+                int(ejercicio_val) if ejercicio_val else 0,
+                cliente_nombre,
+                cliente_nif,
+                descripcion,
+                float(importe_base or 0),
+                float(comision_pct or 0),
+                float(comision or 0),
+                int(cobrada or 0),
+                fecha,
+                now,
+                now,
+                str(actor_user_id or "").strip(),
+            ),
+        )
+        return {"ok": True, "id": entry_id}
+
+    conn.execute(
+        """
+        UPDATE workspace_rrhh_productividad_manual
+        SET service = ?,
+            ejercicio = ?,
+            cliente_nombre = ?,
+            cliente_nif = ?,
+            descripcion = ?,
+            importe_base = ?,
+            comision_pct = ?,
+            comision = ?,
+            cobrada = ?,
+            fecha = ?,
+            updated_at = ?
+        WHERE workspace_id = ? AND persona_id = ? AND id = ?
+        """,
+        (
+            service_key,
+            int(ejercicio_val) if ejercicio_val else 0,
+            cliente_nombre,
+            cliente_nif,
+            descripcion,
+            float(importe_base or 0),
+            float(comision_pct or 0),
+            float(comision or 0),
+            int(cobrada or 0),
+            fecha,
+            now,
+            workspace_id,
+            persona_id,
+            entry_id,
+        ),
+    )
+    return {"ok": True, "id": entry_id}
+
+
+def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, entry_id):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    entry_id = str(entry_id or "").strip()
+    if not workspace_id or not persona_id or not entry_id:
+        raise ValueError("workspace_id, persona_id e id requeridos")
+    conn.execute(
+        "DELETE FROM workspace_rrhh_productividad_manual WHERE workspace_id = ? AND persona_id = ? AND id = ?",
+        (workspace_id, persona_id, entry_id),
+    )
+    return {"ok": True}
+
     placeholders = ",".join(["?"] * len(selected_cliente_ids))
     selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
     doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
@@ -28430,6 +28605,28 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_productividad_manual (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          persona_id TEXT NOT NULL,
+          service TEXT NOT NULL,
+          ejercicio INTEGER NOT NULL DEFAULT 0,
+          cliente_nombre TEXT,
+          cliente_nif TEXT,
+          descripcion TEXT,
+          importe_base REAL NOT NULL DEFAULT 0,
+          comision_pct REAL NOT NULL DEFAULT 0,
+          comision REAL NOT NULL DEFAULT 0,
+          cobrada INTEGER NOT NULL DEFAULT 0,
+          fecha TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_registro_alerts (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -28540,6 +28737,19 @@ def ensure_workspace_product_tables(conn):
         )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_registro_personal_kiosk_token ON workspace_registro_personal (workspace_id, kiosk_token)"
+        )
+    except Exception:
+        pass
+    # Índices productividad manual (consulta frecuente por persona/ejercicio).
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_prod_manual_ws_persona ON workspace_rrhh_productividad_manual (workspace_id, persona_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_prod_manual_ws_persona_service_year ON workspace_rrhh_productividad_manual (workspace_id, persona_id, service, ejercicio)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_prod_manual_ws_persona_cobrada ON workspace_rrhh_productividad_manual (workspace_id, persona_id, cobrada)"
         )
     except Exception:
         pass
@@ -41298,10 +41508,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_kiosk_token",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
-            "/api/workspace_registro_periodo_lock",
-            "/api/workspace_rrhh_profile",
-            "/api/workspace_rrhh_turnos",
-            "/api/workspace_rrhh_ausencia",
+	            "/api/workspace_registro_periodo_lock",
+	            "/api/workspace_rrhh_profile",
+	            "/api/workspace_rrhh_productividad_manual_upsert",
+	            "/api/workspace_rrhh_productividad_manual_delete",
+	            "/api/workspace_rrhh_turnos",
+	            "/api/workspace_rrhh_ausencia",
             "/api/workspace_rrhh_ausencia_estado",
             "/api/workspace_rrhh_gasto",
             "/api/workspace_rrhh_gasto_estado",
@@ -48196,6 +48408,64 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": result.get("error")}, status=400)
                 return
             json_response(self, {"ok": True, "row": result})
+            return
+        elif parsed.path == "/api/workspace_rrhh_productividad_manual_upsert":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            actor_user_id = str(session.get("user_id") or "").strip()
+            try:
+                res = upsert_workspace_rrhh_productividad_manual(
+                    conn,
+                    workspace_id,
+                    persona_id,
+                    payload,
+                    actor_user_id=actor_user_id,
+                )
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo guardar"}, status=400)
+                return
+            json_response(self, res)
+            return
+        elif parsed.path == "/api/workspace_rrhh_productividad_manual_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            entry_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not persona_id or not entry_id:
+                json_response(self, {"error": "workspace_id, persona_id e id requeridos"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            try:
+                res = delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, entry_id)
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo borrar"}, status=400)
+                return
+            json_response(self, res)
             return
         elif parsed.path == "/api/workspace_rrhh_profile":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -59365,6 +59635,35 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo calcular la productividad."}, status=500)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_rrhh_productividad_manual":
+            workspace_id = params.get("workspace_id", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
+            servicio = params.get("service", [""])[0] or params.get("servicio", [""])[0]
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            can_manage = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if not can_manage:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_for_user = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_for_user or str(persona_for_user) != str(persona_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            items = fetch_workspace_rrhh_productividad_manual(
+                conn,
+                workspace_id=str(workspace_id or "").strip(),
+                persona_id=str(persona_id or "").strip(),
+                service=str(servicio or "").strip(),
+                ejercicio=str(ejercicio or "").strip(),
+            )
+            json_response(self, {"items": items})
             return
 
         if path == "/api/workspace_registro_periodos":
