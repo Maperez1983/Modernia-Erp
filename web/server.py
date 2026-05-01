@@ -25267,6 +25267,14 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
           c.id AS cliente_id,
           c.nombre,
           c.nif,
+          c.telefono,
+          c.movil,
+          c.email,
+          c.fecha_nacimiento,
+          c.direccion,
+          c.codigo_postal,
+          c.poblacion,
+          c.provincia,
           c.estado AS cliente_estado,
           cg.renta_detalles,
           (
@@ -25308,6 +25316,14 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
         nombre = str(row_dict.get("nombre") or "").strip()
         nif = str(row_dict.get("nif") or "").strip()
         servicio_estado = str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip()
+        telefono = str(row_dict.get("telefono") or "").strip()
+        movil = str(row_dict.get("movil") or "").strip()
+        email = str(row_dict.get("email") or "").strip()
+        fecha_nacimiento = str(row_dict.get("fecha_nacimiento") or "").strip()
+        direccion = str(row_dict.get("direccion") or "").strip()
+        codigo_postal = str(row_dict.get("codigo_postal") or "").strip()
+        poblacion = str(row_dict.get("poblacion") or "").strip()
+        provincia = str(row_dict.get("provincia") or "").strip()
         payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
         entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
         entry = None
@@ -25328,11 +25344,28 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
         remesada = 1 if parse_boolish(entry.get("remesada")) else 0
         presentacion_fecha = str(entry.get("presentacion_fecha") or "").strip()
         month = presentacion_fecha[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha) else ""
+        resultado = entry.get("resultado_declaracion")
+        casilla_505 = entry.get("casilla_505")
+        hijos_count = entry.get("hijos_count")
+        estado_civil = str(entry.get("estado_civil") or "").strip()
+        conyuge_nif = str(entry.get("conyuge_nif") or "").strip()
+        cuentas_detectadas = entry.get("cuentas_detectadas") or []
+        if not isinstance(cuentas_detectadas, list):
+            cuentas_detectadas = []
+        cuentas_str = ", ".join(str(x or "").strip() for x in cuentas_detectadas if str(x or "").strip())
         campaigns.append(
             {
                 "cliente_id": cliente_id,
                 "cliente": nombre,
                 "nif": nif,
+                "telefono": telefono,
+                "movil": movil,
+                "email": email,
+                "fecha_nacimiento": fecha_nacimiento,
+                "direccion": direccion,
+                "codigo_postal": codigo_postal,
+                "poblacion": poblacion,
+                "provincia": provincia,
                 "estado_servicio": servicio_estado,
                 "ejercicio": ejercicio_val,
                 "estado_presentacion": estado,
@@ -25345,6 +25378,12 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
                 "cobrada": cobrada,
                 "forma_cobro": forma_cobro,
                 "remesada": remesada,
+                "resultado_declaracion": resultado if resultado is not None else "",
+                "casilla_505": casilla_505 if casilla_505 is not None else "",
+                "hijos_count": hijos_count if hijos_count is not None else "",
+                "estado_civil": estado_civil,
+                "conyuge_nif": conyuge_nif,
+                "cuentas_detectadas": cuentas_str,
             }
         )
 
@@ -61464,6 +61503,7 @@ class Handler(BaseHTTPRequestHandler):
             ejercicio = params.get("ejercicio", [""])[0]
             kind = str(params.get("kind", ["all"])[0] or "all").strip().lower()
             responsable_key = str(params.get("responsable_key", [""])[0] or "").strip().lower()
+            fields_mode = str(params.get("fields", ["full"])[0] or "full").strip().lower()
             q = params.get("q", [""])[0]
             try:
                 campaigns, missing = collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio=ejercicio, q=q)
@@ -61473,20 +61513,50 @@ class Handler(BaseHTTPRequestHandler):
                     headers = ["cliente", "nif", "estado_servicio", "cliente_id"]
                     selected_rows = missing
                 else:
-                    headers = [
-                        "ejercicio",
-                        "cliente",
-                        "nif",
-                        "estado_servicio",
-                        "estado_presentacion",
-                        "presentacion_fecha",
-                        "responsable",
-                        "precio_servicio",
-                        "cobrada",
-                        "forma_cobro",
-                        "remesada",
-                        "cliente_id",
-                    ]
+                    if fields_mode in {"basic", "resumen", "simple"}:
+                        headers = [
+                            "ejercicio",
+                            "cliente",
+                            "nif",
+                            "estado_servicio",
+                            "estado_presentacion",
+                            "presentacion_fecha",
+                            "responsable",
+                            "precio_servicio",
+                            "cobrada",
+                            "forma_cobro",
+                            "remesada",
+                            "cliente_id",
+                        ]
+                    else:
+                        headers = [
+                            "ejercicio",
+                            "cliente",
+                            "nif",
+                            "telefono",
+                            "movil",
+                            "email",
+                            "fecha_nacimiento",
+                            "direccion",
+                            "codigo_postal",
+                            "poblacion",
+                            "provincia",
+                            "estado_servicio",
+                            "estado_presentacion",
+                            "presentacion_fecha",
+                            "responsable",
+                            "precio_servicio",
+                            "cobrada",
+                            "forma_cobro",
+                            "remesada",
+                            "resultado_declaracion",
+                            "casilla_505",
+                            "hijos_count",
+                            "estado_civil",
+                            "conyuge_nif",
+                            "cuentas_detectadas",
+                            "cliente_id",
+                        ]
                     selected_rows = campaigns
                     if kind in {"unpaid", "impagados", "sin_cobrar"}:
                         selected_rows = [
@@ -61523,9 +61593,10 @@ class Handler(BaseHTTPRequestHandler):
                 csv_text = buf.getvalue()
                 payload = ("\ufeff" + csv_text).encode("utf-8", "ignore")
                 safe_kind = re.sub(r"[^a-z0-9_\\-]+", "_", kind or "all")
+                safe_fields = "basic" if fields_mode in {"basic", "resumen", "simple"} else "full"
                 safe_year = re.sub(r"[^0-9]+", "", str(ejercicio or "")) or ""
                 date_token = datetime.now().strftime("%Y%m%d")
-                filename = f"rentas_{safe_year or 'ejercicio'}_{safe_kind}_{date_token}.csv"
+                filename = f"rentas_{safe_year or 'ejercicio'}_{safe_kind}_{safe_fields}_{date_token}.csv"
                 binary_response(self, payload, content_type="text/csv; charset=utf-8", filename=filename)
             except Exception as exc:
                 try:

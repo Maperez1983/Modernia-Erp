@@ -49812,13 +49812,14 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
-  const downloadGestoriaRentaExport = async ({ kind = "all", responsableKey = "", query = "" } = {}) => {
+  const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) return;
     const params = new URLSearchParams();
     params.set("empresa_id", empresa.id);
     if (ejercicio) params.set("ejercicio", ejercicio);
     if (kind) params.set("kind", kind);
+    if (fields) params.set("fields", fields);
     if (responsableKey) params.set("responsable_key", responsableKey);
     if (query) params.set("q", query);
     const endpoint = `/api/gestoria_renta_export?${params.toString()}`;
@@ -49943,7 +49944,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("responsables"),
   });
 
-  const buildCampaignTable = (items, { title, hint, emptyText, exportKind = "", exportResponsableKey = "", printMissing = false } = {}) => {
+  const buildCampaignTable = (items, { title, hint, emptyText, exportKind = "", exportFields = "full", exportResponsableKey = "", printMissing = false } = {}) => {
     const card = document.createElement("div");
     card.className = "form-card";
     const head = document.createElement("div");
@@ -49967,7 +49968,7 @@ const renderGestoriaRentaDashboard = (payload) => {
         exportBtn.disabled = true;
         exportBtn.textContent = "Generando...";
         try {
-          await downloadGestoriaRentaExport({ kind: exportKind, responsableKey: exportResponsableKey });
+          await downloadGestoriaRentaExport({ kind: exportKind, fields: exportFields, responsableKey: exportResponsableKey });
         } catch (err) {
           alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
         } finally {
@@ -50159,6 +50160,7 @@ const renderGestoriaRentaDashboard = (payload) => {
         hint,
         emptyText: "No hay rentas para mostrar.",
         exportKind: view,
+        exportFields: "full",
         exportResponsableKey: view === "responsable" ? viewParam : "",
       })
     );
@@ -50171,6 +50173,7 @@ const renderGestoriaRentaDashboard = (payload) => {
           hint: "Cliente con módulo renta activo pero sin campaña creada para el ejercicio.",
           emptyText: "No hay clientes sin campaña.",
           exportKind: "missing",
+          exportFields: "basic",
           printMissing: true,
         }
       )
@@ -50179,6 +50182,83 @@ const renderGestoriaRentaDashboard = (payload) => {
     root.appendChild(buildResponsablesTable(responsables));
   } else {
     // Gráficos resumen (estado + pendientes por responsable) antes de las tablas.
+    const exportCard = document.createElement("div");
+    exportCard.className = "form-card";
+    exportCard.innerHTML = `
+      <h3>Informes</h3>
+      <p class="muted">Descarga/impresión de listados de Renta (${escapeHtml(ejercicio || "")}).</p>
+    `;
+    const exportRow = document.createElement("div");
+    exportRow.className = "form-row";
+    const exportLeft = document.createElement("div");
+    exportLeft.className = "form-group";
+    exportLeft.innerHTML = `<label>Informe</label>`;
+    const exportKindSel = document.createElement("select");
+    [
+      { key: "all", label: "Todas las campañas" },
+      { key: "unpaid", label: "Sin cobrar" },
+      { key: "paid", label: "Cobradas" },
+      { key: "draft", label: "Borrador" },
+      { key: "presented", label: "Presentadas" },
+      { key: "unassigned", label: "Sin responsable" },
+      { key: "unremesada", label: "No remesadas" },
+      { key: "missing", label: "Clientes sin campaña" },
+    ].forEach((opt) => exportKindSel.appendChild(createOption(opt.key, opt.label)));
+    exportLeft.appendChild(exportKindSel);
+    exportRow.appendChild(exportLeft);
+
+    const exportMid = document.createElement("div");
+    exportMid.className = "form-group";
+    exportMid.innerHTML = `<label>Campos</label>`;
+    const exportFieldsSel = document.createElement("select");
+    exportFieldsSel.appendChild(createOption("full", "Completo"));
+    exportFieldsSel.appendChild(createOption("basic", "Resumen"));
+    exportMid.appendChild(exportFieldsSel);
+    exportRow.appendChild(exportMid);
+
+    const exportRight = document.createElement("div");
+    exportRight.className = "form-actions";
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "primary";
+    exportBtn.textContent = "Descargar CSV";
+    exportBtn.addEventListener("click", async () => {
+      exportBtn.disabled = true;
+      exportBtn.textContent = "Generando...";
+      try {
+        await downloadGestoriaRentaExport({ kind: exportKindSel.value, fields: exportFieldsSel.value });
+      } catch (err) {
+        alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = "Descargar CSV";
+      }
+    });
+    exportRight.appendChild(exportBtn);
+    const printBtn = document.createElement("button");
+    printBtn.type = "button";
+    printBtn.className = "secondary";
+    printBtn.textContent = "Imprimir";
+    printBtn.addEventListener("click", () => {
+      const kind = String(exportKindSel.value || "all");
+      const isMissing = kind === "missing";
+      let items = campaigns;
+      if (kind === "unpaid") items = unpaid;
+      else if (kind === "unassigned") items = unassigned;
+      else if (kind === "draft") items = campaigns.filter((it) => String(it.estado_presentacion || "") === "Borrador");
+      else if (kind === "paid") items = campaigns.filter((it) => Number(it.precio_servicio || 0) > 0.0001 && Number(it.cobrada || 0) === 1);
+      else if (kind === "presented") items = campaigns.filter((it) => String(it.estado_presentacion || "") !== "Borrador");
+      else if (kind === "unremesada") items = campaigns.filter((it) => Number(it.remesada || 0) !== 1);
+      else if (kind === "missing") items = missing;
+      openCrmPrintWindow({
+        title: `Renta ${ejercicio || ""} · ${exportKindSel.selectedOptions?.[0]?.textContent || "Listado"}`.trim(),
+        html: buildRentaPrintTableHtml(items, { isMissing }),
+      });
+    });
+    exportRight.appendChild(printBtn);
+    exportRow.appendChild(exportRight);
+    exportCard.appendChild(exportRow);
+
     const chartGrid = document.createElement("div");
     chartGrid.className = "crm-split";
     const buildChartCard = ({ title, hint, canvasAttr }) => {
@@ -50202,6 +50282,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       })
     );
     root.appendChild(chartGrid);
+    root.insertBefore(exportCard, chartGrid);
 
     const split = document.createElement("div");
     split.className = "crm-split";
