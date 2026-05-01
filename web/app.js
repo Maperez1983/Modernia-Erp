@@ -12657,9 +12657,11 @@ const renderWorkspaceRrhhHub = () => {
           // Carga diferida: se rellena al entrar en Productividad.
           const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
           const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
-          const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
-	          const productividadPanel = `
-	            <div class="workspace-rrhh-panel-card">
+	          const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+	          const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
+	          const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
+		          const productividadPanel = `
+		            <div class="workspace-rrhh-panel-card">
               <div class="section-head">
                 <div>
                   <h4>Productividad</h4>
@@ -12747,15 +12749,37 @@ const renderWorkspaceRrhhHub = () => {
 	                  </div>
 	                </details>
 	              ` : `
-	                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-	                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
+		                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+		                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
+		                </div>
+		              `}
+	              <div id="rrhhEconProductividadStatus" class="muted"></div>
+	              <div class="workspace-rrhh-panel-card" style="margin-top:10px;">
+	                <div class="form-grid">
+	                  <label class="muted">Buscar
+	                    <input id="rrhhEconProductividadQuery" type="text" placeholder="Cliente, DNI/NIF o concepto…" value="${escapeHtml(prodQuery)}" />
+	                  </label>
+	                  <label class="muted">Estado
+	                    <select id="rrhhEconProductividadEstado">
+	                      ${[
+	                        { v: "", l: "Todos" },
+	                        { v: "pendiente", l: "Pendiente" },
+	                        { v: "cobrado", l: "Cobrado" },
+	                      ].map((o) => `<option value="${escapeHtml(o.v)}"${o.v === prodEstado ? " selected" : ""}>${escapeHtml(o.l)}</option>`).join("")}
+	                    </select>
+	                  </label>
+	                  <label class="muted">Acciones
+	                    <div style="display:flex;gap:8px;align-items:center;">
+	                      <button type="button" class="secondary" id="rrhhEconProductividadExportCsv">Exportar CSV</button>
+	                      <button type="button" class="secondary ghost" id="rrhhEconProductividadClearFilters">Limpiar</button>
+	                    </div>
+	                  </label>
 	                </div>
-	              `}
-              <div id="rrhhEconProductividadStatus" class="muted"></div>
-              <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
-              <div id="rrhhEconProductividadList" class="inline-list"></div>
-            </div>
-          `;
+	              </div>
+	              <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
+	              <div id="rrhhEconProductividadList" class="inline-list"></div>
+	            </div>
+	          `;
           const nominasPanel = `
             <div class="workspace-rrhh-panel-card">
               <div class="section-head">
@@ -13968,15 +13992,21 @@ const renderWorkspaceRrhhHub = () => {
     });
   }
 
-  async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
-    try {
-      const status = document.getElementById("rrhhEconProductividadStatus");
-      const kpisEl = document.getElementById("rrhhEconProductividadKpis");
-      const listEl = document.getElementById("rrhhEconProductividadList");
-      const yearSel = document.getElementById("rrhhEconProductividadYear");
-      const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
-      const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-      const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+	  async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
+	    try {
+	      const status = document.getElementById("rrhhEconProductividadStatus");
+	      const kpisEl = document.getElementById("rrhhEconProductividadKpis");
+	      const listEl = document.getElementById("rrhhEconProductividadList");
+	      const queryEl = document.getElementById("rrhhEconProductividadQuery");
+	      const estadoEl = document.getElementById("rrhhEconProductividadEstado");
+	      const exportBtn = document.getElementById("rrhhEconProductividadExportCsv");
+	      const clearBtn = document.getElementById("rrhhEconProductividadClearFilters");
+	      const yearSel = document.getElementById("rrhhEconProductividadYear");
+	      const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
+	      const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+	      const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+	      const query = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim().toLowerCase();
+	      const estado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim().toLowerCase();
 
       if (status) status.textContent = `Cargando apuntes (${serviceKey})…`;
       if (kpisEl) kpisEl.innerHTML = "";
@@ -13994,9 +14024,25 @@ const renderWorkspaceRrhhHub = () => {
         autoKpis = data?.kpis || {};
         autoItems = Array.isArray(data?.items) ? data.items : [];
         autoItems = autoItems.map((it) => ({ ...(it || {}), source: "auto" }));
-      }
+	      }
 
-      const items = [...manualItems, ...autoItems];
+	      const items = [...manualItems, ...autoItems];
+	      const filteredItems = items.filter((it) => {
+	        if (estado === "cobrado" && !Boolean(it?.cobrada)) return false;
+	        if (estado === "pendiente" && Boolean(it?.cobrada)) return false;
+	        if (!query) return true;
+	        const hay = [
+	          it?.cliente_nombre,
+	          it?.cliente_nif,
+	          it?.descripcion,
+	          it?.poliza_numero,
+	          it?.compania,
+	          it?.banco,
+	          it?.oficina,
+	          it?.inmobiliaria_compra,
+	        ].map((v) => String(v || "").toLowerCase()).join(" · ");
+	        return hay.includes(query);
+	      });
       const sums = items.reduce((acc, it) => {
         const paid = Boolean(it?.cobrada);
         acc.items += 1;
@@ -14024,27 +14070,55 @@ const renderWorkspaceRrhhHub = () => {
         ];
       })();
 
-      if (kpisEl) {
-        kpisEl.innerHTML = kpiCards.map((item) => `
-          <div class="kpi-card">
-            <div class="muted">${escapeHtml(item.label)}</div>
-            <div class="kpi-value">${escapeHtml(item.value)}</div>
-          </div>
-        `).join("");
-      }
+	      if (kpisEl) {
+	        kpisEl.innerHTML = kpiCards.map((item) => {
+	          const key = String(item.label || "").toLowerCase();
+	          const kpiKey =
+	            key.includes("cobrados") || key.includes("cobradas")
+	              ? "cobrado"
+	              : key.includes("pendiente")
+	                ? "pendiente"
+	                : "all";
+	          return `
+	          <div class="kpi-card" role="button" tabindex="0" data-rrhh-kpi="${escapeHtml(kpiKey)}">
+	            <div class="muted">${escapeHtml(item.label)}</div>
+	            <div class="kpi-value">${escapeHtml(item.value)}</div>
+	          </div>
+	        `;
+	        }).join("");
+	        Array.from(kpisEl.querySelectorAll("[data-rrhh-kpi]")).forEach((card) => {
+	          if (card.dataset.bound) return;
+	          card.dataset.bound = "1";
+	          const apply = async () => {
+	            const k = String(card.dataset.rrhhKpi || "all");
+	            state.workspaceRrhhEconomicosProductividadEstado = k === "all" ? "" : k;
+	            if (estadoEl) estadoEl.value = state.workspaceRrhhEconomicosProductividadEstado;
+	            await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	          };
+	          card.addEventListener("click", apply);
+	          card.addEventListener("keydown", (e) => {
+	            if (e.key === "Enter" || e.key === " ") apply();
+	          });
+	        });
+	      }
 
-      if (listEl) {
-        const emptyMsg =
-          serviceKey === "renta"
-            ? "Sin rentas asignadas a este trabajador en el ejercicio."
-            : "Sin items asignados a este trabajador en el ejercicio.";
-        if (!items.length) {
-          listEl.innerHTML = `<p class='muted'>${escapeHtml(emptyMsg)}</p>`;
-        } else {
-          items.slice(0, 200).forEach((it) => {
-            const row = document.createElement("div");
-            row.className = "inline-row";
-            const left = document.createElement("div");
+	      if (listEl) {
+	        const emptyMsg =
+	          serviceKey === "renta"
+	            ? "Sin rentas asignadas a este trabajador en el ejercicio."
+	            : "Sin items asignados a este trabajador en el ejercicio.";
+	        const bannerParts = [];
+	        if (query) bannerParts.push(`búsqueda: “${query}”`);
+	        if (estado) bannerParts.push(`estado: ${estado}`);
+	        const filterBanner = bannerParts.length ? `<div class="muted" style="margin-bottom:8px;">Filtrado por ${escapeHtml(bannerParts.join(" · "))}.</div>` : "";
+	        if (!filteredItems.length) {
+	          listEl.innerHTML = `${filterBanner}<p class='muted'>${escapeHtml(emptyMsg)}</p>`;
+	        } else {
+	          listEl.innerHTML = filterBanner;
+	          filteredItems.slice(0, 200).forEach((it) => {
+	            const row = document.createElement("div");
+	            row.className = "inline-row";
+	            const left = document.createElement("div");
             left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || "") || it.cliente_nombre || "-")}</strong><div class="muted">${escapeHtml(it.cliente_nif || "-")}</div>`;
             const right = document.createElement("div");
             right.className = "inline-actions";
@@ -14102,16 +14176,74 @@ const renderWorkspaceRrhhHub = () => {
         }
       }
 
-      if (status) {
-        const mCount = manualItems.length;
-        const mPaid = manualItems.reduce((n, it) => n + (it?.cobrada ? 1 : 0), 0);
-        const autoTag = state.workspaceRrhhEconomicosProductividadAutoEnabled ? ` · Auto: ${autoItems.length}` : "";
-        status.textContent = `Manual: ${mCount} (${mPaid} cobrados)${autoTag}`;
-      }
+	      if (status) {
+	        const mCount = manualItems.length;
+	        const mPaid = manualItems.reduce((n, it) => n + (it?.cobrada ? 1 : 0), 0);
+	        const autoTag = state.workspaceRrhhEconomicosProductividadAutoEnabled ? ` · Auto: ${autoItems.length}` : "";
+	        status.textContent = `Manual: ${mCount} (${mPaid} cobrados)${autoTag}`;
+	      }
 
-      const saveBtn = document.getElementById("rrhhEconManualSave");
-      if (saveBtn && canEditEconomicos && !saveBtn.dataset.bound) {
-        saveBtn.dataset.bound = "1";
+	      if (queryEl && !queryEl.dataset.bound) {
+	        queryEl.dataset.bound = "1";
+	        queryEl.addEventListener("input", async () => {
+	          state.workspaceRrhhEconomicosProductividadQuery = String(queryEl.value || "");
+	          await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	        });
+	      }
+	      if (estadoEl && !estadoEl.dataset.bound) {
+	        estadoEl.dataset.bound = "1";
+	        estadoEl.addEventListener("change", async () => {
+	          state.workspaceRrhhEconomicosProductividadEstado = String(estadoEl.value || "");
+	          await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	        });
+	      }
+	      if (clearBtn && !clearBtn.dataset.bound) {
+	        clearBtn.dataset.bound = "1";
+	        clearBtn.addEventListener("click", async () => {
+	          state.workspaceRrhhEconomicosProductividadQuery = "";
+	          state.workspaceRrhhEconomicosProductividadEstado = "";
+	          if (queryEl) queryEl.value = "";
+	          if (estadoEl) estadoEl.value = "";
+	          await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	        });
+	      }
+	      if (exportBtn && !exportBtn.dataset.bound) {
+	        exportBtn.dataset.bound = "1";
+	        exportBtn.addEventListener("click", () => {
+	          try {
+	            const rows = filteredItems.map((it) => ({
+	              fecha: String(it?.fecha || it?.fecha_cobro || it?.fecha_firma || ""),
+	              service: String(serviceKey || ""),
+	              source: String(it?.source || ""),
+	              estado: Boolean(it?.cobrada) ? "Cobrado" : "Pendiente",
+	              cliente_nombre: String(it?.cliente_nombre || ""),
+	              cliente_nif: String(it?.cliente_nif || ""),
+	              descripcion: String(it?.descripcion || it?.concepto || ""),
+	              importe_base: String(parseMoneyValue(it?.importe_base || it?.facturado_anual || 0)),
+	              comision_pct: String(parseMoneyValue(it?.comision_pct || 0)),
+	              comision: String(parseMoneyValue(it?.comision || 0)),
+	            }));
+	            const headers = ["fecha","service","source","estado","cliente_nombre","cliente_nif","descripcion","importe_base","comision_pct","comision"];
+	            const esc = (v) => `"${String(v ?? "").replace(/\"/g, "\"\"")}"`;
+	            const csv = [headers.join(",")].concat(rows.map((r) => headers.map((h) => esc(r[h])).join(","))).join("\n");
+	            const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+	            const url = URL.createObjectURL(blob);
+	            const a = document.createElement("a");
+	            a.href = url;
+	            a.download = `productividad_${serviceKey}_${ejercicio}.csv`;
+	            document.body.appendChild(a);
+	            a.click();
+	            a.remove();
+	            URL.revokeObjectURL(url);
+	          } catch (e) {
+	            alert(e?.message || "No se pudo exportar CSV.");
+	          }
+	        });
+	      }
+
+	      const saveBtn = document.getElementById("rrhhEconManualSave");
+	      if (saveBtn && canEditEconomicos && !saveBtn.dataset.bound) {
+	        saveBtn.dataset.bound = "1";
         saveBtn.addEventListener("click", async () => {
           const st = document.getElementById("rrhhEconManualStatus");
           try {
@@ -49627,6 +49759,66 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
+  const downloadGestoriaRentaExport = async ({ kind = "all", responsableKey = "", query = "" } = {}) => {
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) return;
+    const params = new URLSearchParams();
+    params.set("empresa_id", empresa.id);
+    if (ejercicio) params.set("ejercicio", ejercicio);
+    if (kind) params.set("kind", kind);
+    if (responsableKey) params.set("responsable_key", responsableKey);
+    if (query) params.set("q", query);
+    const endpoint = `/api/gestoria_renta_export?${params.toString()}`;
+    const res = await fetch(endpoint, { method: "GET", credentials: "same-origin" });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text || `HTTP ${res.status}`;
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        if (parsed && parsed.error) detail = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
+      } catch {}
+      throw new Error(detail);
+    }
+    const disposition = String(res.headers.get("Content-Disposition") || "");
+    const match = disposition.match(/filename=\"([^\"]+)\"/i);
+    const filename = match && match[1] ? match[1] : `rentas_${ejercicio || "export"}.csv`;
+    const blob = await res.blob();
+    downloadBlobFile(filename, blob);
+  };
+
+  const buildRentaPrintTableHtml = (items = [], { isMissing = false } = {}) => {
+    const rows = Array.isArray(items) ? items : [];
+    const maxRows = 2000;
+    const clipped = rows.length > maxRows ? rows.slice(0, maxRows) : rows;
+    const headers = isMissing
+      ? ["Cliente", "NIF", "Estado servicio"]
+      : ["Cliente", "NIF", "Estado", "Presentación", "Responsable", "Precio", "Cobrada", "Remesada"];
+    const body = clipped
+      .map((row) => {
+        if (isMissing) {
+          return `<tr>
+            <td>${escapeHtml(row.cliente || "-")}</td>
+            <td>${escapeHtml(row.nif || "-")}</td>
+            <td>${escapeHtml(row.estado_servicio || "-")}</td>
+          </tr>`;
+        }
+        return `<tr>
+          <td>${escapeHtml(row.cliente || "-")}</td>
+          <td>${escapeHtml(row.nif || "-")}</td>
+          <td>${escapeHtml(row.estado_presentacion || "-")}</td>
+          <td>${escapeHtml(row.presentacion_fecha || "-")}</td>
+          <td>${escapeHtml(row.responsable_label || row.responsable || "-")}</td>
+          <td>${escapeHtml(formatMoney(row.precio_servicio || 0))}</td>
+          <td>${escapeHtml(Number(row.cobrada || 0) ? "Sí" : "No")}</td>
+          <td>${escapeHtml(Number(row.remesada || 0) ? "Sí" : "No")}</td>
+        </tr>`;
+      })
+      .join("");
+    const headHtml = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+    const truncatedNote = rows.length > maxRows ? `<p class="muted">Listado truncado a ${maxRows} filas (de ${rows.length}).</p>` : "";
+    return `${truncatedNote}<table><thead><tr>${headHtml}</tr></thead><tbody>${body}</tbody></table>`;
+  };
+
   const setView = (view) => {
     state.gestoriaRentaDashView = view;
     state.gestoriaRentaDashViewParam = "";
@@ -49698,7 +49890,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("responsables"),
   });
 
-  const buildCampaignTable = (items, { title, hint, emptyText } = {}) => {
+  const buildCampaignTable = (items, { title, hint, emptyText, exportKind = "", exportResponsableKey = "", printMissing = false } = {}) => {
     const card = document.createElement("div");
     card.className = "form-card";
     const head = document.createElement("div");
@@ -49713,6 +49905,37 @@ const renderGestoriaRentaDashboard = (payload) => {
     headLeft.appendChild(p);
     head.appendChild(headLeft);
     const headRight = document.createElement("div");
+    if (exportKind) {
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.className = "secondary";
+      exportBtn.textContent = "Descargar CSV";
+      exportBtn.addEventListener("click", async () => {
+        exportBtn.disabled = true;
+        exportBtn.textContent = "Generando...";
+        try {
+          await downloadGestoriaRentaExport({ kind: exportKind, responsableKey: exportResponsableKey });
+        } catch (err) {
+          alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
+        } finally {
+          exportBtn.disabled = false;
+          exportBtn.textContent = "Descargar CSV";
+        }
+      });
+      headRight.appendChild(exportBtn);
+
+      const printBtn = document.createElement("button");
+      printBtn.type = "button";
+      printBtn.className = "secondary ghost";
+      printBtn.textContent = "Imprimir";
+      printBtn.addEventListener("click", () => {
+        openCrmPrintWindow({
+          title: `${title || "Listado"} · ${ejercicio || ""}`.trim(),
+          html: buildRentaPrintTableHtml(items, { isMissing: !!printMissing }),
+        });
+      });
+      headRight.appendChild(printBtn);
+    }
     const backBtn = document.createElement("button");
     backBtn.type = "button";
     backBtn.className = "secondary ghost";
@@ -49882,6 +50105,8 @@ const renderGestoriaRentaDashboard = (payload) => {
         title,
         hint,
         emptyText: "No hay rentas para mostrar.",
+        exportKind: view,
+        exportResponsableKey: view === "responsable" ? viewParam : "",
       })
     );
   } else if (view === "missing") {
@@ -49892,6 +50117,8 @@ const renderGestoriaRentaDashboard = (payload) => {
           title: `Clientes sin campaña (${ejercicio || ""})`.trim(),
           hint: "Cliente con módulo renta activo pero sin campaña creada para el ejercicio.",
           emptyText: "No hay clientes sin campaña.",
+          exportKind: "missing",
+          printMissing: true,
         }
       )
     );

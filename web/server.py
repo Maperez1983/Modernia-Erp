@@ -30,7 +30,7 @@ import socket
 import ipaddress
 import calendar
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
 try:
@@ -25239,6 +25239,150 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "missing": missing[:400],
         "months": months_list,
     }
+
+
+def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+    q_raw = str(q or "").strip()
+    q_norm = normalize_lookup_text(q_raw)
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    service_filter_exists = (
+        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id AS cliente_id,
+          c.nombre,
+          c.nif,
+          c.estado AS cliente_estado,
+          cg.renta_detalles,
+          (
+            SELECT ce2.estado
+            FROM clientes_empresas ce2
+            WHERE ce2.empresa_id = ?
+              AND ce2.cliente_id = c.id
+              AND {service_filter_exists}
+            ORDER BY
+              CASE
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'activo' THEN 3
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'alta' THEN 2
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'pendiente' THEN 1
+                ELSE 0
+              END DESC,
+              ce2.updated_at DESC
+            LIMIT 1
+          ) AS servicio_estado
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )
+        ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
+        """,
+        (empresa_id, empresa_id),
+    ).fetchall()
+
+    campaigns = []
+    missing = []
+    for row in rows:
+        row_dict = dict(row)
+        cliente_id = str(row_dict.get("cliente_id") or "").strip()
+        nombre = str(row_dict.get("nombre") or "").strip()
+        nif = str(row_dict.get("nif") or "").strip()
+        servicio_estado = str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip()
+        payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
+        entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
+        entry = None
+        for e in entries:
+            if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                entry = e
+                break
+        if not entry:
+            missing.append({"cliente_id": cliente_id, "cliente": nombre, "nif": nif, "estado_servicio": servicio_estado})
+            continue
+        estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
+        responsable_raw = str(entry.get("responsable") or "").strip()
+        responsable_label = responsable_raw or "Sin responsable"
+        responsable_key = normalize_lookup_text(responsable_label) or "sin-responsable"
+        precio = coerce_renta_money(entry.get("precio_servicio")) or 0.0
+        cobrada = 1 if parse_boolish(entry.get("cobrada")) else 0
+        forma_cobro = str(entry.get("forma_cobro") or "").strip()
+        remesada = 1 if parse_boolish(entry.get("remesada")) else 0
+        presentacion_fecha = str(entry.get("presentacion_fecha") or "").strip()
+        month = presentacion_fecha[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha) else ""
+        campaigns.append(
+            {
+                "cliente_id": cliente_id,
+                "cliente": nombre,
+                "nif": nif,
+                "estado_servicio": servicio_estado,
+                "ejercicio": ejercicio_val,
+                "estado_presentacion": estado,
+                "presentacion_fecha": presentacion_fecha,
+                "mes": month,
+                "responsable": responsable_raw,
+                "responsable_label": responsable_label,
+                "responsable_key": responsable_key,
+                "precio_servicio": round(float(precio or 0.0), 2),
+                "cobrada": cobrada,
+                "forma_cobro": forma_cobro,
+                "remesada": remesada,
+            }
+        )
+
+    if q_norm:
+        filtered = []
+        for item in campaigns:
+            hay = normalize_lookup_text(
+                " ".join(
+                    [
+                        str(item.get("cliente") or ""),
+                        str(item.get("nif") or ""),
+                        str(item.get("estado_presentacion") or ""),
+                        str(item.get("responsable_label") or ""),
+                        str(item.get("forma_cobro") or ""),
+                    ]
+                )
+            )
+            if q_norm in hay:
+                filtered.append(item)
+        campaigns = filtered
+        missing = [
+            m
+            for m in missing
+            if q_norm
+            in normalize_lookup_text(
+                " ".join(
+                    [
+                        str(m.get("cliente") or ""),
+                        str(m.get("nif") or ""),
+                        str(m.get("estado_servicio") or ""),
+                    ]
+                )
+            )
+        ]
+
+    campaigns.sort(key=lambda x: (str(x.get("cliente") or ""), str(x.get("nif") or "")))
+    missing.sort(key=lambda x: (str(x.get("cliente") or ""), str(x.get("nif") or "")))
+    return campaigns, missing
 
 
 def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, limit=12):
@@ -61310,6 +61454,85 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo calcular el dashboard de renta."}, status=500)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/gestoria_renta_export":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ejercicio = params.get("ejercicio", [""])[0]
+            kind = str(params.get("kind", ["all"])[0] or "all").strip().lower()
+            responsable_key = str(params.get("responsable_key", [""])[0] or "").strip().lower()
+            q = params.get("q", [""])[0]
+            try:
+                campaigns, missing = collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio=ejercicio, q=q)
+                selected_rows = []
+                headers = []
+                if kind == "missing":
+                    headers = ["cliente", "nif", "estado_servicio", "cliente_id"]
+                    selected_rows = missing
+                else:
+                    headers = [
+                        "ejercicio",
+                        "cliente",
+                        "nif",
+                        "estado_servicio",
+                        "estado_presentacion",
+                        "presentacion_fecha",
+                        "responsable",
+                        "precio_servicio",
+                        "cobrada",
+                        "forma_cobro",
+                        "remesada",
+                        "cliente_id",
+                    ]
+                    selected_rows = campaigns
+                    if kind in {"unpaid", "impagados", "sin_cobrar"}:
+                        selected_rows = [
+                            it
+                            for it in campaigns
+                            if float(it.get("precio_servicio") or 0.0) > 0.0001 and int(it.get("cobrada") or 0) != 1
+                        ]
+                    elif kind in {"paid", "cobradas"}:
+                        selected_rows = [
+                            it
+                            for it in campaigns
+                            if float(it.get("precio_servicio") or 0.0) > 0.0001 and int(it.get("cobrada") or 0) == 1
+                        ]
+                    elif kind in {"draft", "borrador"}:
+                        selected_rows = [it for it in campaigns if str(it.get("estado_presentacion") or "") == "Borrador"]
+                    elif kind in {"presented", "presentadas"}:
+                        selected_rows = [it for it in campaigns if str(it.get("estado_presentacion") or "") != "Borrador"]
+                    elif kind in {"unassigned", "sin_responsable"}:
+                        selected_rows = [it for it in campaigns if not str(it.get("responsable") or "").strip()]
+                    elif kind in {"unremesada", "no_remesadas", "sin_remesar"}:
+                        selected_rows = [it for it in campaigns if int(it.get("remesada") or 0) != 1]
+                    elif kind in {"responsable"}:
+                        rk = normalize_lookup_text(responsable_key)
+                        if rk:
+                            selected_rows = [it for it in campaigns if str(it.get("responsable_key") or "") == rk]
+                        else:
+                            selected_rows = campaigns
+
+                buf = StringIO(newline="")
+                writer = csv.writer(buf, delimiter=";")
+                writer.writerow(headers)
+                for row in selected_rows:
+                    writer.writerow([str(row.get(col) or "") for col in headers])
+                csv_text = buf.getvalue()
+                payload = ("\ufeff" + csv_text).encode("utf-8", "ignore")
+                safe_kind = re.sub(r"[^a-z0-9_\\-]+", "_", kind or "all")
+                safe_year = re.sub(r"[^0-9]+", "", str(ejercicio or "")) or ""
+                date_token = datetime.now().strftime("%Y%m%d")
+                filename = f"rentas_{safe_year or 'ejercicio'}_{safe_kind}_{date_token}.csv"
+                binary_response(self, payload, content_type="text/csv; charset=utf-8", filename=filename)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_renta_export", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo generar el export de renta."}, status=500)
             return
 
         if path == "/api/acciones":
