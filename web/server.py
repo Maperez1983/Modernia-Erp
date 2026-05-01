@@ -24448,6 +24448,11 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     months_list = list(months.values())
     months_list.sort(key=lambda x: str(x.get("mes") or ""))
 
+    # `campaigns` puede ser grande, pero es un payload de dashboard (no se usa en cards).
+    # Limitamos a un máximo razonable para habilitar vistas filtradas en frontend sin otra llamada.
+    campaigns_sorted = list(campaigns)
+    campaigns_sorted.sort(key=lambda x: (str(x.get("cliente") or ""), str(x.get("nif") or "")))
+
     return {
         "ejercicio": ejercicio_val,
         "counts": {
@@ -24465,6 +24470,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             }
             for row in responsables_list
         ],
+        "campaigns": campaigns_sorted[:2000],
         "unpaid": unpaid[:400],
         "unassigned": unassigned[:400],
         "missing": missing[:400],
@@ -56478,6 +56484,8 @@ class Handler(BaseHTTPRequestHandler):
                     "direccion": cliente_row["direccion"] if cliente_row else "",
                     "estado_presentacion": "Borrador",
                     "doc_status": "Borrador",
+                    # Si el front no envía `responsable`, al menos marcamos el usuario que adjunta.
+                    "responsable": str(payload.get("responsable") or payload.get("usuario") or "").strip(),
                 }
                 upsert_cliente_renta_entry(conn, cliente_id, seed, now)
                 cg_row = conn.execute(
@@ -56583,6 +56591,8 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
             updated_entry = dict(current_entry)
+            responsable_fallback = str(payload.get("usuario") or "").strip()
+            responsable_value = str(payload.get("responsable") or current_entry.get("responsable") or responsable_fallback or "").strip()
             updated_entry.update(
                 {
                     "id": entry_id,
@@ -56591,11 +56601,11 @@ class Handler(BaseHTTPRequestHandler):
                     "doc_status": estado_presentacion,
                     "presentacion_fecha": presentacion_fecha,
                     "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
-                    "responsable": payload.get("responsable", current_entry.get("responsable")),
+                    "responsable": responsable_value,
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
                     "forma_cobro": forma_cobro,
                     "remesada": remesada_val,
-	                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+		                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
 	                    "doc_key": doc_key or current_entry.get("doc_key") or "",
 	                    "doc_url": doc_url or current_entry.get("doc_url") or "",
 	                    "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
