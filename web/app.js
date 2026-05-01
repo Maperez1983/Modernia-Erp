@@ -12656,12 +12656,13 @@ const renderWorkspaceRrhhHub = () => {
           const ejercicio = String(new Date().getFullYear()).trim();
           // Carga diferida: se rellena al entrar en Productividad.
           const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+          const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
           const productividadPanel = `
             <div class="workspace-rrhh-panel-card">
               <div class="section-head">
                 <div>
                   <h4>Productividad</h4>
-                  <p class="muted">Renta: 30% base imponible. Resto servicios: 10% de la comisión cobrada del producto.</p>
+                  <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
                 </div>
               </div>
               <div class="rrhh-econ-productividad-head">
@@ -12682,6 +12683,34 @@ const renderWorkspaceRrhhHub = () => {
                       return `<option value="${escapeHtml(y)}"${y === ejercicio ? " selected" : ""}>${escapeHtml(y)}</option>`;
                     }).join("")}
                   </select>
+                </div>
+              </div>
+              <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+                <div class="section-head">
+                  <div>
+                    <h4>Calculadora</h4>
+                    <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="muted">Tipo cálculo
+                    <select id="rrhhEconCalcMode">
+                      <option value="renta">Renta (30% base imponible)</option>
+                      <option value="comision_10">Servicios (10% cobrado)</option>
+                    </select>
+                  </label>
+                  <label class="muted">Importe (sin IVA)
+                    <input id="rrhhEconCalcBase" type="number" step="0.01" placeholder="0.00" />
+                  </label>
+                  <label class="muted">Resultado comisión
+                    <input id="rrhhEconCalcOut" type="text" readonly />
+                  </label>
+                </div>
+                <div class="muted" style="margin-top:8px;">
+                  <label style="display:inline-flex;gap:8px;align-items:center;">
+                    <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
+                    Usar cálculo automático (beta)
+                  </label>
                 </div>
               </div>
               <div id="rrhhEconProductividadStatus" class="muted"></div>
@@ -13873,6 +13902,32 @@ const renderWorkspaceRrhhHub = () => {
     });
   }
 
+  const econCalcBase = document.getElementById("rrhhEconCalcBase");
+  const econCalcMode = document.getElementById("rrhhEconCalcMode");
+  const econCalcOut = document.getElementById("rrhhEconCalcOut");
+  function updateEconCalc() {
+    if (!econCalcOut) return;
+    const base = parseMoneyValue(econCalcBase?.value || 0);
+    const mode = String(econCalcMode?.value || "renta");
+    const pct = mode === "comision_10" ? 0.10 : 0.30;
+    econCalcOut.value = euroFormatter.format(base * pct);
+  }
+  if (econCalcBase) econCalcBase.addEventListener("input", updateEconCalc);
+  if (econCalcMode) econCalcMode.addEventListener("change", updateEconCalc);
+  updateEconCalc();
+
+  const econAutoToggle = document.getElementById("rrhhEconAutoToggle");
+  if (econAutoToggle) {
+    econAutoToggle.addEventListener("change", async () => {
+      state.workspaceRrhhEconomicosProductividadAutoEnabled = Boolean(econAutoToggle.checked);
+      const personaId = String(econAutoToggle.closest("[data-rrhh-persona-id]")?.dataset?.rrhhPersonaId || econYear?.dataset?.rrhhPersonaId || "").trim();
+      const empresaId = String(econYear?.dataset?.rrhhEmpresaId || "").trim();
+      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
+      if (!personaId || !empresaId) return;
+      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+    });
+  }
+
   async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
     try {
       const status = document.getElementById("rrhhEconProductividadStatus");
@@ -13881,6 +13936,12 @@ const renderWorkspaceRrhhHub = () => {
       const yearSel = document.getElementById("rrhhEconProductividadYear");
       const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
       const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+      if (!state.workspaceRrhhEconomicosProductividadAutoEnabled) {
+        if (status) status.textContent = "Cálculo automático desactivado. Usa la calculadora manual.";
+        if (kpisEl) kpisEl.innerHTML = "";
+        if (listEl) listEl.innerHTML = "";
+        return;
+      }
       if (status) status.textContent = `Cargando productividad (${serviceKey})…`;
       if (kpisEl) kpisEl.innerHTML = "";
       if (listEl) listEl.innerHTML = "";
@@ -13939,7 +14000,7 @@ const renderWorkspaceRrhhHub = () => {
             } else if (serviceKey === "hipotecas") {
               meta.textContent = `Hipoteca ${it.banco || \"\"} · ${it.oficina || it.inmobiliaria_compra || \"\"} · ${it.cobrada ? \"Firmada\" : (it.estado || \"Pendiente\")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
-              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · Facturado anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)}`;
+              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)}`;
             } else {
               meta.textContent = `Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             }

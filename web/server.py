@@ -24635,7 +24635,7 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
           COALESCE(c.nombre, '') AS cliente_nombre,
           COALESCE(c.nif, '') AS cliente_nif,
           COALESCE(f.responsable, '') AS responsable,
-          SUM(COALESCE(f.total, 0)) AS total_facturado,
+          SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
           MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
           MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
           COUNT(*) AS num_facturas
