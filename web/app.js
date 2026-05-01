@@ -1,6 +1,6 @@
 // Render puede tener cold starts que superan 15s en la primera petición.
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
-try { window.__APP_JS_LOADED = true; } catch {}
+try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
@@ -12,7 +12,7 @@ const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
 // Debug (panel/trazas) desactivado en producción.
 const isDebugEnabled = () => false;
 const debugLog = () => {};
-try { localStorage.removeItem("crm.debug"); } catch {}
+try { localStorage.removeItem("crm.debug"); } catch (e) {}
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -395,7 +395,7 @@ const uploadBlobToSignedUrlWithFetch = async (url, file, contentTypeOverride = "
       if (msgMatch && msgMatch[1]) {
         message = msgMatch[1];
       }
-    } catch {}
+    } catch (e) {}
     throw new Error(message);
   }
 };
@@ -510,7 +510,7 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
         key,
         upload_id: uploadId,
       }));
-    } catch {}
+    } catch (e) {}
     throw err;
   }
 };
@@ -1409,7 +1409,7 @@ const openS3File = async (key, fallbackUrl) => {
   try {
     // Abrimos primero para evitar bloqueo de popups tras await.
     popup = window.open("", "_blank", "noopener");
-  } catch {}
+  } catch (e) {}
   const normalizeS3Key = (value) => {
     const raw = String(value || "").trim();
     if (!raw) return "";
@@ -1433,13 +1433,13 @@ const openS3File = async (key, fallbackUrl) => {
   const closePopup = () => {
     try {
       if (popup) popup.close();
-    } catch {}
+    } catch (e) {}
   };
   const fail = (message) => {
     closePopup();
     try {
       alert(message || "No se pudo abrir el archivo.");
-    } catch {}
+    } catch (e) {}
   };
 
   // Si `key` parece un id legacy (32-hex) y tenemos una URL pública, abrimos la URL directamente.
@@ -1458,7 +1458,7 @@ const openS3File = async (key, fallbackUrl) => {
         try {
           const data2 = await api(`/api/s3_url?key=${encodeURIComponent(normalizedFallbackKey)}`);
           if (data2 && data2.url && openUrl(data2.url)) return;
-        } catch {}
+        } catch (e) {}
       }
       fail(err?.message || "Archivo no encontrado.");
       return;
@@ -1521,7 +1521,7 @@ const RoutingModule = window.CRMAppRouting || null;
       pre.textContent = String(detail || "").slice(0, 2000);
       banner.appendChild(strong);
       if (detail) banner.appendChild(pre);
-    } catch {}
+    } catch (e) {}
   };
   window.addEventListener("error", (event) => {
     const err = event?.error;
@@ -1543,7 +1543,7 @@ const RoutingModule = window.CRMAppRouting || null;
 	    if (isAuthError) {
 	      try {
 	        event.preventDefault();
-	      } catch {}
+	      } catch (e) {}
 	      return;
 	    }
 	    // Si el backend bloquea una llamada por permisos, no debe romper la experiencia con un banner global.
@@ -1551,10 +1551,10 @@ const RoutingModule = window.CRMAppRouting || null;
 	    if (isPermissionError) {
 	      try {
 	        console.warn("Promise rejection ignored (permissions):", reason);
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        event.preventDefault();
-	      } catch {}
+	      } catch (e) {}
 	      return;
 	    }
 	    const detail = (reason?.message ? `${reason.message}\n` : "")
@@ -1563,7 +1563,7 @@ const RoutingModule = window.CRMAppRouting || null;
 	    try {
       // Safari/Chrome: evita el mensaje "Unhandled Promise Rejection" en consola cuando ya lo mostramos en UI.
       event.preventDefault();
-    } catch {}
+    } catch (e) {}
   });
 })();
 
@@ -2149,7 +2149,7 @@ const setDensityMode = (mode = DENSITY_NORMAL, persist = true) => {
   if (persist) {
     try {
       localStorage.setItem(DENSITY_STORAGE_KEY, nextMode);
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -2811,7 +2811,7 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 					  if (crmInsertModal && document.body && crmInsertModal.parentElement !== document.body) {
 					    document.body.appendChild(crmInsertModal);
 					  }
-					} catch {}
+					} catch (e) {}
 					const crmClienteModal = document.getElementById("crmClienteModal");
 				const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
 				const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
@@ -2845,7 +2845,7 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
             if (el.parentElement === portal) return;
             portal.appendChild(el);
           });
-        } catch {}
+        } catch (e) {}
       };
 
       ensureCrmOverlayPortal();
@@ -3433,7 +3433,7 @@ const saveVisibleColumnsToStorage = (contextKey, columns = []) => {
   const storageKey = getColumnsPrefStorageKey(contextKey);
   try {
     localStorage.setItem(storageKey, JSON.stringify(Array.isArray(columns) ? columns : []));
-  } catch {}
+  } catch (e) {}
 };
 
 const setColumnsPickerContext = (context) => {
@@ -3455,7 +3455,7 @@ const setColumnsPickerContext = (context) => {
     if (typeof updateTableVisibility === "function") {
       updateTableVisibility();
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const renderActiveColumnsPicker = () => {
@@ -3847,16 +3847,16 @@ const normalizeLookupText = (value) =>
     .trim();
 try {
   window.normalizeLookupText = normalizeLookupText;
-} catch {}
+} catch (e) {}
 
 function setSimuladoresPane(pane = "", options = {}) {
   const next = normalizeSimple(pane || "");
   try {
     state.simuladoresPane = next;
-  } catch {}
+  } catch (e) {}
   try {
     localStorage.setItem(SIMULADORES_PANE_STORAGE_KEY, next);
-  } catch {}
+  } catch (e) {}
 
   const panes = document.querySelectorAll('.simuladores-pane[data-sim-pane]');
   panes.forEach((el) => {
@@ -3910,23 +3910,23 @@ function openWorkspaceSimuladores(opts = {}) {
   try {
     const params = new URLSearchParams(window.location.search || "");
     workspace = String(params.get("workspace") || "").trim();
-  } catch {}
+  } catch (e) {}
   if (!workspace) {
     try {
       workspace = String(state.currentWorkspaceTarget || "").trim();
-    } catch {}
+    } catch (e) {}
   }
   openHolding({ mode: "tenant", workspace, view: "motores", engine: "simuladores" });
   window.setTimeout(() => {
     try {
       setSimuladoresPane(pane);
-    } catch {}
+    } catch (e) {}
     try {
       applyFiscalWizardPrefill(prefill);
-    } catch {}
+    } catch (e) {}
     try {
       if (pane) scrollToSimuladoresPane(pane);
-    } catch {}
+    } catch (e) {}
   }, 180);
 }
 
@@ -4342,18 +4342,18 @@ const resolveDefaultTenantWorkspaceSlug = () => {
   try {
     const fromStatus = String(state?.homeTimeStatus?.workspace_slug || "").trim();
     if (fromStatus) return normalizeTenantWorkspaceSlug(fromStatus, DEFAULT_TENANT_WORKSPACE_SLUG);
-  } catch {}
+  } catch (e) {}
   try {
     const fromCurrent = String(state?.currentWorkspaceTarget || state?.currentWorkspaceName || "").trim();
     if (fromCurrent) return normalizeTenantWorkspaceSlug(fromCurrent, DEFAULT_TENANT_WORKSPACE_SLUG);
-  } catch {}
+  } catch (e) {}
   try {
     const rows = Array.isArray(state?.workspaces) ? state.workspaces : [];
     if (rows.length === 1) {
       const value = String(rows[0]?.slug || rows[0]?.nombre || rows[0]?.id || "").trim();
       if (value) return normalizeTenantWorkspaceSlug(value, DEFAULT_TENANT_WORKSPACE_SLUG);
     }
-  } catch {}
+  } catch (e) {}
   return DEFAULT_TENANT_WORKSPACE_SLUG;
 };
 
@@ -4431,7 +4431,7 @@ const userCanAccessService = (serviceKey) => {
       for (const key of allowed) {
         if (String(key || "").includes("fincas")) return true;
       }
-    } catch {}
+    } catch (e) {}
     return false;
   }
   if (normalized === "gestoria") {
@@ -4450,21 +4450,21 @@ const userCanAccessService = (serviceKey) => {
         if (text.includes("gestoria") || text.includes("gestoría")) return true;
         if (text.includes("fincas")) return true;
       }
-    } catch {}
+    } catch (e) {}
     return false;
   }
   if (normalized === "seguros") {
     if (allowed.has("seguros")) return true;
     try {
       for (const key of allowed) if (String(key || "").includes("seguros") || String(key || "").includes("seguro")) return true;
-    } catch {}
+    } catch (e) {}
     return false;
   }
   if (normalized === "inmobiliaria") {
     if (allowed.has("inmobiliaria")) return true;
     try {
       for (const key of allowed) if (String(key || "").includes("inmobili")) return true;
-    } catch {}
+    } catch (e) {}
     return false;
   }
   if (normalized === "hipotecas") {
@@ -4545,10 +4545,10 @@ const ensureModalDataLoaded = async () => {
     // No bloquees la apertura del modal si falla la carga de listas (agenda debe seguir siendo operativa).
     try {
       console.warn("ensureModalDataLoaded failed", err);
-    } catch {}
+    } catch (e) {}
     try {
       setUiToast("Aviso", "No se pudo cargar la lista de usuarios/clientes. Puedes escribir el cliente manualmente.");
-    } catch {}
+    } catch (e) {}
   } finally {
     modalLoading = false;
   }
@@ -4560,7 +4560,7 @@ const ensureActionModalClientesReady = async () => {
       await loadClientesList().catch(() => null);
     }
     populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
-  } catch {}
+  } catch (e) {}
 };
 
 const syncActionModalClienteButtons = () => {
@@ -5073,7 +5073,7 @@ const renderAgendaCalendar = (container, events, label = "") => {
     } catch (err) {
       try {
         setUiToast("No se pudo mover la cita", String(err?.message || "Error desconocido"));
-      } catch {}
+      } catch (e) {}
     }
   };
 
@@ -5119,7 +5119,7 @@ const renderAgendaCalendar = (container, events, label = "") => {
         event.dataTransfer.setData("text/plain", ev.id || "");
         try {
           event.dataTransfer.effectAllowed = "move";
-        } catch {}
+        } catch (e) {}
       });
     }
     return row;
@@ -5477,7 +5477,7 @@ const renderCompanyCards = () => {
             }
             seen.add(key);
           });
-        } catch {}
+        } catch (e) {}
       };
 
 	    const buildInitials = (value) => {
@@ -5643,7 +5643,7 @@ const renderCompanyCards = () => {
 		        if (mapped.has("gestoria") || mapped.has("inmobiliaria") || mapped.has("fincas")) {
 		          appendSimuladoresCard();
 		        }
-		      } catch {}
+		      } catch (e) {}
 		      // Prompt de fichaje (solo si aplica al usuario).
 		      maybeAutoShowHomeTimePunchModal();
 	        dedupeCoreCards();
@@ -5699,7 +5699,7 @@ const renderCompanyCards = () => {
           // Reemplaza la card "Workspaces" por N cards, una por workspace.
           try {
             homeWorkspacesCard.remove();
-          } catch {}
+          } catch (e) {}
           rows.forEach((row) => {
             const workspaceId = String(row?.id || "").trim();
             const rawName = String(row?.nombre || row?.name || row?.slug || row?.id || "").trim();
@@ -5733,7 +5733,7 @@ const renderCompanyCards = () => {
           });
           dedupeCoreCards();
         })();
-      } catch {}
+      } catch (e) {}
 	    maybeAutoShowHomeTimePunchModal();
       dedupeCoreCards();
 	  }
@@ -5913,7 +5913,7 @@ const safeSetMonthInputValue = (input, value) => {
   } catch {
     try {
       input.value = "";
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -6157,7 +6157,7 @@ const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id", serviceKe
   if (serviceKey) {
     try {
       if (!shouldScopeByCompanyForService(serviceKey)) return items;
-    } catch {}
+    } catch (e) {}
   }
   if (!companyId) return items;
   return items.filter((row) => String(row?.[field] || "").trim() === companyId);
@@ -6170,7 +6170,7 @@ const shouldScopeByCompanyForService = (serviceKey = "") => {
   // ve TODO lo relacionado con ese servicio dentro del workspace.
   try {
     if (userCanAccessService(serviceKey)) return false;
-  } catch {}
+  } catch (e) {}
   return true;
 };
 
@@ -6263,7 +6263,7 @@ const renderWorkspaceCompanyScopedData = () => {
     const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
     const filteredLedger = ledgerRows.filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || "")));
     renderWorkspaceFincasLedgerList(filteredLedger);
-  } catch {}
+  } catch (e) {}
   renderWorkspaceFincasDashboard();
   renderWorkspacePortalList(raw.portalRows || []);
   hydrateWorkspacePortalRequestTargets(raw.portalRows || []);
@@ -6377,7 +6377,7 @@ const setWorkspaceTenantSection = (section = "general", options = {}) => {
   if (persist) {
     try {
       localStorage.setItem("crm.workspaceTenantSection", normalized);
-    } catch {}
+    } catch (e) {}
   }
   if (workspaceTenantTabs) {
     workspaceTenantTabs.querySelectorAll("[data-workspace-tenant-tab]").forEach((button) => {
@@ -6586,7 +6586,7 @@ const ensureIivtnuMunicipios = async () => {
     if (prev && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(prev)}"]`)) {
       iivtnuMunicipioSelect.value = prev;
     }
-  } catch {}
+  } catch (e) {}
   return iivtnuMunicipiosCache || [];
 };
 
@@ -6751,13 +6751,13 @@ const ensureIivtnuSimulator = async () => {
         if (ine && iivtnuMunicipioSelect.querySelector(`option[value="${CSS.escape(ine)}"]`)) {
           iivtnuMunicipioSelect.value = ine;
         }
-      } catch {}
+      } catch (e) {}
     });
   }
   iivtnuMunicipioSelect.addEventListener("change", () => {
     try {
       localStorage.setItem("crm.iivtnu.municipio_ine", String(iivtnuMunicipioSelect.value || ""));
-    } catch {}
+    } catch (e) {}
   });
   if (iivtnuPdfApplyBtn) {
     iivtnuPdfApplyBtn.addEventListener("click", () => {
@@ -7005,7 +7005,7 @@ const setWorkspaceEngineView = (engine = "documental") => {
   if (normalizeSimple(state.currentWorkspaceView || "") !== "motores") {
     try {
       setWorkspaceView("motores", { forceTenantView: true });
-    } catch {}
+    } catch (e) {}
   }
   workspaceEngineButtons.forEach((button) => {
     button.classList.toggle("active", (button.dataset.workspaceEngineTab || "") === normalized);
@@ -7339,7 +7339,7 @@ const setFormFieldValue = (form, name, rawValue) => {
   }
   try {
     el.dispatchEvent(new Event("change", { bubbles: true }));
-  } catch {}
+  } catch (e) {}
 };
 
 const applyFiscalWizardPreset = (preset = null) => {
@@ -7371,7 +7371,7 @@ const applyFiscalWizardPreset = (preset = null) => {
     iivtnuMunicipioCp.value = cp;
     try {
       iivtnuMunicipioCp.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
+    } catch (e) {}
   }
 
   fiscalWizardActivePreset = preset;
@@ -7403,10 +7403,10 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
     }
     try {
       syncFiscalWizardPvVisibility();
-    } catch {}
+    } catch (e) {}
     try {
       fiscalWizardForm.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
+    } catch (e) {}
   }
 
   if (irpfGainForm) {
@@ -7416,7 +7416,7 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
         el.value = clienteId;
         try {
           el.dispatchEvent(new Event("change", { bubbles: true }));
-        } catch {}
+        } catch (e) {}
       }
     }
     if (ccaa && irpfGainForm.querySelector(`select[name="ccaa"] option[value="${CSS.escape(ccaa)}"]`)) {
@@ -7450,7 +7450,7 @@ const applyFiscalWizardPrefill = (prefill = {}) => {
     iivtnuMunicipioCp.value = codigoPostal;
     try {
       iivtnuMunicipioCp.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -7464,23 +7464,23 @@ const openWorkspaceFiscalWizard = (prefill = {}) => {
   try {
     const params = new URLSearchParams(window.location.search || "");
     workspace = String(params.get("workspace") || "").trim();
-  } catch {}
+  } catch (e) {}
   if (!workspace) {
     try {
       workspace = String(state.currentWorkspaceTarget || "").trim();
-    } catch {}
+    } catch (e) {}
   }
   openHolding({ mode: "tenant", workspace, view: "motores", engine: "simuladores" });
   window.setTimeout(() => {
     try {
       setSimuladoresPane("informe");
-    } catch {}
+    } catch (e) {}
     try {
       applyFiscalWizardPrefill(prefill);
-    } catch {}
+    } catch (e) {}
     try {
       scrollToSimuladoresPane("informe");
-    } catch {}
+    } catch (e) {}
   }, 180);
 };
 
@@ -7804,7 +7804,7 @@ const openIrpfGananciaModal = (options = {}) => {
 	  const form = modal.querySelector("[data-irpf-form]");
 	  try {
 	    bindMoneyPlainInputs(form);
-	  } catch {}
+	  } catch (e) {}
 	  const closeBtn = modal.querySelector("[data-irpf-close]");
 	  const simulateBtn = modal.querySelector("[data-irpf-simulate]");
 	  const pdfBtn = modal.querySelector("[data-irpf-pdf]");
@@ -7917,7 +7917,7 @@ const openIrpfGananciaModal = (options = {}) => {
   const prefill = (options && typeof options === "object" ? options : {}) || {};
   try {
     form?.reset();
-  } catch {}
+  } catch (e) {}
 		  setValue("referencia", prefill.referencia || "");
 		  setValue("ejercicio", prefill.ejercicio || "");
 		  setValue("regimen_fiscal", prefill.regimen_fiscal || "irpf");
@@ -8015,7 +8015,7 @@ const openIrpfGananciaModal = (options = {}) => {
           const resp = await postJsonWithDbRetry("/api/irpf_ganancia_simulate", payload, { timeoutMs: 30000 });
           lastResp = resp;
           renderResult(resp);
-        } catch {}
+        } catch (e) {}
       }
     } catch (err) {
       if (statusEl) statusEl.textContent = err?.message || "No se pudo generar el PDF.";
@@ -8950,7 +8950,7 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
         ],
         { tooltip: true, legend: false, rotateLabels: true }
       );
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -9229,7 +9229,7 @@ const renderWorkspaceList = (rows = []) => {
   state.currentWorkspaceId = selectedId;
   try {
     localStorage.setItem("crm.currentWorkspaceId", String(selectedId || ""));
-  } catch {}
+  } catch (e) {}
   workspaceList.innerHTML = rows
     .map((row) => {
       const isActive = String(row.id || "") === String(selectedId || "");
@@ -9460,7 +9460,7 @@ const renderWorkspaceCompanies = (rows = []) => {
         if (Array.isArray(parsed)) {
           cnaes = parsed.map((item) => String(item || "").trim()).filter(Boolean);
         }
-      } catch {}
+      } catch (e) {}
     }
     if (!cnaes.length) {
       const fallback = String(row?.cnae || "").trim();
@@ -9659,7 +9659,7 @@ const renderWorkspaceCompanies = (rows = []) => {
   if (companySearchInput) {
     try {
       companySearchInput.value = String(state.workspaceCompanySearchQuery || "");
-    } catch {}
+    } catch (e) {}
   }
   if (companyShowInactiveInput) {
     companyShowInactiveInput.checked = Boolean(state.workspaceCompanyShowInactive);
@@ -10912,7 +10912,7 @@ const renderWorkspaceCopilotHub = () => {
     if (contractEmpresa && activeCompanyId) {
       try {
         contractEmpresa.value = activeCompanyId;
-      } catch {}
+      } catch (e) {}
     }
     const dateInput = contractForm.querySelector('[name="fecha"]');
     if (dateInput && !String(dateInput.value || "").trim()) {
@@ -12657,7 +12657,7 @@ const renderWorkspaceRrhhHub = () => {
           // Carga diferida: se rellena al entrar en Productividad.
           const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
           const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
-	          const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+	          const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
 	          const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
 	          const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
 		          const productividadPanel = `
@@ -12735,14 +12735,24 @@ const renderWorkspaceRrhhHub = () => {
 	                    <label class="muted">% comisión
 	                      <input id="rrhhEconManualPct" type="number" step="0.01" placeholder="10" />
 	                    </label>
-	                    <label class="muted">Fecha
-	                      <input id="rrhhEconManualDate" type="date" />
-	                    </label>
-	                    <label class="muted" style="display:flex;gap:10px;align-items:center;margin-top:22px;">
-	                      <input id="rrhhEconManualPaid" type="checkbox" />
-	                      Cobrado
-	                    </label>
-	                  </div>
+		                    <label class="muted">Fecha
+		                      <input id="rrhhEconManualDate" type="date" />
+		                    </label>
+		                    <label class="muted">Estado cobro
+		                      <select id="rrhhEconManualEstado">
+		                        <option value="pendiente">Pendiente</option>
+		                        <option value="parcial">Parcial</option>
+		                        <option value="cobrado">Cobrado</option>
+		                        <option value="anulado">Anulado</option>
+		                      </select>
+		                    </label>
+		                    <label class="muted">Importe cobrado (comisión)
+		                      <input id="rrhhEconManualImporteCobrado" type="number" step="0.01" placeholder="0.00" />
+		                    </label>
+		                    <label class="muted">Fecha cobro
+		                      <input id="rrhhEconManualFechaCobro" type="date" />
+		                    </label>
+		                  </div>
 		                  <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
 		                    <button type="button" class="secondary" id="rrhhEconManualSave" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">Guardar apunte</button>
 		                    <button type="button" class="secondary ghost" id="rrhhEconManualCancelEdit" style="display:none;">Cancelar edición</button>
@@ -12765,7 +12775,9 @@ const renderWorkspaceRrhhHub = () => {
 	                      ${[
 	                        { v: "", l: "Todos" },
 	                        { v: "pendiente", l: "Pendiente" },
+	                        { v: "parcial", l: "Parcial" },
 	                        { v: "cobrado", l: "Cobrado" },
+	                        { v: "anulado", l: "Anulado" },
 	                      ].map((o) => `<option value="${escapeHtml(o.v)}"${o.v === prodEstado ? " selected" : ""}>${escapeHtml(o.l)}</option>`).join("")}
 	                    </select>
 	                  </label>
@@ -12776,6 +12788,22 @@ const renderWorkspaceRrhhHub = () => {
 	                    </div>
 	                  </label>
 	                </div>
+	                ${canEditEconomicos ? `
+	                  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;">
+	                    <label class="muted" style="display:inline-flex;gap:8px;align-items:center;">
+	                      <input type="checkbox" id="rrhhEconProductividadSelectAll" />
+	                      Seleccionar visibles
+	                    </label>
+	                    <label class="muted">Fecha cobro
+	                      <input type="date" id="rrhhEconProductividadBulkFechaCobro" />
+	                    </label>
+	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkCobra">Marcar cobrado</button>
+	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkParcial">Marcar parcial</button>
+	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkPendiente">Marcar pendiente</button>
+	                    <button type="button" class="secondary danger" id="rrhhEconProductividadBulkAnula">Anular</button>
+	                    <span class="muted" id="rrhhEconProductividadBulkStatus"></span>
+	                  </div>
+	                ` : ""}
 	              </div>
 	              <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
 	              <div id="rrhhEconProductividadList" class="inline-list"></div>
@@ -14002,10 +14030,17 @@ const renderWorkspaceRrhhHub = () => {
 	      const estadoEl = document.getElementById("rrhhEconProductividadEstado");
 	      const exportBtn = document.getElementById("rrhhEconProductividadExportCsv");
 	      const clearBtn = document.getElementById("rrhhEconProductividadClearFilters");
+	      const selectAllEl = document.getElementById("rrhhEconProductividadSelectAll");
+	      const bulkFechaCobroEl = document.getElementById("rrhhEconProductividadBulkFechaCobro");
+	      const bulkCobraBtn = document.getElementById("rrhhEconProductividadBulkCobra");
+	      const bulkParcialBtn = document.getElementById("rrhhEconProductividadBulkParcial");
+	      const bulkPendienteBtn = document.getElementById("rrhhEconProductividadBulkPendiente");
+	      const bulkAnulaBtn = document.getElementById("rrhhEconProductividadBulkAnula");
+	      const bulkStatusEl = document.getElementById("rrhhEconProductividadBulkStatus");
 	      const yearSel = document.getElementById("rrhhEconProductividadYear");
 	      const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
 	      const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-	      const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
+	      const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
 	      const query = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim().toLowerCase();
 	      const estado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim().toLowerCase();
 
@@ -14029,8 +14064,8 @@ const renderWorkspaceRrhhHub = () => {
 
 	      const items = [...manualItems, ...autoItems];
 	      const filteredItems = items.filter((it) => {
-	        if (estado === "cobrado" && !Boolean(it?.cobrada)) return false;
-	        if (estado === "pendiente" && Boolean(it?.cobrada)) return false;
+	        const st = String(it?.estado_cobro || (it?.cobrada ? "cobrado" : "pendiente")).toLowerCase();
+	        if (estado && st !== estado) return false;
 	        if (!query) return true;
 	        const hay = [
 	          it?.cliente_nombre,
@@ -14044,14 +14079,17 @@ const renderWorkspaceRrhhHub = () => {
 	        ].map((v) => String(v || "").toLowerCase()).join(" · ");
 	        return hay.includes(query);
 	      });
-      const sums = items.reduce((acc, it) => {
-        const paid = Boolean(it?.cobrada);
-        acc.items += 1;
-        if (paid) acc.cobradas += 1;
-        acc.comision_total += parseMoneyValue(it?.comision || 0);
-        if (paid) acc.comision_cobradas += parseMoneyValue(it?.comision || 0);
-        return acc;
-      }, { items: 0, cobradas: 0, comision_total: 0, comision_cobradas: 0 });
+	      const sums = items.reduce((acc, it) => {
+	        const st = String(it?.estado_cobro || (it?.cobrada ? "cobrado" : "pendiente")).toLowerCase();
+	        const paid = st === "cobrado";
+	        acc.items += 1;
+	        if (st === "cobrado") acc.cobradas += 1;
+	        if (st === "parcial") acc.parciales += 1;
+	        if (st === "anulado") acc.anuladas += 1;
+	        acc.comision_total += parseMoneyValue(it?.comision || 0);
+	        if (paid) acc.comision_cobradas += parseMoneyValue(it?.comision || 0);
+	        return acc;
+	      }, { items: 0, cobradas: 0, parciales: 0, anuladas: 0, comision_total: 0, comision_cobradas: 0 });
 
       const kpiCards = (() => {
         if (serviceKey === "renta" && state.workspaceRrhhEconomicosProductividadAutoEnabled) {
@@ -14063,13 +14101,15 @@ const renderWorkspaceRrhhHub = () => {
             { label: "Comisión (cobradas)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
           ];
         }
-        return [
-          { label: "Items", value: String(sums.items || 0) },
-          { label: "Cobrados", value: String(sums.cobradas || 0) },
-          { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(sums.comision_total || 0)) },
-          { label: "Comisión (cobrados)", value: euroFormatter.format(parseMoneyValue(sums.comision_cobradas || 0)) },
-        ];
-      })();
+	        return [
+	          { label: "Items", value: String(sums.items || 0) },
+	          { label: "Cobrados", value: String(sums.cobradas || 0) },
+	          { label: "Parciales", value: String(sums.parciales || 0) },
+	          { label: "Anulados", value: String(sums.anuladas || 0) },
+	          { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(sums.comision_total || 0)) },
+	          { label: "Comisión (cobrados)", value: euroFormatter.format(parseMoneyValue(sums.comision_cobradas || 0)) },
+	        ];
+	      })();
 
 	      if (kpisEl) {
 	        kpisEl.innerHTML = kpiCards.map((item) => {
@@ -14120,13 +14160,26 @@ const renderWorkspaceRrhhHub = () => {
 	            const row = document.createElement("div");
 	            row.className = "inline-row";
 	            const left = document.createElement("div");
-            left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || "") || it.cliente_nombre || "-")}</strong><div class="muted">${escapeHtml(it.cliente_nif || "-")}</div>`;
+            const isManual = String(it?.source || "") === "manual";
+            const nameHtml = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || "") || it.cliente_nombre || "-")}</strong><div class="muted">${escapeHtml(it.cliente_nif || "-")}</div>`;
+            if (canEditEconomicos && isManual && it?.id) {
+              left.innerHTML = `
+                <label class="muted" style="display:inline-flex;gap:8px;align-items:center;margin-bottom:6px;">
+                  <input type="checkbox" data-rrhh-econ-select-id="${escapeHtml(String(it.id || ""))}"/>
+                  Seleccionar
+                </label>
+                ${nameHtml}
+              `;
+            } else {
+              left.innerHTML = nameHtml;
+            }
             const right = document.createElement("div");
             right.className = "inline-actions";
             const meta = document.createElement("div");
             meta.className = "muted";
             if (String(it?.source || "") === "manual") {
-              const paidLabel = it.cobrada ? "Cobrado" : "Pendiente";
+              const st = String(it?.estado_cobro || (it.cobrada ? "cobrado" : "pendiente")).toLowerCase();
+              const paidLabel = st === "cobrado" ? "Cobrado" : st === "parcial" ? "Parcial" : st === "anulado" ? "Anulado" : "Pendiente";
               const baseLabel = euroFormatter.format(parseMoneyValue(it.importe_base || 0));
               const pctLabel = `${parseMoneyValue(it.comision_pct || 0)}%`;
               meta.textContent = `Manual · ${paidLabel} · ${it.descripcion || ""} · Base: ${baseLabel} · Comisión (${pctLabel}): ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
@@ -14155,13 +14208,15 @@ const renderWorkspaceRrhhHub = () => {
 	                  saveBtn.dataset.editId = String(it.id || "");
 	                  saveBtn.textContent = "Actualizar apunte";
 	                  if (cancelBtn) cancelBtn.style.display = "";
-	                  try { document.getElementById("rrhhEconManualClientName").value = String(it.cliente_nombre || ""); } catch {}
-	                  try { document.getElementById("rrhhEconManualClientNif").value = String(it.cliente_nif || ""); } catch {}
-	                  try { document.getElementById("rrhhEconManualDesc").value = String(it.descripcion || ""); } catch {}
-	                  try { document.getElementById("rrhhEconManualBase").value = String(parseMoneyValue(it.importe_base || 0) || ""); } catch {}
-	                  try { document.getElementById("rrhhEconManualPct").value = String(parseMoneyValue(it.comision_pct || 0) || ""); } catch {}
-	                  try { document.getElementById("rrhhEconManualPaid").checked = Boolean(it.cobrada); } catch {}
-	                  try { document.getElementById("rrhhEconManualDate").value = String(it.fecha || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualClientName").value = String(it.cliente_nombre || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualClientNif").value = String(it.cliente_nif || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualDesc").value = String(it.descripcion || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualBase").value = String(parseMoneyValue(it.importe_base || 0) || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualPct").value = String(parseMoneyValue(it.comision_pct || 0) || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualDate").value = String(it.fecha || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualEstado").value = String(it.estado_cobro || (it.cobrada ? "cobrado" : "pendiente") || "pendiente"); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualImporteCobrado").value = String(parseMoneyValue(it.importe_cobrado || 0) || ""); } catch (e) {}
+	                  try { document.getElementById("rrhhEconManualFechaCobro").value = String(it.fecha_cobro || ""); } catch (e) {}
 	                } catch (e) {
 	                  alert(e?.message || "No se pudo preparar la edición.");
 	                }
@@ -14267,6 +14322,90 @@ const renderWorkspaceRrhhHub = () => {
 	        });
 	      }
 
+	      const collectSelectedManualIds = () => {
+	        if (!listEl) return [];
+	        return Array.from(listEl.querySelectorAll("input[data-rrhh-econ-select-id]"))
+	          .filter((el) => el && el.checked)
+	          .map((el) => String(el.dataset.rrhhEconSelectId || "").trim())
+	          .filter(Boolean);
+	      };
+	      const updateBulkUi = () => {
+	        if (!bulkStatusEl) return;
+	        const ids = collectSelectedManualIds();
+	        bulkStatusEl.textContent = ids.length ? `Seleccionados: ${ids.length}` : "";
+	      };
+
+	      if (selectAllEl && canEditEconomicos && !selectAllEl.dataset.bound) {
+	        selectAllEl.dataset.bound = "1";
+	        selectAllEl.addEventListener("change", () => {
+	          if (!listEl) return;
+	          const next = Boolean(selectAllEl.checked);
+	          Array.from(listEl.querySelectorAll("input[data-rrhh-econ-select-id]")).forEach((el) => {
+	            try { el.checked = next; } catch (e) {}
+	          });
+	          updateBulkUi();
+	        });
+	      }
+	      if (listEl && canEditEconomicos) {
+	        // Recalcula el contador al marcar/desmarcar items.
+	        listEl.addEventListener(
+	          "change",
+	          (e) => {
+	            const t = e?.target;
+	            if (t && t.matches && t.matches("input[data-rrhh-econ-select-id]")) updateBulkUi();
+	          },
+	          { passive: true }
+	        );
+	      }
+	      const bulkUpdate = async (estadoCobro) => {
+	        const ids = collectSelectedManualIds();
+	        if (!ids.length) {
+	          if (bulkStatusEl) bulkStatusEl.textContent = "Selecciona al menos un apunte manual.";
+	          return;
+	        }
+	        const fechaCobro = String(bulkFechaCobroEl?.value || "").trim();
+	        if (bulkStatusEl) bulkStatusEl.textContent = "Actualizando…";
+	        await apiPost("/api/workspace_rrhh_productividad_manual_bulk_update", {
+	          workspace_id: state.currentWorkspaceId,
+	          persona_id: personaId,
+	          ids,
+	          patch: {
+	            estado_cobro: String(estadoCobro || "pendiente"),
+	            fecha_cobro: fechaCobro,
+	            // Si va vacío (0), el backend autocompleta con la comisión al marcar cobrado.
+	            importe_cobrado: 0,
+	          },
+	        });
+	        if (selectAllEl) selectAllEl.checked = false;
+	        updateBulkUi();
+	        await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	      };
+	      if (bulkCobraBtn && canEditEconomicos && !bulkCobraBtn.dataset.bound) {
+	        bulkCobraBtn.dataset.bound = "1";
+	        bulkCobraBtn.addEventListener("click", async () => {
+	          try { await bulkUpdate("cobrado"); } catch (e) { if (bulkStatusEl) bulkStatusEl.textContent = e?.message || "No se pudo actualizar."; }
+	        });
+	      }
+	      if (bulkParcialBtn && canEditEconomicos && !bulkParcialBtn.dataset.bound) {
+	        bulkParcialBtn.dataset.bound = "1";
+	        bulkParcialBtn.addEventListener("click", async () => {
+	          try { await bulkUpdate("parcial"); } catch (e) { if (bulkStatusEl) bulkStatusEl.textContent = e?.message || "No se pudo actualizar."; }
+	        });
+	      }
+	      if (bulkPendienteBtn && canEditEconomicos && !bulkPendienteBtn.dataset.bound) {
+	        bulkPendienteBtn.dataset.bound = "1";
+	        bulkPendienteBtn.addEventListener("click", async () => {
+	          try { await bulkUpdate("pendiente"); } catch (e) { if (bulkStatusEl) bulkStatusEl.textContent = e?.message || "No se pudo actualizar."; }
+	        });
+	      }
+	      if (bulkAnulaBtn && canEditEconomicos && !bulkAnulaBtn.dataset.bound) {
+	        bulkAnulaBtn.dataset.bound = "1";
+	        bulkAnulaBtn.addEventListener("click", async () => {
+	          if (!confirm("¿Anular los apuntes seleccionados?")) return;
+	          try { await bulkUpdate("anulado"); } catch (e) { if (bulkStatusEl) bulkStatusEl.textContent = e?.message || "No se pudo actualizar."; }
+	        });
+	      }
+
 	      const saveBtn = document.getElementById("rrhhEconManualSave");
 	      if (saveBtn && canEditEconomicos && !saveBtn.dataset.bound) {
 	        saveBtn.dataset.bound = "1";
@@ -14281,12 +14420,17 @@ const renderWorkspaceRrhhHub = () => {
 	            const pctRaw = String(document.getElementById("rrhhEconManualPct")?.value || "").trim();
 	            const pctDefault = serviceKey === "renta" ? 30 : 10;
 	            const pct = pctRaw ? parseMoneyValue(pctRaw) : pctDefault;
-	            const paid = Boolean(document.getElementById("rrhhEconManualPaid")?.checked);
 	            const date = String(document.getElementById("rrhhEconManualDate")?.value || "").trim();
+	            const estadoCobro = String(document.getElementById("rrhhEconManualEstado")?.value || "pendiente").trim().toLowerCase();
+	            const importeCobrado = parseMoneyValue(document.getElementById("rrhhEconManualImporteCobrado")?.value || 0);
+	            const fechaCobro = String(document.getElementById("rrhhEconManualFechaCobro")?.value || "").trim();
 	            const editId = String(saveBtn.dataset.editId || "").trim();
 	            if (!desc && !clientName && !clientNif) throw new Error("Indica al menos un concepto o cliente.");
 	            if (!base || base <= 0) throw new Error("Indica un importe base válido (sin IVA).");
 	            const comision = Math.round(((base * pct) / 100) * 100) / 100;
+	            const estadoFinal = ["pendiente", "parcial", "cobrado", "anulado"].includes(estadoCobro) ? estadoCobro : "pendiente";
+	            const cobrada = estadoFinal === "cobrado" ? 1 : 0;
+	            const importeCobradoFinal = estadoFinal === "cobrado" ? (importeCobrado > 0 ? importeCobrado : comision) : (estadoFinal === "pendiente" ? 0 : importeCobrado);
 	            await apiPost("/api/workspace_rrhh_productividad_manual_upsert", {
 	              ...(editId ? { id: editId } : {}),
 	              workspace_id: state.currentWorkspaceId,
@@ -14299,22 +14443,27 @@ const renderWorkspaceRrhhHub = () => {
               importe_base: base,
               comision_pct: pct,
               comision,
-              cobrada: paid ? 1 : 0,
+              cobrada,
+              estado_cobro: estadoFinal,
+              importe_cobrado: importeCobradoFinal,
+              fecha_cobro: fechaCobro,
               fecha: date,
             });
-            try { document.getElementById("rrhhEconManualClientName").value = ""; } catch {}
-            try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch {}
-            try { document.getElementById("rrhhEconManualDesc").value = ""; } catch {}
-            try { document.getElementById("rrhhEconManualBase").value = ""; } catch {}
-            try { document.getElementById("rrhhEconManualPct").value = ""; } catch {}
-	            try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
-	            try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
-	            try { delete saveBtn.dataset.editId; } catch {}
-	            try { saveBtn.textContent = "Guardar apunte"; } catch {}
+            try { document.getElementById("rrhhEconManualClientName").value = ""; } catch (e) {}
+            try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualDesc").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualBase").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualPct").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualDate").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualEstado").value = "pendiente"; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualImporteCobrado").value = ""; } catch (e) {}
+	            try { document.getElementById("rrhhEconManualFechaCobro").value = ""; } catch (e) {}
+	            try { delete saveBtn.dataset.editId; } catch (e) {}
+	            try { saveBtn.textContent = "Guardar apunte"; } catch (e) {}
 	            try {
 	              const cancelBtn = document.getElementById("rrhhEconManualCancelEdit");
 	              if (cancelBtn) cancelBtn.style.display = "none";
-	            } catch {}
+	            } catch (e) {}
 	            if (st) st.textContent = "Guardado.";
 	            await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
 	          } catch (error) {
@@ -14327,16 +14476,18 @@ const renderWorkspaceRrhhHub = () => {
 	        cancelEditBtn.dataset.bound = "1";
 	        cancelEditBtn.addEventListener("click", () => {
 	          const saveBtn = document.getElementById("rrhhEconManualSave");
-	          try { document.getElementById("rrhhEconManualClientName").value = ""; } catch {}
-	          try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch {}
-	          try { document.getElementById("rrhhEconManualDesc").value = ""; } catch {}
-	          try { document.getElementById("rrhhEconManualBase").value = ""; } catch {}
-	          try { document.getElementById("rrhhEconManualPct").value = ""; } catch {}
-	          try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
-	          try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
-	          try { delete saveBtn.dataset.editId; } catch {}
-	          try { saveBtn.textContent = "Guardar apunte"; } catch {}
-	          try { cancelEditBtn.style.display = "none"; } catch {}
+	          try { document.getElementById("rrhhEconManualClientName").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualDesc").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualBase").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualPct").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualDate").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualEstado").value = "pendiente"; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualImporteCobrado").value = ""; } catch (e) {}
+	          try { document.getElementById("rrhhEconManualFechaCobro").value = ""; } catch (e) {}
+	          try { delete saveBtn.dataset.editId; } catch (e) {}
+	          try { saveBtn.textContent = "Guardar apunte"; } catch (e) {}
+	          try { cancelEditBtn.style.display = "none"; } catch (e) {}
 	          const st = document.getElementById("rrhhEconManualStatus");
 	          if (st) st.textContent = "";
 	        });
@@ -14401,7 +14552,7 @@ const renderWorkspaceRrhhHub = () => {
 	        )
 	      );
       lockActions.forEach((btn) => {
-        try { btn.disabled = true; } catch {}
+        try { btn.disabled = true; } catch (e) {}
       });
       try {
         const form = new FormData(personalForm);
@@ -14446,7 +14597,7 @@ const renderWorkspaceRrhhHub = () => {
       } finally {
         if (submit) submit.disabled = false;
         lockActions.forEach((btn) => {
-          try { btn.disabled = false; } catch {}
+          try { btn.disabled = false; } catch (e) {}
         });
       }
     });
@@ -14649,7 +14800,7 @@ const renderWorkspaceRrhhHub = () => {
       } catch {
         try {
           window.prompt("Copia la contraseña:", value);
-        } catch {}
+        } catch (e) {}
       }
 	    });
 	  }
@@ -14690,7 +14841,7 @@ const renderWorkspaceRrhhHub = () => {
 	      } catch {
 	        try {
 	          window.prompt("Copia la contraseña:", value);
-	        } catch {}
+	        } catch (e) {}
 	      }
 	    });
 	  }
@@ -14738,7 +14889,7 @@ const renderWorkspaceRrhhHub = () => {
       } catch {
         try {
           window.prompt("Copia el enlace:", value);
-        } catch {}
+        } catch (e) {}
       }
     });
   }
@@ -15084,7 +15235,7 @@ const renderWorkspaceRrhhHub = () => {
     if (_rrhhCleanupModal) {
       try {
         _rrhhCleanupModal.remove();
-      } catch {}
+      } catch (e) {}
       _rrhhCleanupModal = null;
     }
   };
@@ -15415,7 +15566,7 @@ const renderWorkspaceRrhhHub = () => {
           if (status) status.textContent = "Invitación enviada.";
         } else {
           if (data?.invite_link) {
-            try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
+            try { await navigator.clipboard?.writeText(data.invite_link); } catch (e) {}
           }
           if (status) status.textContent = "SMTP no configurado. Enlace copiado al portapapeles.";
         }
@@ -17625,7 +17776,7 @@ const closeHomeTimePunchModal = ({ persist = false } = {}) => {
       const uid = String(user?.id || "").trim();
       const day = new Date().toISOString().slice(0, 10);
       if (uid) localStorage.setItem(`crm_home_punch_hide_${uid}_${day}`, "1");
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -17680,8 +17831,8 @@ const renderHomeTimePunchModal = () => {
         state.homeTimeStatus = next && next.ok ? next : state.homeTimeStatus;
         try {
           if (typeof setAuthUi === "function") setAuthUi(state.authUser);
-        } catch {}
-      } catch {}
+        } catch (e) {}
+      } catch (e) {}
       renderCompanyCards();
       closeHomeTimePunchModal({ persist: false });
     } catch (error) {
@@ -17702,8 +17853,8 @@ const renderHomeTimePunchModal = () => {
 	      }
 	      try {
 	        if (typeof setAuthUi === "function") setAuthUi(state.authUser);
-	      } catch {}
-	    } catch {}
+	      } catch (e) {}
+	    } catch (e) {}
 	  };
 	  // Refresca siempre (best-effort) para que el modal y el botón no "dependan" del orden de carga.
 	  // Evita que desaparezca el acceso a fichaje cuando /api/home_time_status falla temporalmente.
@@ -17740,7 +17891,7 @@ const maybeAutoShowHomeTimePunchModal = () => {
     if (_homeTimePunchAutoShownKey === key) return;
     _homeTimePunchAutoShownKey = key;
     openHomeTimePunchModal({ persist: false });
-  } catch {}
+  } catch (e) {}
 };
 
 const renderWorkspaceTimeSummary = (summary = null) => {
@@ -17919,7 +18070,7 @@ const syncWorkspaceFincasBudgetMap = () => {
   if (!addr) {
     try {
       workspaceFincasBudgetMapActions?.classList?.add("hidden");
-    } catch {}
+    } catch (e) {}
     workspaceFincasBudgetMapWrap.classList.add("hidden");
     workspaceFincasBudgetMap.removeAttribute("src");
     return;
@@ -17931,7 +18082,7 @@ const syncWorkspaceFincasBudgetMap = () => {
       workspaceFincasBudgetMapLink.href = `https://www.google.com/maps/search/?api=1&query=${q}`;
       workspaceFincasBudgetMapActions.classList.remove("hidden");
     }
-  } catch {}
+  } catch (e) {}
   workspaceFincasBudgetMapWrap.classList.remove("hidden");
   workspaceFincasBudgetMap.setAttribute("src", `https://www.google.com/maps?hl=es&z=16&output=embed&q=${q}`);
   try {
@@ -17956,7 +18107,7 @@ const syncWorkspaceFincasBudgetMap = () => {
         })
         .catch(() => {});
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const fillWorkspaceFincasCommunityForm = (record = null) => {
@@ -18003,7 +18154,7 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     if (cuotaInput && String(cuotaInput.value || "").trim()) {
       cuotaInput.value = formatEurosCompact(parseMoneyValue(cuotaInput.value));
     }
-  } catch {}
+  } catch (e) {}
   syncWorkspaceFincasCommunityMap();
   if (workspaceFincasCommunityBuildingPhotoPreview) {
     const key = String(payload.foto_edificio_key || "").trim();
@@ -18054,7 +18205,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
           if (typeof workspaceFincasCommunityForm?.scrollIntoView === "function") {
             workspaceFincasCommunityForm.scrollIntoView({ behavior: "smooth", block: "start" });
           }
-        } catch {}
+        } catch (e) {}
       }
     });
   });
@@ -18419,7 +18570,7 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     try {
       const idField = workspaceFincasLedgerForm?.querySelector('[name="id"]');
       if (workspaceFincasLedgerForm && !String(idField?.value || "").trim()) fillWorkspaceFincasLedgerForm();
-    } catch {}
+    } catch (e) {}
     void refreshWorkspaceFincasLedger({ silent: true });
   }
   if (normalized === "presupuestos") {
@@ -18435,14 +18586,14 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     };
     try {
       setupBudgetsUi();
-    } catch {}
+    } catch (e) {}
     const companies = state.currentWorkspaceDetail?.companies || [];
     if (!companies.length && state.currentWorkspaceId) {
       void ensureWorkspaceCompaniesLoaded()
         .then(() => {
           try {
             setupBudgetsUi();
-          } catch {}
+          } catch (e) {}
         })
         .catch(() => {});
     }
@@ -18644,11 +18795,11 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   if (options.forceAuto) {
     try {
       delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-    } catch {}
+    } catch (e) {}
     try {
       if (subtotalInput) delete subtotalInput.dataset.manual;
       if (totalInput) delete totalInput.dataset.manual;
-    } catch {}
+    } catch (e) {}
   }
 
   if (useManualTotal) {
@@ -18668,7 +18819,7 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
     if (totalInput) delete totalInput.dataset.manual;
     try {
       delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-    } catch {}
+    } catch (e) {}
     subtotal = suggestedSubtotal;
   }
 
@@ -18735,7 +18886,7 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
     if (subtotalInput) delete subtotalInput.dataset.manual;
-  } catch {}
+  } catch (e) {}
   syncWorkspaceFincasBudgetQuickComputed();
   syncWorkspaceFincasBudgetMap();
 };
@@ -18773,11 +18924,11 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   }
   try {
     syncWorkspaceFincasBudgetBranding();
-  } catch {}
+  } catch (e) {}
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
     if (subtotalInput) delete subtotalInput.dataset.manual;
-  } catch {}
+  } catch (e) {}
   syncWorkspaceFincasBudgetQuickComputed();
   syncWorkspaceFincasBudgetMap();
 };
@@ -18831,7 +18982,7 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
     if (subtotalInput) delete subtotalInput.dataset.manual;
-  } catch {}
+  } catch (e) {}
   if (workspaceFincasBudgetBuildingPhotoPreview) {
     workspaceFincasBudgetBuildingPhotoPreview.removeAttribute("src");
     workspaceFincasBudgetBuildingPhotoPreview.classList.add("hidden");
@@ -18845,7 +18996,7 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   }
   try {
     syncWorkspaceFincasBudgetBranding();
-  } catch {}
+  } catch (e) {}
   syncWorkspaceFincasBudgetQuickComputed();
   syncWorkspaceFincasBudgetMap();
 };
@@ -19167,7 +19318,7 @@ const renderWorkspaceFincasBudgetsList = () => {
       if (!id) return;
       try {
         await refreshWorkspaceFincasCommunities({ silent: true });
-      } catch {}
+      } catch (e) {}
       setWorkspaceFincasTab("comunidades");
       const record = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === id) || null;
       if (record) fillWorkspaceFincasCommunityForm(record);
@@ -19200,7 +19351,7 @@ const renderWorkspaceFincasBudgetsList = () => {
       if (!row) return;
       try {
         openBudgetEngineFromRow(row, {});
-      } catch {}
+      } catch (e) {}
     });
   });
 
@@ -19223,7 +19374,7 @@ const renderWorkspaceFincasBudgetsList = () => {
           encargo_accion_id: "",
           titulo: `Copia · ${baseTitle}`,
         });
-      } catch {}
+      } catch (e) {}
     });
   });
 
@@ -19247,7 +19398,7 @@ const renderWorkspaceFincasBudgetsList = () => {
       } catch (error) {
         if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo borrar.";
       } finally {
-        try { btn.disabled = false; } catch {}
+        try { btn.disabled = false; } catch (e) {}
       }
     });
   });
@@ -19431,10 +19582,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
     if (wsRow && wsRow.member_role != null) {
       state.currentWorkspaceMemberRole = String(wsRow.member_role || "").trim();
     }
-  } catch {}
+  } catch (e) {}
   try {
     localStorage.setItem("crm.currentWorkspaceId", String(workspaceId || ""));
-  } catch {}
+  } catch (e) {}
   // Evita cargar un workspace con DB todavía "fría" (Render/PG): si no, se muestran fichas vacías y
   // el usuario siente que "se han borrado" configuraciones.
   {
@@ -19495,7 +19646,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     if (detail.member_role != null) {
       state.currentWorkspaceMemberRole = String(detail.member_role || "").trim();
     }
-  } catch {}
+  } catch (e) {}
   if (detail && typeof detail.can_manage_workspace !== "undefined") {
     canManageWorkspace = Boolean(authUser && (isSuperAdmin || Boolean(detail.can_manage_workspace) || canManageCurrentWorkspace()));
   } else {
@@ -19761,7 +19912,7 @@ const loadWorkspaceCentral = async () => {
         "Base de datos no disponible",
         `${health.body || `HTTP ${health.status}`} · Reintentando cargar el workspace en unos segundos...`
       );
-    } catch {}
+    } catch (e) {}
     updateWorkspaceEntryChrome();
     const attempt = Number(state.workspaceCentralRetryAttempt || 0) || 0;
     const nextAttempt = Math.min(7, attempt + 1);
@@ -19786,7 +19937,7 @@ const loadWorkspaceCentral = async () => {
       } else {
         setUiToast("Servidor no disponible", (last.message || "Reintentando...").trim() || "Reintentando...");
       }
-    } catch {}
+    } catch (e) {}
     updateWorkspaceEntryChrome();
     // Reintento con backoff simple.
     const attempt = Number(state.workspaceCentralRetryAttempt || 0) || 0;
@@ -20000,7 +20151,7 @@ const setPage = (page) => {
   document.body.classList.toggle("page-empresa", page !== "home");
   try {
     debugLog("setPage()", page);
-  } catch {}
+  } catch (e) {}
   // Diagnóstico: si la URL pide un deep-link pero acabamos en Home, lo mostramos en UI (sin depender de consola).
   try {
     if (page === "home" && isDebugEnabled()) {
@@ -20012,7 +20163,7 @@ const setPage = (page) => {
         debugLog("Routing: volvió a Home", `URL actual: ${window.location.href}`);
       }
     }
-  } catch {}
+  } catch (e) {}
   if (homeSection) {
     homeSection.classList.toggle("hidden", page !== "home");
   }
@@ -20181,7 +20332,7 @@ const getClientesContextServiceParam = () => {
     if (crmParam === "inmo" || crmParam === "inmobiliaria") return "inmobiliaria";
     if (crmParam === "seguros") return "seguros";
     if (crmParam === "fin" || crmParam === "financiaciones" || crmParam === "hipotecas") return "financiaciones";
-  } catch {}
+  } catch (e) {}
   return getServiceFilterParam();
 };
 
@@ -20218,7 +20369,7 @@ const setStoredServiceCompanyId = (serviceKey = "", empresaId = "") => {
       return;
     }
     localStorage.setItem(key, id);
-  } catch {}
+  } catch (e) {}
 };
 
 const getWorkspaceDefaultCompanyIdForServiceKey = (serviceKey = "") => {
@@ -20449,12 +20600,12 @@ const syncCrmTecnocloudVerticalNav = () => {
         btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
       });
     }
-  } catch {}
+  } catch (e) {}
 
   // Financiaciones: usar módulos "card" en topbar, no micro-tabs internos.
   try {
     if (hipotecaTabs) hipotecaTabs.classList.toggle("hidden", vertical === "fin");
-  } catch {}
+  } catch (e) {}
 
   const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin";
   [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
@@ -20567,7 +20718,7 @@ const openCrmInmobiliario = () => {
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const ensureCrmOpen = (action) => {
@@ -20685,7 +20836,7 @@ const syncCrmModalOpenState = () => {
       (crmCaptacionModal && !crmCaptacionModal.classList.contains("hidden")) ||
       (actionModal && !actionModal.classList.contains("hidden"));
     document.body.classList.toggle("modal-open", Boolean(open));
-  } catch {}
+  } catch (e) {}
 };
 
 const setCrmQuickNewOpen = (open = false, options = {}) => {
@@ -20747,7 +20898,7 @@ const setReturnDraft = (ctx = "", payload = {}, meta = {}) => {
         ...((meta && typeof meta === "object") ? meta : {}),
       })
     );
-  } catch {}
+  } catch (e) {}
 };
 
 const peekReturnDraftCtx = () => {
@@ -20796,7 +20947,7 @@ const applyDraftToForm = (formEl, payload = {}) => {
       }
       el.value = value === null || value === undefined ? "" : String(value);
     });
-  } catch {}
+  } catch (e) {}
 };
 
 const maybeReturnToCrmCaptacionCreate = () => {
@@ -20805,7 +20956,7 @@ const maybeReturnToCrmCaptacionCreate = () => {
   window.setTimeout(() => {
     try {
       setCrmCaptacionModalOpen(true);
-    } catch {}
+    } catch (e) {}
   }, 0);
 };
 
@@ -20815,7 +20966,7 @@ const maybeReturnToCrmClienteCreate = () => {
   window.setTimeout(() => {
     try {
       setCrmClienteModalOpen(true);
-    } catch {}
+    } catch (e) {}
   }, 0);
 };
 
@@ -20824,11 +20975,11 @@ const maybeReturnToAltaCaptacion = () => {
   const restored = consumeReturnDraft("alta_captacion");
   try {
     setTab("alta");
-  } catch {}
+  } catch (e) {}
   try {
     if (altaSection) altaSection.dataset.estudioActive = "captacion";
     updateEstudioAltaTabs();
-  } catch {}
+  } catch (e) {}
   if (captacionForm && restored?.payload) {
     applyDraftToForm(captacionForm, restored.payload);
     const focusName = String(restored?.focusName || "").trim();
@@ -20836,7 +20987,7 @@ const maybeReturnToAltaCaptacion = () => {
       try {
         const el = captacionForm.querySelector(`[name="${CSS.escape(focusName)}"]`);
         if (el && el.focus) window.setTimeout(() => el.focus(), 0);
-      } catch {}
+      } catch (e) {}
     }
   }
 };
@@ -20865,7 +21016,7 @@ const setCrmClienteModalOpen = (open = false) => {
     } else {
       try {
         crmClienteCreateForm?.reset?.();
-      } catch {}
+      } catch (e) {}
     }
 	    setTimeout(() => {
 	      const input = crmClienteCreateForm?.querySelector?.('input[name="nombre"]');
@@ -20895,7 +21046,7 @@ const setCrmClienteModalOpen = (open = false) => {
     } else {
       try {
         crmCaptacionCreateForm?.reset?.();
-      } catch {}
+      } catch (e) {}
     }
     setTimeout(() => {
       const input = crmCaptacionCreateForm?.querySelector?.('input[name="direccion"]');
@@ -20903,7 +21054,7 @@ const setCrmClienteModalOpen = (open = false) => {
     }, 0);
 	    try {
 	      bindPostalLookup(crmCaptacionCreateForm);
-	    } catch {}
+	    } catch (e) {}
 	  }
 	  syncCrmModalOpenState();
 	};
@@ -21071,7 +21222,7 @@ const loadCrmAzValue = (scope = "") => {
 const saveCrmAzValue = (scope = "", value = "") => {
   try {
     localStorage.setItem(getCrmAzStorageKey(scope), String(value || "").trim().toUpperCase());
-  } catch {}
+  } catch (e) {}
 };
 
 const TC_AZ_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -21150,7 +21301,7 @@ const saveCrmRecentItems = (items = []) => {
   try {
     const trimmed = Array.isArray(items) ? items.slice(0, 10) : [];
     localStorage.setItem(getCrmRecentStorageKey(), JSON.stringify(trimmed));
-  } catch {}
+  } catch (e) {}
 };
 
 const pushCrmRecentItem = (item = {}) => {
@@ -21256,7 +21407,7 @@ const setCrmGlobalSearchResultsOpen = (open = false) => {
   if (crmGlobalSearch) {
     try {
       crmGlobalSearch.setAttribute("aria-expanded", open ? "true" : "false");
-    } catch {}
+    } catch (e) {}
   }
   if (!open) {
     state.crmGlobalSearchActiveIdx = -1;
@@ -21279,7 +21430,7 @@ const setCrmGlobalSearchActiveIndex = (index) => {
     item.classList.toggle("active", isActive);
     item.setAttribute("aria-selected", isActive ? "true" : "false");
     if (isActive) {
-      try { item.scrollIntoView({ block: "nearest" }); } catch {}
+      try { item.scrollIntoView({ block: "nearest" }); } catch (e) {}
     }
   });
   if (crmGlobalSearch) {
@@ -21290,7 +21441,7 @@ const setCrmGlobalSearchActiveIndex = (index) => {
       } else {
         crmGlobalSearch.removeAttribute("aria-activedescendant");
       }
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -21549,7 +21700,7 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
 		      // Steps (Tecnocloud).
 		      if (isDemandasStep) {
 		        state.crmDemandasStep = v;
-		        try { localStorage.setItem("crm.demandas.step", v); } catch {}
+		        try { localStorage.setItem("crm.demandas.step", v); } catch (e) {}
 		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
 		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = "";
 		        if (crmDemandaSearch) crmDemandaSearch.value = "";
@@ -21563,7 +21714,7 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
 		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = v;
 		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
 		        state.crmDemandasStep = "otras";
-		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch (e) {}
 		        if (crmDemandaSearch) crmDemandaSearch.value = "";
 		        setCrmWorkspaceView("demandas");
 		        loadCrmDemandas();
@@ -21575,7 +21726,7 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
 		        if (crmDemandaOrigenFilter) crmDemandaOrigenFilter.value = "";
 		        if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = "activa";
 		        state.crmDemandasStep = "otras";
-		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch (e) {}
 		        if (crmDemandaSearch) crmDemandaSearch.value = "prioridad:alta";
 		        setCrmWorkspaceView("demandas");
 		        loadCrmDemandas();
@@ -21587,7 +21738,7 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
 		      if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = vRaw || "";
 		      if (v === "activa") {
 		        state.crmDemandasStep = "otras";
-		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch {}
+		        try { localStorage.setItem("crm.demandas.step", "otras"); } catch (e) {}
 		      }
 		      if (crmDemandaSearch) crmDemandaSearch.value = "";
 		      setCrmWorkspaceView("demandas");
@@ -21855,7 +22006,7 @@ const openCrmAlertsModal = () => {
       loadCrmDemandas();
       loadCrmAgenda();
       setTimeout(() => openCrmAlertsModal(), 260);
-    } catch {}
+    } catch (e) {}
   });
   body.querySelectorAll('[data-crm-alert-open="1"]').forEach((btn) => {
     btn.addEventListener("click", (event) => {
@@ -21921,14 +22072,14 @@ const openCrmProfileModal = () => {
     modal.classList.add("hidden");
     try {
       logoutAuthSession();
-    } catch {}
+    } catch (e) {}
   });
   body.querySelector('[data-crm-profile-open-workspaces="1"]')?.addEventListener("click", () => {
     modal.classList.add("hidden");
     try {
       setUrlParams(new URLSearchParams({ holding: "1", mode: "tenant", view: "operations" }));
       openHolding({ mode: "tenant", view: "operations" });
-    } catch {}
+    } catch (e) {}
   });
   modal.classList.remove("hidden");
 };
@@ -21960,7 +22111,7 @@ const openGestoriaCrm = () => {
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
@@ -21999,7 +22150,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
     currentParams.set("crm", "gestoria");
     currentParams.set("tab", targetTab);
     setUrlParams(currentParams);
-  } catch {}
+  } catch (e) {}
   updateTableVisibility();
   // Gestoría se renderiza con sus secciones propias (gestoriaDashboardSection/gestoriaCrmSection/etc).
   // No debe montarse dentro del shell "Lightning" del CRM inmobiliario (evita duplicados/solapes).
@@ -22077,7 +22228,7 @@ const openSegurosCrm = () => {
     currentParams.set("crm", "seguros");
     currentParams.delete("tab");
     setUrlParams(currentParams);
-  } catch {}
+  } catch (e) {}
   updateTableVisibility();
   if (segurosCrmSearch) segurosCrmSearch.value = "";
   if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
@@ -22090,7 +22241,7 @@ const openSegurosCrm = () => {
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const openFinCrm = () => {
@@ -22143,7 +22294,7 @@ const openFinCrm = () => {
     state.currentInmueble = null;
     state.currentInmuebleContext = null;
     state.currentInmuebleId = "";
-  } catch {}
+  } catch (e) {}
   try {
     const currentParams = new URLSearchParams(window.location.search);
     currentParams.delete("empresa");
@@ -22152,7 +22303,7 @@ const openFinCrm = () => {
     currentParams.set("crm", "fin");
     currentParams.set("tab", "fin-crm");
     setUrlParams(currentParams);
-  } catch {}
+  } catch (e) {}
   updateTableVisibility();
   setCrmMode("fin");
   {
@@ -22165,7 +22316,7 @@ const openFinCrm = () => {
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const openFinServiceTab = (targetTab = "fin-crm") => {
@@ -22184,7 +22335,7 @@ const openFinServiceTab = (targetTab = "fin-crm") => {
     currentParams.set("crm", "fin");
     currentParams.set("tab", targetTab);
     setUrlParams(currentParams);
-  } catch {}
+  } catch (e) {}
   updateTableVisibility();
   setCrmMode("fin");
   if (targetTab === "fin-sim") {
@@ -22310,7 +22461,7 @@ const renderClienteContabilidadPanel = () => {
       if (gestoriaModuleRenta) {
         gestoriaModuleRenta.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-    } catch {}
+    } catch (e) {}
   };
 
   const gestoria = state.currentClienteGestoriaData || {};
@@ -22482,7 +22633,7 @@ const renderClienteRentaDashboardPanel = () => {
       if (gestoriaModuleRenta) {
         gestoriaModuleRenta.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-    } catch {}
+    } catch (e) {}
   };
 
   const makeKpiCard = (label, value, onClick) => {
@@ -22859,7 +23010,7 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
         row.nombre = next;
         try {
           saveGestoriaDocField(row.id, "nombre", next);
-        } catch {}
+        } catch (e) {}
       };
       input.addEventListener("blur", commit);
       input.addEventListener("keydown", (event) => {
@@ -23081,7 +23232,7 @@ const openHolding = (options = {}) => {
       "openHolding()",
       `mode=${mode} workspace=${String(options.workspace || "")} view=${String(options.view || "")}\nuser=${user?.usuario || user?.email || user?.id || "-"} priv=${canManageWorkspace ? "1" : "0"}`
     );
-  } catch {}
+  } catch (e) {}
   // En modo plataforma (admin), exigimos permisos globales. En tenant, cualquier usuario autenticado debe poder entrar.
   if (mode === "platform" && !canAccessSharedHomeModules(user)) {
     goHome();
@@ -23091,7 +23242,7 @@ const openHolding = (options = {}) => {
     // No limpiamos la URL ni forzamos home: dejamos el deep-link y pedimos login.
     try {
       showAuthOverlay("La sesión ha caducado. Inicia sesión de nuevo.");
-    } catch {}
+    } catch (e) {}
     return;
   }
   const requestedWorkspace = normalizeTenantWorkspaceSlug(String(options.workspace || "").trim(), "");
@@ -23139,24 +23290,24 @@ const openHolding = (options = {}) => {
       "openHolding(): state",
       `target=${state.currentWorkspaceTarget || "-"} nextView=${requestedView || "-"} engine=${state.currentWorkspaceEngineView || "-"}`
     );
-  } catch {}
+  } catch (e) {}
   setModule("empresas");
   if (explorerSection) {
     explorerSection.classList.add("hidden");
   } else {
     try {
       debugLog("openHolding(): missing explorerSection", "DOM element #explorerSection no existe.");
-    } catch {}
+    } catch (e) {}
   }
   try {
     debugLog("openHolding(): setPage", "holding");
-  } catch {}
+  } catch (e) {}
   setPage("holding");
   const nextView = requestedView || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview");
   updateWorkspaceEntryChrome();
   try {
     debugLog("openHolding(): setWorkspaceView", nextView);
-  } catch {}
+  } catch (e) {}
   setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   loadWorkspaceCentral().catch(() => {});
   syncHoldingUrlParams();
@@ -23176,7 +23327,7 @@ const openAgenda = () => {
     if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
       inmuebleDetail.classList.add("hidden");
     }
-  } catch {}
+  } catch (e) {}
   explorerSection.classList.add("hidden");
   setPage("agenda");
   if (agendaSection) {
@@ -23468,7 +23619,7 @@ const goHome = () => {
       setUiToast("Debug: goHome()", `${window.location.href}\n\n${stack}`);
       debugLog("goHome()", `${window.location.href}\n\n${stack}`);
     }
-  } catch {}
+  } catch (e) {}
   setCrmMode("");
   setModule("empresas");
   empresaSelect.value = "";
@@ -23509,7 +23660,7 @@ const goHome = () => {
 const handleRoute = () => {
   try {
     debugLog("handleRoute()", `search=${window.location.search || ""}`);
-  } catch {}
+  } catch (e) {}
   const deps = {
     state,
     slugify,
@@ -23536,7 +23687,7 @@ const handleRoute = () => {
     RoutingModule.handleRoute(deps);
     try {
       debugLog("handleRoute(): ok", `page=${state.currentPage || "-"} holdingView=${state.currentWorkspaceView || "-"}`);
-    } catch {}
+    } catch (e) {}
     return;
   }
   // Fallback defensivo: si por caché/red falla el script `app-routing.js`, no nos quedamos en Home
@@ -23566,7 +23717,7 @@ const handleRoute = () => {
       const requestedPersona = (params.get("persona") || "").trim();
       try {
         debugLog("route: holding", `mode=${mode} workspace=${params.get("workspace") || ""} view=${requestedView || ""}`);
-      } catch {}
+      } catch (e) {}
       openHolding({
         mode,
         workspace: params.get("workspace") || "",
@@ -23657,7 +23808,7 @@ const handleRoute = () => {
         return;
       }
     }
-  } catch {}
+  } catch (e) {}
   goHome();
   UI?.refreshContext(state);
 };
@@ -23927,7 +24078,7 @@ const enableCrmDenseTableResize = (table, storageKey = "") => {
   const save = () => {
     try {
       localStorage.setItem(tableKey, JSON.stringify(stored || {}));
-    } catch {}
+    } catch (e) {}
   };
 
   ths.forEach((th, index) => {
@@ -24024,7 +24175,7 @@ const enableCrmDenseTableResize = (table, storageKey = "") => {
         event.stopPropagation();
         try {
           handle.setPointerCapture(event.pointerId);
-        } catch {}
+        } catch (e) {}
         startResize(event.clientX, event.pointerId);
       });
     } else {
@@ -26197,7 +26348,7 @@ const bindPostalLookup = (formEl) => {
         provinciaInput.value = provinciaValue;
         try {
           provinciaInput.dispatchEvent(new Event("change", { bubbles: true }));
-        } catch {}
+        } catch (e) {}
       }
       if (poblacionInput && poblacionValue) {
         const shouldAuto =
@@ -26370,7 +26521,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     try {
       canvas.removeEventListener("click", canvas.__barChartHandlers.click);
       canvas.removeEventListener("mousemove", canvas.__barChartHandlers.move);
-    } catch {}
+    } catch (e) {}
     canvas.__barChartHandlers = null;
   }
 
@@ -26605,7 +26756,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       if (!found) return;
       try {
         options.onBarClick(found);
-      } catch {}
+      } catch (e) {}
     };
     canvas.__barChartHandlers = { click: onClick, move: onMove };
     canvas.addEventListener("mousemove", onMove);
@@ -26990,7 +27141,7 @@ const autocompleteInmuebleDireccionFromUi = async () => {
 
   try {
     await saveInmuebleFields(updates);
-  } catch {}
+  } catch (e) {}
 };
 
 const refreshCurrentInmuebleHeader = () => {
@@ -27939,7 +28090,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
         const contextStage = normalizeSimple(state?.currentInmuebleContext?.captacion?.situacion_comercial || "");
         return contextStage || normalizeSimple(data?.estado || "");
       }
-    } catch {}
+    } catch (e) {}
     return normalizeSimple(data?.estado || data?.situacion_comercial || "");
   };
   const inmoStageKey = resolveInmoStageKey();
@@ -28169,12 +28320,12 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (input && input.tagName === "INPUT" && field.list) {
       try {
         input.setAttribute("list", String(field.list || "").trim());
-      } catch {}
+      } catch (e) {}
       try {
         const current = String(input.value || "").trim();
         const extras = current ? [current] : [];
         ensureInlineDatalist(field.list, () => [...(field.listOptions || []), ...extras]);
-      } catch {}
+      } catch (e) {}
     }
     input.classList.add("inline-input");
     input.dataset.target = target;
@@ -28480,7 +28631,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     if (existing?.map) {
       try {
         existing.map.remove();
-      } catch {}
+      } catch (e) {}
     }
     leafletMapInstances.delete(container);
   };
@@ -28625,7 +28776,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   const map = window.L.map(mapEl, { zoomControl: false, attributionControl: true, scrollWheelZoom: true });
   try {
     window.L.control.zoom({ position: "bottomright" }).addTo(map);
-  } catch {}
+  } catch (e) {}
   const street = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20,
     attribution: "&copy; OpenStreetMap contributors",
@@ -28643,7 +28794,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   map.setView([Number(lat), Number(lon)], 16);
   try {
     if (marker.dragging) marker.dragging.disable();
-  } catch {}
+  } catch (e) {}
   leafletMapInstances.set(container, { map, marker, street, satellite, active: "street", savedLat: Number(lat), savedLon: Number(lon), preview: null, syncPickUi: null });
 
   const setLayer = (layerKey) => {
@@ -28654,11 +28805,11 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     try {
       if (inst.active === "street") inst.map.removeLayer(inst.street);
       if (inst.active === "satellite") inst.map.removeLayer(inst.satellite);
-    } catch {}
+    } catch (e) {}
     try {
       if (next === "satellite") inst.satellite.addTo(inst.map);
       else inst.street.addTo(inst.map);
-    } catch {}
+    } catch (e) {}
     inst.active = next === "satellite" ? "satellite" : "street";
     const buttons = Array.from(container.querySelectorAll(".map-box-leaflet-controls button[data-layer]"));
     buttons.forEach((btn) => btn.classList.toggle("active", btn.dataset.layer === inst.active));
@@ -28698,7 +28849,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
         if (pick) inst.marker.dragging.enable();
         else inst.marker.dragging.disable();
       }
-    } catch {}
+    } catch (e) {}
     if (applyBtn) applyBtn.classList.toggle("hidden", !(pick && inst.preview));
     if (pick) setHint("Modo posición: busca o haz clic en el mapa para fijar.");
     else setHint("");
@@ -28706,7 +28857,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   try {
     const inst = leafletMapInstances.get(container);
     if (inst) inst.syncPickUi = syncPickUi;
-  } catch {}
+  } catch (e) {}
   syncPickUi();
 
   const centerTo = (nextLat, nextLon, zoom = 16) => {
@@ -28715,7 +28866,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     try {
       inst.marker.setLatLng([Number(nextLat), Number(nextLon)]);
       inst.map.setView([Number(nextLat), Number(nextLon)], zoom);
-    } catch {}
+    } catch (e) {}
   };
 
   if (marker) {
@@ -28791,7 +28942,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   window.setTimeout(() => {
     try {
       map.invalidateSize();
-    } catch {}
+    } catch (e) {}
   }, 60);
 };
 
@@ -28821,11 +28972,11 @@ const setInmueblePositionPickActive = (active) => {
         inst.syncPickUi();
       }
     }
-  } catch {}
+  } catch (e) {}
   if (!next && typeof inmueblePositionPickCleanup === "function") {
     try {
       inmueblePositionPickCleanup();
-    } catch {}
+    } catch (e) {}
     inmueblePositionPickCleanup = null;
   }
 };
@@ -28839,7 +28990,7 @@ const startInmueblePositionPickMode = () => {
   if (typeof inmueblePositionPickCleanup === "function") {
     try {
       inmueblePositionPickCleanup();
-    } catch {}
+    } catch (e) {}
     inmueblePositionPickCleanup = null;
   }
   const handler = (event) => {
@@ -28849,7 +29000,7 @@ const startInmueblePositionPickMode = () => {
     try {
       inst.marker.setLatLng([lat, lon]);
       inst.map.panTo([lat, lon]);
-    } catch {}
+    } catch (e) {}
     void saveInmuebleFields({ lat, lon }).then((res) => {
       if (res?.error) {
         setInmuebleSaveStatus(res.error || "Error al guardar posición.");
@@ -28865,7 +29016,7 @@ const startInmueblePositionPickMode = () => {
   inmueblePositionPickCleanup = () => {
     try {
       inst.map.off("click", handler);
-    } catch {}
+    } catch (e) {}
   };
   setInmueblePositionPickActive(true);
   return true;
@@ -29027,7 +29178,7 @@ const clientSideGeocodeLookup = async (query) => {
           hit.query_attempts = candidates.slice();
           return hit;
         }
-      } catch {}
+      } catch (e) {}
     }
   }
   return null;
@@ -29051,7 +29202,7 @@ const lookupMapAddress = async (query) => {
         };
       }
     }
-  } catch {}
+  } catch (e) {}
   try {
     const hit = await clientSideGeocodeLookup(q);
     if (hit) {
@@ -29066,7 +29217,7 @@ const lookupMapAddress = async (query) => {
         };
       }
     }
-  } catch {}
+  } catch (e) {}
   return null;
 };
 
@@ -29137,7 +29288,7 @@ const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => 
               saveInmuebleField("codigo_postal", cp);
             }
           }
-        } catch {}
+        } catch (e) {}
         if (latInput) latInput.value = String(lat);
         if (lonInput) lonInput.value = String(lon);
         saveInmuebleField("lat", lat);
@@ -29208,7 +29359,7 @@ const geocodeCaptacionAddress = () => {
             codigoPostalInput.value = cp;
           }
         }
-      } catch {}
+      } catch (e) {}
       if (latInput) latInput.value = String(lat);
       if (lonInput) lonInput.value = String(lon);
       updateCaptacionMap(lat, lon);
@@ -29287,7 +29438,7 @@ const syncCaptacionOwnerByName = async () => {
     const match = await lookupClienteByNombre(nombreInput.value);
     if (!match?.id) return;
     applyCaptacionOwnerMatch(match, { message: `Cliente vinculado por nombre: ${match.nombre}` });
-  } catch {}
+  } catch (e) {}
 };
 
 const chooseCatastroCandidate = (candidates = [], title = "Selecciona referencia catastral") => {
@@ -29497,7 +29648,7 @@ const syncInmuebleCatastroFicha = async (inputMap = {}, opts = {}) => {
         setInmuebleSaveStatus(msg);
         try {
           if (popupWindow && !popupWindow.closed) popupWindow.close();
-        } catch {}
+        } catch (e) {}
         return { error: msg };
       }
       currentRef = String(
@@ -29551,7 +29702,7 @@ const syncInmuebleCatastroFicha = async (inputMap = {}, opts = {}) => {
     } else {
       try {
         if (popupWindow && !popupWindow.closed) popupWindow.close();
-      } catch {}
+      } catch (e) {}
     }
     return data;
   } catch (err) {
@@ -29559,7 +29710,7 @@ const syncInmuebleCatastroFicha = async (inputMap = {}, opts = {}) => {
     setInmuebleSaveStatus(msg);
     try {
       if (popupWindow && !popupWindow.closed) popupWindow.close();
-    } catch {}
+    } catch (e) {}
     return { error: msg };
   }
 };
@@ -31363,7 +31514,7 @@ const renderAdminUserDetail = () => {
         ? "Invitación enviada."
         : "SMTP no configurado. Enlace copiado al portapapeles.";
       if (!data.sent && data.invite_link) {
-        try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
+        try { await navigator.clipboard?.writeText(data.invite_link); } catch (e) {}
       }
     } catch {
       status.textContent = "Error al enviar invitación.";
@@ -32049,7 +32200,7 @@ const renderPropietariosEditor = (propietarios) => {
         }
         return true;
       }
-    } catch {}
+    } catch (e) {}
     return false;
   };
 
@@ -32210,7 +32361,7 @@ const updateTableVisibility = () => {
         if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") {
           return new Set(["operativa", "fin-crm", "fin-sim"]);
         }
-      } catch {}
+      } catch (e) {}
       if (currentTab === "crm") return new Set(["operativa", "crm"]);
       if (currentTab === "seguros-crm") return new Set(["operativa", "seguros-crm"]);
       if (currentTab === "fin-crm" || currentTab === "fin-sim") return new Set(["operativa", "fin-crm", "fin-sim"]);
@@ -32569,7 +32720,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
   }
   try {
     updateTableVisibility();
-  } catch {}
+  } catch (e) {}
 
 	if (nextView === "captaciones") {
 	  loadCrmCaptaciones();
@@ -32633,7 +32784,7 @@ const mountCrmVerticalViews = () => {
     if (segurosCrmSection) {
       segurosCrmSection.classList.toggle("hidden", vertical !== "seguros");
     }
-  } catch {}
+  } catch (e) {}
   try {
     if (crmFinMount && hipotecaSection && hipotecaSection.parentElement !== crmFinMount) {
       crmFinMount.appendChild(hipotecaSection);
@@ -32641,7 +32792,7 @@ const mountCrmVerticalViews = () => {
     if (hipotecaSection) {
       hipotecaSection.classList.toggle("hidden", vertical !== "fin");
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const escapeHtml = (value) =>
@@ -34678,7 +34829,7 @@ const autofillHipotecaLiquidacionFromFicha = (panel) => {
     if (c2Nombre) {
       setLiquidacionFieldIfEmpty(panel, "vendedor.cliente", c2Nombre);
     }
-  } catch {}
+  } catch (e) {}
   refreshHipotecaLiquidacionComputedControls(panel);
 };
 
@@ -35000,7 +35151,7 @@ const setupHipotecaPrestamoCuotasAuto = (panel) => {
   // Permitir decimales si hace falta (p.e. cuotas no múltiplo de 12).
   try {
     plazoEl.step = "0.01";
-  } catch {}
+  } catch (e) {}
 
   let guard = false;
   const syncFromPlazo = () => {
@@ -35353,7 +35504,7 @@ const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
       panel
         .querySelector('[data-json="cliente_inmueble_json"][data-path="comprador.c1.nombre"]')
         ?.focus?.();
-    } catch {}
+    } catch (e) {}
   });
 };
 
@@ -35675,7 +35826,7 @@ const saveHipotecaFicha = async (event) => {
     if (status) status.textContent = message || "Error API al guardar cambios.";
     try {
       console.error("saveHipotecaFicha error", error);
-    } catch {}
+    } catch (e) {}
   }
 };
 
@@ -36818,7 +36969,7 @@ const setHipotecaAltaView = (view) => {
         btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
       });
     }
-  } catch {}
+  } catch (e) {}
   if (next === "dashboard") {
     loadHipotecaDashboard();
   }
@@ -39993,7 +40144,7 @@ const loadCrmClientes = async ({ force = false } = {}) => {
 	    if (crmViewResumen && !crmViewResumen.classList.contains("hidden")) {
 	      renderCrmResumenDashboard();
 	    }
-	  } catch {}
+	  } catch (e) {}
 	};
 
 const resolveCaptacionCodePrefix = (etapa) => {
@@ -40651,7 +40802,7 @@ const renderCrmKanban = (data) => {
             try {
               event.dataTransfer?.setData?.("text/plain", String(captacionId || ""));
               event.dataTransfer.effectAllowed = "move";
-            } catch {}
+            } catch (e) {}
             crmKanbanDragPayload = {
               captacionId: String(captacionId || "").trim(),
               inmuebleId: String(inmuebleId || "").trim(),
@@ -41048,7 +41199,7 @@ const hydrateCrmResumenYtdControls = () => {
     state.crmResumenYtdYear = String(crmResumenYtdYear.value || String(currentYear));
     try {
       localStorage.setItem("crm.resumen.ytdYear", state.crmResumenYtdYear);
-    } catch {}
+    } catch (e) {}
     renderCrmResumenYtdBoard({ force: true });
   });
 
@@ -41056,7 +41207,7 @@ const hydrateCrmResumenYtdControls = () => {
     state.crmResumenYtdResponsable = String(crmResumenYtdResponsable.value || "");
     try {
       localStorage.setItem("crm.resumen.ytdResponsable", state.crmResumenYtdResponsable);
-    } catch {}
+    } catch (e) {}
     renderCrmResumenYtdBoard({ force: true });
   });
 };
@@ -41426,7 +41577,7 @@ const renderCrmInicioBoard = (pipelineItems = []) => {
           crmInicioDragPayload = { captacionId, fromEtapa: stage, label: `${codePrefix} - ${direccion}` };
           try {
             event.dataTransfer?.setData?.("text/plain", captacionId);
-          } catch {}
+          } catch (e) {}
         });
       }
       col.appendChild(card);
@@ -41554,7 +41705,7 @@ const renderCrmResumenDashboard = () => {
   try {
     const snapshot = collectCrmAlertsSnapshot();
     updateCrmAlertsBadge(snapshot);
-  } catch {}
+  } catch (e) {}
 
   renderCrmHomeAgendaPreview();
 
@@ -43233,7 +43384,7 @@ const loadCrmInmuebles = () => {
   const persistEstadoFilter = (key) => {
     try {
       localStorage.setItem("crm.inmuebles.estadoFilter", String(key || "activos"));
-    } catch {}
+    } catch (e) {}
   };
   const estadoToBucket = (raw) => {
     const key = normalizeSimple(raw || "");
@@ -44290,7 +44441,7 @@ const loadCrmDemandas = () => {
 	  const persistDemandasStep = (key) => {
 	    try {
 	      localStorage.setItem("crm.demandas.step", String(key || "a_analizar"));
-	    } catch {}
+	    } catch (e) {}
 	  };
 	  const origenFilter = normalizeSimple(crmDemandaOrigenFilter?.value || "");
 		  const matchesOrigen = (row) => {
@@ -44992,7 +45143,7 @@ const openCrmAgendaEditModal = (row) => {
         try {
           loadCrmCaptaciones();
           loadCrmInmuebles();
-        } catch {}
+        } catch (e) {}
         if (data?.inmueble_id && String(data.inmueble_id) === String(state.currentInmuebleId || "")) {
           try {
             if (state.currentInmuebleContext?.inmueble && data?.inmueble_estado) {
@@ -45003,10 +45154,10 @@ const openCrmAgendaEditModal = (row) => {
               state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
             }
             refreshCurrentInmuebleHeader();
-          } catch {}
+          } catch (e) {}
           try {
             if (empresaId) loadInmuebleActividad(state.currentInmuebleId, empresaId);
-          } catch {}
+          } catch (e) {}
         }
       } catch (err) {
         if (statusEl) statusEl.textContent = err?.message || "No se pudo guardar.";
@@ -45074,14 +45225,14 @@ const initCrmAgendaPrefsIfNeeded = () => {
     let ambito = "";
     try {
       view = normalizeCrmAgendaView(localStorage.getItem("crm.agenda.view") || view);
-    } catch {}
+    } catch (e) {}
     try {
       const storedDay = String(localStorage.getItem("crm.agenda.day") || "").trim();
       if (storedDay) day = storedDay;
-    } catch {}
+    } catch (e) {}
     try {
       ambito = String(localStorage.getItem("crm.agenda.ambito") || "").trim();
-    } catch {}
+    } catch (e) {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
     state.crmAgendaAmbito = ambito;
@@ -45097,7 +45248,7 @@ const initCrmAgendaPrefsIfNeeded = () => {
     try {
       const stored = String(localStorage.getItem("crm.agenda.preset") || "").trim();
       if (stored) preset = stored;
-    } catch {}
+    } catch (e) {}
     const allowed = new Set(Array.from(crmAgendaPreset.options || []).map((opt) => String(opt.value || "").trim()));
     if (!allowed.has(preset)) preset = DEFAULT_PRESET;
     if (!crmAgendaPreset.value || crmAgendaPreset.value !== preset) {
@@ -45123,7 +45274,7 @@ const persistCrmAgendaPrefs = () => {
     if (crmAgendaPreset) {
       localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias"));
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const setCrmAgendaView = (nextView) => {
@@ -45287,7 +45438,7 @@ const renderCrmAgendaCalendar = (rows = []) => {
     try {
       localStorage.setItem("crm.agenda.people", JSON.stringify(Array.isArray(state.crmAgendaPeople) ? state.crmAgendaPeople : []));
       localStorage.setItem("crm.agenda.showCancelled", state.crmAgendaShowCancelled ? "1" : "0");
-    } catch {}
+    } catch (e) {}
   };
 
   const isCancelled = (row) => {
@@ -46373,7 +46524,7 @@ const openDemandaDetail = (id) => {
       title: row?.cliente || `Pedido ${key.slice(0, 8)}`,
       meta: [row?.tipo || "", row?.estado || ""].filter(Boolean).join(" · "),
     });
-  } catch {}
+  } catch (e) {}
   api(`/api/matching?empresa_id=${empresa.id}&demanda_id=${id}`).then((data) => {
     if (demandaTitle) {
       demandaTitle.textContent = "Matching de demanda";
@@ -46476,7 +46627,7 @@ const forceShowEmbeddedSimuladoresPanes = (preferredPane = "") => {
   try {
     const key = normalizeSimple(preferredPane || "");
     if (key) scrollToSimuladoresPane(key);
-  } catch {}
+  } catch (e) {}
 };
 
 const mountWorkspaceSimuladoresIntoInmueble = () => {
@@ -46538,7 +46689,7 @@ const restoreWorkspaceSimuladoresFromInmueble = () => {
   portal.mounted = false;
   try {
     setSimuladoresPane(portal.prevPane || state.simuladoresPane || "");
-  } catch {}
+  } catch (e) {}
 };
 
 const openEmbeddedFiscalWizard = (options = {}) => {
@@ -46553,14 +46704,14 @@ const openEmbeddedFiscalWizard = (options = {}) => {
   window.setTimeout(() => {
     try {
       forceShowEmbeddedSimuladoresPanes(pane);
-    } catch {}
+    } catch (e) {}
     try {
       applyFiscalWizardPrefill(prefill);
-    } catch {}
+    } catch (e) {}
     try {
       if (pane) scrollToSimuladoresPane(pane);
       else scrollToSimuladoresPane("informe");
-    } catch {}
+    } catch (e) {}
   }, 120);
   return true;
 };
@@ -46593,40 +46744,40 @@ const buildFiscalPrefillFromCurrentInmueble = () => {
 const resetFiscalSimulatorsForInmuebleChange = () => {
   try {
     fiscalWizardActivePreset = null;
-  } catch {}
+  } catch (e) {}
   try {
     setFiscalWizardDgtRefs([], { replace: true });
-  } catch {}
+  } catch (e) {}
   try {
     if (fiscalWizardStatus) fiscalWizardStatus.textContent = "";
     if (fiscalWizardPresetStatus) fiscalWizardPresetStatus.textContent = "";
     if (fiscalWizardResult) fiscalWizardResult.innerHTML = "";
-  } catch {}
+  } catch (e) {}
   try {
     if (fiscalWizardForm && typeof fiscalWizardForm.reset === "function") fiscalWizardForm.reset();
-  } catch {}
+  } catch (e) {}
   try {
     if (irpfGainStatus) irpfGainStatus.textContent = "";
     if (irpfGainResult) irpfGainResult.innerHTML = "";
-  } catch {}
+  } catch (e) {}
   try {
     if (irpfGainForm && typeof irpfGainForm.reset === "function") irpfGainForm.reset();
-  } catch {}
+  } catch (e) {}
   try {
     if (irpfGainForm && typeof irpfGainForm._crmResetIrpfScenarioState === "function") {
       irpfGainForm._crmResetIrpfScenarioState();
     }
-  } catch {}
+  } catch (e) {}
   try {
     if (iivtnuSimulatorStatus) iivtnuSimulatorStatus.textContent = "";
     if (iivtnuSimulatorResult) iivtnuSimulatorResult.innerHTML = "";
     if (iivtnuSimulatorForm && typeof iivtnuSimulatorForm.reset === "function") iivtnuSimulatorForm.reset();
-  } catch {}
+  } catch (e) {}
   try {
     if (irpfRentalStatus) irpfRentalStatus.textContent = "";
     if (irpfRentalResult) irpfRentalResult.innerHTML = "";
     if (irpfRentalForm && typeof irpfRentalForm.reset === "function") irpfRentalForm.reset();
-  } catch {}
+  } catch (e) {}
 };
 
 const syncInmuebleTecnocloudSidebar = (tabKey = "") => {
@@ -46695,10 +46846,10 @@ const setInmuebleTab = (tab) => {
         resetFiscalSimulatorsForInmuebleChange();
         state._lastFiscalPrefillInmuebleId = inmuebleId;
       }
-    } catch {}
+    } catch (e) {}
     try {
       applyFiscalWizardPrefill(buildFiscalPrefillFromCurrentInmueble());
-    } catch {}
+    } catch (e) {}
   } else {
     restoreWorkspaceSimuladoresFromInmueble();
   }
@@ -46733,7 +46884,7 @@ const parseInmuebleValoracionJson = (raw) => {
   try {
     const parsed = JSON.parse(String(raw || ""));
     if (parsed && typeof parsed === "object") return parsed;
-  } catch {}
+  } catch (e) {}
   return {};
 };
 
@@ -46967,7 +47118,7 @@ const renderInmuebleValoracionTab = (inmueble = {}) => {
             markPendingInlineEdit("inmueble", "fecha_valoracion", new Date().toISOString().slice(0, 10));
           }
         }
-      } catch {}
+      } catch (e) {}
     }
   };
 
@@ -47322,7 +47473,7 @@ const openInmueblePersonasModal = async () => {
     if (data && Array.isArray(data.columns) && Array.isArray(data.rows)) {
       clients = data.rows.map((row) => buildRowMap(row, data.columns));
     }
-  } catch {}
+  } catch (e) {}
 
   const renderOptions = (needle = "") => {
     if (!select) return;
@@ -47408,7 +47559,7 @@ const openInmuebleDetail = (id, originView = "") => {
   inmuebleDetail.classList.remove("hidden");
   try {
     updateTableVisibility();
-  } catch {}
+  } catch (e) {}
   if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
   setInmuebleTab("datos");
@@ -47427,7 +47578,7 @@ const openInmuebleDetail = (id, originView = "") => {
 		      ).trim();
 		      try {
 		        window.empresaId = empresaId;
-		      } catch {}
+		      } catch (e) {}
 		      // Normaliza nombres de usuario (evita duplicados tipo "MPerez" vs "Miguel Angel Pérez").
 		      const normalizedInmueble = {
 	        ...inmueble,
@@ -47497,7 +47648,7 @@ const openInmuebleDetail = (id, originView = "") => {
 	        renderEditableGrid(inmuebleDatosGrid, fields, normalizedInmueble, "inmueble");
 	        try {
 	          bindPostalLookup(inmuebleDatosGrid);
-	        } catch {}
+	        } catch (e) {}
       }
 	      if (inmuebleCaptacionGrid) {
 	        const fields =
@@ -47568,7 +47719,7 @@ const openInmuebleDetail = (id, originView = "") => {
 	      refreshCurrentInmuebleProfile();
 	      try {
 	        renderInmuebleValoracionTab(inmueble || {});
-	      } catch {}
+	      } catch (e) {}
 	      refreshInmuebleVisitSheetButton();
 	      loadInmuebleDemandas(id);
 	      loadInmuebleCompradores(id);
@@ -47581,7 +47732,7 @@ const openInmuebleDetail = (id, originView = "") => {
       inmuebleDetail.classList.remove("hidden");
       try {
         updateTableVisibility();
-      } catch {}
+      } catch (e) {}
       setInmuebleSaveStatus(getPendingInlineEditsCount() ? "Cambios pendientes" : "Sin cambios");
       if (!hasPendingPrefill) {
         setInmuebleTab("datos");
@@ -47633,7 +47784,7 @@ if (inmuebleManualSaveBtn) {
 	          if (touchedCaptacion) captacionUpdates.desviacion_pct = pct;
 	        }
 	      }
-	    } catch {}
+	    } catch (e) {}
 
 	    if (!Object.keys(inmuebleUpdates).length && !Object.keys(captacionUpdates).length) {
 	      setInmuebleSaveStatus("Sin cambios");
@@ -48825,7 +48976,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         try {
           loadCrmCaptaciones();
           loadCrmInmuebles();
-        } catch {}
+        } catch (e) {}
         if (state.currentInmuebleContext && String(data?.inmueble_id || "") === String(state.currentInmuebleId || "")) {
           try {
             if (state.currentInmuebleContext.inmueble && data?.inmueble_estado) {
@@ -48836,7 +48987,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
               state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
             }
             refreshCurrentInmuebleHeader();
-          } catch {}
+          } catch (e) {}
         }
         if (state.currentInmuebleId && empresaId) {
           loadInmuebleActividad(state.currentInmuebleId, empresaId);
@@ -49830,7 +49981,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       try {
         const parsed = text ? JSON.parse(text) : null;
         if (parsed && parsed.error) detail = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
-      } catch {}
+      } catch (e) {}
       throw new Error(detail);
     }
     const disposition = String(res.headers.get("Content-Disposition") || "");
@@ -52905,7 +53056,7 @@ const lookupClienteByNombre = async (nombre) => {
     if (best && bestScore >= 0.4) {
       return { id: best[idIndex], nombre: best[nombreIndex] || text };
     }
-  } catch {}
+  } catch (e) {}
   return null;
 };
 
@@ -53014,7 +53165,7 @@ const linkClienteSegurosService = async (clienteId, ctx, tomador = "") => {
       if (fincas?.id) params.set("empresa_id", fincas.id);
       try {
         await api(`/api/seguros_cliente?${params.toString()}`);
-      } catch {}
+      } catch (e) {}
     }
     setOcrClienteUi(ctx, {
       status: "Servicio Seguros asignado y pólizas revisadas.",
@@ -55792,7 +55943,7 @@ const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
     try {
       const parsed = text ? JSON.parse(text) : null;
       if (parsed && parsed.error) detail = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
-    } catch {}
+    } catch (e) {}
     throw new Error(detail);
   }
   const disposition = String(res.headers.get("Content-Disposition") || "");
@@ -55810,18 +55961,18 @@ const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
           downloadBlobFile(filename, blob);
           try {
             URL.revokeObjectURL(url);
-          } catch {}
+          } catch (e) {}
           return;
         }
         // No revocamos inmediatamente: algunos navegadores necesitan tiempo para cargar el PDF.
         setTimeout(() => {
           try {
             URL.revokeObjectURL(url);
-          } catch {}
+          } catch (e) {}
         }, 120000);
         return;
       }
-    } catch {}
+    } catch (e) {}
   }
   downloadBlobFile(filename, blob);
 };
@@ -56038,7 +56189,7 @@ const parseGestoriaRentaPayload = (row = {}) => {
         entries: Array.isArray(parsed.entries) ? parsed.entries : [],
       };
     }
-  } catch {}
+  } catch (e) {}
   return { notes: raw, entries: [] };
 };
 
@@ -56255,17 +56406,17 @@ const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
           try {
             populateResponsableSelects();
             populateGestoriaRentaQuickPendingUserSelect();
-          } catch {}
+          } catch (e) {}
         })
         .catch(() => {});
     } else {
       populateResponsableSelects();
     }
-  } catch {}
+  } catch (e) {}
   syncGestoriaRentaRemesaToggles();
   try {
     populateGestoriaRentaQuickPendingUserSelect();
-  } catch {}
+  } catch (e) {}
   if (gestoriaRentaQuickStatus) {
     gestoriaRentaQuickStatus.textContent = "";
   }
@@ -56281,7 +56432,7 @@ const openGestoriaRentaQuickModal = ({ autoPickFile = false } = {}) => {
       try {
         gestoriaRentaQuickFile.focus();
         gestoriaRentaQuickFile.click();
-      } catch {}
+      } catch (e) {}
     }, 0);
   }
 };
@@ -56614,14 +56765,14 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
             estado: "Activo",
             fecha_inicio: new Date().toISOString().slice(0, 10),
           });
-        } catch {}
+        } catch (e) {}
         try {
           await apiPost("/api/cliente_gestoria_update", {
             cliente_id: clienteId,
             tipo_cliente: "Cliente Renta",
             mod_renta: 1,
           });
-        } catch {}
+        } catch (e) {}
         // Asigna el documento y abre el cliente.
         await attachGestoriaRentaQuickToCliente(clienteId, ctx);
       } catch (err) {
@@ -56711,7 +56862,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
     try {
       // Invalida cache de cards "Cliente Renta" para que aparezca el PDF recién asignado.
       state.gestoriaRentaCardsCache = null;
-    } catch {}
+    } catch (e) {}
     const entryId = String(data?.entry_id || "").trim();
     if (entryId) {
       state.currentRentaEntryId = entryId;
@@ -56736,7 +56887,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
         if (gestoriaRentaQuickStatus) {
           gestoriaRentaQuickStatus.textContent = "OCR aplicado. Abriendo cliente...";
         }
-      } catch {}
+      } catch (e) {}
     }
     closeGestoriaRentaQuickModal();
     // Si tenemos entry_id, abrimos directamente la renta (última subida) del cliente.
@@ -56859,7 +57010,7 @@ const submitGestoriaRentaQuick = async () => {
         // Refresca listado de pendientes (por si el admin quiere reasignar más tarde).
         loadGestoriaRentaQuickPendientes().catch(() => {});
       }
-    } catch {}
+    } catch (e) {}
     if (!nif) {
       if (gestoriaRentaQuickStatus) {
         const method = String(fields.ocr_method || "").trim();
@@ -57227,7 +57378,7 @@ const renderGestoriaRentaDetail = (entry = {}) => {
       actions.appendChild(btn);
       detail.appendChild(actions);
     }
-  } catch {}
+  } catch (e) {}
 
   const extra = document.createElement("div");
   extra.className = "inline-list";
@@ -57614,7 +57765,7 @@ const loadClienteGestoria = (clienteId) => {
       const active = clienteTabs?.querySelector(".tab.active")?.dataset?.tab || "";
       if (active === "economicos") renderClienteContabilidadPanel();
       if (active === "dashboard") renderClienteRentaDashboardPanel();
-    } catch {}
+    } catch (e) {}
   });
 };
 
@@ -57996,7 +58147,7 @@ const ensureGestoriaBudgetsWorkspaceId = async () => {
       state.gestoriaBudgetWorkspaceId = cached;
       return cached;
     }
-  } catch {}
+  } catch (e) {}
   const data = await api("/api/workspaces");
   const rows = Array.isArray(data?.rows) ? data.rows : [];
   const picked = String(rows[0]?.id || "").trim();
@@ -58006,7 +58157,7 @@ const ensureGestoriaBudgetsWorkspaceId = async () => {
   state.gestoriaBudgetWorkspaceId = picked;
   try {
     localStorage.setItem("crm.gestoriaBudgetWorkspaceId", picked);
-  } catch {}
+  } catch (e) {}
   return picked;
 };
 
@@ -58202,7 +58353,7 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
 	      window.setTimeout(() => {
 	        try {
 	          setHipotecaAltaView("alta");
-	        } catch {}
+	        } catch (e) {}
 	      }, 0);
 	    };
 	  }
@@ -60270,7 +60421,7 @@ const openClienteDetail = (id) => {
       if (pendingEntryId) {
         state.currentRentaEntryId = pendingEntryId;
       }
-    } catch {}
+    } catch (e) {}
     const cliente = data.cliente || {};
     state.currentClienteData = cliente;
     state.clienteContabView = "dashboard";
@@ -60734,7 +60885,7 @@ const closeClienteDetail = () => {
         loadGestoriaFact();
       }
     }
-  } catch {}
+  } catch (e) {}
 };
 
 const loadTable = () => {
@@ -60866,7 +61017,7 @@ const showAuthOverlay = (message = "") => {
   setAuthUi(null);
   try {
     debugLog("showAuthOverlay()", message || "");
-  } catch {}
+  } catch (e) {}
 };
 
 const hideAuthOverlay = () => {
@@ -60875,7 +61026,7 @@ const hideAuthOverlay = () => {
   document.body.classList.remove("auth-locked");
   try {
     debugLog("hideAuthOverlay()");
-  } catch {}
+  } catch (e) {}
 };
 
 const showActivationOverlay = (introText = "") => {
@@ -60912,7 +61063,7 @@ function handleAuthExpired() {
   // guardamos la URL para poder reabrirla tras el login (evita "vuelve a home" con query perdida).
   try {
     state.postAuthReturnUrl = window.location.href;
-  } catch {}
+  } catch (e) {}
   try {
     if (isDebugEnabled()) {
       const last = state.lastApiError || {};
@@ -60923,7 +61074,7 @@ function handleAuthExpired() {
       setUiToast("Sesión expirada", detail);
       debugLog("Sesión expirada", detail);
     }
-  } catch {}
+  } catch (e) {}
   return AuthModule.handleAuthExpired({
     state,
     authLoginOverlay,
@@ -61004,7 +61155,7 @@ const init = async () => {
         setUiToast("Debug activo", `URL: ${window.location.href}`);
         debugLog("Debug activo", `URL: ${window.location.href}`);
       }
-    } catch {}
+    } catch (e) {}
     // Importante: routing temprano para deep-links de Workspaces.
     // Si esperamos a que carguen /api/empresas/tablas/resumen, el usuario ve "Home" y parece que no entra.
     try {
@@ -61013,14 +61164,14 @@ const init = async () => {
         debugLog("init: early route", `search=${window.location.search || ""}`);
         handleRoute();
       }
-    } catch {}
+    } catch (e) {}
     // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
     // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
     bindGestoriaRentaCampaignBanner();
 
     try {
       debugLog("init: api bootstrap", "loading /api/empresas, /api/tablas, /api/resumen, /api/home_time_status");
-    } catch {}
+    } catch (e) {}
 
     const results = await Promise.allSettled([
       api("/api/empresas"),
@@ -61040,7 +61191,7 @@ const init = async () => {
           })
           .join(" · ")
       );
-    } catch {}
+    } catch (e) {}
 
     const empresas = results[0].status === "fulfilled" ? results[0].value : [];
     const tablas = results[1].status === "fulfilled" ? results[1].value : [];
@@ -61054,7 +61205,7 @@ const init = async () => {
     try {
       // Refresca el pill de usuario cuando llega RRHH (puede diferir del nombre del usuario si hay datos legacy).
       if (typeof setAuthUi === "function") setAuthUi(state.authUser);
-    } catch {}
+    } catch (e) {}
 
     if (empresaSelect) {
       empresaSelect.appendChild(createOption("", "Todas las empresas"));
@@ -61064,7 +61215,7 @@ const init = async () => {
     } else {
       try {
         debugLog("init: missing empresaSelect", "No se puede poblar el selector de empresas (DOM no disponible).");
-      } catch {}
+      } catch (e) {}
     }
 
     populateTables();
@@ -61074,7 +61225,7 @@ const init = async () => {
     initCrmInmoLinkInterceptor();
     try {
       debugLog("init: handleRoute()", `search=${window.location.search || ""}`);
-    } catch {}
+    } catch (e) {}
     handleRoute();
     UI?.boot(state);
     renderCompanyCards();
@@ -61137,7 +61288,7 @@ const init = async () => {
       if (isDebugEnabled()) {
         setUiToast("Error al arrancar", msg);
       }
-    } catch {}
+    } catch (e) {}
     if (dbStatus) {
       dbStatus.textContent = "";
     }
@@ -61248,7 +61399,7 @@ if (crmExitBtn) {
 		        } else if (fallbackUrl) {
 		          window.location.href = fallbackUrl.toString();
 		        }
-		      } catch {}
+		      } catch (e) {}
 		    };
 		    const workspaceFromFallback = (() => {
 		      try {
@@ -61465,7 +61616,7 @@ if (crmWorkspaceTabs) {
         } catch {
           try {
             setTab(tab);
-          } catch {}
+          } catch (e) {}
         }
       }
       return;
@@ -61663,7 +61814,7 @@ if (crmClienteCreateForm) {
       if (clienteId) {
         try {
           addCrmRecentItem({ kind: "cliente", view: "clientes", id: clienteId });
-        } catch {}
+        } catch (e) {}
       }
     } catch (error) {
       if (error?.code === "duplicate_cliente" && crmClienteCreateDuplicates) {
@@ -61687,7 +61838,7 @@ if (crmClienteCreateForm) {
               const draftPayload = Object.fromEntries(new FormData(crmClienteCreateForm).entries());
               const focusName = String(document.activeElement?.getAttribute?.("name") || "").trim();
               setReturnDraft("crm_cliente_create", draftPayload, { focusName });
-            } catch {}
+            } catch (e) {}
             setCrmClienteModalOpen(false);
             openClientesModule();
             openClienteDetail(String(row?.id || "").trim());
@@ -61770,7 +61921,7 @@ if (crmCaptacionCreateForm) {
             meta: [payload?.poblacion || "", payload?.provincia || ""].filter(Boolean).join(" · "),
             ts: Date.now(),
           });
-        } catch {}
+        } catch (e) {}
         ensureCrmOpen(() => openInmuebleDetail(result.inmuebleId, "captaciones"));
       }
     } catch (error) {
@@ -61825,7 +61976,7 @@ if (crmCaptacionCreateForm) {
               loadCrmCaptaciones();
               loadCrmInmuebles();
               ensureCrmOpen(() => openInmuebleDetail(id, "captaciones"));
-            } catch {}
+            } catch (e) {}
           });
 
           item.appendChild(left);
@@ -61857,7 +62008,7 @@ if (crmGlobalSearch) {
     crmGlobalSearch.setAttribute("aria-autocomplete", "list");
     crmGlobalSearch.setAttribute("aria-controls", "crmGlobalSearchResults");
     crmGlobalSearch.setAttribute("aria-expanded", "false");
-  } catch {}
+  } catch (e) {}
 
   crmGlobalSearch.addEventListener("input", () => {
     state.crmGlobalSearch = crmGlobalSearch.value || "";
@@ -62784,7 +62935,7 @@ if (crmInmuebleEstadoFilter) {
     state.crmInmueblesEstadoFilter = String(crmInmuebleEstadoFilter.value || "activos");
     try {
       localStorage.setItem("crm.inmuebles.estadoFilter", String(state.crmInmueblesEstadoFilter));
-    } catch {}
+    } catch (e) {}
     loadCrmInmuebles();
   });
 }
@@ -62797,7 +62948,7 @@ if (crmInmuebleEstadoFilterMirror) {
     state.crmInmueblesEstadoFilter = String(crmInmuebleEstadoFilterMirror.value || "activos");
     try {
       localStorage.setItem("crm.inmuebles.estadoFilter", String(state.crmInmueblesEstadoFilter));
-    } catch {}
+    } catch (e) {}
     loadCrmInmuebles();
   });
 }
@@ -63016,7 +63167,7 @@ if (gestoriaCrmEjercicio) {
     for (let year = currentYear; year >= currentYear - 8; year -= 1) {
       gestoriaCrmEjercicio.appendChild(createOption(String(year), String(year)));
     }
-  } catch {}
+  } catch (e) {}
 }
 if (gestoriaCrmApply) {
   gestoriaCrmApply.addEventListener("click", () => {
@@ -64689,7 +64840,7 @@ if (fiscalWizardForm) {
     if (prevPv && fiscalWizardForm.querySelector(`select[name="pv_territorio"] option[value="${CSS.escape(prevPv)}"]`)) {
       fiscalWizardForm.querySelector('select[name="pv_territorio"]').value = prevPv;
     }
-  } catch {}
+  } catch (e) {}
   syncFiscalWizardPvVisibility();
   fiscalWizardForm.addEventListener("change", () => {
     syncFiscalWizardPvVisibility();
@@ -64698,7 +64849,7 @@ if (fiscalWizardForm) {
       localStorage.setItem("crm.fiscalWizard.ccaa", String(data.get("ccaa") || "AN").toUpperCase());
       localStorage.setItem("crm.fiscalWizard.operacion", String(data.get("operacion") || "venta").toLowerCase());
       localStorage.setItem("crm.fiscalWizard.pv", String(data.get("pv_territorio") || "BI").toUpperCase());
-    } catch {}
+    } catch (e) {}
   });
 
   if (fiscalWizardOpenIrpfBtn) {
@@ -64720,7 +64871,7 @@ if (fiscalWizardForm) {
 
   try {
     renderFiscalWizardDgtRefs();
-  } catch {}
+  } catch (e) {}
 
   if (fiscalWizardDgtAddBtn && fiscalWizardDgtInput) {
     fiscalWizardDgtAddBtn.addEventListener("click", () => {
@@ -64814,7 +64965,7 @@ if (fiscalWizardForm) {
         try {
           const presetsData = await loadFiscalWizardPresets();
           pdfPayload.sources_global = Array.isArray(presetsData?.sources_global) ? presetsData.sources_global : [];
-        } catch {}
+        } catch (e) {}
         if (fiscalWizardActivePreset?.id) pdfPayload.preset_id = String(fiscalWizardActivePreset.id || "").trim();
         if (fiscalWizardActivePreset?.title) pdfPayload.preset_title = String(fiscalWizardActivePreset.title || "").trim();
         if (Array.isArray(fiscalWizardDgtRefs) && fiscalWizardDgtRefs.length) pdfPayload.dgt_refs = [...fiscalWizardDgtRefs];
@@ -64931,7 +65082,7 @@ try {
   const storedPane = String(localStorage.getItem(SIMULADORES_PANE_STORAGE_KEY) || "");
   if (storedPane) setSimuladoresPane(storedPane);
   else setSimuladoresPane("");
-} catch {}
+} catch (e) {}
 
 if (simHubIrpfBtn) {
   simHubIrpfBtn.addEventListener("click", () => {
@@ -64967,14 +65118,14 @@ document.querySelectorAll("[data-sim-go]").forEach((el) => {
     setSimuladoresPane(next, { scroll: true });
     try {
       scrollToSimuladoresPane(next);
-    } catch {}
+    } catch (e) {}
   });
 });
 
 if (irpfGainForm) {
   try {
     bindMoneyPlainInputs(irpfGainForm);
-  } catch {}
+  } catch (e) {}
 
   const irpfScenarioTabs = document.getElementById("irpfScenarioTabs");
   const irpfSlotNombre = document.getElementById("irpfSlotNombre");
@@ -65015,17 +65166,17 @@ if (irpfGainForm) {
       },
       true
     );
-  } catch {}
+  } catch (e) {}
 
   const resolveScenarioEmpresaId = () => {
     try {
       const gest = resolveCrmGestoriaEmpresa();
       if (gest && gest.id) return String(gest.id || "").trim();
-    } catch {}
+    } catch (e) {}
     try {
       const inmo = resolveCrmInmoEmpresa();
       if (inmo && inmo.id) return String(inmo.id || "").trim();
-    } catch {}
+    } catch (e) {}
     return String(state.currentWorkspaceCompanyId || "").trim();
   };
 
@@ -65047,7 +65198,7 @@ if (irpfGainForm) {
         irpfClienteIdInput.value = inferred;
       }
       return inferred;
-    } catch {}
+    } catch (e) {}
     return "";
   };
 
@@ -65067,7 +65218,7 @@ if (irpfGainForm) {
       if (type !== "checkbox" && type !== "radio") {
         try {
           el.readOnly = Boolean(locked);
-        } catch {}
+        } catch (e) {}
       }
       // Bloqueo de focus por teclado (sin perder valores).
       const prev = el.getAttribute("data-prev-tabindex");
@@ -65121,14 +65272,14 @@ if (irpfGainForm) {
 	        st.last = null;
 	        try {
 	          delete st._basePayload;
-	        } catch {}
+	        } catch (e) {}
 	      });
 	      irpfBaseTouched = false;
 	      irpfBaseHydrated = false;
 	      irpfBaseHydrateMute = false;
 	      setSlotStatus("");
 	      renderSlotPanel();
-	    } catch {}
+	    } catch (e) {}
 	  };
 
   const calcValorTransmisionForSlot = (st) => {
@@ -65218,7 +65369,7 @@ if (irpfGainForm) {
       if (metaEsc) slotState[slot].escritura = metaEsc;
       if (metaCalc) slotState[slot].calc = metaCalc;
       if (metaInclude != null) slotState[slot].include = Number(metaInclude || 0) === 1 || metaInclude === true;
-    } catch {}
+    } catch (e) {}
     // Fallback: si no hay meta, usamos valor_transmision guardado.
     try {
       const savedValor = pl?.valor_transmision != null ? parseMoneyValue(pl.valor_transmision) : null;
@@ -65227,7 +65378,7 @@ if (irpfGainForm) {
         if (slot === "B") slotState[slot].escritura = slotState[slot].escritura || asText;
         else slotState[slot].venta = slotState[slot].venta || asText;
       }
-    } catch {}
+    } catch (e) {}
     if (row?.valor_transmision != null && Number(row.valor_transmision) > 0) {
       const asText = `${Number(row.valor_transmision).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       if (slot === "B") slotState[slot].escritura = slotState[slot].escritura || asText;
@@ -65273,7 +65424,7 @@ if (irpfGainForm) {
           }
           try {
             el.value = String(val ?? "");
-          } catch {}
+          } catch (e) {}
         });
       });
     } finally {
@@ -65282,14 +65433,14 @@ if (irpfGainForm) {
     irpfBaseHydrated = true;
     try {
       syncIrpfGainExtras();
-    } catch {}
+    } catch (e) {}
   };
 
   const loadAllSlots = async () => {
     await Promise.all(["A", "B", "C"].map((s) => loadSlotFromDb(s)));
     try {
       hydrateIrpfBaseForm(slotState.A._basePayload);
-    } catch {}
+    } catch (e) {}
     renderSlotPanel();
   };
 
@@ -65340,7 +65491,7 @@ if (irpfGainForm) {
 	      setSlotStatus("Marca al menos un escenario.");
         try {
           if (popup) popup.close();
-        } catch {}
+        } catch (e) {}
 	      return;
 	    }
 	    setSlotStatus("Preparando informe...");
@@ -65442,13 +65593,13 @@ if (irpfGainForm) {
 	      try {
 	        // Abrimos primero para evitar bloqueo de popups/descargas tras awaits (Safari/iOS especialmente).
 	        popup = window.open("", "_blank", "noopener");
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        await printComparePdf({ popup });
 	      } catch (err) {
 	        try {
 	          if (popup) popup.close();
-	        } catch {}
+	        } catch (e) {}
 	        setSlotStatus(err?.message || "No se pudo generar el PDF.");
 	      }
 	    });
@@ -65460,7 +65611,7 @@ if (irpfGainForm) {
       irpfBaseHydrated = false;
       try {
         delete slotState.A._basePayload;
-      } catch {}
+      } catch (e) {}
       void loadAllSlots();
     });
   }
@@ -65468,7 +65619,7 @@ if (irpfGainForm) {
   // Boot: carga slots si ya tenemos cliente.
   try {
     void loadAllSlots();
-  } catch {}
+  } catch (e) {}
   const syncIrpfGainExtras = () => {
     const data = new FormData(irpfGainForm);
     const adqMode = normalizeSimple(data.get("gastos_adquisicion_mode") || "");
@@ -65555,16 +65706,16 @@ if (irpfGainForm) {
 
   try {
     syncIrpfGainExtras();
-  } catch {}
+  } catch (e) {}
   irpfGainForm.addEventListener("change", () => {
     try {
       syncIrpfGainExtras();
-    } catch {}
+    } catch (e) {}
   });
   irpfGainForm.addEventListener("input", () => {
     try {
       syncIrpfGainExtras();
-    } catch {}
+    } catch (e) {}
   });
 
   if (irpfGainPdfBtn) {
@@ -65748,7 +65899,7 @@ const previewWorkspaceCompanyLogoFile = () => {
   try {
     const url = URL.createObjectURL(file);
     workspaceCompanyLogoPreview.src = url;
-  } catch {}
+  } catch (e) {}
 };
 
 const uploadWorkspaceCompanyLogo = async () => {
@@ -65803,7 +65954,7 @@ const uploadWorkspaceCompanyLogo = async () => {
       const empresas = await api("/api/empresas");
       state.empresas = Array.isArray(empresas) ? empresas : state.empresas;
       renderCompanyCards();
-    } catch {}
+    } catch (e) {}
     await loadWorkspaceDetail(state.currentWorkspaceId);
   } catch (error) {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = error?.message || "No se pudo subir el logo.";
@@ -66631,7 +66782,7 @@ if (workspaceFincasCommunityBuildingPhoto) {
     } finally {
       try {
         workspaceFincasCommunityBuildingPhoto.value = "";
-      } catch {}
+      } catch (e) {}
     }
   });
 }
@@ -66735,12 +66886,12 @@ if (workspaceFincasBudgetQuickForm) {
 		        delete subtotalInput.dataset.manual;
 		        try {
 		          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-		        } catch {}
+		        } catch (e) {}
 		      } else {
 		        subtotalInput.dataset.manual = "1";
 		        try {
 		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
-		        } catch {}
+		        } catch (e) {}
 		      }
 		      syncWorkspaceFincasBudgetQuickComputed();
 		    });
@@ -66749,7 +66900,7 @@ if (workspaceFincasBudgetQuickForm) {
 		        subtotalInput.dataset.manual = "1";
 		        try {
 		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
-		        } catch {}
+		        } catch (e) {}
 		        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
 		      }
 		    });
@@ -66762,12 +66913,12 @@ if (workspaceFincasBudgetQuickForm) {
 	        delete totalInput.dataset.manual;
 	        try {
 	          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-	        } catch {}
+	        } catch (e) {}
 	      } else {
 	        totalInput.dataset.manual = "1";
 	        try {
 	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
-	        } catch {}
+	        } catch (e) {}
 	      }
 	      syncWorkspaceFincasBudgetQuickComputed();
 	    });
@@ -66776,7 +66927,7 @@ if (workspaceFincasBudgetQuickForm) {
 	        totalInput.dataset.manual = "1";
 	        try {
 	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
-	        } catch {}
+	        } catch (e) {}
 	        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
 	      }
 	    });
@@ -66801,7 +66952,7 @@ if (workspaceFincasBudgetQuickForm) {
       } finally {
         try {
           workspaceFincasBudgetBuildingPhoto.value = "";
-        } catch {}
+        } catch (e) {}
       }
     });
   }
@@ -66821,7 +66972,7 @@ if (workspaceFincasBudgetQuickForm) {
 	          <p style="margin:0;color:#6b7280;font-size:13px;">En unos segundos se cargará el presupuesto.</p>
 	        </div>`;
 	      }
-	    } catch {}
+	    } catch (e) {}
 	    syncWorkspaceFincasBudgetQuickComputed();
 	    const formData = new FormData(workspaceFincasBudgetQuickForm);
 	    const values = Object.fromEntries(formData.entries());
@@ -66915,7 +67066,7 @@ if (workspaceFincasBudgetQuickForm) {
 	      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
 	      try {
 	        if (pdfWindow && !pdfWindow.closed) pdfWindow.close();
-	      } catch {}
+	      } catch (e) {}
 	    }
 	  });
 	}
@@ -66952,7 +67103,7 @@ if (workspaceFincasBudgetOpenEngine) {
       applyWorkspaceBudgetServiceMode();
       applyWorkspaceBudgetTemplate({ force: true });
       syncWorkspaceBudgetComputedFields({ forceSubtotal: true, forceTotal: true });
-    } catch {}
+    } catch (e) {}
   });
 }
 
@@ -67420,7 +67571,7 @@ if (inmuebleBackBtn) {
   inmuebleBackBtn.addEventListener("click", () => {
     try {
       restoreWorkspaceSimuladoresFromInmueble();
-    } catch {}
+    } catch (e) {}
     if (inmuebleDetail) {
       inmuebleDetail.classList.add("hidden");
     }
@@ -67429,7 +67580,7 @@ if (inmuebleBackBtn) {
     }
     try {
       updateTableVisibility();
-    } catch {}
+    } catch (e) {}
     setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
     state.currentInmuebleOriginView = "inmuebles";
@@ -67475,7 +67626,7 @@ if (inmuebleDeleteBtn) {
         }
         try {
           updateTableVisibility();
-        } catch {}
+        } catch (e) {}
         setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
         state.currentInmuebleId = "";
         state.currentInmueble = null;
@@ -67569,7 +67720,7 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    if (tabKey) {
 	      try {
 	        setInmuebleTab(tabKey);
-	      } catch {}
+	      } catch (e) {}
 	    }
 	    window.setTimeout(() => {
 	      try {
@@ -67588,33 +67739,33 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	        if (!el) return;
 	        try {
 	          el.scrollIntoView({ behavior: "smooth", block: "center" });
-	        } catch {}
+	        } catch (e) {}
 	        if (el.focus) el.focus();
-	      } catch {}
+	      } catch (e) {}
 	    }, 80);
 	  };
 
 	  const scrollToOwnersEditor = () => {
 	    try {
 	      setInmuebleTab("captacion");
-	    } catch {}
+	    } catch (e) {}
 	    window.setTimeout(() => {
 	      const card = inmuebleTabCaptacion?.querySelector?.(".editable-card--owners");
 	      if (!card) return;
 	      try {
 	        card.scrollIntoView({ behavior: "smooth", block: "start" });
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        const firstSelect = card.querySelector("select");
 	        if (firstSelect && firstSelect.focus) firstSelect.focus();
-	      } catch {}
+	      } catch (e) {}
 	    }, 120);
 	  };
 
 	  const openInmuebleDocs = (tipo = "") => {
 	    try {
 	      setInmuebleTab("adjuntos");
-	    } catch {}
+	    } catch (e) {}
 	    window.setTimeout(() => {
 	      try {
 	        const select = inmuebleDocsForm?.querySelector?.('select[name="tipo"]');
@@ -67622,13 +67773,13 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	        if (select && next) {
 	          select.value = next;
 	        }
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        inmuebleDocsForm?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        inmuebleDocsFile?.focus?.();
-	      } catch {}
+	      } catch (e) {}
 	    }, 120);
 	  };
 
@@ -67739,7 +67890,7 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	        btn.addEventListener("click", () => {
 	          try {
 	            action?.onClick?.();
-	          } catch {}
+	          } catch (e) {}
 	        });
 	        right.appendChild(btn);
 	      });
@@ -67860,7 +68011,7 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	    try {
 	      try {
 	        await apiPost("/api/inmueble_guided_prepare", { inmueble_id: inmuebleId });
-	      } catch {}
+	      } catch (e) {}
 
 	      const checklistParams = new URLSearchParams({ inmueble_id: inmuebleId, etapa: etapaMain });
 	      const [checklistData, accionesData] = await Promise.all([
@@ -67966,7 +68117,7 @@ if (inmuebleAlquilerDiaPdfBtn) {
 	      window.setTimeout(() => {
 	        try {
 	          document.getElementById("inmuebleChecklistTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
-	        } catch {}
+	        } catch (e) {}
 	      }, 0);
 	    });
 	  }
@@ -68130,7 +68281,7 @@ if (inmuebleTecnoPosBtn) {
       // Si el navegador bloquea popups, al menos dejamos el link en el portapapeles si existe la API.
       try {
         navigator.clipboard?.writeText?.(url);
-      } catch {}
+      } catch (e) {}
       alert("No se pudo abrir el mapa en una pestaña nueva.");
     }
   });
@@ -69083,14 +69234,14 @@ if (gestoriaRentaDetallesForm) {
             };
             renderGestoriaRentaCards(state.currentClienteGestoriaData);
             fillGestoriaRentaDetailsForm(state.currentClienteGestoriaData);
-          } catch {}
+          } catch (e) {}
           // Invalida caché de cards (vista Gestoría → Renta) para que el resumen se actualice.
           try {
             if (state.gestoriaRentaCardsCache) state.gestoriaRentaCardsCache.ts = 0;
             if (state.currentTab === "gestoria-crm" && state.gestoriaCrmTab === "renta") {
               loadGestoriaCrm();
             }
-          } catch {}
+          } catch (e) {}
           loadClienteGestoria(state.currentClienteId);
         }
       })
@@ -69845,7 +69996,7 @@ if (inmuebleActividadForm) {
           try {
             loadCrmCaptaciones();
             loadCrmInmuebles();
-          } catch {}
+          } catch (e) {}
           if (data?.inmueble_id && String(data.inmueble_id) === String(state.currentInmuebleId || "")) {
             try {
               if (state.currentInmuebleContext?.inmueble && data?.inmueble_estado) {
@@ -69856,7 +70007,7 @@ if (inmuebleActividadForm) {
                 state.currentInmuebleContext.captacion.situacion_comercial = data.captacion_etapa;
               }
               refreshCurrentInmuebleHeader();
-            } catch {}
+            } catch (e) {}
           }
         }
       })
@@ -70606,9 +70757,9 @@ const submitInmobiliariaWithDuplicateCheck = async ({
                 ? String(active.name || "").trim()
                 : "";
             setReturnDraft("alta_captacion", payload, { focusName });
-          } catch {}
+          } catch (e) {}
           openInmuebleDetail(choice.inmuebleId, "captaciones");
-        } catch {}
+        } catch (e) {}
         if (typeof onSuccess === "function") onSuccess({ duplicated: true, opened: true, inmueble_id: choice.inmuebleId });
         return { ok: true, handledDuplicate: true, action: "open", inmueble_id: choice.inmuebleId };
       }
@@ -70632,9 +70783,9 @@ const submitInmobiliariaWithDuplicateCheck = async ({
                 ? String(active.name || "").trim()
                 : "";
             setReturnDraft("alta_captacion", payload, { focusName });
-          } catch {}
+          } catch (e) {}
           openInmuebleDetail(renewData.inmueble_id || choice.inmuebleId, "captaciones");
-        } catch {}
+        } catch (e) {}
         if (typeof onSuccess === "function") onSuccess({ renewed: true, ...renewData });
         return { ok: true, handledDuplicate: true, action: "renew", ...renewData };
       }
@@ -70947,7 +71098,7 @@ UI?.boot(state);
 renderCompanyCards();
 showAuthOverlay("Conectando con el servidor… (si es la primera visita puede tardar unos segundos)");
 ensureAuthAndBoot();
-try { window.__APP_JS_BOOTED = true; } catch {}
+try { window.__APP_JS_BOOTED = true; } catch (e) {}
 
 // Si el service worker se actualiza, algunos navegadores (sobre todo iOS/Safari) pueden quedarse con un app.js viejo.
 // Cuando recibimos la activación del SW, forzamos una recarga única.
@@ -70967,7 +71118,7 @@ try {
       }
     });
   }
-} catch {}
+} catch (e) {}
 
 populateGestoriaSubtipos("");
 
@@ -71135,7 +71286,7 @@ if (compraventaForm) {
 	        const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
 	        const cliente_id = String(propietarios?.[0]?.id || state.currentClienteId || "").trim();
 	        if (cliente_id) prefill.cliente_id = cliente_id;
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
 	        prefill = {
@@ -71144,7 +71295,7 @@ if (compraventaForm) {
 	          fecha_transmision: payload.fecha_escritura || "",
 	          valor_transmision: payload.precio_escritura || "",
 	        };
-	      } catch {}
+	      } catch (e) {}
 	      if (!openEmbeddedFiscalWizard({ pane: "irpf", prefill })) {
 	        openWorkspaceSimuladores({ pane: "irpf", prefill });
 	      }
@@ -71158,7 +71309,7 @@ if (compraventaForm) {
 	        const propietarios = Array.isArray(ctx.propietarios) ? ctx.propietarios : [];
 	        const cliente_id = String(propietarios?.[0]?.id || state.currentClienteId || "").trim();
 	        if (cliente_id) prefill.cliente_id = cliente_id;
-	      } catch {}
+	      } catch (e) {}
 	      try {
 	        const payload = Object.fromEntries(new FormData(compraventaForm).entries());
 	        prefill = {
@@ -71167,7 +71318,7 @@ if (compraventaForm) {
 	          fecha_transmision: payload.fecha_escritura || payload.fecha_operacion || "",
 	          valor_transmision: payload.precio_escritura || payload.precio_contrato || payload.precio_propuesta || "",
 	        };
-	      } catch {}
+	      } catch (e) {}
 	      if (!openEmbeddedFiscalWizard({ pane: "informe", prefill })) {
 	        openWorkspaceFiscalWizard(prefill);
 	      }
@@ -71821,7 +71972,7 @@ try {
       });
     });
   }
-} catch {}
+} catch (e) {}
 
 	if (hipotecaBdtRefresh) {
 	  hipotecaBdtRefresh.addEventListener("click", () => {
@@ -72424,7 +72575,7 @@ document.addEventListener("change", (event) => {
     } else if (pop) {
       renderInmoPoblacionDatalist(provincia);
     }
-  } catch {}
+  } catch (e) {}
 });
 
 // --- Inmobiliaria: códigos postales por población (datalist) ---
@@ -72541,17 +72692,17 @@ document.addEventListener("change", (event) => {
     const poblacion = String(poblacionInput.value || "").trim();
     if (!poblacion) return;
     renderInmoPostalDatalist(poblacion, String(target.value || "").trim());
-  } catch {}
+  } catch (e) {}
 });
 
 try {
   initGestoriaRentaCampaignToolbar();
-} catch {}
+} catch (e) {}
 
 try {
   initGestoriaRentaQuickEjercicio();
-} catch {}
+} catch (e) {}
 
 try {
   syncGestoriaRentaQuickRemesaToggle();
-} catch {}
+} catch (e) {}

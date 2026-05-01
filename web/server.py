@@ -24965,12 +24965,25 @@ def bulk_update_workspace_rrhh_productividad_manual(conn, workspace_id, persona_
     cobrada = 1 if estado_cobro == "cobrado" else 0
     now = datetime.utcnow().isoformat()
     placeholders = ",".join(["?"] * len(ids))
+    # Para "cobrado" con importe_cobrado vacío/0, usamos la comisión calculada de cada fila.
+    # Para "pendiente", forzamos importe_cobrado a 0.
+    # Para "parcial"/"anulado", mantenemos el existente salvo que venga uno explícito.
+    importe_mode = "keep"
+    if estado_cobro == "cobrado":
+        importe_mode = "auto"
+    elif estado_cobro == "pendiente":
+        importe_mode = "zero"
     conn.execute(
         f"""
         UPDATE workspace_rrhh_productividad_manual
         SET cobrada = ?,
             estado_cobro = ?,
-            importe_cobrado = ?,
+            importe_cobrado = CASE
+              WHEN ? = 'zero' THEN 0
+              WHEN ? = 'auto' AND (? <= 0) THEN COALESCE(comision, 0)
+              WHEN ? = 'keep' AND (? <= 0) THEN COALESCE(importe_cobrado, 0)
+              ELSE ?
+            END,
             fecha_cobro = ?,
             updated_at = ?,
             created_by = COALESCE(NULLIF(TRIM(COALESCE(created_by,'')), ''), ?)
@@ -24978,7 +24991,25 @@ def bulk_update_workspace_rrhh_productividad_manual(conn, workspace_id, persona_
           AND persona_id = ?
           AND id IN ({placeholders})
         """,
-        tuple([cobrada, estado_cobro, float(importe_cobrado or 0), fecha_cobro, now, str(actor_user_id or "").strip(), workspace_id, persona_id] + ids),
+        tuple(
+            [
+                cobrada,
+                estado_cobro,
+                importe_mode,
+                importe_mode,
+                float(importe_cobrado or 0),
+                importe_mode,
+                float(importe_cobrado or 0),
+                float(importe_cobrado or 0),
+                float(importe_cobrado or 0),
+                fecha_cobro,
+                now,
+                str(actor_user_id or "").strip(),
+                workspace_id,
+                persona_id,
+            ]
+            + ids
+        ),
     )
     return {"ok": True, "updated": len(ids)}
 
@@ -48710,7 +48741,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
-            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+            if (not workspace_session_is_privileged(session)) or (not workspace_actor_can_manage_workspace(conn, session, workspace_id)):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             actor_user_id = str(session.get("user_id") or "").strip()
@@ -48743,7 +48774,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id or not entry_id:
                 json_response(self, {"error": "workspace_id, persona_id e id requeridos"}, status=400)
                 return
-            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+            if (not workspace_session_is_privileged(session)) or (not workspace_actor_can_manage_workspace(conn, session, workspace_id)):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             try:
@@ -48755,6 +48786,41 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 json_response(self, {"error": str(exc) or "No se pudo borrar"}, status=400)
+                return
+            json_response(self, res)
+            return
+        elif parsed.path == "/api/workspace_rrhh_productividad_manual_bulk_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            ids = payload.get("ids") or []
+            patch = payload.get("patch") or {}
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if (not workspace_session_is_privileged(session)) or (not workspace_actor_can_manage_workspace(conn, session, workspace_id)):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            actor_user_id = str(session.get("user_id") or "").strip()
+            try:
+                res = bulk_update_workspace_rrhh_productividad_manual(
+                    conn,
+                    workspace_id,
+                    persona_id,
+                    ids,
+                    patch,
+                    actor_user_id=actor_user_id,
+                )
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo actualizar"}, status=400)
                 return
             json_response(self, res)
             return
