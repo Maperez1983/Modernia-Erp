@@ -56351,6 +56351,7 @@ const renderGestoriaRentaDetail = (entry = {}) => {
 
   const result = formatRentaResult(entry.resultado_declaracion);
   const dniMeta = getRentaDniMeta(entry);
+  const presentacionFecha = getRentaPresentacionFecha(entry);
   const summary = document.createElement("div");
   summary.className = "renta-detail-grid";
   const rows = [
@@ -56360,7 +56361,7 @@ const renderGestoriaRentaDetail = (entry = {}) => {
     ["Fecha nacimiento", formatCell("fecha", entry.cliente_fecha_nacimiento || "") || entry.cliente_fecha_nacimiento || "-"],
     ["Estado civil", entry.estado_civil || "-"],
     ["Hijos", String(entry.hijos_count ?? "-")],
-    ["Presentación", formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"],
+    ["Presentación", formatCell("fecha", presentacionFecha) || presentacionFecha || "-"],
     ["Estado campaña", normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")],
     ["Referencia AEAT", entry.referencia_hacienda || "-"],
     ["Casilla 505", entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"],
@@ -56499,6 +56500,7 @@ const renderGestoriaRentaCards = (row = {}) => {
   const selectedId = getSelectedRentaEntry(row)?.id || entries[0].id;
   entries.forEach((entry) => {
     const dniMeta = getRentaDniMeta(entry);
+    const presentacionFecha = getRentaPresentacionFecha(entry);
     const card = document.createElement("button");
     card.type = "button";
     card.className = "renta-card";
@@ -56517,6 +56519,10 @@ const renderGestoriaRentaCards = (row = {}) => {
         <span>Exp. DNI: ${dniMeta.expedicion}</span>
         <span>${dniMeta.label}: ${dniMeta.value}</span>
         <span>Hijos: ${entry.hijos_count ?? "-"}</span>
+      </div>
+      <div class="renta-card-meta">
+        <span>Presentación</span>
+        <strong>${formatCell("fecha", presentacionFecha) || presentacionFecha || "-"}</strong>
       </div>
       <div class="renta-card-meta">
         <span>Casilla 505</span>
@@ -56549,11 +56555,15 @@ const renderGestoriaRentaCards = (row = {}) => {
   fillGestoriaRentaDetailsForm(row);
 };
 
+const getRentaPresentacionFecha = (entry = {}) => {
+  if (!entry || typeof entry !== "object") return "";
+  return String(entry.presentacion_fecha || entry.fecha_presentacion || entry.doc_fecha || "").trim();
+};
+
 const getGestoriaRentaLatestTimestamp = (row = {}) => {
   const entry = row?.renta_latest || {};
   const ts =
-    parseDateToTimestamp(entry.presentacion_fecha || "") ||
-    parseDateToTimestamp(entry.fecha_presentacion || "") ||
+    parseDateToTimestamp(getRentaPresentacionFecha(entry)) ||
     parseDateToTimestamp(entry.updated_at || "") ||
     parseDateToTimestamp(entry.created_at || "");
   if (ts) return ts;
@@ -56652,6 +56662,7 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
         ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total))
         : "-";
     const metaLocation = [row.poblacion, row.provincia].filter(Boolean).join(" · ") || "-";
+    const presentacionFecha = getRentaPresentacionFecha(entry);
     const card = document.createElement("article");
     card.className = "gestoria-renta-overview-card";
     card.tabIndex = 0;
@@ -56669,7 +56680,7 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
       <div class="gestoria-renta-overview-grid">
         <div>
           <span class="muted">Presentación</span>
-          <strong>${formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"}</strong>
+          <strong>${formatCell("fecha", presentacionFecha) || presentacionFecha || "-"}</strong>
         </div>
         <div>
           <span class="muted">Estado</span>
