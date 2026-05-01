@@ -11805,7 +11805,7 @@ const renderWorkspaceRrhhHub = () => {
 
 	    const normalizeMemberTab = (value = "") => {
 	      const key = String(value || "").trim().toLowerCase();
-	      if (["personal", "docs", "vacaciones"].includes(key)) return key;
+	      if (["personal", "docs", "vacaciones", "economicos"].includes(key)) return key;
 	      return "personal";
 	    };
 
@@ -12645,9 +12645,53 @@ const renderWorkspaceRrhhHub = () => {
 
 	      const docsHtml = renderMemberDocs(employee);
         const vacacionesHtml = renderMemberVacaciones(employee);
+        const economicosHtml = (() => {
+          const personaId = String(employee?.id || "").trim();
+          const empresaId = String(employee?.empresa_id || "").trim();
+          if (!personaId) {
+            return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+          }
+          const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
+          const active = subTab === "productividad" ? "productividad" : "nominas";
+          const ejercicio = String(new Date().getFullYear()).trim();
+          // Carga diferida: se rellena al entrar en Productividad.
+          const productividadPanel = `
+            <div class="workspace-rrhh-panel-card">
+              <div class="section-head">
+                <div>
+                  <h4>Productividad</h4>
+                  <p class="muted">Renta: comisiona 30% sobre base imponible (precio con IVA → sin IVA).</p>
+                </div>
+              </div>
+              <div id="rrhhEconProductividadStatus" class="muted"></div>
+              <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
+              <div id="rrhhEconProductividadList" class="inline-list"></div>
+            </div>
+          `;
+          const nominasPanel = `
+            <div class="workspace-rrhh-panel-card">
+              <div class="section-head">
+                <div>
+                  <h4>Nóminas</h4>
+                  <p class="muted">Listado + OCR automático al subir (pendiente de activar).</p>
+                </div>
+              </div>
+              <p class="muted">Pendiente de implementación: carga de nóminas + OCR y volcado de datos.</p>
+            </div>
+          `;
+          return `
+            <div class="rrhh-econ-tabs">
+              ${[
+                { key: "nominas", label: "Nóminas" },
+                { key: "productividad", label: "Productividad" },
+              ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">${escapeHtml(t.label)}</button>`).join("")}
+            </div>
+            ${active === "productividad" ? productividadPanel : nominasPanel}
+          `;
+        })();
 
 		      const personalHtml = `${personalCardHtml}${accessHtml}`;
-		      const tabHtml = memberTab === "docs" ? docsHtml : memberTab === "vacaciones" ? vacacionesHtml : personalHtml;
+		      const tabHtml = memberTab === "docs" ? docsHtml : memberTab === "vacaciones" ? vacacionesHtml : memberTab === "economicos" ? economicosHtml : personalHtml;
 		      const canDeactivate = Boolean(isWorkspaceRrhhManager() && employee?.id);
 		      const canDelete = Boolean(isWorkspaceRrhhManager() && employee?.id);
 		      const canDeleteUser = Boolean(isWorkspaceRrhhManager() && user?.id);
@@ -12686,6 +12730,7 @@ const renderWorkspaceRrhhHub = () => {
 	              { key: "personal", label: "Datos personales" },
 	              { key: "docs", label: "Documentación" },
 	              { key: "vacaciones", label: "Vacaciones" },
+	              { key: "economicos", label: "Condiciones económicas" },
 	            ].map((t) => `<button type="button" class="tab${t.key === memberTab ? " active" : ""}" data-rrhh-member-tab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
 	          </div>
 	          ${tabHtml}
@@ -13769,6 +13814,76 @@ const renderWorkspaceRrhhHub = () => {
     button.addEventListener("click", () => {
       state.workspaceRrhhEquipoMemberTab = String(button.dataset.rrhhMemberTab || "personal").trim().toLowerCase();
       renderWorkspaceRrhhHub();
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-econ-tab]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.workspaceRrhhEconomicosSubtab = String(button.dataset.rrhhEconTab || "nominas").trim().toLowerCase();
+      renderWorkspaceRrhhHub();
+      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
+      const personaId = String(button.dataset.rrhhPersonaId || "").trim();
+      const empresaId = String(button.dataset.rrhhEmpresaId || "").trim();
+      if (!personaId || !empresaId) return;
+      try {
+        const status = document.getElementById("rrhhEconProductividadStatus");
+        const kpisEl = document.getElementById("rrhhEconProductividadKpis");
+        const listEl = document.getElementById("rrhhEconProductividadList");
+        if (status) status.textContent = "Cargando productividad (Renta)…";
+        if (kpisEl) kpisEl.innerHTML = "";
+        if (listEl) listEl.innerHTML = "";
+        const ejercicio = String(new Date().getFullYear());
+        const data = await api(`/api/workspace_rrhh_productividad_renta?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(ejercicio)}`);
+        if (data?.error) throw new Error(data.error);
+        const k = data?.kpis || {};
+        if (kpisEl) {
+          kpisEl.innerHTML = [
+            { label: "Rentas presentadas", value: String(k.presentadas || 0) },
+            { label: "Rentas cobradas", value: String(k.cobradas || 0) },
+            { label: "Comisión (presentadas)", value: euroFormatter.format(parseMoneyValue(k.comision_presentadas || 0)) },
+            { label: "Comisión (cobradas)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
+          ].map((item) => `
+            <div class="kpi-card">
+              <div class="muted">${escapeHtml(item.label)}</div>
+              <div class="kpi-value">${escapeHtml(item.value)}</div>
+            </div>
+          `).join("");
+        }
+        const items = Array.isArray(data?.items) ? data.items : [];
+        if (listEl) {
+          if (!items.length) {
+            listEl.innerHTML = "<p class='muted'>Sin rentas asignadas a este trabajador en el ejercicio.</p>";
+          } else {
+            items.slice(0, 200).forEach((it) => {
+              const row = document.createElement("div");
+              row.className = "inline-row";
+              const left = document.createElement("div");
+              left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || \"\") || it.cliente_nombre || \"-\")}</strong><div class=\"muted\">${escapeHtml(it.cliente_nif || \"-\")}</div>`;
+              const right = document.createElement("div");
+              right.className = "inline-actions";
+              const meta = document.createElement("div");
+              meta.className = "muted";
+              meta.textContent = `Renta ${it.ejercicio || \"\"} · ${it.estado_presentacion || \"\"} · ${it.cobrada ? \"Cobrada\" : \"Pendiente\"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+              right.appendChild(meta);
+              if (String(it.cliente_id || "").trim()) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "secondary ghost";
+                btn.textContent = "Abrir cliente";
+                btn.addEventListener("click", () => openClienteDetail(String(it.cliente_id).trim()));
+                right.appendChild(btn);
+              }
+              row.appendChild(left);
+              row.appendChild(right);
+              listEl.appendChild(row);
+            });
+          }
+        }
+        if (status) status.textContent = "";
+      } catch (err) {
+        const status = document.getElementById("rrhhEconProductividadStatus");
+        if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
+      }
     });
   });
 

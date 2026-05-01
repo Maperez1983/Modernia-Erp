@@ -24163,6 +24163,148 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 continue
         return items
 
+
+def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, persona_id, ejercicio=""):
+    ejercicio_val = str(ejercicio or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio_val or ""):
+        ejercicio_val = ""
+
+    persona = conn.execute(
+        """
+        SELECT id, nombre, usuario_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    if not persona:
+        return {"kpis": {}, "items": []}
+
+    usuario_id = str(persona["usuario_id"] or "").strip()
+    user = None
+    if usuario_id:
+        try:
+            user = conn.execute(
+                "SELECT id, usuario, email, nombre, apellido FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+        except Exception:
+            user = None
+
+    def add_matcher(out_set, raw):
+        key = normalize_lookup_text(raw or "")
+        if key:
+            out_set.add(key)
+
+    matchers = set()
+    add_matcher(matchers, persona["nombre"])
+    if user:
+        add_matcher(matchers, user["usuario"])
+        add_matcher(matchers, user["email"])
+        full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
+        add_matcher(matchers, full_name)
+
+    # Si no hay vínculo con usuario/login, no podemos atribuir productividad automáticamente.
+    if not matchers:
+        return {"kpis": {}, "items": []}
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id AS cliente_id,
+          c.nombre,
+          c.nif,
+          cg.renta_detalles
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    items = []
+    presentadas = 0
+    cobradas = 0
+    comision_presentadas = 0.0
+    comision_cobradas = 0.0
+
+    for row in rows or []:
+        renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
+        entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
+        if ejercicio_val:
+            entries = [e for e in entries if str(e.get("ejercicio") or "").strip() == ejercicio_val]
+        for entry in entries:
+            responsable = normalize_lookup_text(entry.get("responsable") or "")
+            if not responsable or responsable not in matchers:
+                continue
+            estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status") or "")
+            is_presentada = estado == "Presentada"
+            is_cobrada = int(entry.get("cobrada") or 0) == 1
+            precio = parse_money_value(entry.get("precio_servicio"))
+            iva_pct = entry.get("iva_pct")
+            try:
+                iva_pct_val = float(iva_pct) if iva_pct is not None and str(iva_pct).strip() != "" else 21.0
+            except Exception:
+                iva_pct_val = 21.0
+            denom = 1.0 + (iva_pct_val / 100.0 if iva_pct_val else 0.0)
+            base_imponible = precio / denom if denom else precio
+            comision = base_imponible * 0.30
+            if is_presentada:
+                presentadas += 1
+                comision_presentadas += comision
+            if is_cobrada:
+                cobradas += 1
+                comision_cobradas += comision
+            items.append(
+                {
+                    "cliente_id": row["cliente_id"],
+                    "cliente_nombre": row["nombre"],
+                    "cliente_nif": row["nif"],
+                    "ejercicio": str(entry.get("ejercicio") or "").strip(),
+                    "estado_presentacion": estado or "-",
+                    "presentacion_fecha": str(entry.get("presentacion_fecha") or entry.get("fecha_presentacion") or entry.get("doc_fecha") or "").strip(),
+                    "cobrada": 1 if is_cobrada else 0,
+                    "precio_servicio": round(precio, 2),
+                    "base_imponible": round(base_imponible, 2),
+                    "comision": round(comision, 2),
+                    "responsable": str(entry.get("responsable") or "").strip(),
+                }
+            )
+
+    # Orden: más reciente primero (si hay fecha); fallback por ejercicio.
+    try:
+        items.sort(
+            key=lambda it: (
+                parse_date_to_timestamp(it.get("presentacion_fecha") or "") or 0,
+                int(str(it.get("ejercicio") or "0")[:4] or "0"),
+            ),
+            reverse=True,
+        )
+    except Exception:
+        pass
+
+    return {
+        "kpis": {
+            "presentadas": int(presentadas),
+            "cobradas": int(cobradas),
+            "comision_presentadas": round(comision_presentadas, 2),
+            "comision_cobradas": round(comision_cobradas, 2),
+        },
+        "items": items,
+    }
+
     placeholders = ",".join(["?"] * len(selected_cliente_ids))
     selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
     doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
@@ -58693,6 +58835,57 @@ class Handler(BaseHTTPRequestHandler):
                     only_active=(params.get("activos", ["0"])[0] in {"1", "true"}),
                 ),
             )
+            return
+
+        if path == "/api/workspace_rrhh_productividad_renta":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            can_manage = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if not can_manage:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_for_user = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_for_user or str(persona_for_user) != str(persona_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                # Si es "self", no permitimos pedir productividades de otra empresa arbitraria.
+                empresa_id = ""
+            persona_row = conn.execute(
+                "SELECT empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            if not str(empresa_id or "").strip():
+                empresa_id = str(persona_row["empresa_id"] or "").strip()
+            if not str(empresa_id or "").strip():
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                payload = compute_workspace_rrhh_productividad_renta(
+                    conn,
+                    workspace_id=str(workspace_id or "").strip(),
+                    empresa_id=str(empresa_id or "").strip(),
+                    persona_id=str(persona_id or "").strip(),
+                    ejercicio=str(ejercicio or "").strip(),
+                )
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/workspace_rrhh_productividad_renta", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo calcular la productividad de renta."}, status=500)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/workspace_registro_periodos":
