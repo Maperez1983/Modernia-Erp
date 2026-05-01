@@ -50196,16 +50196,35 @@ const renderGestoriaRentaDashboard = (payload) => {
     const exportKindSel = document.createElement("select");
     [
       { key: "all", label: "Todas las campañas" },
+      { key: "responsable", label: "Por responsable" },
       { key: "unpaid", label: "Sin cobrar" },
       { key: "paid", label: "Cobradas" },
       { key: "draft", label: "Borrador" },
       { key: "presented", label: "Presentadas" },
       { key: "unassigned", label: "Sin responsable" },
+      { key: "remesadas", label: "Remesadas" },
       { key: "unremesada", label: "No remesadas" },
       { key: "missing", label: "Clientes sin campaña" },
     ].forEach((opt) => exportKindSel.appendChild(createOption(opt.key, opt.label)));
     exportLeft.appendChild(exportKindSel);
     exportRow.appendChild(exportLeft);
+
+    const respGroup = document.createElement("div");
+    respGroup.className = "form-group";
+    respGroup.innerHTML = `<label>Responsable</label>`;
+    const respSel = document.createElement("select");
+    respSel.appendChild(createOption("", "Selecciona responsable"));
+    [...responsables]
+      .map((r) => ({
+        key: String(r?.responsable_key || ""),
+        label: String(r?.responsable || "Sin responsable"),
+      }))
+      .filter((r) => r.key)
+      .sort((a, b) => a.label.localeCompare(b.label, "es", { sensitivity: "base" }))
+      .forEach((r) => respSel.appendChild(createOption(r.key, r.label)));
+    respGroup.appendChild(respSel);
+    respGroup.style.display = "none";
+    exportRow.appendChild(respGroup);
 
     const exportMid = document.createElement("div");
     exportMid.className = "form-group";
@@ -50226,7 +50245,9 @@ const renderGestoriaRentaDashboard = (payload) => {
       exportBtn.disabled = true;
       exportBtn.textContent = "Generando...";
       try {
-        await downloadGestoriaRentaExport({ kind: exportKindSel.value, fields: exportFieldsSel.value });
+        const kind = String(exportKindSel.value || "all");
+        const responsableKey = kind === "responsable" ? String(respSel.value || "") : "";
+        await downloadGestoriaRentaExport({ kind, fields: exportFieldsSel.value, responsableKey });
       } catch (err) {
         alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
       } finally {
@@ -50248,7 +50269,12 @@ const renderGestoriaRentaDashboard = (payload) => {
       else if (kind === "draft") items = campaigns.filter((it) => String(it.estado_presentacion || "") === "Borrador");
       else if (kind === "paid") items = campaigns.filter((it) => Number(it.precio_servicio || 0) > 0.0001 && Number(it.cobrada || 0) === 1);
       else if (kind === "presented") items = campaigns.filter((it) => String(it.estado_presentacion || "") !== "Borrador");
+      else if (kind === "remesadas") items = campaigns.filter((it) => Number(it.remesada || 0) === 1);
       else if (kind === "unremesada") items = campaigns.filter((it) => Number(it.remesada || 0) !== 1);
+      else if (kind === "responsable") {
+        const rk = String(respSel.value || "");
+        items = rk ? campaigns.filter((it) => String(it.responsable_key || "") === rk) : campaigns;
+      }
       else if (kind === "missing") items = missing;
       openCrmPrintWindow({
         title: `Renta ${ejercicio || ""} · ${exportKindSel.selectedOptions?.[0]?.textContent || "Listado"}`.trim(),
@@ -50258,6 +50284,17 @@ const renderGestoriaRentaDashboard = (payload) => {
     exportRight.appendChild(printBtn);
     exportRow.appendChild(exportRight);
     exportCard.appendChild(exportRow);
+
+    const syncReportUi = () => {
+      const kind = String(exportKindSel.value || "all");
+      const needsResp = kind === "responsable";
+      respGroup.style.display = needsResp ? "" : "none";
+      exportBtn.disabled = needsResp && !String(respSel.value || "");
+      printBtn.disabled = exportBtn.disabled;
+    };
+    exportKindSel.addEventListener("change", syncReportUi);
+    respSel.addEventListener("change", syncReportUi);
+    syncReportUi();
 
     const chartGrid = document.createElement("div");
     chartGrid.className = "crm-split";

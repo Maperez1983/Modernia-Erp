@@ -24749,7 +24749,12 @@ def fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, *,
             comision_pct,
             comision,
             cobrada,
+            estado_cobro,
+            importe_cobrado,
             fecha,
+            fecha_cobro,
+            justificante_key,
+            justificante_url,
             created_at,
             updated_at
           FROM workspace_rrhh_productividad_manual
@@ -24781,7 +24786,12 @@ def fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, *,
             d["comision_pct"] = float(d.get("comision_pct") or 0)
             d["comision"] = float(d.get("comision") or 0)
             d["cobrada"] = 1 if int(d.get("cobrada") or 0) == 1 else 0
+            d["estado_cobro"] = str(d.get("estado_cobro") or "").strip().lower()
+            d["importe_cobrado"] = float(d.get("importe_cobrado") or 0)
             d["fecha"] = str(d.get("fecha") or "").strip()
+            d["fecha_cobro"] = str(d.get("fecha_cobro") or "").strip()
+            d["justificante_key"] = str(d.get("justificante_key") or "").strip()
+            d["justificante_url"] = str(d.get("justificante_url") or "").strip()
         except Exception:
             pass
         d["source"] = "manual"
@@ -24808,7 +24818,11 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
     cliente_nif = str(raw.get("cliente_nif") or "").strip()
     descripcion = str(raw.get("descripcion") or "").strip()
     fecha = str(raw.get("fecha") or "").strip()
-    cobrada = 1 if str(raw.get("cobrada") or "").strip() in {"1", "true", "True"} else 0
+    cobrada_raw = 1 if str(raw.get("cobrada") or "").strip() in {"1", "true", "True"} else 0
+    estado_cobro = str(raw.get("estado_cobro") or "").strip().lower()
+    fecha_cobro = str(raw.get("fecha_cobro") or "").strip()
+    justificante_key = str(raw.get("justificante_key") or "").strip()
+    justificante_url = str(raw.get("justificante_url") or "").strip()
     try:
         importe_base = float(raw.get("importe_base") or 0)
     except Exception:
@@ -24824,6 +24838,29 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
     if comision <= 0 and importe_base > 0 and comision_pct > 0:
         comision = round((importe_base * comision_pct) / 100.0, 2)
 
+    try:
+        importe_cobrado = float(raw.get("importe_cobrado") or 0)
+    except Exception:
+        importe_cobrado = 0.0
+
+    if estado_cobro not in {"pendiente", "parcial", "cobrado", "anulado", ""}:
+        raise ValueError("estado_cobro inválido")
+    if not estado_cobro:
+        if cobrada_raw == 1:
+            estado_cobro = "cobrado"
+        elif importe_cobrado and importe_cobrado > 0:
+            estado_cobro = "parcial"
+        else:
+            estado_cobro = "pendiente"
+    if estado_cobro == "cobrado":
+        cobrada = 1
+        if importe_cobrado <= 0:
+            importe_cobrado = float(comision or 0)
+    else:
+        cobrada = 0
+        if estado_cobro == "pendiente":
+            importe_cobrado = 0.0
+
     now = datetime.utcnow().isoformat()
     if not entry_id:
         entry_id = uuid.uuid4().hex
@@ -24831,9 +24868,10 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
             """
             INSERT INTO workspace_rrhh_productividad_manual
               (id, workspace_id, persona_id, service, ejercicio, cliente_nombre, cliente_nif, descripcion,
-               importe_base, comision_pct, comision, cobrada, fecha, created_at, updated_at, created_by)
+               importe_base, comision_pct, comision, cobrada, estado_cobro, importe_cobrado, fecha, fecha_cobro,
+               justificante_key, justificante_url, created_at, updated_at, created_by)
             VALUES
-              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry_id,
@@ -24848,7 +24886,12 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
                 float(comision_pct or 0),
                 float(comision or 0),
                 int(cobrada or 0),
+                estado_cobro,
+                float(importe_cobrado or 0),
                 fecha,
+                fecha_cobro,
+                justificante_key,
+                justificante_url,
                 now,
                 now,
                 str(actor_user_id or "").strip(),
@@ -24868,7 +24911,12 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
             comision_pct = ?,
             comision = ?,
             cobrada = ?,
+            estado_cobro = ?,
+            importe_cobrado = ?,
             fecha = ?,
+            fecha_cobro = ?,
+            justificante_key = ?,
+            justificante_url = ?,
             updated_at = ?
         WHERE workspace_id = ? AND persona_id = ? AND id = ?
         """,
@@ -24882,7 +24930,12 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
             float(comision_pct or 0),
             float(comision or 0),
             int(cobrada or 0),
+            estado_cobro,
+            float(importe_cobrado or 0),
             fecha,
+            fecha_cobro,
+            justificante_key,
+            justificante_url,
             now,
             workspace_id,
             persona_id,
@@ -24890,6 +24943,44 @@ def upsert_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, p
         ),
     )
     return {"ok": True, "id": entry_id}
+
+
+def bulk_update_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, entry_ids, patch, *, actor_user_id=""):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    if not workspace_id or not persona_id:
+        raise ValueError("workspace_id y persona_id requeridos")
+    ids = [str(x or "").strip() for x in (entry_ids or []) if str(x or "").strip()]
+    if not ids:
+        raise ValueError("ids requeridos")
+    p = patch or {}
+    estado_cobro = str(p.get("estado_cobro") or "").strip().lower()
+    fecha_cobro = str(p.get("fecha_cobro") or "").strip()
+    try:
+        importe_cobrado = float(p.get("importe_cobrado") or 0)
+    except Exception:
+        importe_cobrado = 0.0
+    if estado_cobro not in {"pendiente", "parcial", "cobrado", "anulado"}:
+        raise ValueError("estado_cobro inválido")
+    cobrada = 1 if estado_cobro == "cobrado" else 0
+    now = datetime.utcnow().isoformat()
+    placeholders = ",".join(["?"] * len(ids))
+    conn.execute(
+        f"""
+        UPDATE workspace_rrhh_productividad_manual
+        SET cobrada = ?,
+            estado_cobro = ?,
+            importe_cobrado = ?,
+            fecha_cobro = ?,
+            updated_at = ?,
+            created_by = COALESCE(NULLIF(TRIM(COALESCE(created_by,'')), ''), ?)
+        WHERE workspace_id = ?
+          AND persona_id = ?
+          AND id IN ({placeholders})
+        """,
+        tuple([cobrada, estado_cobro, float(importe_cobrado or 0), fecha_cobro, now, str(actor_user_id or "").strip(), workspace_id, persona_id] + ids),
+    )
+    return {"ok": True, "updated": len(ids)}
 
 
 def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, entry_id):
@@ -28923,6 +29014,22 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # Columnas productividad manual (migración suave).
+    ensure_column(
+        conn,
+        "workspace_rrhh_productividad_manual",
+        "estado_cobro",
+        "estado_cobro TEXT NOT NULL DEFAULT 'pendiente'",
+    )
+    ensure_column(
+        conn,
+        "workspace_rrhh_productividad_manual",
+        "importe_cobrado",
+        "importe_cobrado REAL NOT NULL DEFAULT 0",
+    )
+    ensure_column(conn, "workspace_rrhh_productividad_manual", "fecha_cobro", "fecha_cobro TEXT")
+    ensure_column(conn, "workspace_rrhh_productividad_manual", "justificante_key", "justificante_key TEXT")
+    ensure_column(conn, "workspace_rrhh_productividad_manual", "justificante_url", "justificante_url TEXT")
     # Índices productividad manual (consulta frecuente por persona/ejercicio).
     try:
         conn.execute(
@@ -41692,10 +41799,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
 	            "/api/workspace_registro_periodo_lock",
-	            "/api/workspace_rrhh_profile",
-	            "/api/workspace_rrhh_productividad_manual_upsert",
-	            "/api/workspace_rrhh_productividad_manual_delete",
-	            "/api/workspace_rrhh_turnos",
+		            "/api/workspace_rrhh_profile",
+		            "/api/workspace_rrhh_productividad_manual_upsert",
+		            "/api/workspace_rrhh_productividad_manual_delete",
+		            "/api/workspace_rrhh_productividad_manual_bulk_update",
+		            "/api/workspace_rrhh_turnos",
 	            "/api/workspace_rrhh_ausencia",
             "/api/workspace_rrhh_ausencia_estado",
             "/api/workspace_rrhh_gasto",
@@ -61578,6 +61686,8 @@ class Handler(BaseHTTPRequestHandler):
                         selected_rows = [it for it in campaigns if not str(it.get("responsable") or "").strip()]
                     elif kind in {"unremesada", "no_remesadas", "sin_remesar"}:
                         selected_rows = [it for it in campaigns if int(it.get("remesada") or 0) != 1]
+                    elif kind in {"remesadas", "remesada"}:
+                        selected_rows = [it for it in campaigns if int(it.get("remesada") or 0) == 1]
                     elif kind in {"responsable"}:
                         rk = normalize_lookup_text(responsable_key)
                         if rk:
