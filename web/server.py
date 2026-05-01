@@ -12847,6 +12847,8 @@ def _parse_renta_pdf_fields(text: str) -> dict:
             if value is not None:
                 fields["resultado_declaracion"] = round(float(value), 2)
 
+    # Fecha de presentación (si está disponible en el PDF).
+    # Primero intentamos formatos explícitos que suelen aparecer en la misma línea.
     presentacion = ""
     match = re.search(
         r"Presentaci[oó]n realizada el\s*:?\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
@@ -12855,6 +12857,14 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     )
     if match:
         presentacion = _parse_date_ddmmyyyy_to_iso(match.group(1))
+    if not presentacion:
+        match = re.search(
+            r"Presentad[ao]\s+el\s*:?\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+            raw,
+            re.IGNORECASE,
+        )
+        if match:
+            presentacion = _parse_date_ddmmyyyy_to_iso(match.group(1))
     if presentacion:
         fields["presentacion_fecha"] = presentacion
 
@@ -12897,6 +12907,18 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         if not m2:
             return ""
         return _parse_date_ddmmyyyy_to_iso(m2.group(1))
+
+    # Fallback (usa helper): buscar fecha cerca de etiquetas típicas si aún no se detectó.
+    if "presentacion_fecha" not in fields:
+        for pat in (
+            r"Fecha\s+de\s+presentaci[oó]n",
+            r"Fecha\s+presentaci[oó]n",
+            r"Presentaci[oó]n\s*:",
+        ):
+            presentacion = _extract_date_after(pat)
+            if presentacion:
+                fields["presentacion_fecha"] = presentacion
+                break
 
     def _extract_estado_civil() -> str:
         # Ejemplo típico: "Estado civil (el 31-12-2025) ... Casado/a [o007]"
