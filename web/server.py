@@ -24638,7 +24638,8 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
           SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
           MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
           MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
-          COUNT(*) AS num_facturas
+          COUNT(*) AS num_facturas,
+          SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
         FROM workspace_facturacion f
         LEFT JOIN clientes c ON c.id = f.cliente_id
         WHERE {' AND '.join(where)}
@@ -24660,6 +24661,10 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
         total_facturado = parse_money_value(row["total_facturado"])
         if total_facturado <= 0:
             continue
+        num_facturas = int(row["num_facturas"] or 0)
+        num_cobradas = int(row["num_cobradas"] or 0)
+        pendientes = max(0, num_facturas - num_cobradas)
+        is_cobrada = (num_facturas > 0 and pendientes == 0)
         comision = total_facturado * 0.10
         clientes += 1
         facturado_total += total_facturado
@@ -24673,7 +24678,10 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
                 "fecha": str(row["last_fecha"] or row["first_fecha"] or "").strip(),
                 "facturado_anual": round(total_facturado, 2),
                 "comision": round(comision, 2),
-                "num_facturas": int(row["num_facturas"] or 0),
+                "num_facturas": num_facturas,
+                "num_cobradas": num_cobradas,
+                "pendientes": pendientes,
+                "cobrada": 1 if is_cobrada else 0,
                 "responsable": str(row["responsable"] or "").strip(),
             }
         )

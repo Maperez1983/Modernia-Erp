@@ -12657,6 +12657,7 @@ const renderWorkspaceRrhhHub = () => {
           // Carga diferida: se rellena al entrar en Productividad.
           const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
           const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
+          const canEditEconomicos = Boolean(canManageCurrentWorkspace && canManageCurrentWorkspace());
           const productividadPanel = `
             <div class="workspace-rrhh-panel-card">
               <div class="section-head">
@@ -12685,34 +12686,40 @@ const renderWorkspaceRrhhHub = () => {
                   </select>
                 </div>
               </div>
-              <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-                <div class="section-head">
-                  <div>
-                    <h4>Calculadora</h4>
-                    <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
+              ${canEditEconomicos ? `
+                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+                  <div class="section-head">
+                    <div>
+                      <h4>Calculadora</h4>
+                      <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
+                    </div>
+                  </div>
+                  <div class="form-grid">
+                    <label class="muted">Tipo cálculo
+                      <select id="rrhhEconCalcMode">
+                        <option value="renta">Renta (30% base imponible)</option>
+                        <option value="comision_10">Servicios (10% cobrado)</option>
+                      </select>
+                    </label>
+                    <label class="muted">Importe (sin IVA)
+                      <input id="rrhhEconCalcBase" type="number" step="0.01" placeholder="0.00" />
+                    </label>
+                    <label class="muted">Resultado comisión
+                      <input id="rrhhEconCalcOut" type="text" readonly />
+                    </label>
+                  </div>
+                  <div class="muted" style="margin-top:8px;">
+                    <label style="display:inline-flex;gap:8px;align-items:center;">
+                      <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
+                      Usar cálculo automático (beta)
+                    </label>
                   </div>
                 </div>
-                <div class="form-grid">
-                  <label class="muted">Tipo cálculo
-                    <select id="rrhhEconCalcMode">
-                      <option value="renta">Renta (30% base imponible)</option>
-                      <option value="comision_10">Servicios (10% cobrado)</option>
-                    </select>
-                  </label>
-                  <label class="muted">Importe (sin IVA)
-                    <input id="rrhhEconCalcBase" type="number" step="0.01" placeholder="0.00" />
-                  </label>
-                  <label class="muted">Resultado comisión
-                    <input id="rrhhEconCalcOut" type="text" readonly />
-                  </label>
+              ` : `
+                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
                 </div>
-                <div class="muted" style="margin-top:8px;">
-                  <label style="display:inline-flex;gap:8px;align-items:center;">
-                    <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
-                    Usar cálculo automático (beta)
-                  </label>
-                </div>
-              </div>
+              `}
               <div id="rrhhEconProductividadStatus" class="muted"></div>
               <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
               <div id="rrhhEconProductividadList" class="inline-list"></div>
@@ -13912,9 +13919,11 @@ const renderWorkspaceRrhhHub = () => {
     const pct = mode === "comision_10" ? 0.10 : 0.30;
     econCalcOut.value = euroFormatter.format(base * pct);
   }
-  if (econCalcBase) econCalcBase.addEventListener("input", updateEconCalc);
-  if (econCalcMode) econCalcMode.addEventListener("change", updateEconCalc);
-  updateEconCalc();
+  if (econCalcBase && econCalcMode && econCalcOut) {
+    econCalcBase.addEventListener("input", updateEconCalc);
+    econCalcMode.addEventListener("change", updateEconCalc);
+    updateEconCalc();
+  }
 
   const econAutoToggle = document.getElementById("rrhhEconAutoToggle");
   if (econAutoToggle) {
@@ -14000,7 +14009,7 @@ const renderWorkspaceRrhhHub = () => {
             } else if (serviceKey === "hipotecas") {
               meta.textContent = `Hipoteca ${it.banco || \"\"} · ${it.oficina || it.inmobiliaria_compra || \"\"} · ${it.cobrada ? \"Firmada\" : (it.estado || \"Pendiente\")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
-              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)}`;
+              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)} (${String(it.num_cobradas || 0)} cobradas, ${String(it.pendientes || 0)} pendientes)`;
             } else {
               meta.textContent = `Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             }
