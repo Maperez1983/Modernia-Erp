@@ -13042,6 +13042,189 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     return fields
 
 
+_NOMINA_MONTHS = {
+    "ENERO": 1,
+    "FEBRERO": 2,
+    "MARZO": 3,
+    "ABRIL": 4,
+    "MAYO": 5,
+    "JUNIO": 6,
+    "JULIO": 7,
+    "AGOSTO": 8,
+    "SEPTIEMBRE": 9,
+    "SETIEMBRE": 9,
+    "OCTUBRE": 10,
+    "NOVIEMBRE": 11,
+    "DICIEMBRE": 12,
+}
+
+
+def _parse_nomina_pdf_fields(text: str) -> dict:
+    raw = str(text or "")
+    if not raw.strip():
+        return {}
+    upper = raw.upper()
+    fields: dict[str, object] = {}
+
+    def _find_amount_near(label_patterns) -> float:
+        pats = label_patterns if isinstance(label_patterns, (list, tuple)) else [label_patterns]
+        for pat in pats:
+            for m in re.finditer(pat, raw, flags=re.IGNORECASE):
+                # recorta un contexto corto (misma línea o 200 chars).
+                start = max(0, m.start() - 60)
+                end = min(len(raw), m.end() + 220)
+                ctx = raw[start:end]
+                # Busca el último importe plausible del contexto.
+                candidates = re.findall(r"[-]?(?:\\d{1,3}(?:[\\.\\s]\\d{3})*(?:,\\d{2})|\\d+(?:,\\d{2}))", ctx)
+                if not candidates:
+                    continue
+                amt = parse_money_value(candidates[-1])
+                if amt > 0:
+                    return round(float(amt), 2)
+        return 0.0
+
+    # Periodo: MM/YYYY o MesNombre YYYY
+    m = re.search(r"\\b(?:PERIODO|PER[ÍI]ODO|LIQUIDACI[ÓO]N|DEVENGO)\\b[^\\n\\r]{0,80}?(\\d{1,2})\\s*[\\/\\-]\\s*(\\d{4})", upper)
+    if m:
+        try:
+            fields["month"] = int(m.group(1))
+            fields["year"] = int(m.group(2))
+        except Exception:
+            pass
+    if not fields.get("year"):
+        m2 = re.search(r"\\b(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|SETIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\\b[^\\n\\r]{0,20}?(\\d{4})\\b", upper)
+        if m2:
+            fields["month"] = int(_NOMINA_MONTHS.get(m2.group(1).strip().upper(), 0) or 0)
+            try:
+                fields["year"] = int(m2.group(2))
+            except Exception:
+                pass
+
+    # NIF/DNI del empleado: prioriza etiquetas.
+    nif = ""
+    m3 = re.search(r"\\b(?:DNI|NIF|N\\.I\\.F\\.|NIF/NIE|NIE)\\b\\s*[:\\-]?\\s*([A-Z0-9][A-Z0-9\\-\\.\\s]{6,20})", upper)
+    if m3:
+        nif = normalize_nif(m3.group(1))
+    if not nif:
+        # fallback: primer candidato de NIF en el texto.
+        nifs = re.findall(r"\\b(?:[ABCDEFGHJNPQRSUVW]\\d{7}[0-9A-J]|\\d{8}[A-Z])\\b", upper, flags=re.IGNORECASE)
+        nif = normalize_nif(nifs[0]) if nifs else ""
+    if nif:
+        fields["empleado_nif"] = nif
+
+    # Nombre empleado: etiquetas típicas.
+    name = ""
+    for pat in (
+        r"\\b(?:TRABAJADOR|EMPLEADO|NOMBRE\\s+Y\\s+APELLIDOS|APELLIDOS\\s+Y\\s+NOMBRE)\\b\\s*[:\\-]\\s*([^\\n\\r]{4,120})",
+        r"\\bAPELLIDOS\\b\\s*[:\\-]\\s*([^\\n\\r]{2,80})\\s+\\bNOMBRE\\b\\s*[:\\-]\\s*([^\\n\\r]{2,60})",
+    ):
+        mname = re.search(pat, raw, flags=re.IGNORECASE)
+        if not mname:
+            continue
+        if mname.lastindex == 2:
+            candidate = f"{mname.group(1)} {mname.group(2)}"
+        else:
+            candidate = mname.group(1)
+        candidate = re.sub(r"\\s+", " ", str(candidate or "")).strip()
+        candidate = re.split(r"\\b(?:NIF|DNI|NIE)\\b", candidate, flags=re.IGNORECASE)[0].strip()
+        if len(candidate) >= 6:
+            name = candidate
+            break
+    if name:
+        fields["empleado_nombre"] = name
+
+    # Importes.
+    neto = _find_amount_near(
+        [
+            r"\\bL[ÍI]QUIDO\\s+A\\s+PERCIBIR\\b",
+            r"\\bNETO\\s+A\\s+PERCIBIR\\b",
+            r"\\bTOTAL\\s+A\\s+PERCIBIR\\b",
+            r"\\bL[ÍI]QUIDO\\b",
+        ]
+    )
+    if neto > 0:
+        fields["neto"] = neto
+    bruto = _find_amount_near([r"\\bTOTAL\\s+DEVENGADO\\b", r"\\bDEVENGOS\\b", r"\\bBRUTO\\b"])
+    if bruto > 0:
+        fields["bruto"] = bruto
+
+    # IRPF %.
+    m_irpf = re.search(r"\\bIRPF\\b[^\\n\\r]{0,40}?([0-9]{1,2}(?:[\\.,][0-9]{1,2})?)\\s*%", raw, flags=re.IGNORECASE)
+    if m_irpf:
+        try:
+            fields["irpf_pct"] = round(parse_money_value(m_irpf.group(1)), 4)
+        except Exception:
+            pass
+
+    # Seguridad social (trabajador/empresa): best-effort.
+    ss_trab = _find_amount_near([r"\\bSEGURIDAD\\s+SOCIAL\\b[^\\n\\r]{0,40}?TRAB", r"\\bAPORTACI[ÓO]N\\s+TRABAJADOR\\b"])
+    if ss_trab > 0:
+        fields["ss_trabajador"] = ss_trab
+    ss_emp = _find_amount_near([r"\\bSEGURIDAD\\s+SOCIAL\\b[^\\n\\r]{0,40}?EMP", r"\\bAPORTACI[ÓO]N\\s+EMPRESA\\b"])
+    if ss_emp > 0:
+        fields["ss_empresa"] = ss_emp
+
+    return fields
+
+
+def ocr_nomina_from_s3(s3_key: str, *, filename: str = "") -> dict:
+    key = str(s3_key or "").strip()
+    if not key:
+        return {"error": "s3_key requerido", "status": "error", "confidence": 0.0}
+    payload = {"s3_key": key, "filename": filename or "nomina.pdf"}
+    raw_bytes, mime, _hint = decode_document_payload(payload, conn=None, session=None)
+    if not raw_bytes:
+        return {"error": "No se pudo leer el archivo", "status": "error", "confidence": 0.0}
+    if not mime:
+        mime = "application/pdf" if raw_bytes.startswith(b"%PDF") else "application/octet-stream"
+    if mime != "application/pdf":
+        return {"error": "Formato no soportado (solo PDF)", "status": "error", "confidence": 0.0}
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp.flush()
+            tmp_path = tmp.name
+        text, err_detail, _method = extract_pdf_text(tmp_path)
+        if (not text or len(str(text).strip()) < 40) and not err_detail:
+            text2, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
+            if text2 and len(text2.strip()) > len(str(text or "").strip()):
+                text = text2
+            if ocr_err and not err_detail:
+                err_detail = ocr_err
+        parsed = _parse_nomina_pdf_fields(text or "")
+        score = 0
+        if parsed.get("empleado_nif"):
+            score += 3
+        if parsed.get("neto"):
+            score += 3
+        if parsed.get("bruto"):
+            score += 1
+        if parsed.get("year") and parsed.get("month"):
+            score += 2
+        if parsed.get("empleado_nombre"):
+            score += 1
+        confidence = max(0.0, min(1.0, score / 9.0))
+        status = "ok" if (parsed.get("empleado_nif") and parsed.get("neto") and parsed.get("year") and parsed.get("month")) else ("partial" if parsed else "empty")
+        if err_detail and not text:
+            return {"error": err_detail, "status": "error", "confidence": 0.0, "text": "", "fields": {}}
+        return {
+            "ok": True,
+            "status": status,
+            "confidence": confidence,
+            "text": (text or "")[:220000],
+            "fields": parsed,
+        }
+    except Exception as exc:
+        return {"error": str(exc) or "OCR nómina falló", "status": "error", "confidence": 0.0}
+    finally:
+        try:
+            if tmp_path:
+                os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 def process_renta_ocr_job(payload, conn):
     raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=None, session=None)
     tmp_path = None
@@ -15443,7 +15626,10 @@ def _normalize_nif_ocr(value: str) -> str:
     if len(raw) > 12:
         raw = raw[:12]
     def fix_digits(chunk: str) -> str:
-        table = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5"})
+        # Correcciones OCR solo en posiciones que deben ser dígitos.
+        # Importante: NO convertir el prefijo CIF (p.ej. "B") a "8" porque el prefijo
+        # también puede ser una letra válida.
+        table = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8"})
         return str(chunk or "").translate(table)
     if not raw:
         return ""
@@ -25014,6 +25200,229 @@ def bulk_update_workspace_rrhh_productividad_manual(conn, workspace_id, persona_
     return {"ok": True, "updated": len(ids)}
 
 
+def fetch_workspace_rrhh_nominas(conn, workspace_id, persona_id, *, year=0, month=0, limit=120):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    year_i = int(year or 0) if str(year or "").strip() else 0
+    month_i = int(month or 0) if str(month or "").strip() else 0
+    limit_i = max(1, min(int(limit or 120), 400))
+    params = [workspace_id, persona_id]
+    where = "workspace_id = ? AND persona_id = ?"
+    if year_i > 0:
+        where += " AND year = ?"
+        params.append(year_i)
+    if month_i > 0:
+        where += " AND month = ?"
+        params.append(month_i)
+    rows = conn.execute(
+        f"""
+        SELECT
+          id, workspace_id, empresa_id, persona_id, year, month,
+          empleado_nombre, empleado_nif,
+          bruto, neto, irpf_pct, ss_trabajador, ss_empresa,
+          doc_key, doc_url,
+          ocr_status, ocr_confidence,
+          created_by, created_at, updated_at
+        FROM workspace_rrhh_nominas
+        WHERE {where}
+        ORDER BY year DESC, month DESC, created_at DESC
+        LIMIT {limit_i}
+        """,
+        tuple(params),
+    ).fetchall()
+    return [dict(r) for r in (rows or [])]
+
+
+def upsert_workspace_rrhh_nomina(conn, workspace_id, persona_id, payload, *, actor_user_id="", now=""):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    if not workspace_id or not persona_id:
+        raise ValueError("workspace_id y persona_id requeridos")
+    now = now or datetime.now(timezone.utc).isoformat()
+    rec_id = str(payload.get("id") or "").strip()
+    empresa_id = str(payload.get("empresa_id") or "").strip() or None
+    year_i = int(payload.get("year") or payload.get("ejercicio") or 0) if str(payload.get("year") or payload.get("ejercicio") or "").strip() else 0
+    month_i = int(payload.get("month") or payload.get("mes") or 0) if str(payload.get("month") or payload.get("mes") or "").strip() else 0
+    empleado_nombre = str(payload.get("empleado_nombre") or payload.get("nombre") or "").strip() or None
+    empleado_nif = normalize_nif(payload.get("empleado_nif") or payload.get("nif") or payload.get("dni") or "") or None
+    bruto = round(parse_money_value(payload.get("bruto") or 0), 2)
+    neto = round(parse_money_value(payload.get("neto") or 0), 2)
+    irpf_pct = round(parse_money_value(payload.get("irpf_pct") or payload.get("irpf") or 0), 4)
+    ss_trabajador = round(parse_money_value(payload.get("ss_trabajador") or payload.get("seg_social_trabajador") or 0), 2)
+    ss_empresa = round(parse_money_value(payload.get("ss_empresa") or payload.get("seg_social_empresa") or 0), 2)
+    doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip() or None
+    doc_url = str(payload.get("doc_url") or payload.get("public_url") or "").strip() or None
+
+    do_ocr = str(payload.get("do_ocr") or payload.get("ocr") or "").strip().lower() in {"1", "true", "si", "sí", "on"}
+
+    ocr_status = None
+    ocr_confidence = None
+    ocr_text = None
+    ocr_json = None
+    if do_ocr and doc_key:
+        ocr = ocr_nomina_from_s3(doc_key, filename=str(payload.get("filename") or "").strip() or "nomina.pdf")
+        if not ocr.get("error"):
+            parsed = ocr.get("fields") or {}
+            ocr_status = str(ocr.get("status") or "").strip() or None
+            try:
+                ocr_confidence = float(ocr.get("confidence") or 0.0)
+            except Exception:
+                ocr_confidence = 0.0
+            ocr_text = str(ocr.get("text") or "").strip() or None
+            try:
+                ocr_json = json.dumps(parsed or {}, ensure_ascii=False)
+            except Exception:
+                ocr_json = None
+            if not empleado_nif:
+                empleado_nif = normalize_nif(parsed.get("empleado_nif") or "") or empleado_nif
+            if not empleado_nombre:
+                empleado_nombre = str(parsed.get("empleado_nombre") or "").strip() or empleado_nombre
+            if not year_i and parsed.get("year"):
+                try:
+                    year_i = int(parsed.get("year") or 0)
+                except Exception:
+                    year_i = year_i
+            if not month_i and parsed.get("month"):
+                try:
+                    month_i = int(parsed.get("month") or 0)
+                except Exception:
+                    month_i = month_i
+            if bruto <= 0 and parsed.get("bruto") not in (None, ""):
+                try:
+                    bruto = round(float(parsed.get("bruto") or 0.0), 2)
+                except Exception:
+                    pass
+            if neto <= 0 and parsed.get("neto") not in (None, ""):
+                try:
+                    neto = round(float(parsed.get("neto") or 0.0), 2)
+                except Exception:
+                    pass
+            if irpf_pct <= 0 and parsed.get("irpf_pct") not in (None, ""):
+                try:
+                    irpf_pct = round(float(parsed.get("irpf_pct") or 0.0), 4)
+                except Exception:
+                    pass
+            if ss_trabajador <= 0 and parsed.get("ss_trabajador") not in (None, ""):
+                try:
+                    ss_trabajador = round(float(parsed.get("ss_trabajador") or 0.0), 2)
+                except Exception:
+                    pass
+            if ss_empresa <= 0 and parsed.get("ss_empresa") not in (None, ""):
+                try:
+                    ss_empresa = round(float(parsed.get("ss_empresa") or 0.0), 2)
+                except Exception:
+                    pass
+        else:
+            ocr_status = "error"
+            ocr_confidence = 0.0
+            ocr_text = str(ocr.get("text") or "").strip() or None
+            try:
+                ocr_json = json.dumps({"error": ocr.get("error")}, ensure_ascii=False)
+            except Exception:
+                ocr_json = None
+
+    if rec_id:
+        conn.execute(
+            """
+            UPDATE workspace_rrhh_nominas
+            SET empresa_id = COALESCE(NULLIF(?, ''), empresa_id),
+                year = COALESCE(NULLIF(?, 0), year),
+                month = COALESCE(NULLIF(?, 0), month),
+                empleado_nombre = COALESCE(NULLIF(?, ''), empleado_nombre),
+                empleado_nif = COALESCE(NULLIF(?, ''), empleado_nif),
+                bruto = COALESCE(NULLIF(?, 0), bruto),
+                neto = COALESCE(NULLIF(?, 0), neto),
+                irpf_pct = COALESCE(NULLIF(?, 0), irpf_pct),
+                ss_trabajador = COALESCE(NULLIF(?, 0), ss_trabajador),
+                ss_empresa = COALESCE(NULLIF(?, 0), ss_empresa),
+                doc_key = COALESCE(NULLIF(?, ''), doc_key),
+                doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                ocr_status = COALESCE(NULLIF(?, ''), ocr_status),
+                ocr_confidence = COALESCE(NULLIF(?, 0), ocr_confidence),
+                ocr_text = COALESCE(NULLIF(?, ''), ocr_text),
+                ocr_json = COALESCE(NULLIF(?, ''), ocr_json),
+                updated_at = datetime(?)
+            WHERE id = ? AND workspace_id = ? AND persona_id = ?
+            """,
+            (
+                empresa_id or "",
+                year_i,
+                month_i,
+                empleado_nombre or "",
+                empleado_nif or "",
+                bruto,
+                neto,
+                irpf_pct,
+                ss_trabajador,
+                ss_empresa,
+                doc_key or "",
+                doc_url or "",
+                ocr_status or "",
+                float(ocr_confidence or 0.0),
+                (ocr_text or "")[:200000],
+                (ocr_json or "")[:200000],
+                now,
+                rec_id,
+                workspace_id,
+                persona_id,
+            ),
+        )
+        return {"ok": True, "id": rec_id}
+
+    rec_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_rrhh_nominas (
+          id, workspace_id, empresa_id, persona_id,
+          year, month,
+          empleado_nombre, empleado_nif,
+          bruto, neto, irpf_pct, ss_trabajador, ss_empresa,
+          doc_key, doc_url,
+          ocr_status, ocr_confidence, ocr_text, ocr_json,
+          created_by, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))
+        """,
+        (
+            rec_id,
+            workspace_id,
+            empresa_id,
+            persona_id,
+            year_i,
+            month_i,
+            empleado_nombre,
+            empleado_nif,
+            bruto,
+            neto,
+            irpf_pct,
+            ss_trabajador,
+            ss_empresa,
+            doc_key,
+            doc_url,
+            ocr_status,
+            float(ocr_confidence or 0.0),
+            (ocr_text or "")[:200000] if ocr_text else None,
+            (ocr_json or "")[:200000] if ocr_json else None,
+            str(actor_user_id or "").strip() or None,
+            now,
+            now,
+        ),
+    )
+    return {"ok": True, "id": rec_id}
+
+
+def delete_workspace_rrhh_nomina(conn, workspace_id, persona_id, rec_id):
+    workspace_id = str(workspace_id or "").strip()
+    persona_id = str(persona_id or "").strip()
+    rec_id = str(rec_id or "").strip()
+    if not (workspace_id and persona_id and rec_id):
+        return {"ok": False, "error": "workspace_id, persona_id e id requeridos"}
+    conn.execute(
+        "DELETE FROM workspace_rrhh_nominas WHERE workspace_id = ? AND persona_id = ? AND id = ?",
+        (workspace_id, persona_id, rec_id),
+    )
+    return {"ok": True}
+
+
 def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, entry_id):
     workspace_id = str(workspace_id or "").strip()
     persona_id = str(persona_id or "").strip()
@@ -28932,6 +29341,35 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_nominas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT NOT NULL,
+          year INTEGER NOT NULL DEFAULT 0,
+          month INTEGER NOT NULL DEFAULT 0,
+          empleado_nombre TEXT,
+          empleado_nif TEXT,
+          bruto REAL NOT NULL DEFAULT 0,
+          neto REAL NOT NULL DEFAULT 0,
+          irpf_pct REAL NOT NULL DEFAULT 0,
+          ss_trabajador REAL NOT NULL DEFAULT 0,
+          ss_empresa REAL NOT NULL DEFAULT 0,
+          doc_key TEXT,
+          doc_url TEXT,
+          ocr_status TEXT,
+          ocr_confidence REAL NOT NULL DEFAULT 0,
+          ocr_text TEXT,
+          ocr_json TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, persona_id, year, month, doc_key)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_registro_alerts (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -29252,6 +29690,20 @@ def ensure_workspace_product_tables(conn):
         """
     )
     ensure_column(conn, "workspace_rrhh_profile", "vacaciones_dias_anuales", "vacaciones_dias_anuales REAL NOT NULL DEFAULT 22")
+    ensure_column(conn, "workspace_rrhh_nominas", "ocr_text", "ocr_text TEXT")
+    ensure_column(conn, "workspace_rrhh_nominas", "ocr_json", "ocr_json TEXT")
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_nominas_ws_persona ON workspace_rrhh_nominas (workspace_id, persona_id)"
+        )
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_nominas_ws_persona_year_month ON workspace_rrhh_nominas (workspace_id, persona_id, year, month)"
+        )
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_rrhh_turnos (
@@ -40158,17 +40610,12 @@ def send_file(handler, path):
         elif path.suffix in {".svg", ".png", ".jpg", ".jpeg", ".gif"}:
             handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
 
-        # Compresión gzip para acelerar cargas (app.js es grande).
-        accept_encoding = (handler.headers.get("Accept-Encoding") or "").lower()
-        can_gzip = "gzip" in accept_encoding
-        is_text_like = path.suffix in {".html", ".js", ".css", ".webmanifest", ".svg"}
-        if can_gzip and is_text_like and len(data) > 1024:
-            gz = gzip.compress(data, compresslevel=6)
-            # Solo si compensa (evita inflar SVG/manifest pequeños).
-            if len(gz) + 64 < len(data):
-                data = gz
-                handler.send_header("Content-Encoding", "gzip")
-                handler.send_header("Vary", "Accept-Encoding")
+        # NOTA: evitamos comprimir aquí con gzip.
+        #
+        # Motivo: con service worker, algunos navegadores pueden acabar cacheando un body ya
+        # descomprimido pero conservando el header `Content-Encoding: gzip`, lo que provoca
+        # que `app.js` falle al parsear (p.ej. "Invalid escape in identifier") y bloquee el login.
+        # Dejamos que el reverse proxy / CDN / plataforma aplique compresión de forma segura.
 
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()

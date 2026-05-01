@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v312";
+const APP_SW_VERSION = "v313";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -3788,7 +3788,7 @@ const ICONS = {
 const renderIco = (id, size = 18) =>
   `<svg width="${Number(size) || 18}" height="${Number(size) || 18}" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="#ico-${String(id || "")
     .trim()
-    .replace(/[^a-z0-9\\-]/gi, "")}"></use></svg>`;
+    .replace(/[^a-z0-9-]/gi, "")}"></use></svg>`;
 
 const setPasswordToggleIcon = (button, isHidden) => {
   if (!button) return;
@@ -56228,7 +56228,7 @@ const syncGestoriaRentaRemesaToggles = () => {
 
 const parseRentaQuickNifFromNotas = (raw = "") => {
   const text = String(raw || "");
-  const match = text.match(/nif\\s*detectado\\s*:\\s*([a-z0-9\\-]+)/i);
+  const match = text.match(/nif\s*detectado\s*:\s*([a-z0-9-]+)/i);
   return match ? String(match[1] || "").trim() : "";
 };
 
