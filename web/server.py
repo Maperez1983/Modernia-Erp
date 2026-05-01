@@ -24305,6 +24305,284 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
         "items": items,
     }
 
+
+def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id, persona_id, ejercicio=""):
+    ejercicio_val = str(ejercicio or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio_val or ""):
+        ejercicio_val = ""
+
+    persona = conn.execute(
+        """
+        SELECT id, nombre, usuario_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    if not persona:
+        return {"kpis": {}, "items": []}
+
+    usuario_id = str(persona["usuario_id"] or "").strip()
+    user = None
+    if usuario_id:
+        try:
+            user = conn.execute(
+                "SELECT id, usuario, email, nombre, apellido FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+        except Exception:
+            user = None
+
+    def add_matcher(out_set, raw):
+        key = normalize_lookup_text(raw or "")
+        if key:
+            out_set.add(key)
+
+    matchers = set()
+    add_matcher(matchers, persona["nombre"])
+    if user:
+        add_matcher(matchers, user["usuario"])
+        add_matcher(matchers, user["email"])
+        full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
+        add_matcher(matchers, full_name)
+    if not matchers:
+        return {"kpis": {}, "items": []}
+
+    fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
+    year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
+    where = ["s.empresa_id = ?"]
+    values = [empresa_id]
+    if ejercicio_val:
+        where.append(f"{year_expr} = ?")
+        values.append(ejercicio_val)
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          s.id,
+          s.cliente_id,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(s.compania, '') AS compania,
+          COALESCE(s.ramo, '') AS ramo,
+          COALESCE(s.poliza_numero, '') AS poliza_numero,
+          COALESCE(s.produccion, '') AS responsable,
+          COALESCE(s.estado_poliza, s.estado, '') AS estado,
+          s.comision,
+          s.prima_total,
+          COALESCE(s.fecha_efecto, '') AS fecha_efecto,
+          COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento
+        FROM seguros s
+        LEFT JOIN clientes c ON c.id = s.cliente_id
+        WHERE {' AND '.join(where)}
+        """,
+        values,
+    ).fetchall()
+
+    items = []
+    count_total = 0
+    count_cobradas = 0
+    comision_total = 0.0
+    comision_cobradas = 0.0
+
+    for row in rows or []:
+        responsable = normalize_lookup_text(row["responsable"] or "")
+        if not responsable or responsable not in matchers:
+            continue
+        comision_cobrada = parse_money_value(row["comision"])
+        if comision_cobrada <= 0:
+            continue
+        # En seguros tratamos la comision como "cobrada" si la póliza no está de baja/cancelada.
+        try:
+            bucket = seguro_estado_bucket_value(dict(row))
+        except Exception:
+            bucket = ""
+        # Tratamos como "cobrada" si la póliza está en vigor/contratada (heurística).
+        is_cobrada = str(bucket or "").strip().lower() in {"en_vigor", "contratada"}
+        comision_trabajador = comision_cobrada * 0.10
+        count_total += 1
+        comision_total += comision_trabajador
+        if is_cobrada:
+            count_cobradas += 1
+            comision_cobradas += comision_trabajador
+        items.append(
+            {
+                "service": "seguros",
+                "ref_id": row["id"],
+                "cliente_id": row["cliente_id"],
+                "cliente_nombre": row["cliente_nombre"],
+                "cliente_nif": row["cliente_nif"],
+                "compania": row["compania"],
+                "ramo": row["ramo"],
+                "poliza_numero": row["poliza_numero"],
+                "fecha": str(row["fecha_efecto"] or "").strip() or str(row["fecha_vencimiento"] or "").strip(),
+                "estado": str(row.get("estado") or "").strip() or "-",
+                "cobrada": 1 if is_cobrada else 0,
+                "comision_cobrada": round(comision_cobrada, 2),
+                "comision": round(comision_trabajador, 2),
+                "responsable": str(row["responsable"] or "").strip(),
+            }
+        )
+
+    try:
+        items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
+    except Exception:
+        pass
+
+    return {
+        "kpis": {
+            "items": int(count_total),
+            "cobradas": int(count_cobradas),
+            "comision_total": round(comision_total, 2),
+            "comision_cobradas": round(comision_cobradas, 2),
+        },
+        "items": items,
+    }
+
+
+def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_id, persona_id, ejercicio=""):
+    ejercicio_val = str(ejercicio or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio_val or ""):
+        ejercicio_val = ""
+
+    persona = conn.execute(
+        """
+        SELECT id, nombre, usuario_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    if not persona:
+        return {"kpis": {}, "items": []}
+
+    usuario_id = str(persona["usuario_id"] or "").strip()
+    user = None
+    if usuario_id:
+        try:
+            user = conn.execute(
+                "SELECT id, usuario, email, nombre, apellido FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+        except Exception:
+            user = None
+
+    def add_matcher(out_set, raw):
+        key = normalize_lookup_text(raw or "")
+        if key:
+            out_set.add(key)
+
+    matchers = set()
+    add_matcher(matchers, persona["nombre"])
+    if user:
+        add_matcher(matchers, user["usuario"])
+        add_matcher(matchers, user["email"])
+        full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
+        add_matcher(matchers, full_name)
+    if not matchers:
+        return {"kpis": {}, "items": []}
+
+    where = ["h.empresa_id = ?"]
+    values = [empresa_id]
+    if ejercicio_val:
+        where.append("COALESCE(CAST(h.anio AS TEXT), SUBSTR(NULLIF(h.fecha_firma,''),1,4), '') = ?")
+        values.append(ejercicio_val)
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          h.id,
+          h.cliente_id,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(h.banco, '') AS banco,
+          COALESCE(h.oficina, '') AS oficina,
+          COALESCE(h.inmobiliaria_compra, '') AS inmobiliaria_compra,
+          COALESCE(h.asesor, '') AS responsable,
+          COALESCE(h.estado, '') AS estado,
+          COALESCE(h.fecha_firma, '') AS fecha_firma,
+          h.comision_modernia,
+          h.comision,
+          h.cesion,
+          h.comision_juan
+        FROM hipotecas h
+        LEFT JOIN clientes c ON c.id = h.cliente_id
+        WHERE {' AND '.join(where)}
+        """,
+        values,
+    ).fetchall()
+
+    items = []
+    count_total = 0
+    count_cobradas = 0
+    comision_total = 0.0
+    comision_cobradas = 0.0
+
+    for row in rows or []:
+        responsable = normalize_lookup_text(row["responsable"] or "")
+        if not responsable or responsable not in matchers:
+            continue
+        # "Nos deja 700€" -> usamos comision_modernia si existe; si no comision.
+        comision_cobrada = parse_money_value(row["comision_modernia"])
+        if comision_cobrada <= 0:
+            comision_cobrada = parse_money_value(row["comision"])
+        if comision_cobrada <= 0:
+            continue
+        estado_norm = normalize_lookup_text(row.get("estado") or "")
+        is_cobrada = "firm" in estado_norm or str(row.get("fecha_firma") or "").strip() != ""
+        comision_trabajador = comision_cobrada * 0.10
+        count_total += 1
+        comision_total += comision_trabajador
+        if is_cobrada:
+            count_cobradas += 1
+            comision_cobradas += comision_trabajador
+        items.append(
+            {
+                "service": "hipotecas",
+                "ref_id": row["id"],
+                "cliente_id": row["cliente_id"],
+                "cliente_nombre": row["cliente_nombre"],
+                "cliente_nif": row["cliente_nif"],
+                "banco": row["banco"],
+                "oficina": row["oficina"],
+                "inmobiliaria_compra": row["inmobiliaria_compra"],
+                "fecha": str(row.get("fecha_firma") or "").strip(),
+                "estado": str(row.get("estado") or "").strip() or "-",
+                "cobrada": 1 if is_cobrada else 0,
+                "comision_cobrada": round(comision_cobrada, 2),
+                "comision": round(comision_trabajador, 2),
+                "responsable": str(row["responsable"] or "").strip(),
+            }
+        )
+
+    try:
+        items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
+    except Exception:
+        pass
+
+    return {
+        "kpis": {
+            "items": int(count_total),
+            "cobradas": int(count_cobradas),
+            "comision_total": round(comision_total, 2),
+            "comision_cobradas": round(comision_cobradas, 2),
+        },
+        "items": items,
+    }
+
+
+def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona_id, servicio, ejercicio=""):
+    service_key = normalize_lookup_text(servicio or "")
+    if service_key in {"renta", "rentas"}:
+        return compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
+    if service_key in {"seguro", "seguros"}:
+        return compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
+    if service_key in {"hipoteca", "hipotecas", "financiacion", "financiaciones"}:
+        return compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
+    return {"kpis": {}, "items": []}
+
     placeholders = ",".join(["?"] * len(selected_cliente_ids))
     selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
     doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
@@ -58884,6 +59162,61 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 json_response(self, {"error": "No se pudo calcular la productividad de renta."}, status=500)
+                return
+            json_response(self, payload)
+            return
+
+        if path == "/api/workspace_rrhh_productividad":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
+            servicio = params.get("service", [""])[0] or params.get("servicio", [""])[0]
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if not str(servicio or "").strip():
+                json_response(self, {"error": "service requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            can_manage = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if not can_manage:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_for_user = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_for_user or str(persona_for_user) != str(persona_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                empresa_id = ""
+            persona_row = conn.execute(
+                "SELECT empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            if not str(empresa_id or "").strip():
+                empresa_id = str(persona_row["empresa_id"] or "").strip()
+            if not str(empresa_id or "").strip():
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                payload = compute_workspace_rrhh_productividad(
+                    conn,
+                    workspace_id=str(workspace_id or "").strip(),
+                    empresa_id=str(empresa_id or "").strip(),
+                    persona_id=str(persona_id or "").strip(),
+                    servicio=str(servicio or "").strip(),
+                    ejercicio=str(ejercicio or "").strip(),
+                )
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/workspace_rrhh_productividad", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo calcular la productividad."}, status=500)
                 return
             json_response(self, payload)
             return

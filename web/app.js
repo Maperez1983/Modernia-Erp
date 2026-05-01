@@ -12655,12 +12655,31 @@ const renderWorkspaceRrhhHub = () => {
           const active = subTab === "productividad" ? "productividad" : "nominas";
           const ejercicio = String(new Date().getFullYear()).trim();
           // Carga diferida: se rellena al entrar en Productividad.
+          const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
           const productividadPanel = `
             <div class="workspace-rrhh-panel-card">
               <div class="section-head">
                 <div>
                   <h4>Productividad</h4>
-                  <p class="muted">Renta: comisiona 30% sobre base imponible (precio con IVA → sin IVA).</p>
+                  <p class="muted">Renta: 30% base imponible. Resto servicios: 10% de la comisión cobrada del producto.</p>
+                </div>
+              </div>
+              <div class="rrhh-econ-productividad-head">
+                <div class="rrhh-econ-productividad-services">
+                  ${[
+                    { key: "renta", label: "Renta" },
+                    { key: "seguros", label: "Seguros" },
+                    { key: "hipotecas", label: "Hipotecas" },
+                  ].map((s) => `<button type="button" class="chip${s.key === serviceActive ? " active" : ""}" data-rrhh-econ-service="${s.key}" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">${escapeHtml(s.label)}</button>`).join("")}
+                </div>
+                <div class="rrhh-econ-productividad-year">
+                  <label class="muted">Ejercicio</label>
+                  <select id="rrhhEconProductividadYear" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">
+                    ${[0,1,2,3].map((delta) => {
+                      const y = String((new Date().getFullYear()) - delta);
+                      return `<option value="${escapeHtml(y)}"${y === ejercicio ? " selected" : ""}>${escapeHtml(y)}</option>`;
+                    }).join("")}
+                  </select>
                 </div>
               </div>
               <div id="rrhhEconProductividadStatus" class="muted"></div>
@@ -13825,67 +13844,122 @@ const renderWorkspaceRrhhHub = () => {
       const personaId = String(button.dataset.rrhhPersonaId || "").trim();
       const empresaId = String(button.dataset.rrhhEmpresaId || "").trim();
       if (!personaId || !empresaId) return;
-      try {
-        const status = document.getElementById("rrhhEconProductividadStatus");
-        const kpisEl = document.getElementById("rrhhEconProductividadKpis");
-        const listEl = document.getElementById("rrhhEconProductividadList");
-        if (status) status.textContent = "Cargando productividad (Renta)…";
-        if (kpisEl) kpisEl.innerHTML = "";
-        if (listEl) listEl.innerHTML = "";
-        const ejercicio = String(new Date().getFullYear());
-        const data = await api(`/api/workspace_rrhh_productividad_renta?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(ejercicio)}`);
-        if (data?.error) throw new Error(data.error);
-        const k = data?.kpis || {};
-        if (kpisEl) {
-          kpisEl.innerHTML = [
+      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-econ-service]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.workspaceRrhhEconomicosProductividadService = String(button.dataset.rrhhEconService || "renta").trim().toLowerCase();
+      const personaId = String(button.dataset.rrhhPersonaId || "").trim();
+      const empresaId = String(button.dataset.rrhhEmpresaId || "").trim();
+      renderWorkspaceRrhhHub();
+      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
+      if (!personaId || !empresaId) return;
+      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+    });
+  });
+
+  const econYear = document.getElementById("rrhhEconProductividadYear");
+  if (econYear) {
+    econYear.addEventListener("change", async () => {
+      const personaId = String(econYear.dataset.rrhhPersonaId || "").trim();
+      const empresaId = String(econYear.dataset.rrhhEmpresaId || "").trim();
+      if (!personaId || !empresaId) return;
+      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
+      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+    });
+  }
+
+  async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
+    try {
+      const status = document.getElementById("rrhhEconProductividadStatus");
+      const kpisEl = document.getElementById("rrhhEconProductividadKpis");
+      const listEl = document.getElementById("rrhhEconProductividadList");
+      const yearSel = document.getElementById("rrhhEconProductividadYear");
+      const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
+      const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+      if (status) status.textContent = `Cargando productividad (${serviceKey})…`;
+      if (kpisEl) kpisEl.innerHTML = "";
+      if (listEl) listEl.innerHTML = "";
+      const data = await api(`/api/workspace_rrhh_productividad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
+      if (data?.error) throw new Error(data.error);
+      const k = data?.kpis || {};
+      const items = Array.isArray(data?.items) ? data.items : [];
+
+      const kpiCards = (() => {
+        if (serviceKey === "renta") {
+          return [
             { label: "Rentas presentadas", value: String(k.presentadas || 0) },
             { label: "Rentas cobradas", value: String(k.cobradas || 0) },
             { label: "Comisión (presentadas)", value: euroFormatter.format(parseMoneyValue(k.comision_presentadas || 0)) },
             { label: "Comisión (cobradas)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
-          ].map((item) => `
-            <div class="kpi-card">
-              <div class="muted">${escapeHtml(item.label)}</div>
-              <div class="kpi-value">${escapeHtml(item.value)}</div>
-            </div>
-          `).join("");
+          ];
         }
-        const items = Array.isArray(data?.items) ? data.items : [];
-        if (listEl) {
-          if (!items.length) {
-            listEl.innerHTML = "<p class='muted'>Sin rentas asignadas a este trabajador en el ejercicio.</p>";
-          } else {
-            items.slice(0, 200).forEach((it) => {
-              const row = document.createElement("div");
-              row.className = "inline-row";
-              const left = document.createElement("div");
-              left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || \"\") || it.cliente_nombre || \"-\")}</strong><div class=\"muted\">${escapeHtml(it.cliente_nif || \"-\")}</div>`;
-              const right = document.createElement("div");
-              right.className = "inline-actions";
-              const meta = document.createElement("div");
-              meta.className = "muted";
-              meta.textContent = `Renta ${it.ejercicio || \"\"} · ${it.estado_presentacion || \"\"} · ${it.cobrada ? \"Cobrada\" : \"Pendiente\"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-              right.appendChild(meta);
-              if (String(it.cliente_id || "").trim()) {
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = "secondary ghost";
-                btn.textContent = "Abrir cliente";
-                btn.addEventListener("click", () => openClienteDetail(String(it.cliente_id).trim()));
-                right.appendChild(btn);
-              }
-              row.appendChild(left);
-              row.appendChild(right);
-              listEl.appendChild(row);
-            });
-          }
-        }
-        if (status) status.textContent = "";
-      } catch (err) {
-        const status = document.getElementById("rrhhEconProductividadStatus");
-        if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
+        return [
+          { label: "Items", value: String(k.items || 0) },
+          { label: "Cobrados", value: String(k.cobradas || 0) },
+          { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(k.comision_total || 0)) },
+          { label: "Comisión (cobrados)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
+        ];
+      })();
+
+      if (kpisEl) {
+        kpisEl.innerHTML = kpiCards.map((item) => `
+          <div class="kpi-card">
+            <div class="muted">${escapeHtml(item.label)}</div>
+            <div class="kpi-value">${escapeHtml(item.value)}</div>
+          </div>
+        `).join("");
       }
-    });
-  });
+
+      if (listEl) {
+        const emptyMsg =
+          serviceKey === "renta"
+            ? "Sin rentas asignadas a este trabajador en el ejercicio."
+            : "Sin items asignados a este trabajador en el ejercicio.";
+        if (!items.length) {
+          listEl.innerHTML = `<p class='muted'>${escapeHtml(emptyMsg)}</p>`;
+        } else {
+          items.slice(0, 200).forEach((it) => {
+            const row = document.createElement("div");
+            row.className = "inline-row";
+            const left = document.createElement("div");
+            left.innerHTML = `<strong>${escapeHtml(formatNombreCliente(it.cliente_nombre || \"\") || it.cliente_nombre || \"-\")}</strong><div class=\"muted\">${escapeHtml(it.cliente_nif || \"-\")}</div>`;
+            const right = document.createElement("div");
+            right.className = "inline-actions";
+            const meta = document.createElement("div");
+            meta.className = "muted";
+            if (serviceKey === "renta") {
+              meta.textContent = `Renta ${it.ejercicio || \"\"} · ${it.estado_presentacion || \"\"} · ${it.cobrada ? \"Cobrada\" : \"Pendiente\"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            } else if (serviceKey === "seguros") {
+              meta.textContent = `Seguro ${it.poliza_numero || \"\"} · ${it.compania || \"\"} · ${it.cobrada ? \"Cobrado\" : \"Pendiente\"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            } else if (serviceKey === "hipotecas") {
+              meta.textContent = `Hipoteca ${it.banco || \"\"} · ${it.oficina || it.inmobiliaria_compra || \"\"} · ${it.cobrada ? \"Firmada\" : (it.estado || \"Pendiente\")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            } else {
+              meta.textContent = `Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            }
+            right.appendChild(meta);
+            if (String(it.cliente_id || "").trim()) {
+              const btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "secondary ghost";
+              btn.textContent = "Abrir cliente";
+              btn.addEventListener("click", () => openClienteDetail(String(it.cliente_id).trim()));
+              right.appendChild(btn);
+            }
+            row.appendChild(left);
+            row.appendChild(right);
+            listEl.appendChild(row);
+          });
+        }
+      }
+      if (status) status.textContent = "";
+    } catch (err) {
+      const status = document.getElementById("rrhhEconProductividadStatus");
+      if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
+    }
+  }
 
   const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
   if (personalForm) {
