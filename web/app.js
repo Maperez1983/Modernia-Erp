@@ -12743,11 +12743,12 @@ const renderWorkspaceRrhhHub = () => {
 	                      Cobrado
 	                    </label>
 	                  </div>
-	                  <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
-	                    <button type="button" class="secondary" id="rrhhEconManualSave" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">Guardar apunte</button>
-	                    <span id="rrhhEconManualStatus" class="muted"></span>
-	                  </div>
-	                </details>
+		                  <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+		                    <button type="button" class="secondary" id="rrhhEconManualSave" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">Guardar apunte</button>
+		                    <button type="button" class="secondary ghost" id="rrhhEconManualCancelEdit" style="display:none;">Cancelar edición</button>
+		                    <span id="rrhhEconManualStatus" class="muted"></span>
+		                  </div>
+		                </details>
 	              ` : `
 		                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
 		                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
@@ -14140,11 +14141,36 @@ const renderWorkspaceRrhhHub = () => {
             } else {
               meta.textContent = `${it.cobrada ? "Cobrado" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             }
-            right.appendChild(meta);
-            if (canEditEconomicos && String(it?.source || "") === "manual") {
-              const del = document.createElement("button");
-              del.type = "button";
-              del.className = "secondary danger";
+	            right.appendChild(meta);
+	            if (canEditEconomicos && String(it?.source || "") === "manual") {
+	              const edit = document.createElement("button");
+	              edit.type = "button";
+	              edit.className = "secondary";
+	              edit.textContent = "Editar";
+	              edit.addEventListener("click", async () => {
+	                try {
+	                  const saveBtn = document.getElementById("rrhhEconManualSave");
+	                  const cancelBtn = document.getElementById("rrhhEconManualCancelEdit");
+	                  if (!saveBtn) return;
+	                  saveBtn.dataset.editId = String(it.id || "");
+	                  saveBtn.textContent = "Actualizar apunte";
+	                  if (cancelBtn) cancelBtn.style.display = "";
+	                  try { document.getElementById("rrhhEconManualClientName").value = String(it.cliente_nombre || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualClientNif").value = String(it.cliente_nif || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualDesc").value = String(it.descripcion || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualBase").value = String(parseMoneyValue(it.importe_base || 0) || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualPct").value = String(parseMoneyValue(it.comision_pct || 0) || ""); } catch {}
+	                  try { document.getElementById("rrhhEconManualPaid").checked = Boolean(it.cobrada); } catch {}
+	                  try { document.getElementById("rrhhEconManualDate").value = String(it.fecha || ""); } catch {}
+	                } catch (e) {
+	                  alert(e?.message || "No se pudo preparar la edición.");
+	                }
+	              });
+	              right.appendChild(edit);
+
+	              const del = document.createElement("button");
+	              del.type = "button";
+	              del.className = "secondary danger";
               del.textContent = "Borrar";
               del.addEventListener("click", async () => {
                 if (!confirm("¿Borrar este apunte manual?")) return;
@@ -14244,7 +14270,7 @@ const renderWorkspaceRrhhHub = () => {
 	      const saveBtn = document.getElementById("rrhhEconManualSave");
 	      if (saveBtn && canEditEconomicos && !saveBtn.dataset.bound) {
 	        saveBtn.dataset.bound = "1";
-        saveBtn.addEventListener("click", async () => {
+	        saveBtn.addEventListener("click", async () => {
           const st = document.getElementById("rrhhEconManualStatus");
           try {
             if (st) st.textContent = "Guardando…";
@@ -14252,19 +14278,21 @@ const renderWorkspaceRrhhHub = () => {
             const clientNif = String(document.getElementById("rrhhEconManualClientNif")?.value || "").trim();
             const desc = String(document.getElementById("rrhhEconManualDesc")?.value || "").trim();
             const base = parseMoneyValue(document.getElementById("rrhhEconManualBase")?.value || 0);
-            const pctRaw = String(document.getElementById("rrhhEconManualPct")?.value || "").trim();
-            const pctDefault = serviceKey === "renta" ? 30 : 10;
-            const pct = pctRaw ? parseMoneyValue(pctRaw) : pctDefault;
-            const paid = Boolean(document.getElementById("rrhhEconManualPaid")?.checked);
-            const date = String(document.getElementById("rrhhEconManualDate")?.value || "").trim();
-            if (!desc && !clientName && !clientNif) throw new Error("Indica al menos un concepto o cliente.");
-            if (!base || base <= 0) throw new Error("Indica un importe base válido (sin IVA).");
-            const comision = Math.round(((base * pct) / 100) * 100) / 100;
-            await apiPost("/api/workspace_rrhh_productividad_manual_upsert", {
-              workspace_id: state.currentWorkspaceId,
-              persona_id: personaId,
-              service: serviceKey,
-              ejercicio,
+	            const pctRaw = String(document.getElementById("rrhhEconManualPct")?.value || "").trim();
+	            const pctDefault = serviceKey === "renta" ? 30 : 10;
+	            const pct = pctRaw ? parseMoneyValue(pctRaw) : pctDefault;
+	            const paid = Boolean(document.getElementById("rrhhEconManualPaid")?.checked);
+	            const date = String(document.getElementById("rrhhEconManualDate")?.value || "").trim();
+	            const editId = String(saveBtn.dataset.editId || "").trim();
+	            if (!desc && !clientName && !clientNif) throw new Error("Indica al menos un concepto o cliente.");
+	            if (!base || base <= 0) throw new Error("Indica un importe base válido (sin IVA).");
+	            const comision = Math.round(((base * pct) / 100) * 100) / 100;
+	            await apiPost("/api/workspace_rrhh_productividad_manual_upsert", {
+	              ...(editId ? { id: editId } : {}),
+	              workspace_id: state.currentWorkspaceId,
+	              persona_id: personaId,
+	              service: serviceKey,
+	              ejercicio,
               cliente_nombre: clientName,
               cliente_nif: clientNif,
               descripcion: desc,
@@ -14279,20 +14307,45 @@ const renderWorkspaceRrhhHub = () => {
             try { document.getElementById("rrhhEconManualDesc").value = ""; } catch {}
             try { document.getElementById("rrhhEconManualBase").value = ""; } catch {}
             try { document.getElementById("rrhhEconManualPct").value = ""; } catch {}
-            try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
-            try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
-            if (st) st.textContent = "Guardado.";
-            await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
-          } catch (error) {
-            if (st) st.textContent = error.message || "No se pudo guardar.";
-          }
-        });
-      }
-    } catch (err) {
-      const status = document.getElementById("rrhhEconProductividadStatus");
-      if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
-    }
-  }
+	            try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
+	            try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
+	            try { delete saveBtn.dataset.editId; } catch {}
+	            try { saveBtn.textContent = "Guardar apunte"; } catch {}
+	            try {
+	              const cancelBtn = document.getElementById("rrhhEconManualCancelEdit");
+	              if (cancelBtn) cancelBtn.style.display = "none";
+	            } catch {}
+	            if (st) st.textContent = "Guardado.";
+	            await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	          } catch (error) {
+	            if (st) st.textContent = error.message || "No se pudo guardar.";
+	          }
+	        });
+	      }
+	      const cancelEditBtn = document.getElementById("rrhhEconManualCancelEdit");
+	      if (cancelEditBtn && canEditEconomicos && !cancelEditBtn.dataset.bound) {
+	        cancelEditBtn.dataset.bound = "1";
+	        cancelEditBtn.addEventListener("click", () => {
+	          const saveBtn = document.getElementById("rrhhEconManualSave");
+	          try { document.getElementById("rrhhEconManualClientName").value = ""; } catch {}
+	          try { document.getElementById("rrhhEconManualClientNif").value = ""; } catch {}
+	          try { document.getElementById("rrhhEconManualDesc").value = ""; } catch {}
+	          try { document.getElementById("rrhhEconManualBase").value = ""; } catch {}
+	          try { document.getElementById("rrhhEconManualPct").value = ""; } catch {}
+	          try { document.getElementById("rrhhEconManualPaid").checked = false; } catch {}
+	          try { document.getElementById("rrhhEconManualDate").value = ""; } catch {}
+	          try { delete saveBtn.dataset.editId; } catch {}
+	          try { saveBtn.textContent = "Guardar apunte"; } catch {}
+	          try { cancelEditBtn.style.display = "none"; } catch {}
+	          const st = document.getElementById("rrhhEconManualStatus");
+	          if (st) st.textContent = "";
+	        });
+	      }
+	    } catch (err) {
+	      const status = document.getElementById("rrhhEconProductividadStatus");
+	      if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
+	    }
+	  }
 
   const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
   if (personalForm) {
