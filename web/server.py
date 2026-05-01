@@ -24573,6 +24573,126 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
     }
 
 
+def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, empresa_id, persona_id, *, servicio_keys, ejercicio=""):
+    ejercicio_val = str(ejercicio or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio_val or ""):
+        ejercicio_val = ""
+
+    persona = conn.execute(
+        """
+        SELECT id, nombre, usuario_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    if not persona:
+        return {"kpis": {}, "items": []}
+
+    usuario_id = str(persona["usuario_id"] or "").strip()
+    user = None
+    if usuario_id:
+        try:
+            user = conn.execute(
+                "SELECT id, usuario, email, nombre, apellido FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+        except Exception:
+            user = None
+
+    def add_matcher(out_set, raw):
+        key = normalize_lookup_text(raw or "")
+        if key:
+            out_set.add(key)
+
+    matchers = set()
+    add_matcher(matchers, persona["nombre"])
+    if user:
+        add_matcher(matchers, user["usuario"])
+        add_matcher(matchers, user["email"])
+        full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
+        add_matcher(matchers, full_name)
+    if not matchers:
+        return {"kpis": {}, "items": []}
+
+    keys = [normalize_lookup_text(k) for k in (servicio_keys or [])]
+    keys = [k for k in keys if k]
+    if not keys:
+        return {"kpis": {}, "items": []}
+    placeholders = ",".join(["?"] * len(keys))
+
+    where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
+    values = [workspace_id, empresa_id, *keys]
+    if ejercicio_val:
+        where.append("SUBSTR(NULLIF(f.fecha_emision,''), 1, 4) = ?")
+        values.append(ejercicio_val)
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          f.cliente_id,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(f.responsable, '') AS responsable,
+          SUM(COALESCE(f.total, 0)) AS total_facturado,
+          MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
+          MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
+          COUNT(*) AS num_facturas
+        FROM workspace_facturacion f
+        LEFT JOIN clientes c ON c.id = f.cliente_id
+        WHERE {' AND '.join(where)}
+          AND COALESCE(f.cliente_id,'') != ''
+        GROUP BY f.cliente_id, COALESCE(f.responsable,'')
+        """,
+        values,
+    ).fetchall()
+
+    items = []
+    clientes = 0
+    facturado_total = 0.0
+    comision_total = 0.0
+
+    for row in rows or []:
+        responsable = normalize_lookup_text(row["responsable"] or "")
+        if not responsable or responsable not in matchers:
+            continue
+        total_facturado = parse_money_value(row["total_facturado"])
+        if total_facturado <= 0:
+            continue
+        comision = total_facturado * 0.10
+        clientes += 1
+        facturado_total += total_facturado
+        comision_total += comision
+        items.append(
+            {
+                "service": "facturacion",
+                "cliente_id": row["cliente_id"],
+                "cliente_nombre": row["cliente_nombre"],
+                "cliente_nif": row["cliente_nif"],
+                "fecha": str(row["last_fecha"] or row["first_fecha"] or "").strip(),
+                "facturado_anual": round(total_facturado, 2),
+                "comision": round(comision, 2),
+                "num_facturas": int(row["num_facturas"] or 0),
+                "responsable": str(row["responsable"] or "").strip(),
+            }
+        )
+
+    try:
+        items.sort(key=lambda it: (parse_money_value(it.get("facturado_anual"))), reverse=True)
+    except Exception:
+        pass
+
+    return {
+        "kpis": {
+            "clientes": int(clientes),
+            "facturado_total": round(facturado_total, 2),
+            "comision_total": round(comision_total, 2),
+        },
+        "items": items,
+    }
+
+
 def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona_id, servicio, ejercicio=""):
     service_key = normalize_lookup_text(servicio or "")
     if service_key in {"renta", "rentas"}:
@@ -24581,6 +24701,24 @@ def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona
         return compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
     if service_key in {"hipoteca", "hipotecas", "financiacion", "financiaciones"}:
         return compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
+    if service_key in {"gestoria", "gestoría"}:
+        return compute_workspace_rrhh_productividad_facturacion_anual(
+            conn,
+            workspace_id,
+            empresa_id,
+            persona_id,
+            servicio_keys={"gestoria", "gestoría"},
+            ejercicio=ejercicio,
+        )
+    if service_key in {"fincas", "administracion fincas", "administración fincas"}:
+        return compute_workspace_rrhh_productividad_facturacion_anual(
+            conn,
+            workspace_id,
+            empresa_id,
+            persona_id,
+            servicio_keys={"administracion fincas", "administración fincas"},
+            ejercicio=ejercicio,
+        )
     return {"kpis": {}, "items": []}
 
     placeholders = ",".join(["?"] * len(selected_cliente_ids))

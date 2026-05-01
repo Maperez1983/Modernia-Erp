@@ -12670,6 +12670,8 @@ const renderWorkspaceRrhhHub = () => {
                     { key: "renta", label: "Renta" },
                     { key: "seguros", label: "Seguros" },
                     { key: "hipotecas", label: "Hipotecas" },
+                    { key: "gestoria", label: "Gestoría" },
+                    { key: "fincas", label: "Fincas" },
                   ].map((s) => `<button type="button" class="chip${s.key === serviceActive ? " active" : ""}" data-rrhh-econ-service="${s.key}" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">${escapeHtml(s.label)}</button>`).join("")}
                 </div>
                 <div class="rrhh-econ-productividad-year">
@@ -13936,6 +13938,8 @@ const renderWorkspaceRrhhHub = () => {
               meta.textContent = `Seguro ${it.poliza_numero || \"\"} · ${it.compania || \"\"} · ${it.cobrada ? \"Cobrado\" : \"Pendiente\"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             } else if (serviceKey === "hipotecas") {
               meta.textContent = `Hipoteca ${it.banco || \"\"} · ${it.oficina || it.inmobiliaria_compra || \"\"} · ${it.cobrada ? \"Firmada\" : (it.estado || \"Pendiente\")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
+            } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
+              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · Facturado anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)}`;
             } else {
               meta.textContent = `Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
             }
