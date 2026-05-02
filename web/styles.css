@@ -107,6 +107,17 @@ body.crm-context-seguros.crm-context-vertical #explorerSection .app-lightning-sh
   margin: 0 auto;
 }
 
+/* CRM vertical: no mostrar la topbar del Explorador (rompe el look Lightning y duplica navegación). */
+body.crm-context-vertical #explorerSection .app-lightning-topbar {
+  display: none !important;
+}
+
+/* Seguros (CRM vertical): centrar el shell Lightning completo dentro del layout estándar. */
+body.crm-context-seguros.crm-context-vertical #crmSection .crm-lightning-shell {
+  width: min(var(--layout-max), calc(100% - (var(--layout-gutter) * 2)));
+  margin: 0 auto;
+}
+
 body.crm-context-vertical #explorerSection > .section-head {
   display: none;
 }
