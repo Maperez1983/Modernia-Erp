@@ -49690,7 +49690,12 @@ const loadGestoriaCrm = async () => {
     return;
   }
   let data = await api(`/api/tabla?${params.toString()}`);
-  if (data && (!data.rows || data.rows.length === 0) && empresa?.id && state.gestoriaCrmFull) {
+  // Si el cliente no tiene empresa asignada, puede que no aparezca en la búsqueda normal.
+  // En ese caso hacemos fallback a búsqueda global (sin empresa_id) al menos cuando:
+  // - el usuario está buscando (q), o
+  // - está en vista "tabla completa" (gestoriaCrmFull).
+  const shouldFallbackGlobal = Boolean(rawQuery) || state.gestoriaCrmFull;
+  if (data && (!data.rows || data.rows.length === 0) && empresa?.id && shouldFallbackGlobal) {
     const fallbackParams = new URLSearchParams(params);
     fallbackParams.delete("empresa_id");
     data = await api(`/api/tabla?${fallbackParams.toString()}`);
