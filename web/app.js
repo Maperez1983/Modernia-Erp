@@ -11366,7 +11366,7 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
       state.workspaceRrhhEquipoMemberKey = `emp:${jumpId}`;
       state.workspaceRrhhEquipoMemberPersonaId = jumpId;
       state.workspaceRrhhEquipoMemberUserId = "";
-      state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "personal";
+      state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "dashboard";
       state.workspaceRrhhSelectedPersonaId = jumpId;
       state.workspaceRrhhScopeAll = false;
     }
@@ -11643,21 +11643,15 @@ const renderWorkspaceRrhhHub = () => {
     }
   };
 
-	  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
+	  const renderRrhhEconomicosDashboardPanel = ({ personaId = "", empresaId = "" } = {}) => {
 	    const pId = String(personaId || "").trim();
 	    const eId = String(empresaId || "").trim();
 	    if (!pId) {
-	      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+	      return `<p class="muted">Guarda primero la ficha del trabajador para ver su dashboard.</p>`;
 	    }
-	    const subTab = String(state.workspaceRrhhEconomicosSubtab || "dashboard").trim().toLowerCase();
-	    const active = subTab === "productividad" ? "productividad" : subTab === "dashboard" ? "dashboard" : "nominas";
 	    const ejercicio = String(new Date().getFullYear()).trim();
-	    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-	    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
-	    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
-	    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
 	    const dashYear = String(state.workspaceRrhhEconomicosDashboardYear || "").trim() || ejercicio;
-	    const dashboardPanel = `
+	    return `
 	      <div class="workspace-rrhh-panel-card">
 	        <div class="section-head">
 	          <div>
@@ -11681,11 +11675,26 @@ const renderWorkspaceRrhhHub = () => {
 	        <div id="rrhhEconDashboardKpis" class="kpi-grid" style="margin-top:12px;"></div>
 	      </div>
 	    `;
+	  };
+
+	  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
+	    const pId = String(personaId || "").trim();
+	    const eId = String(empresaId || "").trim();
+	    if (!pId) {
+	      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+	    }
+	    const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
+	    const active = subTab === "productividad" ? "productividad" : "nominas";
+	    const ejercicio = String(new Date().getFullYear()).trim();
+	    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+	    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
+	    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
+	    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
 	    const productividadPanel = `
 	      <div class="workspace-rrhh-panel-card">
 	        <div class="section-head">
 	          <div>
-            <h4>Productividad</h4>
+	            <h4>Productividad</h4>
             <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
           </div>
         </div>
@@ -11818,12 +11827,11 @@ const renderWorkspaceRrhhHub = () => {
 	    return `
 	      <div class="rrhh-econ-tabs">
 	        ${[
-	          { key: "dashboard", label: "Dashboard" },
 	          { key: "nominas", label: "Nóminas" },
 	          { key: "productividad", label: "Productividad" },
 	        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
 	      </div>
-	      ${active === "productividad" ? productividadPanel : active === "dashboard" ? dashboardPanel : nominasPanel}
+	      ${active === "productividad" ? productividadPanel : nominasPanel}
 	    `;
 	  };
 
@@ -12047,8 +12055,8 @@ const renderWorkspaceRrhhHub = () => {
 
 	    const normalizeMemberTab = (value = "") => {
 	      const key = String(value || "").trim().toLowerCase();
-	      if (["personal", "docs", "vacaciones", "economicos"].includes(key)) return key;
-	      return "personal";
+	      if (["dashboard", "personal", "docs", "vacaciones", "economicos"].includes(key)) return key;
+	      return "dashboard";
 	    };
 
     const parseMemberKey = (key = "") => {
@@ -12887,13 +12895,22 @@ const renderWorkspaceRrhhHub = () => {
 
 	      const docsHtml = renderMemberDocs(employee);
         const vacacionesHtml = renderMemberVacaciones(employee);
-        const economicosHtml = renderRrhhEconomicosPanel({
-          personaId: String(employee?.id || "").trim(),
-          empresaId: String(employee?.empresa_id || "").trim(),
-        });
+	        const dashboardHtml = renderRrhhEconomicosDashboardPanel({
+	          personaId: String(employee?.id || "").trim(),
+	          empresaId: String(employee?.empresa_id || "").trim(),
+	        });
+	        const economicosHtml = renderRrhhEconomicosPanel({
+	          personaId: String(employee?.id || "").trim(),
+	          empresaId: String(employee?.empresa_id || "").trim(),
+	        });
 
 		      const personalHtml = `${personalCardHtml}${accessHtml}`;
-		      const tabHtml = memberTab === "docs" ? docsHtml : memberTab === "vacaciones" ? vacacionesHtml : memberTab === "economicos" ? economicosHtml : personalHtml;
+			      const tabHtml =
+			        memberTab === "dashboard" ? dashboardHtml
+			        : memberTab === "docs" ? docsHtml
+			        : memberTab === "vacaciones" ? vacacionesHtml
+			        : memberTab === "economicos" ? economicosHtml
+			        : personalHtml;
 		      const canDeactivate = Boolean(isWorkspaceRrhhManager() && employee?.id);
 		      const canDelete = Boolean(isWorkspaceRrhhManager() && employee?.id);
 		      const canDeleteUser = Boolean(isWorkspaceRrhhManager() && user?.id);
@@ -12927,14 +12944,15 @@ const renderWorkspaceRrhhHub = () => {
 	              </div>
 	            ` : ""}
 	          </div>
-	          <div class="rrhh-member-tabs">
-	            ${[
-	              { key: "personal", label: "Datos personales" },
-	              { key: "docs", label: "Documentación" },
-	              { key: "vacaciones", label: "Vacaciones" },
-	              { key: "economicos", label: "Condiciones económicas" },
-	            ].map((t) => `<button type="button" class="tab${t.key === memberTab ? " active" : ""}" data-rrhh-member-tab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
-	          </div>
+		          <div class="rrhh-member-tabs">
+		            ${[
+		              { key: "dashboard", label: "Dashboard" },
+		              { key: "personal", label: "Datos personales" },
+		              { key: "docs", label: "Documentación" },
+		              { key: "vacaciones", label: "Vacaciones" },
+		              { key: "economicos", label: "Condiciones económicas" },
+		            ].map((t) => `<button type="button" class="tab${t.key === memberTab ? " active" : ""}" data-rrhh-member-tab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+		          </div>
 	          ${tabHtml}
 	        </div>
 	      `;
@@ -15323,7 +15341,7 @@ const renderWorkspaceRrhhHub = () => {
         state.workspaceRrhhEquipoMemberKey = `emp:${personaId}`;
         state.workspaceRrhhEquipoMemberPersonaId = personaId;
         state.workspaceRrhhEquipoMemberUserId = userId;
-        state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "personal";
+        state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "dashboard";
       }
       state.workspaceRrhhSelectedPersonaId = personaId;
       state.workspaceRrhhScopeAll = false;
@@ -32740,7 +32758,8 @@ const updateTableVisibility = () => {
   }
   const showTable = state.currentModule === "clientes";
   if (bdtSection) {
-    bdtSection.classList.toggle("hidden", !showTable || isClientePage || isServiceCrm);
+    // El maestro de Clientes es transversal: debe verse aunque el usuario haya venido desde un CRM vertical.
+    bdtSection.classList.toggle("hidden", !showTable || isClientePage);
   }
   if (crmSection) {
     crmSection.classList.toggle(
