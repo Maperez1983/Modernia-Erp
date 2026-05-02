@@ -11191,7 +11191,7 @@ const renderWorkspaceCopilotHub = () => {
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["plantilla", "equipo", "horario", "turnos", "ausencias", "gastos", "docs", "usuarios"].includes(key)) return key;
+  if (["plantilla", "equipo", "horario", "turnos", "ausencias", "gastos", "economicos", "docs", "usuarios"].includes(key)) return key;
   return "plantilla";
 };
 
@@ -11614,11 +11614,121 @@ const renderWorkspaceRrhhHub = () => {
         return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 7h16v14H4V7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M4 11h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m9 16 2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       case "gastos":
         return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 7.5a6.5 6.5 0 0 0-6-3.5c-3 0-5.6 1.9-6.4 4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 12h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 15h8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 16.5A6.5 6.5 0 0 1 13 20c-3 0-5.6-1.9-6.4-4.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+      case "economicos":
+        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 1v22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       case "docs":
         return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l3 3v15H7V3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
       default:
         return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M7 10h10M7 14h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
     }
+  };
+
+  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
+    const pId = String(personaId || "").trim();
+    const eId = String(empresaId || "").trim();
+    if (!pId) {
+      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+    }
+    const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
+    const active = subTab === "productividad" ? "productividad" : "nominas";
+    const ejercicio = String(new Date().getFullYear()).trim();
+    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
+    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
+    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
+    const productividadPanel = `
+      <div class="workspace-rrhh-panel-card">
+        <div class="section-head">
+          <div>
+            <h4>Productividad</h4>
+            <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
+          </div>
+        </div>
+        <div class="rrhh-econ-productividad-head">
+          <div class="rrhh-econ-productividad-services">
+            ${[
+              { key: "renta", label: "Renta" },
+              { key: "seguros", label: "Seguros" },
+              { key: "hipotecas", label: "Hipotecas" },
+              { key: "gestoria", label: "Gestoría" },
+              { key: "fincas", label: "Fincas" },
+            ].map((s) => `<button type="button" class="chip${s.key === serviceActive ? " active" : ""}" data-rrhh-econ-service="${s.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(s.label)}</button>`).join("")}
+          </div>
+          <div class="rrhh-econ-productividad-year">
+            <label class="muted">Ejercicio</label>
+            <select id="rrhhEconProductividadYear" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">
+              ${[0, 1, 2, 3].map((delta) => {
+                const y = String((new Date().getFullYear()) - delta);
+                return `<option value="${escapeHtml(y)}"${y === ejercicio ? " selected" : ""}>${escapeHtml(y)}</option>`;
+              }).join("")}
+            </select>
+          </div>
+        </div>
+        <div id="rrhhEconProductividadStatus" class="muted"></div>
+        <div class="workspace-rrhh-panel-card" style="margin-top:10px;">
+          <div class="form-grid">
+            <label class="muted">Buscar
+              <input id="rrhhEconProductividadQuery" type="text" placeholder="Cliente, DNI/NIF o concepto…" value="${escapeHtml(prodQuery)}" />
+            </label>
+            <label class="muted">Estado
+              <select id="rrhhEconProductividadEstado">
+                ${[
+                  { v: "", l: "Todos" },
+                  { v: "pendiente", l: "Pendiente" },
+                  { v: "parcial", l: "Parcial" },
+                  { v: "cobrado", l: "Cobrado" },
+                  { v: "anulado", l: "Anulado" },
+                ].map((o) => `<option value="${escapeHtml(o.v)}"${o.v === prodEstado ? " selected" : ""}>${escapeHtml(o.l)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="muted">Acciones
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button type="button" class="secondary" id="rrhhEconProductividadExportCsv">Exportar CSV</button>
+                <button type="button" class="secondary ghost" id="rrhhEconProductividadClearFilters">Limpiar</button>
+              </div>
+            </label>
+          </div>
+          ${canEditEconomicos ? `
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;">
+              <label class="muted" style="display:inline-flex;gap:8px;align-items:center;">
+                <input type="checkbox" id="rrhhEconProductividadSelectAll" />
+                Seleccionar visibles
+              </label>
+              <label class="muted">Fecha cobro
+                <input type="date" id="rrhhEconProductividadBulkFechaCobro" />
+              </label>
+              <button type="button" class="secondary" id="rrhhEconProductividadBulkCobra">Marcar cobrado</button>
+              <button type="button" class="secondary" id="rrhhEconProductividadBulkParcial">Marcar parcial</button>
+              <button type="button" class="secondary" id="rrhhEconProductividadBulkPendiente">Marcar pendiente</button>
+              <button type="button" class="secondary danger" id="rrhhEconProductividadBulkAnula">Anular</button>
+              <span class="muted" id="rrhhEconProductividadBulkStatus"></span>
+            </div>
+          ` : ""}
+        </div>
+        <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
+        <div id="rrhhEconProductividadList" class="inline-list"></div>
+      </div>
+    `;
+    const nominasPanel = `
+      <div class="workspace-rrhh-panel-card">
+        <div class="section-head">
+          <div>
+            <h4>Nóminas</h4>
+            <p class="muted">Listado + OCR automático al subir (pendiente de activar).</p>
+          </div>
+        </div>
+        <p class="muted">Pendiente de implementación: carga de nóminas + OCR y volcado de datos.</p>
+      </div>
+    `;
+    return `
+      <div class="rrhh-econ-tabs">
+        ${[
+          { key: "nominas", label: "Nóminas" },
+          { key: "productividad", label: "Productividad" },
+        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
+      </div>
+      ${active === "productividad" ? productividadPanel : nominasPanel}
+    `;
   };
 
   const renderTabs = () => `
@@ -11629,6 +11739,7 @@ const renderWorkspaceRrhhHub = () => {
         { key: "turnos", label: "Turnos" },
         { key: "ausencias", label: "Vacaciones" },
         { key: "gastos", label: "Gastos" },
+        ...(!manager ? [{ key: "economicos", label: "Datos económicos" }] : []),
         { key: "docs", label: "Documentación" },
       ]
         .map((item) => {
@@ -12680,191 +12791,10 @@ const renderWorkspaceRrhhHub = () => {
 
 	      const docsHtml = renderMemberDocs(employee);
         const vacacionesHtml = renderMemberVacaciones(employee);
-        const economicosHtml = (() => {
-          const personaId = String(employee?.id || "").trim();
-          const empresaId = String(employee?.empresa_id || "").trim();
-          if (!personaId) {
-            return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
-          }
-          const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
-          const active = subTab === "productividad" ? "productividad" : "nominas";
-          const ejercicio = String(new Date().getFullYear()).trim();
-          // Carga diferida: se rellena al entrar en Productividad.
-          const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-          const autoEnabled = Boolean(state.workspaceRrhhEconomicosProductividadAutoEnabled);
-	          const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
-	          const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
-	          const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
-		          const productividadPanel = `
-		            <div class="workspace-rrhh-panel-card">
-              <div class="section-head">
-                <div>
-                  <h4>Productividad</h4>
-                  <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
-                </div>
-              </div>
-              <div class="rrhh-econ-productividad-head">
-                <div class="rrhh-econ-productividad-services">
-                  ${[
-                    { key: "renta", label: "Renta" },
-                    { key: "seguros", label: "Seguros" },
-                    { key: "hipotecas", label: "Hipotecas" },
-                    { key: "gestoria", label: "Gestoría" },
-                    { key: "fincas", label: "Fincas" },
-                  ].map((s) => `<button type="button" class="chip${s.key === serviceActive ? " active" : ""}" data-rrhh-econ-service="${s.key}" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">${escapeHtml(s.label)}</button>`).join("")}
-                </div>
-                <div class="rrhh-econ-productividad-year">
-                  <label class="muted">Ejercicio</label>
-                  <select id="rrhhEconProductividadYear" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">
-                    ${[0,1,2,3].map((delta) => {
-                      const y = String((new Date().getFullYear()) - delta);
-                      return `<option value="${escapeHtml(y)}"${y === ejercicio ? " selected" : ""}>${escapeHtml(y)}</option>`;
-                    }).join("")}
-                  </select>
-                </div>
-              </div>
-	              ${canEditEconomicos ? `
-	                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-	                  <div class="section-head">
-	                    <div>
-	                      <h4>Calculadora</h4>
-	                      <p class="muted">Cálculo manual para nómina/productividad hasta que todos los módulos estén completados.</p>
-	                    </div>
-	                  </div>
-	                  <div class="form-grid">
-                    <label class="muted">Tipo cálculo
-                      <select id="rrhhEconCalcMode">
-                        <option value="renta">Renta (30% base imponible)</option>
-                        <option value="comision_10">Servicios (10% cobrado)</option>
-                      </select>
-                    </label>
-                    <label class="muted">Importe (sin IVA)
-                      <input id="rrhhEconCalcBase" type="number" step="0.01" placeholder="0.00" />
-                    </label>
-                    <label class="muted">Resultado comisión
-                      <input id="rrhhEconCalcOut" type="text" readonly />
-                    </label>
-                  </div>
-	                  <div class="muted" style="margin-top:8px;">
-	                    <label style="display:inline-flex;gap:8px;align-items:center;">
-	                      <input id="rrhhEconAutoToggle" type="checkbox" ${autoEnabled ? "checked" : ""}/>
-	                      Usar cálculo automático (beta)
-	                    </label>
-	                  </div>
-	                </div>
-	                <details class="workspace-rrhh-panel-card" style="margin-top:12px;">
-	                  <summary style="cursor:pointer;"><strong>Añadir apunte manual</strong> <span class="muted">(admin)</span></summary>
-	                  <div style="margin-top:10px;" class="form-grid">
-	                    <label class="muted">Cliente (nombre)
-	                      <input id="rrhhEconManualClientName" type="text" placeholder="Nombre y apellidos" />
-	                    </label>
-	                    <label class="muted">Cliente (DNI/NIF)
-	                      <input id="rrhhEconManualClientNif" type="text" placeholder="12345678Z" />
-	                    </label>
-	                    <label class="muted">Concepto
-	                      <input id="rrhhEconManualDesc" type="text" placeholder="Ej.: Seguro hogar / Hipoteca / Renta / Gestoría anual" />
-	                    </label>
-	                    <label class="muted">Importe base (sin IVA)
-	                      <input id="rrhhEconManualBase" type="number" step="0.01" placeholder="0.00" />
-	                    </label>
-	                    <label class="muted">% comisión
-	                      <input id="rrhhEconManualPct" type="number" step="0.01" placeholder="10" />
-	                    </label>
-		                    <label class="muted">Fecha
-		                      <input id="rrhhEconManualDate" type="date" />
-		                    </label>
-		                    <label class="muted">Estado cobro
-		                      <select id="rrhhEconManualEstado">
-		                        <option value="pendiente">Pendiente</option>
-		                        <option value="parcial">Parcial</option>
-		                        <option value="cobrado">Cobrado</option>
-		                        <option value="anulado">Anulado</option>
-		                      </select>
-		                    </label>
-		                    <label class="muted">Importe cobrado (comisión)
-		                      <input id="rrhhEconManualImporteCobrado" type="number" step="0.01" placeholder="0.00" />
-		                    </label>
-		                    <label class="muted">Fecha cobro
-		                      <input id="rrhhEconManualFechaCobro" type="date" />
-		                    </label>
-		                  </div>
-		                  <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
-		                    <button type="button" class="secondary" id="rrhhEconManualSave" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">Guardar apunte</button>
-		                    <button type="button" class="secondary ghost" id="rrhhEconManualCancelEdit" style="display:none;">Cancelar edición</button>
-		                    <span id="rrhhEconManualStatus" class="muted"></span>
-		                  </div>
-		                </details>
-	              ` : `
-		                <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
-		                  <p class="muted">Las condiciones económicas y cálculos solo los puede editar un administrador.</p>
-		                </div>
-		              `}
-	              <div id="rrhhEconProductividadStatus" class="muted"></div>
-	              <div class="workspace-rrhh-panel-card" style="margin-top:10px;">
-	                <div class="form-grid">
-	                  <label class="muted">Buscar
-	                    <input id="rrhhEconProductividadQuery" type="text" placeholder="Cliente, DNI/NIF o concepto…" value="${escapeHtml(prodQuery)}" />
-	                  </label>
-	                  <label class="muted">Estado
-	                    <select id="rrhhEconProductividadEstado">
-	                      ${[
-	                        { v: "", l: "Todos" },
-	                        { v: "pendiente", l: "Pendiente" },
-	                        { v: "parcial", l: "Parcial" },
-	                        { v: "cobrado", l: "Cobrado" },
-	                        { v: "anulado", l: "Anulado" },
-	                      ].map((o) => `<option value="${escapeHtml(o.v)}"${o.v === prodEstado ? " selected" : ""}>${escapeHtml(o.l)}</option>`).join("")}
-	                    </select>
-	                  </label>
-	                  <label class="muted">Acciones
-	                    <div style="display:flex;gap:8px;align-items:center;">
-	                      <button type="button" class="secondary" id="rrhhEconProductividadExportCsv">Exportar CSV</button>
-	                      <button type="button" class="secondary ghost" id="rrhhEconProductividadClearFilters">Limpiar</button>
-	                    </div>
-	                  </label>
-	                </div>
-	                ${canEditEconomicos ? `
-	                  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;">
-	                    <label class="muted" style="display:inline-flex;gap:8px;align-items:center;">
-	                      <input type="checkbox" id="rrhhEconProductividadSelectAll" />
-	                      Seleccionar visibles
-	                    </label>
-	                    <label class="muted">Fecha cobro
-	                      <input type="date" id="rrhhEconProductividadBulkFechaCobro" />
-	                    </label>
-	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkCobra">Marcar cobrado</button>
-	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkParcial">Marcar parcial</button>
-	                    <button type="button" class="secondary" id="rrhhEconProductividadBulkPendiente">Marcar pendiente</button>
-	                    <button type="button" class="secondary danger" id="rrhhEconProductividadBulkAnula">Anular</button>
-	                    <span class="muted" id="rrhhEconProductividadBulkStatus"></span>
-	                  </div>
-	                ` : ""}
-	              </div>
-	              <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
-	              <div id="rrhhEconProductividadList" class="inline-list"></div>
-	            </div>
-	          `;
-          const nominasPanel = `
-            <div class="workspace-rrhh-panel-card">
-              <div class="section-head">
-                <div>
-                  <h4>Nóminas</h4>
-                  <p class="muted">Listado + OCR automático al subir (pendiente de activar).</p>
-                </div>
-              </div>
-              <p class="muted">Pendiente de implementación: carga de nóminas + OCR y volcado de datos.</p>
-            </div>
-          `;
-          return `
-            <div class="rrhh-econ-tabs">
-              ${[
-                { key: "nominas", label: "Nóminas" },
-                { key: "productividad", label: "Productividad" },
-              ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(personaId)}" data-rrhh-empresa-id="${escapeHtml(empresaId)}">${escapeHtml(t.label)}</button>`).join("")}
-            </div>
-            ${active === "productividad" ? productividadPanel : nominasPanel}
-          `;
-        })();
+        const economicosHtml = renderRrhhEconomicosPanel({
+          personaId: String(employee?.id || "").trim(),
+          empresaId: String(employee?.empresa_id || "").trim(),
+        });
 
 		      const personalHtml = `${personalCardHtml}${accessHtml}`;
 		      const tabHtml = memberTab === "docs" ? docsHtml : memberTab === "vacaciones" ? vacacionesHtml : memberTab === "economicos" ? economicosHtml : personalHtml;
@@ -13630,16 +13560,51 @@ const renderWorkspaceRrhhHub = () => {
           : "<p class='muted'>Sin documentos cargados todavía.</p>"}
       </div>
     </div>
-  `;
+	  `;
 
-	  const panelHtml =
-	    tab === "equipo" ? renderEquipo()
-	    : tab === "plantilla" ? renderPlantilla()
-	    : tab === "horario" ? renderHorario()
-	    : tab === "turnos" ? renderTurnos()
-	    : tab === "ausencias" ? renderAusencias()
-	    : tab === "gastos" ? renderGastos()
-	    : renderDocs();
+	  const renderEconomicos = () => {
+	    const authUserId = String(getAuthScopeUser?.()?.id || "").trim();
+	    const persona =
+	      selectedEmployee ||
+	      employees.find((row) => authUserId && String(row?.usuario_id || "").trim() === authUserId) ||
+	      employees.find((row) => Number(row?.usuario_manual || 0) === 1) ||
+	      null;
+	    const personaId = String(persona?.id || selectedPersonaId || "").trim();
+	    const empresaId = String(persona?.empresa_id || "").trim();
+	    if (!personaId) {
+	      return `
+	        <div class="workspace-rrhh-panel-card">
+	          <div class="section-head">
+	            <div>
+	              <h4>Datos económicos</h4>
+	              <p class="muted">No se pudo localizar tu ficha de RRHH. Contacta con un administrador.</p>
+	            </div>
+	          </div>
+	        </div>
+	      `;
+	    }
+	    return `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
+	            <h4>Datos económicos</h4>
+	            <p class="muted">Nómina y productividad asociada a tu usuario.</p>
+	          </div>
+	        </div>
+	        ${renderRrhhEconomicosPanel({ personaId, empresaId })}
+	      </div>
+	    `;
+	  };
+
+		  const panelHtml =
+		    tab === "equipo" ? renderEquipo()
+		    : tab === "plantilla" ? renderPlantilla()
+		    : tab === "horario" ? renderHorario()
+		    : tab === "turnos" ? renderTurnos()
+		    : tab === "ausencias" ? renderAusencias()
+		    : tab === "gastos" ? renderGastos()
+		    : tab === "economicos" ? renderEconomicos()
+		    : renderDocs();
   const hideMainTabs = Boolean(manager && tab === "equipo" && String(state.workspaceRrhhEquipoView || "") === "member");
 
   workspaceRrhhHub.innerHTML = `
