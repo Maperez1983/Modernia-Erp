@@ -56600,12 +56600,15 @@ const createGestoriaRentaCampaign = async () => {
     gestoriaRentaCampaignCreateBtn.disabled = true;
   }
   try {
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa?.id) throw new Error("Selecciona empresa de Gestoría.");
     const { entryId, renta_detalles } = buildRentaDetallesPayloadWithNewEntry(row, ejercicio);
     const res = await fetch("/api/cliente_gestoria_update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         cliente_id: state.currentClienteId,
+        empresa_id: empresa.id,
         mod_renta: 1,
         renta_detalles,
       }),
@@ -56777,6 +56780,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
         try {
           await apiPost("/api/cliente_gestoria_update", {
             cliente_id: clienteId,
+            empresa_id: empresa.id,
             tipo_cliente: "Cliente Renta",
             mod_renta: 1,
           });
@@ -69056,6 +69060,8 @@ if (clienteGestoriaForm) {
     }
     const formData = new FormData(clienteGestoriaForm);
     const payload = Object.fromEntries(formData.entries());
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (empresa?.id) payload.empresa_id = empresa.id;
     const checkboxFields = [
       "mod_fiscal",
       "mod_laboral",
@@ -69213,8 +69219,10 @@ if (gestoriaRentaDetallesForm) {
     }
     const formData = new FormData(gestoriaRentaDetallesForm);
     const nextRentaPayload = buildGestoriaRentaDetailsPayload(Object.fromEntries(formData.entries()));
+    const empresa = resolveCrmGestoriaEmpresa();
     const payload = {
       cliente_id: state.currentClienteId,
+      empresa_id: empresa?.id || "",
       mod_renta: 1,
       renta_detalles: nextRentaPayload,
     };
