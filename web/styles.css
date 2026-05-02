@@ -3569,6 +3569,115 @@ body.theme-operativa .workspace-home-count {
   gap: 16px;
 }
 
+#holdingSection .app-lightning-shell--sidebar,
+#agendaSection .app-lightning-shell--sidebar {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+#holdingSection .app-lightning-sidebar,
+#agendaSection .app-lightning-sidebar {
+  position: sticky;
+  top: calc(14px + var(--safe-top));
+  align-self: start;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background:
+    radial-gradient(circle at 30% -20%, rgba(255, 255, 255, 0.18), transparent 58%),
+    linear-gradient(180deg, rgba(var(--sage-rgb), 0.92), rgba(19, 122, 72, 0.92));
+  color: rgba(255, 255, 255, 0.98);
+}
+
+#holdingSection .app-sidehead,
+#agendaSection .app-sidehead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--gold-rgb), 0.30);
+  background: rgba(var(--ink-rgb), 0.94);
+  color: rgba(255, 255, 255, 0.98);
+  font-family: var(--font-ui);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+#holdingSection .app-side-item,
+#agendaSection .app-side-item {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+#holdingSection .app-side-item:hover,
+#agendaSection .app-side-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+#holdingSection .app-side-item.active,
+#agendaSection .app-side-item.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+#holdingSection .app-side-item:focus-visible,
+#agendaSection .app-side-item:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.55);
+  outline-offset: 2px;
+}
+
+#holdingSection .app-side-ico,
+#agendaSection .app-side-ico {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.98);
+}
+
+#holdingSection .app-side-ico svg,
+#agendaSection .app-side-ico svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#holdingSection .app-side-label,
+#agendaSection .app-side-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12px;
+  text-transform: uppercase;
+  opacity: 0.95;
+}
+
+#holdingSection .app-lightning-shell--sidebar #workspaceViewTabs {
+  display: none;
+}
+
 #homeSection .app-lightning-main,
 #holdingSection .app-lightning-main,
 #explorerSection .app-lightning-main {

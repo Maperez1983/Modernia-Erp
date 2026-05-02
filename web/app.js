@@ -20575,6 +20575,17 @@ const setPage = (page) => {
   // UI unificada: usamos siempre la identidad corporativa (misma base que CRM inmobiliario).
   document.body.classList.add("theme-operativa");
   document.body.classList.toggle("page-empresa", page !== "home");
+  // Anti-mezcla: al salir del shell CRM vertical (Inmo/Seguros/Fin/Gestoría) hacia páginas transversales,
+  // limpiamos el contexto CRM para que no “pegue” estilos (crm-context-vertical, etc.).
+  if (page !== "empresa") {
+    document.body.classList.remove(
+      "crm-context-vertical",
+      "crm-context-inmo",
+      "crm-context-seguros",
+      "crm-context-fin",
+      "crm-context-gestoria"
+    );
+  }
   try {
     debugLog("setPage()", page);
   } catch (e) {}
@@ -20601,6 +20612,9 @@ const setPage = (page) => {
   }
   if (holdingSection) {
     holdingSection.classList.toggle("hidden", page !== "holding");
+  }
+  if (agendaSection) {
+    agendaSection.classList.toggle("hidden", page !== "agenda");
   }
   if (adminSection) {
     adminSection.classList.toggle("hidden", page !== "admin");
@@ -26949,6 +26963,81 @@ const GESTORIA_SUBTIPOS = {
   "Gestión administrativa": ["Cliente Renta", "Gestiones Administrativas", "Renta", "Puntual"],
 };
 
+const GESTORIA_TRABAJO_CATEGORIES = [
+  { key: "laboral", label: "Laboral" },
+  { key: "fiscal", label: "Fiscal" },
+  { key: "contable", label: "Contable" },
+  { key: "registro", label: "Registro Mercantil" },
+  { key: "sociedades", label: "Sociedades" },
+  { key: "rentas", label: "Rentas" },
+  { key: "trafico", label: "Tráfico" },
+  { key: "herencias", label: "Herencias" },
+  { key: "expedientes", label: "Expedientes" },
+  { key: "tasaciones", label: "Tasaciones" },
+  { key: "otros", label: "Otros" },
+];
+
+const normalizeGestoriaTrabajoCategory = (value) => {
+  const key = String(value || "").trim().toLowerCase();
+  return GESTORIA_TRABAJO_CATEGORIES.some((item) => item.key === key) ? key : "";
+};
+
+const classifyGestoriaTrabajoCategory = (tipoTrabajo) => {
+  const text = normalizeLookupText(tipoTrabajo || "");
+  if (!text) return "otros";
+  if (text.includes("HERENC")) return "herencias";
+  if (text.includes("TRAFIC") || text.includes("TRANSFER") || text.includes("MATRICUL")) return "trafico";
+  if (text.includes("TASACI")) return "tasaciones";
+  if (text.includes("RENTA") || text.includes("MODELO 100") || text.includes("DECLARACION")) return "rentas";
+  if (
+    text.includes("EXPEDIENT") ||
+    text.includes("ADMINISTRAT") ||
+    text.includes("IMV") ||
+    text.includes("BECA") ||
+    text.includes("BRECHA") ||
+    text.includes("CONDOMINIO")
+  ) {
+    return "expedientes";
+  }
+  if (text.includes("LABOR")) return "laboral";
+  if (
+    text.includes("FISCAL") ||
+    text.includes("HACIENDA") ||
+    text.includes("AEAT") ||
+    (text.includes("MODELO") && !text.includes("MODELO 100"))
+  ) {
+    return "fiscal";
+  }
+  if (text.includes("CONTAB")) return "contable";
+  if (text.includes("REGISTRO") || text.includes("MERCANTIL")) return "registro";
+  if (text.includes("CONSTITUCION") || text.includes("SOCIEDAD")) return "sociedades";
+  return "otros";
+};
+
+const getGestoriaTrabajoCategoryLabel = (key) => {
+  const k = normalizeGestoriaTrabajoCategory(key);
+  const item = GESTORIA_TRABAJO_CATEGORIES.find((row) => row.key === k);
+  return item ? item.label : "";
+};
+
+const ensureGestoriaTrabajoCategorySelects = () => {
+  const configure = (selectEl, { placeholder = "" } = {}) => {
+    if (!selectEl) return;
+    const current = String(selectEl.value || "").trim();
+    const currentKey = normalizeGestoriaTrabajoCategory(current) || classifyGestoriaTrabajoCategory(current);
+    selectEl.innerHTML = "";
+    if (placeholder) {
+      selectEl.appendChild(createOption("", placeholder));
+    }
+    GESTORIA_TRABAJO_CATEGORIES.forEach((item) => {
+      selectEl.appendChild(createOption(item.key, item.label));
+    });
+    selectEl.value = currentKey || "";
+  };
+  configure(gestoriaTrabajosTipoFilter, { placeholder: "Tipo (todos)" });
+  configure(gestoriaPipelineServicio, { placeholder: "Todos los servicios" });
+};
+
 const sumTotals = (items) =>
   items.reduce((acc, item) => acc + (item.total || 0), 0);
 
@@ -31288,13 +31377,18 @@ const loadGestoriaTrabajosOverview = () => {
     gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
+  ensureGestoriaTrabajoCategorySelects();
   api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`).then((data) => {
     let rows = data.rows || [];
-    const tipoFilter = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
+    const tipoFilterRaw = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
+    const tipoFilter = normalizeGestoriaTrabajoCategory(tipoFilterRaw);
     const estadoFilter = gestoriaTrabajosEstadoFilter ? gestoriaTrabajosEstadoFilter.value.trim() : "";
     const limitValue = gestoriaTrabajosLimit ? parseInt(gestoriaTrabajosLimit.value, 10) : 20;
     if (tipoFilter) {
-      rows = rows.filter((row) => (row.tipo_trabajo || "") === tipoFilter);
+      rows = rows.filter((row) => {
+        const cat = normalizeGestoriaTrabajoCategory(row.tipo_categoria) || classifyGestoriaTrabajoCategory(row.tipo_trabajo);
+        return cat === tipoFilter;
+      });
     }
     if (estadoFilter) {
       rows = rows.filter((row) => (row.estado || "") === estadoFilter);
@@ -31404,11 +31498,18 @@ const loadGestoriaPipeline = () => {
     gestoriaPipeline.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
+  ensureGestoriaTrabajoCategorySelects();
   api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`).then((data) => {
     const rows = data.rows || [];
-    const servicio = gestoriaPipelineServicio ? gestoriaPipelineServicio.value.trim() : "";
+    const servicioRaw = gestoriaPipelineServicio ? gestoriaPipelineServicio.value.trim() : "";
+    const servicio = normalizeGestoriaTrabajoCategory(servicioRaw);
     const groupBy = gestoriaPipelineGroup ? gestoriaPipelineGroup.value : "estado";
-    const filtered = servicio ? rows.filter((row) => (row.tipo_trabajo || "") === servicio) : rows;
+    const filtered = servicio
+      ? rows.filter((row) => {
+          const cat = normalizeGestoriaTrabajoCategory(row.tipo_categoria) || classifyGestoriaTrabajoCategory(row.tipo_trabajo);
+          return cat === servicio;
+        })
+      : rows;
     const estados = ["En espera", "En curso", "Completado"];
     const responsables = Array.from(
       new Set(
@@ -52357,7 +52458,8 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
   updateTableVisibility();
   setGestoriaCrmView("crm");
   if (gestoriaTrabajosTipoFilter) {
-    gestoriaTrabajosTipoFilter.value = tipo || "";
+    const key = normalizeGestoriaTrabajoCategory(tipo) || classifyGestoriaTrabajoCategory(tipo);
+    gestoriaTrabajosTipoFilter.value = key || "";
   }
   if (gestoriaTrabajosEstadoFilter) {
     gestoriaTrabajosEstadoFilter.value = estado || "";
@@ -56655,6 +56757,9 @@ const submitGestoriaTrabajoForm = async (form, statusEl, afterSubmit) => {
   if (statusEl) statusEl.textContent = "Guardando...";
   const formData = new FormData(form);
   const payload = Object.fromEntries(formData.entries());
+  if (!normalizeGestoriaTrabajoCategory(payload.tipo_categoria)) {
+    payload.tipo_categoria = classifyGestoriaTrabajoCategory(payload.tipo_trabajo);
+  }
   payload.cliente_id = state.currentClienteId;
   payload.empresa_nombre = empresa.nombre;
   payload.usuario = getCurrentUser();
@@ -59299,10 +59404,14 @@ const deleteClienteProfesional = (id, clienteId) => {
 };
 
 const saveGestoriaTrabajoField = (id, field, value) => {
+  const payload = { id, [field]: value, usuario: getCurrentUser() };
+  if (field === "tipo_trabajo") {
+    payload.tipo_categoria = classifyGestoriaTrabajoCategory(value);
+  }
   fetch("/api/gestoria_trabajos_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, [field]: value, usuario: getCurrentUser() }),
+    body: JSON.stringify(payload),
   });
 };
 
@@ -71673,6 +71782,9 @@ if (gestoriaTrabajoForm) {
     }
     const formData = new FormData(gestoriaTrabajoForm);
     const payload = Object.fromEntries(formData.entries());
+    if (!normalizeGestoriaTrabajoCategory(payload.tipo_categoria)) {
+      payload.tipo_categoria = classifyGestoriaTrabajoCategory(payload.tipo_trabajo);
+    }
     payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     if (!payload.cliente_id && state.currentClienteId) {

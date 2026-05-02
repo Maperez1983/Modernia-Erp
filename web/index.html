@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-					    <link rel="stylesheet" href="styles.css?v=249" />
+						    <link rel="stylesheet" href="styles.css?v=250" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -67,7 +67,32 @@
         </div>
       </section>
       <section id="holdingSection" class="hidden">
-        <div class="app-lightning-shell">
+        <div class="app-lightning-shell app-lightning-shell--sidebar">
+          <aside id="holdingLightningSidebar" class="app-lightning-sidebar" aria-label="Navegación workspace">
+            <div class="app-sidehead" aria-hidden="true">
+              <span>WS</span>
+            </div>
+            <button type="button" class="app-side-item" data-workspace-view-tab="operations" title="Operativa">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+              <span class="app-side-label">Op.</span>
+            </button>
+            <button type="button" class="app-side-item" data-workspace-view-tab="fincas" title="Fincas">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
+              <span class="app-side-label">Fincas</span>
+            </button>
+            <button type="button" class="app-side-item" data-workspace-view-tab="rrhh" title="RRHH">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+              <span class="app-side-label">RRHH</span>
+            </button>
+            <button type="button" class="app-side-item" data-workspace-view-tab="motores" title="Motores">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-spark"></use></svg></span>
+              <span class="app-side-label">Mot.</span>
+            </button>
+            <button type="button" class="app-side-item" data-workspace-view-tab="tenant" title="Configuración">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-settings"></use></svg></span>
+              <span class="app-side-label">Config</span>
+            </button>
+          </aside>
           <div class="app-lightning-main">
             <div class="section-head app-lightning-topbar">
               <div>
@@ -77,9 +102,9 @@
               <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
             </div>
             <div class="crm-workspace-shell">
-			          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceViewTabs">
-			            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
-			              <span class="tc-mod-ico" aria-hidden="true">
+				          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceViewTabs">
+				            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
+				              <span class="tc-mod-ico" aria-hidden="true">
 			                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
 			              </span>
 		              <span class="tc-mod-label">Resumen</span>
@@ -91,7 +116,7 @@
 		              <span class="tc-mod-label">Config</span>
 		            </button>
 		          </div>
-          <div class="crm-workspace-view" data-workspace-view="tenant">
+	          <div class="crm-workspace-view" data-workspace-view="tenant">
 		            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceTenantTabs">
 		              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
 		                <span class="tc-mod-ico" aria-hidden="true">
@@ -2786,17 +2811,30 @@
         </div>
       </section>
       <section id="agendaSection" class="hidden">
-        <div class="section-head">
-          <div>
-            <h2>Agenda</h2>
-            <p class="muted">Vista centralizada de tareas y seguimientos.</p>
+        <div class="app-lightning-shell app-lightning-shell--sidebar">
+          <aside id="agendaLightningSidebar" class="app-lightning-sidebar" aria-label="Navegación agenda">
+            <div class="app-sidehead" aria-hidden="true">
+              <span>Ag.</span>
+            </div>
+            <button type="button" class="app-side-item active" data-agenda-view="general" title="Agenda">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+              <span class="app-side-label">Agenda</span>
+            </button>
+          </aside>
+          <div class="app-lightning-main">
+            <div class="section-head app-lightning-topbar">
+              <div>
+                <h2>Agenda</h2>
+                <p class="muted">Vista centralizada de tareas y seguimientos.</p>
+              </div>
+              <button id="agendaBackBtn" class="secondary ghost">Volver a home</button>
+            </div>
+            <div class="form-card">
+              <h3>Agenda general</h3>
+              <p class="muted">Enlazaremos aquí la agenda de cada servicio.</p>
+              <div id="agendaGeneral"></div>
+            </div>
           </div>
-          <button id="agendaBackBtn" class="secondary ghost">Volver a home</button>
-        </div>
-        <div class="form-card">
-          <h3>Agenda general</h3>
-          <p class="muted">Enlazaremos aquí la agenda de cada servicio.</p>
-          <div id="agendaGeneral"></div>
         </div>
       </section>
       <section id="workspacePortalPublicSection" class="hidden">
@@ -4964,26 +5002,28 @@
                   <option value="50">Ver 50</option>
                 </select>
               </div>
-              <form id="gestoriaTrabajoForm" class="form-grid">
+	              <form id="gestoriaTrabajoForm" class="form-grid">
                 <label>
                   Cliente
                   <select id="gestoriaTrabajoCliente" name="cliente_id" required></select>
                 </label>
                 <label>
-                  Tipo de gestión
-                  <select name="tipo_trabajo">
-                    <option>Laboral</option>
-                    <option>Fiscal</option>
-                    <option>Contable</option>
-                    <option>Modelos Hacienda</option>
-                    <option>Registro Mercantil</option>
-                    <option>Renta</option>
-                    <option>Tráfico</option>
-                    <option>Herencias</option>
-                    <option>Constitución sociedad</option>
-                    <option>Otros</option>
-                  </select>
-                </label>
+	                  Tipo de gestión
+	                  <select name="tipo_trabajo">
+	                    <option>Laboral</option>
+	                    <option>Fiscal</option>
+	                    <option>Contable</option>
+	                    <option>Modelos Hacienda</option>
+	                    <option>Registro Mercantil</option>
+	                    <option>Renta</option>
+	                    <option>Tráfico</option>
+	                    <option>Expedientes administrativos</option>
+	                    <option>Tasaciones</option>
+	                    <option>Herencias</option>
+	                    <option>Constitución sociedad</option>
+	                    <option>Otros</option>
+	                  </select>
+	                </label>
                 <label>
                   Estado
                   <select name="estado">
@@ -10164,11 +10204,11 @@
         </script>
 		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=723"></script>
+												    <script src="app.js?v=725"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=321";
+											        const TARGET_SW = "/sw.js?v=323";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";
