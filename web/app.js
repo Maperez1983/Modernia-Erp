@@ -49498,19 +49498,22 @@ const loadGestoriaCrm = async () => {
     return;
   }
   const isRentaTab = state.gestoriaCrmTab === "renta";
-  if (!isRentaTab) {
+  const rawQuery = gestoriaCrmSearch ? gestoriaCrmSearch.value.trim() : "";
+  const isSearching = Boolean(rawQuery);
+  if (!isRentaTab && !isSearching) {
     loadGestoriaTrabajosOverview();
     loadGestoriaModelosOverview();
     loadGestoriaPipeline();
   }
-  loadGestoriaDocsRecent();
-  loadGestoriaAuditoria();
+  if (!isSearching) {
+    loadGestoriaDocsRecent();
+    loadGestoriaAuditoria();
+  }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const rawQuery = gestoriaCrmSearch ? gestoriaCrmSearch.value.trim() : "";
   const docQuery = normalizeDocumento(rawQuery);
   let q = rawQuery;
   let docClienteNameSet = null;

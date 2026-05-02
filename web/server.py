@@ -69174,14 +69174,15 @@ class Handler(BaseHTTPRequestHandler):
                 values.append(year_filter)
 
             if q:
+                q_lower = str(q or "").lower()
                 if field_filter and field_filter in visible_columns:
-                    where.append(f"CAST(t.{quote_ident(field_filter)} AS TEXT) LIKE ?")
-                    values.append(f"%{q}%")
+                    where.append(f"LOWER(CAST(t.{quote_ident(field_filter)} AS TEXT)) LIKE ?")
+                    values.append(f"%{q_lower}%")
                 else:
                     if text_columns:
-                        likes = " OR ".join([f"CAST(t.{quote_ident(col)} AS TEXT) LIKE ?" for col in text_columns])
+                        likes = " OR ".join([f"LOWER(CAST(t.{quote_ident(col)} AS TEXT)) LIKE ?" for col in text_columns])
                         where.append(f"({likes})")
-                        values.extend([f"%{q}%"] * len(text_columns))
+                        values.extend([f"%{q_lower}%"] * len(text_columns))
 
             if estado_filter and "estado" in visible_columns:
                 where.append(f"t.{quote_ident('estado')} = ?")
@@ -69190,8 +69191,9 @@ class Handler(BaseHTTPRequestHandler):
                 where.append(f"t.{quote_ident('tipo')} = ?")
                 values.append(tipo_filter)
             if perfil_filter and "perfil" in visible_columns:
-                where.append(f"CAST(t.{quote_ident('perfil')} AS TEXT) LIKE ?")
-                values.append(f"%{perfil_filter}%")
+                pf_lower = str(perfil_filter or "").lower()
+                where.append(f"LOWER(CAST(t.{quote_ident('perfil')} AS TEXT)) LIKE ?")
+                values.append(f"%{pf_lower}%")
 
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
             select_cols = ", ".join([f"t.{quote_ident(col)}" for col in visible_columns])
