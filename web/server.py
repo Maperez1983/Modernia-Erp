@@ -63868,17 +63868,30 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_trabajos":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
-            if not cliente_id and not empresa_id:
-                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            empresa_ids = []
+            if str(empresa_id or "").strip():
+                empresa_ids = [str(empresa_id or "").strip()]
+            elif workspace_id:
+                try:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                except Exception:
+                    empresa_ids = []
+            if not cliente_id and not empresa_ids:
+                json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
             where = []
             values = []
             if cliente_id:
                 where.append("gt.cliente_id = ?")
                 values.append(cliente_id)
-            if empresa_id:
-                where.append("gt.empresa_id = ?")
-                values.append(empresa_id)
+            if empresa_ids:
+                if len(empresa_ids) == 1:
+                    where.append("gt.empresa_id = ?")
+                    values.append(empresa_ids[0])
+                else:
+                    where.append(f"gt.empresa_id IN ({','.join(['?'] * len(empresa_ids))})")
+                    values.extend(empresa_ids)
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
