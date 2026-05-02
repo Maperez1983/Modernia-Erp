@@ -23991,6 +23991,25 @@ def sanitize_renta_entry(entry):
     if ejercicio:
         sanitized["ejercicio"] = ejercicio
 
+    # Normaliza fecha de presentación (para cards/listados).
+    raw_presentacion = str(
+        entry.get("presentacion_fecha")
+        or entry.get("fecha_presentacion")
+        or entry.get("doc_fecha")
+        or entry.get("fecha")
+        or entry.get("presentacion")
+        or ""
+    ).strip()
+    presentacion_fecha = ""
+    if raw_presentacion:
+        # ISO (o ISO datetime)
+        match_iso = re.match(r"^(20[0-9]{2}\-[0-9]{2}\-[0-9]{2})", raw_presentacion)
+        if match_iso:
+            presentacion_fecha = match_iso.group(1)
+        else:
+            presentacion_fecha = _parse_date_ddmmyyyy_to_iso(raw_presentacion)
+    sanitized["presentacion_fecha"] = presentacion_fecha
+
     raw_work = coerce_renta_money(entry.get("rendimientos_trabajo_total"))
     raw_activities = coerce_renta_money(entry.get("rendimientos_actividades_economicas_total"))
     raw_cap_inm = coerce_renta_money(entry.get("rendimientos_capital_inmobiliario_total"))
