@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v313";
+const APP_SW_VERSION = "v314";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -5494,15 +5494,14 @@ const renderCompanyCards = () => {
 	      const employee = timeProfile?.employee || null;
 	      const homePersona = state.homeTimeStatus?.persona || null;
 	      const personaId = String(employee?.id || homePersona?.id || "").trim();
-		      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
-		      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
-		      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
-		      const rrhhHref = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
-          const rrhhDocsHref = `${rrhhHref}&rrhh_tab=docs`;
-      const displayName =
-        employee?.nombre
-        || homePersona?.nombre
-        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
+			      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
+			      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
+			      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
+			      const rrhhHref = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
+	      const displayName =
+	        employee?.nombre
+	        || homePersona?.nombre
+	        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
 	        || user?.usuario
         || user?.email
         || "Usuario";
@@ -5555,11 +5554,10 @@ const renderCompanyCards = () => {
             <div class="company-meta">${escapeHtml(subtitle)}</div>
           </div>
 		        </div>
-		        <div class="workspace-home-card-actions">
-		          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
-              <a class="secondary ghost button-inline" href="${rrhhDocsHref}" data-action="rrhh-home">Documentación</a>
-		          <button type="button" class="secondary ghost button-inline" data-action="time-punch">${timeLabel}</button>
-		        </div>
+			        <div class="workspace-home-card-actions">
+			          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+			          <button type="button" class="secondary ghost button-inline" data-action="time-punch">${timeLabel}</button>
+			        </div>
 		      `;
 		      coreCards.appendChild(card);
 		    };
