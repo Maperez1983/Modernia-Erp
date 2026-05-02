@@ -64975,35 +64975,36 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
-        if path == "/api/catalogo_match":
-            texto = params.get("texto", [""])[0].strip()
-            if not texto:
-                json_response(self, {"error": "texto requerido"}, status=400)
+        if path in ("/api/catalogo_match", "/api/gestoria_dashboard"):
+            if path == "/api/catalogo_match":
+                texto = params.get("texto", [""])[0].strip()
+                if not texto:
+                    json_response(self, {"error": "texto requerido"}, status=400)
+                    return
+                def match(table):
+                    return conn.execute(
+                        f"""
+                        SELECT codigo, descripcion
+                        FROM {table}
+                        WHERE LOWER(descripcion) LIKE LOWER(?)
+                        ORDER BY CASE
+                          WHEN LOWER(descripcion) = LOWER(?) THEN 0
+                          ELSE 1
+                        END, codigo
+                        LIMIT 5
+                        """,
+                        (f"%{texto}%", texto),
+                    ).fetchall()
+                cnae = match("cnae_catalogo")
+                iae = match("iae_catalogo")
+                json_response(
+                    self,
+                    {
+                        "cnae": [dict(r) for r in cnae],
+                        "iae": [dict(r) for r in iae],
+                    },
+                )
                 return
-            def match(table):
-                return conn.execute(
-                    f"""
-                    SELECT codigo, descripcion
-                    FROM {table}
-                    WHERE LOWER(descripcion) LIKE LOWER(?)
-                    ORDER BY CASE
-                      WHEN LOWER(descripcion) = LOWER(?) THEN 0
-                      ELSE 1
-                    END, codigo
-                    LIMIT 5
-                    """,
-                    (f"%{texto}%", texto),
-                ).fetchall()
-            cnae = match("cnae_catalogo")
-            iae = match("iae_catalogo")
-            json_response(
-                self,
-                {
-                    "cnae": [dict(r) for r in cnae],
-                    "iae": [dict(r) for r in iae],
-                },
-            )
-            return
 
             if path == "/api/gestoria_dashboard":
                 empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
