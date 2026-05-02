@@ -19722,8 +19722,8 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
                 extra.get("email"),
                 extra.get("fecha_nacimiento"),
                 extra.get("direccion"),
-                "Importación",
-                "Seguros",
+                "",
+                "",
                 None,
                 "Activo",
                 now,
@@ -19932,8 +19932,8 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             normalize_email(extra.get("email")) or None,
             (extra.get("fecha_nacimiento") or "").strip() or None,
             (extra.get("direccion") or "").strip() or None,
-            "Importación",
-            "Inmobiliaria",
+            "",
+            "",
             None,
             "Inactivo",
             now,
@@ -27273,8 +27273,8 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
                 extra.get("email"),
                 extra.get("fecha_nacimiento"),
                 extra.get("direccion"),
-                "Importación",
-                "Financiaciones",
+                "",
+                "",
                 None,
                 "Activo",
                 now,
@@ -35449,8 +35449,8 @@ def ensure_workspace_budget_client(
                 nif or None,
                 str(cliente_telefono or "").strip() or None,
                 str(cliente_email or "").strip() or None,
-                "Importación",
-                "Sistema",
+                "",
+                "",
                 None,
                 "Lead",
                 now,
@@ -58164,7 +58164,7 @@ class Handler(BaseHTTPRequestHandler):
                     procedencia_canal = "Colaborador interno"
                     procedencia_user_id = procedencia_user_id or actor_user_id
                 else:
-                    procedencia_canal = "Importación"
+                    procedencia_canal = ""
             if normalize_lookup_text(procedencia_canal) in ("COLABORADOR INTERNO", "INTERNO", "USUARIO"):
                 procedencia_user_id = procedencia_user_id or actor_user_id
             cliente_id = payload.get("id") or os.urandom(16).hex()
@@ -69519,6 +69519,7 @@ class Handler(BaseHTTPRequestHandler):
             # Nota: el bucket de estado usa esta normalización; vencimientos debe usarla también.
             fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
             fecha_venc_raw_date = seguro_date_sql("fecha_vencimiento", "s")
+            fecha_baja_date = seguro_date_sql("fecha_baja", "s")
             fecha_venc_expr = (
                 f"COALESCE({fecha_venc_raw_date}, "
                 f"CASE WHEN {fecha_efecto_date} IS NOT NULL THEN DATE({fecha_efecto_date}, '+1 year') ELSE NULL END)"
@@ -69565,9 +69566,11 @@ class Handler(BaseHTTPRequestHandler):
                 return f"CAST(NULLIF({normalized}, '') AS REAL)"
 
             prima_total_sql = _money_sql("s.prima_total")
+            comision_sql = _money_sql("s.comision")
 
             poliza_strict_expr = "NULLIF(TRIM(s.poliza_numero), '')"
             poliza_key_expr = f"COALESCE({poliza_strict_expr}, s.id)"
+            estado_bucket_expr = seguro_estado_bucket_expr("s")
 
             total = conn.execute(
                 f"""
@@ -69639,6 +69642,33 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
+            altas_30 = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                  AND {fecha_efecto_date} IS NOT NULL
+                  AND DATE({fecha_efecto_date}) BETWEEN DATE('now','localtime','-30 days')
+                      AND DATE('now','localtime')
+                  AND {estado_bucket_expr} IN ('contratada', 'en_vigor')
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+            bajas_30 = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                  AND {fecha_baja_date} IS NOT NULL
+                  AND DATE({fecha_baja_date}) BETWEEN DATE('now','localtime','-30 days')
+                      AND DATE('now','localtime')
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
             faltantes = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -69683,6 +69713,23 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
+            comisiones = conn.execute(
+                f"""
+                SELECT SUM(t.comision) AS total
+                FROM (
+                  SELECT
+                    {poliza_key_expr} AS poliza_key,
+                    MAX(COALESCE({comision_sql}, 0)) AS comision
+                  FROM seguros s
+                  WHERE s.empresa_id = ?
+                    AND ({uploaded_clause} OR ? = 0)
+                    AND {in_vigor_expr}
+                    AND {exclude_sin_seguro}
+                  GROUP BY 1
+                ) t
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
             seguros_totals = compute_seguros_contabilidad_totals(conn, empresa_id)
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
             for row in quality_rows:
@@ -69690,6 +69737,14 @@ class Handler(BaseHTTPRequestHandler):
                 if key not in quality:
                     key = "desconocida"
                 quality[key] += row["total"] or 0
+            prima_total_val = primas["total"] if primas and primas["total"] is not None else 0
+            comision_val = comisiones["total"] if comisiones and comisiones["total"] is not None else 0
+            comision_pct_avg = 0
+            try:
+                if prima_total_val and comision_val:
+                    comision_pct_avg = round((float(comision_val) / float(prima_total_val)) * 100.0, 4)
+            except Exception:
+                comision_pct_avg = 0
             json_response(
                 self,
                 {
@@ -69699,8 +69754,12 @@ class Handler(BaseHTTPRequestHandler):
                     "en_vigor_con_numero": en_vigor_con_numero["total"] if en_vigor_con_numero else 0,
                     "en_vigor_sin_numero": en_vigor_sin_numero["total"] if en_vigor_sin_numero else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
+                    "altas_30": altas_30["total"] if altas_30 else 0,
+                    "bajas_30": bajas_30["total"] if bajas_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
-                    "prima_total": primas["total"] if primas and primas["total"] is not None else 0,
+                    "prima_total": prima_total_val,
+                    "comision_esperada": comision_val,
+                    "comision_pct_avg": comision_pct_avg,
                     "facturacion_comision": seguros_totals["ingresos"],
                     "gastos": seguros_totals["gastos"],
                     "ocr_quality": quality,
