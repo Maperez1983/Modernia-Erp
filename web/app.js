@@ -2546,6 +2546,7 @@ const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
 const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
 const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
+const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
 const gestoriaRentasPendientesCount = document.getElementById("gestoriaRentasPendientesCount");
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
@@ -11677,23 +11678,24 @@ const renderWorkspaceRrhhHub = () => {
 	    `;
 	  };
 
-	  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
-	    const pId = String(personaId || "").trim();
-	    const eId = String(empresaId || "").trim();
-	    if (!pId) {
-	      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
-	    }
-	    const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
-	    const active = subTab === "productividad" ? "productividad" : "nominas";
-	    const ejercicio = String(new Date().getFullYear()).trim();
-	    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-	    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
-	    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
-	    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
-	    const productividadPanel = `
-	      <div class="workspace-rrhh-panel-card">
-	        <div class="section-head">
-	          <div>
+		  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
+		    const pId = String(personaId || "").trim();
+		    const eId = String(empresaId || "").trim();
+		    if (!pId) {
+		      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+		    }
+		    const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
+		    const active = subTab === "dashboard" ? "dashboard" : subTab === "productividad" ? "productividad" : "nominas";
+		    const ejercicio = String(new Date().getFullYear()).trim();
+		    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+		    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
+		    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
+		    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
+		    const dashboardPanel = renderRrhhEconomicosDashboardPanel({ personaId: pId, empresaId: eId });
+		    const productividadPanel = `
+		      <div class="workspace-rrhh-panel-card">
+		        <div class="section-head">
+		          <div>
 	            <h4>Productividad</h4>
             <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
           </div>
@@ -11763,10 +11765,10 @@ const renderWorkspaceRrhhHub = () => {
         <div id="rrhhEconProductividadList" class="inline-list"></div>
       </div>
 	    `;
-	    const nominasPanel = `
-	      <div class="workspace-rrhh-panel-card">
-	        <div class="section-head">
-	          <div>
+		    const nominasPanel = `
+		      <div class="workspace-rrhh-panel-card">
+		        <div class="section-head">
+		          <div>
 	            <h4>Nóminas</h4>
 	            <p class="muted">Sube el PDF desde RRHH → Documentación (tipo “Nómina”). El sistema intentará extraer periodo, neto, bruto e IRPF.</p>
 	          </div>
@@ -11824,16 +11826,17 @@ const renderWorkspaceRrhhHub = () => {
 	        </div>
 	      </div>
 	    `;
-	    return `
-	      <div class="rrhh-econ-tabs">
-	        ${[
-	          { key: "nominas", label: "Nóminas" },
-	          { key: "productividad", label: "Productividad" },
-	        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
-	      </div>
-	      ${active === "productividad" ? productividadPanel : nominasPanel}
-	    `;
-	  };
+		    return `
+		      <div class="rrhh-econ-tabs">
+		        ${[
+		          { key: "dashboard", label: "Dashboard" },
+		          { key: "nominas", label: "Nóminas" },
+		          { key: "productividad", label: "Productividad" },
+		        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
+		      </div>
+		      ${active === "dashboard" ? dashboardPanel : active === "productividad" ? productividadPanel : nominasPanel}
+		    `;
+		  };
 
   const renderTabs = () => `
     <div class="tc-modulebar tc-modulebar--micro workspace-rrhh-tabs">
@@ -14126,17 +14129,16 @@ const renderWorkspaceRrhhHub = () => {
 	    });
 	  }
 
-	  const econDashYear = document.getElementById("rrhhEconDashboardYear");
-	  if (econDashYear) {
-	    econDashYear.addEventListener("change", async () => {
-	      state.workspaceRrhhEconomicosDashboardYear = String(econDashYear.value || "").trim();
-	      const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
-	      const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
-	      if (!personaId || !empresaId) return;
-	      if (String(state.workspaceRrhhEconomicosSubtab || "").trim().toLowerCase() !== "dashboard") return;
-	      await loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
-	    });
-	  }
+		  const econDashYear = document.getElementById("rrhhEconDashboardYear");
+		  if (econDashYear) {
+		    econDashYear.addEventListener("change", async () => {
+		      state.workspaceRrhhEconomicosDashboardYear = String(econDashYear.value || "").trim();
+		      const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
+		      const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
+		      if (!personaId || !empresaId) return;
+		      await loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
+		    });
+		  }
 
 	  const memoriaBtn = document.getElementById("rrhhEconMemoriaBtn");
 	  if (memoriaBtn) {
@@ -14162,11 +14164,11 @@ const renderWorkspaceRrhhHub = () => {
 	    });
 	  }
 
-	  if (econDashYear && String(state.workspaceRrhhEconomicosSubtab || "").trim().toLowerCase() === "dashboard") {
-	    const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
-	    const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
-	    if (personaId && empresaId) loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
-	  }
+		  if (econDashYear) {
+		    const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
+		    const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
+		    if (personaId && empresaId) loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
+		  }
 
   const econCalcBase = document.getElementById("rrhhEconCalcBase");
   const econCalcMode = document.getElementById("rrhhEconCalcMode");
@@ -20520,6 +20522,22 @@ const openClientesModule = (opts = {}) => {
   }
   setModule("clientes");
   setPage("empresa");
+  // Clientes es transversal: lo mostramos siempre en el layout estándar (no dentro de un CRM vertical).
+  try {
+    setTab("operativa");
+  } catch (e) {}
+  try {
+    updateExplorerHeader("Clientes");
+  } catch (e) {}
+  if (explorerSection) {
+    explorerSection.classList.remove("hidden");
+  }
+  try {
+    updateTableVisibility();
+  } catch (e) {}
+  try {
+    loadClientesTable();
+  } catch (e) {}
   setUrlParams(new URLSearchParams({ clientes: "1" }));
 };
 
@@ -24028,7 +24046,16 @@ const handleRoute = () => {
         return;
       }
       if (crm === "gestoria") {
-        openGestoriaCrm();
+        const tab = String(params.get("tab") || "").trim();
+        if (tab && tab.startsWith("gestoria-")) {
+          try {
+            openGestoriaServiceTab(tab);
+          } catch (e) {
+            openGestoriaCrm();
+          }
+        } else {
+          openGestoriaCrm();
+        }
         UI?.refreshContext(state);
         return;
       }
@@ -24038,7 +24065,16 @@ const handleRoute = () => {
         return;
       }
       if (crm === "fin") {
-        openFinCrm();
+        const tab = String(params.get("tab") || "").trim();
+        if (tab && (tab === "fin-crm" || tab === "fin-sim")) {
+          try {
+            openFinServiceTab(tab);
+          } catch (e) {
+            openFinCrm();
+          }
+        } else {
+          openFinCrm();
+        }
         UI?.refreshContext(state);
         return;
       }
@@ -32481,7 +32517,8 @@ const renderPropietariosEditor = (propietarios) => {
 
 const updateTableVisibility = () => {
   if (explorerSection) {
-    explorerSection.classList.toggle("operativa-mode", currentTab === "operativa");
+    // En el módulo maestro de clientes, "operativa" es el listado, no el dashboard legacy.
+    explorerSection.classList.toggle("operativa-mode", currentTab === "operativa" && state.currentModule !== "clientes");
   }
   // Contexto CRM: usado para simplificar el dashboard (y para evitar mezclar verticales).
   let crmContext = "";
@@ -51043,9 +51080,10 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiAutonomos) gestoriaKpiAutonomos.textContent = counts.autonomos ?? 0;
     if (gestoriaKpiEmpresas) gestoriaKpiEmpresas.textContent = counts.empresas ?? 0;
     if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
-    if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
-    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
-    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
+	    if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
+	    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
+	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
 
@@ -51283,19 +51321,20 @@ const loadGestoriaDashboard = () => {
       if (!target) return;
       target.innerHTML = `<p class="muted">No se pudo cargar el dashboard: ${escapeHtml(msg)}</p>`;
     });
-    [
-      gestoriaKpiTotal,
-      gestoriaKpiActivos,
-      gestoriaKpiAutonomos,
-      gestoriaKpiEmpresas,
-      gestoriaKpiPuntuales,
-      gestoriaKpiModelosMes,
-      gestoriaKpiRentasPendientes,
-      gestoriaRentasPendientesCount,
-      gestoriaKpiPresupuestosEstudio,
-      gestoriaKpiEncargosPendientes,
-      gestoriaKpiGestionesCurso,
-      gestoriaKpiGestionesEspera,
+	    [
+	      gestoriaKpiTotal,
+	      gestoriaKpiActivos,
+	      gestoriaKpiAutonomos,
+	      gestoriaKpiEmpresas,
+	      gestoriaKpiPuntuales,
+	      gestoriaKpiModelosMes,
+	      gestoriaKpiRentasPendientes,
+	      gestoriaKpiSinVincular,
+	      gestoriaRentasPendientesCount,
+	      gestoriaKpiPresupuestosEstudio,
+	      gestoriaKpiEncargosPendientes,
+	      gestoriaKpiGestionesCurso,
+	      gestoriaKpiGestionesEspera,
       gestoriaKpiGestionesVencidas,
     ].forEach((el) => {
       if (!el) return;
@@ -51448,11 +51487,16 @@ const bindGestoriaDashboardKpis = () => {
       },
       title: "Modelos este mes",
     },
-    {
-      valueEl: gestoriaKpiRentasPendientes,
-      action: () => openGestoriaCrmWithFilters({ tab: "renta" }),
-      title: "Rentas pendientes",
-    },
+	    {
+	      valueEl: gestoriaKpiRentasPendientes,
+	      action: () => openGestoriaCrmWithFilters({ tab: "renta" }),
+	      title: "Rentas pendientes",
+	    },
+	    {
+	      valueEl: gestoriaKpiSinVincular,
+	      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
+	      title: "Clientes sin vincular a Gestoría",
+	    },
     {
       valueEl: gestoriaKpiGestionesCurso,
       action: () => openGestoriaTrabajosWithFilters({ estado: "En curso" }),
