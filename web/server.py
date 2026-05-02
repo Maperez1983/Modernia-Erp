@@ -13401,6 +13401,135 @@ def _should_run_rrhh_nomina_ocr(payload: dict) -> bool:
     return False
 
 
+def _fetch_rrhh_nominas_ocr(conn, workspace_id: str, persona_id: str, *, ejercicio: str = "") -> list[dict]:
+    ws = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    year = str(ejercicio or "").strip()
+    if year and not re.match(r"^20[0-9]{2}$", year):
+        year = ""
+    if not ws or not pid:
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+          id,
+          tipo,
+          nombre,
+          fecha_emision,
+          created_at,
+          doc_key,
+          doc_url,
+          nomina_ocr_status,
+          nomina_ocr_confidence,
+          nomina_ocr_error,
+          nomina_ocr_json,
+          nomina_ocr_updated_at
+        FROM workspace_rrhh_documentos
+        WHERE workspace_id = ?
+          AND persona_id = ?
+          AND LOWER(COALESCE(tipo,'')) IN ('nómina','nomina')
+        ORDER BY COALESCE(fecha_emision, created_at) DESC
+        """,
+        (ws, pid),
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows or []:
+        payload = dict(row)
+        ocr_json = payload.get("nomina_ocr_json") or ""
+        fields = {}
+        try:
+            parsed = json.loads(ocr_json) if ocr_json else {}
+            fields = parsed.get("fields") or {}
+        except Exception:
+            fields = {}
+        y = str(fields.get("year") or "").strip()
+        if year and y and y != year:
+            continue
+        payload["nomina_fields"] = fields
+        out.append(payload)
+    return out
+
+
+def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=""):
+    ws = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    year = str(ejercicio or "").strip()
+    if year and not re.match(r"^20[0-9]{2}$", year):
+        year = ""
+    if not ws or not pid:
+        return {"kpis": {}, "services": {}}
+
+    nominas = _fetch_rrhh_nominas_ocr(conn, ws, pid, ejercicio=year)
+    coste_total = 0.0
+    neto_total = 0.0
+    for n in nominas:
+        f = n.get("nomina_fields") or {}
+        bruto = float(parse_money_value(f.get("bruto") or 0) or 0)
+        ss_emp = float(parse_money_value(f.get("ss_empresa") or 0) or 0)
+        neto = float(parse_money_value(f.get("neto") or 0) or 0)
+        coste_total += bruto + ss_emp
+        neto_total += neto
+
+    service_keys = ["renta", "seguros", "hipotecas", "gestoria", "fincas"]
+    services = {}
+    facturado_total = 0.0
+    comision_total = 0.0
+    comision_cobrada = 0.0
+    items_count = 0
+    cobradas_count = 0
+
+    manual_all = fetch_workspace_rrhh_productividad_manual(conn, ws, pid, service="", ejercicio=year)
+    for it in manual_all or []:
+        st = str(it.get("estado_cobro") or ("cobrado" if int(it.get("cobrada") or 0) == 1 else "pendiente")).strip().lower()
+        items_count += 1
+        if st == "cobrado":
+            cobradas_count += 1
+        base = float(parse_money_value(it.get("importe_base") or 0) or 0)
+        com = float(parse_money_value(it.get("comision") or 0) or 0)
+        facturado_total += base
+        comision_total += com
+        if st == "cobrado":
+            comision_cobrada += com
+
+    for sk in service_keys:
+        try:
+            payload = compute_workspace_rrhh_productividad(conn, ws, eid, pid, sk, ejercicio=year)
+        except Exception:
+            payload = {"kpis": {}, "items": []}
+        k = payload.get("kpis") or {}
+        facturado_total += float(parse_money_value(k.get("facturado_total") or 0) or 0)
+        comision_total += float(parse_money_value(k.get("comision_total") or 0) or 0)
+        for it in payload.get("items") or []:
+            st = str(it.get("estado_cobro") or ("cobrado" if int(it.get("cobrada") or 0) == 1 else "pendiente")).strip().lower()
+            items_count += 1
+            if st == "cobrado":
+                cobradas_count += 1
+            com = float(parse_money_value(it.get("comision") or 0) or 0)
+            if st == "cobrado":
+                comision_cobrada += com
+        services[sk] = {"kpis": k}
+
+    beneficio = facturado_total - coste_total
+    rentabilidad_pct = (beneficio / coste_total) * 100.0 if coste_total > 0 else 0.0
+
+    return {
+        "kpis": {
+            "ejercicio": year or "",
+            "facturado_total": round(facturado_total, 2),
+            "comision_total": round(comision_total, 2),
+            "comision_cobrada": round(comision_cobrada, 2),
+            "coste_total": round(coste_total, 2),
+            "nomina_neto_total": round(neto_total, 2),
+            "beneficio": round(beneficio, 2),
+            "rentabilidad_pct": round(rentabilidad_pct, 2),
+            "items": int(items_count),
+            "cobradas": int(cobradas_count),
+        },
+        "services": services,
+    }
+
+
 def process_renta_ocr_job(payload, conn):
     raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=None, session=None)
     tmp_path = None
@@ -60835,6 +60964,160 @@ class Handler(BaseHTTPRequestHandler):
                 ejercicio=str(ejercicio or "").strip(),
             )
             json_response(self, {"items": items})
+            return
+
+        if path == "/api/workspace_rrhh_economicos_dashboard":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            can_manage = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if not can_manage:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_for_user = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_for_user or str(persona_for_user) != str(persona_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                empresa_id = ""
+            persona_row = conn.execute(
+                "SELECT empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            if not str(empresa_id or "").strip():
+                empresa_id = str(persona_row["empresa_id"] or "").strip()
+            if not str(empresa_id or "").strip():
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                payload = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
+            except Exception:
+                json_response(self, {"error": "No se pudo calcular el dashboard económico."}, status=500)
+                return
+            json_response(self, payload)
+            return
+
+        if path == "/api/workspace_rrhh_memoria_economica":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            ejercicio = params.get("ejercicio", [""])[0]
+            fmt = (params.get("format", ["csv"])[0] or "csv").strip().lower()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            can_manage = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if not can_manage:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_for_user = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_for_user or str(persona_for_user) != str(persona_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                empresa_id = ""
+            persona_row = conn.execute(
+                "SELECT empresa_id, nombre FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            if not str(empresa_id or "").strip():
+                empresa_id = str(persona_row["empresa_id"] or "").strip()
+            if not str(empresa_id or "").strip():
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            year = str(ejercicio or "").strip()
+            if not re.match(r"^20[0-9]{2}$", year or ""):
+                year = str(datetime.now().year)
+            if fmt != "csv":
+                json_response(self, {"error": "format no soportado (usa csv)"}, status=400)
+                return
+            dash = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=year)
+            nominas = _fetch_rrhh_nominas_ocr(conn, workspace_id, persona_id, ejercicio=year)
+            by_month = {m: {"nomina_bruto": 0.0, "nomina_neto": 0.0, "nomina_ss_empresa": 0.0, "comision_cobrada": 0.0, "comision_total": 0.0} for m in range(1, 13)}
+            for n in nominas:
+                f = n.get("nomina_fields") or {}
+                try:
+                    m = int(f.get("month") or 0)
+                except Exception:
+                    m = 0
+                if m < 1 or m > 12:
+                    continue
+                by_month[m]["nomina_bruto"] += float(parse_money_value(f.get("bruto") or 0) or 0)
+                by_month[m]["nomina_neto"] += float(parse_money_value(f.get("neto") or 0) or 0)
+                by_month[m]["nomina_ss_empresa"] += float(parse_money_value(f.get("ss_empresa") or 0) or 0)
+
+            def _month_from_date(raw):
+                s = str(raw or "").strip()
+                if re.match(r"^\\d{4}-\\d{2}-\\d{2}$", s):
+                    try:
+                        return int(s[5:7])
+                    except Exception:
+                        return 0
+                return 0
+
+            def _add_item(it):
+                st = str(it.get("estado_cobro") or ("cobrado" if int(it.get("cobrada") or 0) == 1 else "pendiente")).strip().lower()
+                m = _month_from_date(it.get("fecha_cobro") or it.get("fecha") or it.get("presentacion_fecha") or it.get("fecha_firma"))
+                if m < 1 or m > 12:
+                    return
+                com = float(parse_money_value(it.get("comision") or 0) or 0)
+                by_month[m]["comision_total"] += com
+                if st == "cobrado":
+                    by_month[m]["comision_cobrada"] += com
+
+            manual_all = fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, service="", ejercicio=year)
+            for it in manual_all or []:
+                _add_item(it)
+            for sk in ["renta", "seguros", "hipotecas", "gestoria", "fincas"]:
+                try:
+                    payload = compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona_id, sk, ejercicio=year)
+                except Exception:
+                    payload = {"items": []}
+                for it in payload.get("items") or []:
+                    _add_item(it)
+
+            persona_name = str(persona_row["nombre"] or "trabajador").strip() or "trabajador"
+            persona_slug = re.sub(r"[^a-z0-9]+", "_", normalize_lookup_text(persona_name)).strip("_") or "trabajador"
+            filename = f"memoria_economica_{persona_slug}_{year}.csv"
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["Ejercicio", year])
+            writer.writerow([])
+            k = dash.get("kpis") or {}
+            writer.writerow(["Facturado total", k.get("facturado_total", 0)])
+            writer.writerow(["Comisión total", k.get("comision_total", 0)])
+            writer.writerow(["Comisión cobrada", k.get("comision_cobrada", 0)])
+            writer.writerow(["Coste total (bruto+SS empresa)", k.get("coste_total", 0)])
+            writer.writerow(["Rentabilidad %", k.get("rentabilidad_pct", 0)])
+            writer.writerow([])
+            writer.writerow(["Mes", "Nómina bruto", "Nómina neto", "SS empresa", "Comisión total", "Comisión cobrada"])
+            for m in range(1, 13):
+                r = by_month[m]
+                writer.writerow([f"{year}-{m:02d}", round(r["nomina_bruto"], 2), round(r["nomina_neto"], 2), round(r["nomina_ss_empresa"], 2), round(r["comision_total"], 2), round(r["comision_cobrada"], 2)])
+            payload_bytes = output.getvalue().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(payload_bytes)))
+            self.end_headers()
+            self.wfile.write(payload_bytes)
             return
 
         if path == "/api/workspace_registro_periodos":

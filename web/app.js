@@ -11643,23 +11643,47 @@ const renderWorkspaceRrhhHub = () => {
     }
   };
 
-  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
-    const pId = String(personaId || "").trim();
-    const eId = String(empresaId || "").trim();
-    if (!pId) {
-      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
-    }
-    const subTab = String(state.workspaceRrhhEconomicosSubtab || "nominas").trim().toLowerCase();
-    const active = subTab === "productividad" ? "productividad" : "nominas";
-    const ejercicio = String(new Date().getFullYear()).trim();
-    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
-    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
-    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
-    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
-    const productividadPanel = `
-      <div class="workspace-rrhh-panel-card">
-        <div class="section-head">
-          <div>
+	  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
+	    const pId = String(personaId || "").trim();
+	    const eId = String(empresaId || "").trim();
+	    if (!pId) {
+	      return `<p class="muted">Guarda primero la ficha del trabajador para ver sus condiciones económicas.</p>`;
+	    }
+	    const subTab = String(state.workspaceRrhhEconomicosSubtab || "dashboard").trim().toLowerCase();
+	    const active = subTab === "productividad" ? "productividad" : subTab === "dashboard" ? "dashboard" : "nominas";
+	    const ejercicio = String(new Date().getFullYear()).trim();
+	    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+	    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
+	    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
+	    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
+	    const dashYear = String(state.workspaceRrhhEconomicosDashboardYear || "").trim() || ejercicio;
+	    const dashboardPanel = `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
+	            <h4>Dashboard</h4>
+	            <p class="muted">KPIs de rendimiento y rentabilidad (facturado vs coste).</p>
+	          </div>
+	        </div>
+	        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+	          <label class="muted">Ejercicio
+	            <select id="rrhhEconDashboardYear" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">
+	              ${[0, 1, 2, 3].map((delta) => {
+	                const y = String((new Date().getFullYear()) - delta);
+	                return `<option value="${escapeHtml(y)}"${y === dashYear ? " selected" : ""}>${escapeHtml(y)}</option>`;
+	              }).join("")}
+	            </select>
+	          </label>
+	          <button type="button" class="secondary" id="rrhhEconMemoriaBtn" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">Memoria económica (CSV)</button>
+	          <span id="rrhhEconDashboardStatus" class="muted"></span>
+	        </div>
+	        <div id="rrhhEconDashboardKpis" class="kpi-grid" style="margin-top:12px;"></div>
+	      </div>
+	    `;
+	    const productividadPanel = `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
             <h4>Productividad</h4>
             <p class="muted">Modo manual (por defecto). Renta: 30% base imponible. Resto servicios: 10% de lo cobrado por el producto (sin IVA si aplica).</p>
           </div>
@@ -11790,16 +11814,17 @@ const renderWorkspaceRrhhHub = () => {
 	        </div>
 	      </div>
 	    `;
-    return `
-      <div class="rrhh-econ-tabs">
-        ${[
-          { key: "nominas", label: "Nóminas" },
-          { key: "productividad", label: "Productividad" },
-        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
-      </div>
-      ${active === "productividad" ? productividadPanel : nominasPanel}
-    `;
-  };
+	    return `
+	      <div class="rrhh-econ-tabs">
+	        ${[
+	          { key: "dashboard", label: "Dashboard" },
+	          { key: "nominas", label: "Nóminas" },
+	          { key: "productividad", label: "Productividad" },
+	        ].map((t) => `<button type="button" class="tab${t.key === active ? " active" : ""}" data-rrhh-econ-tab="${t.key}" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">${escapeHtml(t.label)}</button>`).join("")}
+	      </div>
+	      ${active === "productividad" ? productividadPanel : active === "dashboard" ? dashboardPanel : nominasPanel}
+	    `;
+	  };
 
   const renderTabs = () => `
     <div class="tc-modulebar tc-modulebar--micro workspace-rrhh-tabs">
@@ -14028,17 +14053,22 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
-  workspaceRrhhHub.querySelectorAll("[data-rrhh-econ-tab]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      state.workspaceRrhhEconomicosSubtab = String(button.dataset.rrhhEconTab || "nominas").trim().toLowerCase();
-      renderWorkspaceRrhhHub();
-      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
-      const personaId = String(button.dataset.rrhhPersonaId || "").trim();
-      const empresaId = String(button.dataset.rrhhEmpresaId || "").trim();
-      if (!personaId || !empresaId) return;
-      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
-    });
-  });
+	  workspaceRrhhHub.querySelectorAll("[data-rrhh-econ-tab]").forEach((button) => {
+	    button.addEventListener("click", async () => {
+	      state.workspaceRrhhEconomicosSubtab = String(button.dataset.rrhhEconTab || "nominas").trim().toLowerCase();
+	      renderWorkspaceRrhhHub();
+	      const personaId = String(button.dataset.rrhhPersonaId || "").trim();
+	      const empresaId = String(button.dataset.rrhhEmpresaId || "").trim();
+	      if (!personaId || !empresaId) return;
+	      if (state.workspaceRrhhEconomicosSubtab === "productividad") {
+	        await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	        return;
+	      }
+	      if (state.workspaceRrhhEconomicosSubtab === "dashboard") {
+	        await loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
+	      }
+	    });
+	  });
 
   workspaceRrhhHub.querySelectorAll("[data-rrhh-econ-service]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -14066,16 +14096,46 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
-  const econYear = document.getElementById("rrhhEconProductividadYear");
-  if (econYear) {
-    econYear.addEventListener("change", async () => {
-      const personaId = String(econYear.dataset.rrhhPersonaId || "").trim();
-      const empresaId = String(econYear.dataset.rrhhEmpresaId || "").trim();
-      if (!personaId || !empresaId) return;
-      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
-      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
-    });
-  }
+	  const econYear = document.getElementById("rrhhEconProductividadYear");
+	  if (econYear) {
+	    econYear.addEventListener("change", async () => {
+	      const personaId = String(econYear.dataset.rrhhPersonaId || "").trim();
+	      const empresaId = String(econYear.dataset.rrhhEmpresaId || "").trim();
+	      if (!personaId || !empresaId) return;
+	      if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
+	      await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+	    });
+	  }
+
+	  const econDashYear = document.getElementById("rrhhEconDashboardYear");
+	  if (econDashYear) {
+	    econDashYear.addEventListener("change", async () => {
+	      state.workspaceRrhhEconomicosDashboardYear = String(econDashYear.value || "").trim();
+	      const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
+	      const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
+	      if (!personaId || !empresaId) return;
+	      if (String(state.workspaceRrhhEconomicosSubtab || "").trim().toLowerCase() !== "dashboard") return;
+	      await loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
+	    });
+	  }
+
+	  const memoriaBtn = document.getElementById("rrhhEconMemoriaBtn");
+	  if (memoriaBtn) {
+	    memoriaBtn.addEventListener("click", () => {
+	      const personaId = String(memoriaBtn.dataset.rrhhPersonaId || "").trim();
+	      const empresaId = String(memoriaBtn.dataset.rrhhEmpresaId || "").trim();
+	      const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
+	      if (!personaId || !empresaId) return;
+	      const url = `/api/workspace_rrhh_memoria_economica?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}&format=csv`;
+	      window.location.href = url;
+	    });
+	  }
+
+	  if (econDashYear && String(state.workspaceRrhhEconomicosSubtab || "").trim().toLowerCase() === "dashboard") {
+	    const personaId = String(econDashYear.dataset.rrhhPersonaId || "").trim();
+	    const empresaId = String(econDashYear.dataset.rrhhEmpresaId || "").trim();
+	    if (personaId && empresaId) loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId);
+	  }
 
   const econCalcBase = document.getElementById("rrhhEconCalcBase");
   const econCalcMode = document.getElementById("rrhhEconCalcMode");
@@ -14105,7 +14165,7 @@ const renderWorkspaceRrhhHub = () => {
     });
   }
 
-	  async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
+		  async function loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId) {
 	    try {
 	      const status = document.getElementById("rrhhEconProductividadStatus");
 	      const kpisEl = document.getElementById("rrhhEconProductividadKpis");
@@ -14580,9 +14640,43 @@ const renderWorkspaceRrhhHub = () => {
 	      const status = document.getElementById("rrhhEconProductividadStatus");
 	      if (status) status.textContent = err?.message || "No se pudo cargar productividad.";
 	    }
+		  }
+
+	  async function loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId) {
+	    const status = document.getElementById("rrhhEconDashboardStatus");
+	    const kpisEl = document.getElementById("rrhhEconDashboardKpis");
+	    const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
+	    try {
+	      if (status) status.textContent = "Cargando KPIs…";
+	      if (kpisEl) kpisEl.innerHTML = "";
+	      const data = await api(
+	        `/api/workspace_rrhh_economicos_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}`
+	      );
+	      if (data?.error) throw new Error(data.error);
+	      const k = data?.kpis || {};
+	      const cards = [
+	        { label: "Facturado", value: euroFormatter.format(parseMoneyValue(k.facturado_total || 0)) },
+	        { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(k.comision_total || 0)) },
+	        { label: "Comisión cobrada", value: euroFormatter.format(parseMoneyValue(k.comision_cobrada || 0)) },
+	        { label: "Coste (nómina)", value: euroFormatter.format(parseMoneyValue(k.coste_total || 0)) },
+	        { label: "Beneficio", value: euroFormatter.format(parseMoneyValue(k.beneficio || 0)) },
+	        { label: "Rentabilidad", value: `${Number(k.rentabilidad_pct || 0).toFixed(2).replace(".", ",")}%` },
+	      ];
+	      if (kpisEl) {
+	        kpisEl.innerHTML = cards
+	          .map(
+	            (c) =>
+	              `<div class="kpi-card"><div class="kpi-label">${escapeHtml(c.label)}</div><div class="kpi-value">${escapeHtml(c.value)}</div></div>`
+	          )
+	          .join("");
+	      }
+	      if (status) status.textContent = `Ejercicio ${escapeHtml(year)} · ${Number(k.items || 0)} apuntes (${Number(k.cobradas || 0)} cobrados)`;
+	    } catch (err) {
+	      if (status) status.textContent = err?.message || "No se pudieron cargar KPIs.";
+	    }
 	  }
 
-  const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
+	  const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
   if (personalForm) {
     const empresaSelect = personalForm.querySelector('[name="empresa_id"]');
     if (empresaSelect) {
