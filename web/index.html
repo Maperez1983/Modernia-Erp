@@ -44,36 +44,44 @@
 
     <main>
       <section class="hero" id="homeSection">
-        <div class="hero-shell">
-          <div class="hero-copy">
-            <h2>CRM 360 <span class="pill">Beta</span></h2>
-            <p>Panel operativo: inmuebles, agenda, documentación y automatizaciones. Preparado para un portal de inmuebles verificados.</p>
-            <div class="toolbar" id="tableToolbar">
-              <span class="pill">Año</span>
-              <select id="yearSelect"></select>
+        <div class="app-lightning-shell">
+          <div class="app-lightning-main">
+            <div class="hero-shell">
+              <div class="hero-copy app-lightning-topbar">
+                <div>
+                  <h2>CRM 360 <span class="pill">Beta</span></h2>
+                  <p>Panel operativo: inmuebles, agenda, documentación y automatizaciones. Preparado para un portal de inmuebles verificados.</p>
+                </div>
+                <div class="toolbar" id="tableToolbar">
+                  <span class="pill">Año</span>
+                  <select id="yearSelect"></select>
+                </div>
+              </div>
+            </div>
+            <div class="home-block">
+              <h3>Producto</h3>
+              <p class="muted">CRM inmobiliario + futura plataforma de publicación con sello Verifika² (solo inmuebles verificados documentalmente).</p>
+              <div id="coreCards" class="grid"></div>
             </div>
           </div>
         </div>
-        <div class="home-block">
-          <h3>Producto</h3>
-          <p class="muted">CRM inmobiliario + futura plataforma de publicación con sello Verifika² (solo inmuebles verificados documentalmente).</p>
-          <div id="coreCards" class="grid"></div>
-        </div>
       </section>
       <section id="holdingSection" class="hidden">
-        <div class="section-head">
-          <div>
-            <h2 id="holdingTitle">Gestión de workspaces</h2>
-            <p id="holdingSubtitle" class="muted">Configura workspaces y entra después en la operativa de cada cliente.</p>
-          </div>
-          <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
-        </div>
-        <div class="crm-workspace-shell">
-		          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceViewTabs">
-		            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
-		              <span class="tc-mod-ico" aria-hidden="true">
-		                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
-		              </span>
+        <div class="app-lightning-shell">
+          <div class="app-lightning-main">
+            <div class="section-head app-lightning-topbar">
+              <div>
+                <h2 id="holdingTitle">Gestión de workspaces</h2>
+                <p id="holdingSubtitle" class="muted">Configura workspaces y entra después en la operativa de cada cliente.</p>
+              </div>
+              <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
+            </div>
+            <div class="crm-workspace-shell">
+			          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceViewTabs">
+			            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
+			              <span class="tc-mod-ico" aria-hidden="true">
+			                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
+			              </span>
 		              <span class="tc-mod-label">Resumen</span>
 		            </button>
 		            <button class="tab tc-module" type="button" data-workspace-view-tab="tenant" title="Configuración">
@@ -2885,43 +2893,48 @@
             <div id="adminUsersTable"></div>
             <div class="footer" id="adminUsersInfo"></div>
           </div>
-          <div class="form-card hidden" id="adminUserDetailCard">
-            <div class="section-head">
-              <div>
-                <h3 id="adminUserDetailTitle">Ficha de usuario</h3>
+	          <div class="form-card hidden" id="adminUserDetailCard">
+	            <div class="section-head">
+	              <div>
+	                <h3 id="adminUserDetailTitle">Ficha de usuario</h3>
                 <p class="muted">Define exactamente qué puede ver y gestionar.</p>
               </div>
               <button id="adminUserDetailBack" type="button" class="secondary ghost">Volver al listado</button>
             </div>
             <div id="adminUserDetail"></div>
+	          </div>
+	        </div>
+            </div>
           </div>
         </div>
-      </section>
+	      </section>
 
-      <section id="explorerSection" class="hidden">
-        <div class="section-head">
-          <div>
-            <h2 id="explorerTitle">Explorador de datos</h2>
-            <p class="muted" id="explorerSubtitle">
-              Filtra por empresa, módulo y texto.
-            </p>
-          </div>
-          <button id="homeBtn" class="secondary ghost">Volver a home</button>
-        </div>
-        <div id="companySummary" class="company-summary hidden">
-          <div>
-            <h3 id="companySummaryTitle">Empresa</h3>
-            <p class="muted" id="companySummarySubtitle">Gestion operativa y control diario.</p>
-          </div>
-          <div class="company-summary-meta" id="companySummaryMeta"></div>
-        </div>
-	        <div class="tc-modulebar tc-modulebar--micro" id="viewTabs" role="navigation" aria-label="Menú">
-		          <button class="tab tc-module active" data-tab="operativa" title="Dashboard">
-		            <span class="tc-mod-ico" aria-hidden="true">
-		              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-dashboard"></use></svg>
-		            </span>
-		            <span class="tc-mod-label">Dashboard</span>
-		          </button>
+	      <section id="explorerSection" class="hidden">
+	        <div class="app-lightning-shell">
+	          <div class="app-lightning-main">
+	            <div class="section-head app-lightning-topbar">
+	              <div>
+	                <h2 id="explorerTitle">Explorador de datos</h2>
+	                <p class="muted" id="explorerSubtitle">
+	                  Filtra por empresa, módulo y texto.
+	                </p>
+	              </div>
+	              <button id="homeBtn" class="secondary ghost">Volver a home</button>
+	            </div>
+	            <div id="companySummary" class="company-summary hidden">
+	              <div>
+	                <h3 id="companySummaryTitle">Empresa</h3>
+	                <p class="muted" id="companySummarySubtitle">Gestion operativa y control diario.</p>
+	              </div>
+	              <div class="company-summary-meta" id="companySummaryMeta"></div>
+	            </div>
+		        <div class="tc-modulebar tc-modulebar--micro" id="viewTabs" role="navigation" aria-label="Menú">
+			          <button class="tab tc-module active" data-tab="operativa" title="Dashboard">
+			            <span class="tc-mod-ico" aria-hidden="true">
+			              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-dashboard"></use></svg>
+			            </span>
+			            <span class="tc-mod-label">Dashboard</span>
+			          </button>
 		          <button class="tab tc-module hidden" data-tab="crm" id="crmTab" title="Inmobiliaria">
 		            <span class="tc-mod-ico" aria-hidden="true">
 		              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-building-home"></use></svg>
@@ -2952,12 +2965,12 @@
 		            </span>
 		            <span class="tc-mod-label">Agenda</span>
 		          </button>
-		          <button class="tab tc-module hidden" data-tab="seguros-crm" id="segurosCrmTab" title="CRM Seguros">
-		            <span class="tc-mod-ico" aria-hidden="true">
-		              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-shield"></use></svg>
-		            </span>
-		            <span class="tc-mod-label">Seguros</span>
-		          </button>
+			          <button class="tab tc-module hidden" data-tab="seguros-crm" id="segurosCrmTab" title="CRM Seguros">
+			            <span class="tc-mod-ico" aria-hidden="true">
+			              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-shield"></use></svg>
+			            </span>
+			            <span class="tc-mod-label">Seguros</span>
+			          </button>
 		          <button class="tab tc-module hidden" data-tab="fin-crm" id="finCrmTab" title="CRM Financiaciones">
 		            <span class="tc-mod-ico" aria-hidden="true">
 		              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-bank"></use></svg>
@@ -6034,13 +6047,17 @@
           <div class="form-card">
             <h3>Gráficos</h3>
             <p class="muted">Evolución operativa y rentabilidad de cartera.</p>
-            <div id="fincasDashboardSection" class="dashboard">
-              <div class="dashboard-controls">
-                <label for="fincasDashboardYear">
-                  Año KPI y gráficos
-                  <select id="fincasDashboardYear"></select>
-                </label>
-              </div>
+	            <div id="fincasDashboardSection" class="dashboard">
+	              <div class="dashboard-controls">
+	                <label for="fincasDashboardEmpresaScope">
+	                  Empresa (seguros/fincas)
+	                  <select id="fincasDashboardEmpresaScope"></select>
+	                </label>
+	                <label for="fincasDashboardYear">
+	                  Año KPI y gráficos
+	                  <select id="fincasDashboardYear"></select>
+	                </label>
+	              </div>
               <div class="grid dashboard-kpis hidden" id="fincasDashboardKpis"></div>
               <div class="grid dashboard-charts">
                 <div class="chart-card">
@@ -6536,16 +6553,22 @@
             <p class="muted">Esta vista legacy ya no se usa. El workflow real vive en el panel principal de Financiaciones.</p>
           </div>
         </div>
-        <div id="dashboardSection" class="dashboard hidden">
-          <div class="dashboard-head">
-            <div>
-              <h3 id="dashboardTitle">Dashboard</h3>
-              <p class="muted">Resumen anual de la inmobiliaria.</p>
-            </div>
-            <div class="status"><span></span>Datos por año</div>
-          </div>
-          <div class="grid dashboard-kpis" id="dashboardKpis"></div>
-          <div class="grid dashboard-charts">
+	        <div id="dashboardSection" class="dashboard hidden">
+	          <div class="dashboard-head">
+	            <div>
+	              <h3 id="dashboardTitle">Dashboard</h3>
+	              <p class="muted">Resumen anual de la inmobiliaria.</p>
+	            </div>
+	            <div class="status"><span></span>Datos por año</div>
+	          </div>
+	          <div class="dashboard-controls">
+	            <label for="inmoDashboardEmpresaScope">
+	              Empresa (inmobiliaria)
+	              <select id="inmoDashboardEmpresaScope"></select>
+	            </label>
+	          </div>
+	          <div class="grid dashboard-kpis" id="dashboardKpis"></div>
+	          <div class="grid dashboard-charts">
             <div class="chart-card">
               <h4>Ventas por año</h4>
               <canvas id="ventasChart"></canvas>
@@ -8300,7 +8323,9 @@
             </form>
           </div>
         </div>
-      </section>
+	          </div>
+	        </div>
+	      </section>
       <section id="clientePage" class="hidden">
         <div id="clientesDetail" class="form-card hidden">
           <div class="section-head">

@@ -3538,6 +3538,67 @@ body.theme-operativa .workspace-home-count {
   min-width: 120px;
 }
 
+/* App "Lightning-lite" shell (Home / Workspace / Explorer) */
+#homeSection .app-lightning-shell,
+#holdingSection .app-lightning-shell,
+#explorerSection .app-lightning-shell {
+  display: grid;
+  gap: 16px;
+}
+
+#homeSection .app-lightning-main,
+#holdingSection .app-lightning-main,
+#explorerSection .app-lightning-main {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+#homeSection .app-lightning-topbar,
+#holdingSection .app-lightning-topbar,
+#explorerSection .app-lightning-topbar {
+  position: sticky;
+  top: calc(14px + var(--safe-top));
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+#homeSection .app-lightning-topbar > .toolbar {
+  margin-left: auto;
+}
+
+#homeSection .app-lightning-topbar .toolbar,
+#holdingSection .app-lightning-topbar .toolbar,
+#explorerSection .app-lightning-topbar .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 820px) {
+  #homeSection .app-lightning-topbar,
+  #holdingSection .app-lightning-topbar,
+  #explorerSection .app-lightning-topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  #homeSection .app-lightning-topbar > .toolbar {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 /* CRM "Lightning" (Tecnocloud-like) shell */
 #crmSection .crm-lightning-shell {
   display: grid;
