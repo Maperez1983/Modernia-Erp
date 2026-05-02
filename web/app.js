@@ -22165,8 +22165,33 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
     setUrlParams(currentParams);
   } catch (e) {}
   updateTableVisibility();
-  // Gestoría se renderiza con sus secciones propias (gestoriaDashboardSection/gestoriaCrmSection/etc).
-  // No debe montarse dentro del shell "Lightning" del CRM inmobiliario (evita duplicados/solapes).
+
+  // Gestoría: misma identidad visual "Lightning", manteniendo su flujo y pantallas.
+  // Movemos sus secciones al mount del shell para evitar duplicados (chrome arriba + contenido abajo).
+  try {
+    if (crmGestoriaMount) {
+      [
+        gestoriaDashboardSection,
+        gestoriaCrmSection,
+        gestoriaDocsSection,
+        gestoriaAgendaSection,
+        gestoriaFactSection,
+        gestoriaContaSection,
+      ].forEach((node) => {
+        if (!node) return;
+        if (crmGestoriaMount.contains(node)) return;
+        crmGestoriaMount.appendChild(node);
+      });
+    }
+  } catch (e) {}
+
+  try {
+    setCrmMode("gestoria");
+  } catch (e) {}
+  try {
+    setCrmWorkspaceView("gestoria");
+  } catch (e) {}
+
   if (targetTab === "gestoria-crm") {
     loadGestoriaCrm();
     return;
