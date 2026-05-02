@@ -11728,18 +11728,68 @@ const renderWorkspaceRrhhHub = () => {
         <div id="rrhhEconProductividadKpis" class="kpi-grid"></div>
         <div id="rrhhEconProductividadList" class="inline-list"></div>
       </div>
-    `;
-    const nominasPanel = `
-      <div class="workspace-rrhh-panel-card">
-        <div class="section-head">
-          <div>
-            <h4>Nóminas</h4>
-            <p class="muted">Listado + OCR automático al subir (pendiente de activar).</p>
-          </div>
-        </div>
-        <p class="muted">Pendiente de implementación: carga de nóminas + OCR y volcado de datos.</p>
-      </div>
-    `;
+	    `;
+	    const nominasPanel = `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
+	            <h4>Nóminas</h4>
+	            <p class="muted">Sube el PDF desde RRHH → Documentación (tipo “Nómina”). El sistema intentará extraer periodo, neto, bruto e IRPF.</p>
+	          </div>
+	        </div>
+	        <div class="workspace-rrhh-list">
+	          ${(() => {
+	            const docs = Array.isArray(state.workspaceRrhhDocsRows) ? state.workspaceRrhhDocsRows : [];
+	            const personaId = String(pId || "").trim();
+	            const nominas = docs
+	              .filter((row) => String(row?.persona_id || "").trim() === personaId)
+	              .filter((row) => {
+	                const t = String(row?.tipo || "").trim().toLowerCase();
+	                return t === "nómina" || t === "nomina";
+	              })
+	              .sort((a, b) => String(b.fecha_emision || b.created_at || "").localeCompare(String(a.fecha_emision || a.created_at || "")));
+	            if (!nominas.length) return "<p class='muted'>Sin nóminas todavía.</p>";
+	            return nominas
+	              .map((row) => {
+	                let ocr = null;
+	                try {
+	                  ocr = row.nomina_ocr_json ? JSON.parse(row.nomina_ocr_json) : null;
+	                } catch {}
+	                const fields = ocr?.fields || {};
+	                const periodo =
+	                  fields?.year && fields?.month
+	                    ? `${String(fields.year).padStart(4, "0")}-${String(fields.month).padStart(2, "0")}`
+	                    : (row.fecha_emision || "").slice(0, 7);
+	                const neto = Number(fields?.neto || 0) > 0 ? formatMoney(fields.neto) : "";
+	                const bruto = Number(fields?.bruto || 0) > 0 ? formatMoney(fields.bruto) : "";
+	                const irpf = fields?.irpf_pct != null && String(fields.irpf_pct) !== "" ? `${String(fields.irpf_pct).replace(".", ",")}%` : "";
+	                const status = String(row.nomina_ocr_status || "").trim() || "pending";
+	                const statusLabel = status === "ok" ? "OK" : status === "partial" ? "Parcial" : status === "empty" ? "Vacío" : status === "error" ? "Error" : "Pendiente";
+	                const canReprocess = canEditEconomicos && String(row.doc_key || "").trim();
+	                return `
+	                  <div class="workspace-rrhh-row">
+	                    <div>
+	                      <strong>${escapeHtml(row.nombre || "Nómina")}${periodo ? ` · ${escapeHtml(periodo)}` : ""}</strong>
+	                      <div class="muted">OCR: ${escapeHtml(statusLabel)}${row.nomina_ocr_error ? ` · ${escapeHtml(String(row.nomina_ocr_error).slice(0, 120))}` : ""}</div>
+	                      <div class="muted">
+	                        ${neto ? `Neto: <strong>${escapeHtml(neto)}</strong>` : "Neto: -"}
+	                        ${bruto ? ` · Bruto: ${escapeHtml(bruto)}` : ""}
+	                        ${irpf ? ` · IRPF: ${escapeHtml(irpf)}` : ""}
+	                      </div>
+	                      ${(fields?.empleado_nif || fields?.empleado_nombre) ? `<div class="muted">${escapeHtml(fields.empleado_nombre || "")}${fields.empleado_nif ? ` · ${escapeHtml(fields.empleado_nif)}` : ""}</div>` : ""}
+	                    </div>
+	                    <div class="workspace-rrhh-row-actions">
+	                      ${(row.doc_url || row.doc_key) ? `<button type="button" class="secondary ghost button-inline" data-rrhh-doc-open="${escapeHtml(String(row.id || ""))}">Abrir PDF</button>` : ""}
+	                      ${canReprocess ? `<button type="button" class="secondary button-inline" data-rrhh-nomina-ocr="${escapeHtml(String(row.id || ""))}">Reprocesar OCR</button>` : ""}
+	                    </div>
+	                  </div>
+	                `;
+	              })
+	              .join("");
+	          })()}
+	        </div>
+	      </div>
+	    `;
     return `
       <div class="rrhh-econ-tabs">
         ${[
@@ -13999,6 +14049,20 @@ const renderWorkspaceRrhhHub = () => {
       if (state.workspaceRrhhEconomicosSubtab !== "productividad") return;
       if (!personaId || !empresaId) return;
       await loadWorkspaceRrhhEconomicosProductividad(personaId, empresaId);
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-nomina-ocr]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const docId = String(button.dataset.rrhhNominaOcr || "").trim();
+      if (!docId) return;
+      button.disabled = true;
+      try {
+        await apiPost("/api/workspace_rrhh_nomina_ocr", { workspace_id: state.currentWorkspaceId, id: docId });
+        await refreshWorkspaceRrhh();
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 
