@@ -2453,7 +2453,7 @@
 	              Foto del edificio (opcional)
 	              <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
 	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
-	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden u-mt-10" alt="Foto edificio" style="width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	            </label>
             <label class="span-2">
               Título (opcional)
@@ -2580,7 +2580,7 @@
 	                <input type="hidden" name="foto_edificio_key" />
 	                <input id="workspaceFincasCommunityBuildingPhoto" type="file" accept="image/*" />
 	                <div id="workspaceFincasCommunityBuildingPhotoStatus" class="muted"></div>
-	                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden u-mt-10" alt="Foto edificio" style="width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+	                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	              </label>
 	              <p class="muted span-2">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
 	              <div class="form-actions span-2">
@@ -2997,7 +2997,7 @@
 	        </div>
 	          <div id="crmSection" class="hidden">
 	          <div class="crm-lightning-shell">
-		            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM inmobiliaria">
+			            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM">
 			              <button class="crm-side-item crm-side-new hidden" id="crmQuickNewBtn" type="button" title="Crear nuevo" aria-label="Crear nuevo" aria-haspopup="dialog" aria-controls="crmInsertModal">
 			                <span class="crm-side-ico" aria-hidden="true">+</span>
 			                <span class="crm-side-txt">Crear nuevo</span>
@@ -3229,7 +3229,7 @@
 		                        <option>Otro</option>
 		                      </select>
 		                    </label>
-		                    <label class="span-2 u-row u-gap-10 u-items-center">
+		                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
 		                      <input type="checkbox" name="allow_duplicate" value="1" />
 		                      Permitir duplicado (solo si estás seguro)
 		                    </label>
@@ -3244,7 +3244,32 @@
 		              <datalist id="inmoPoblacionOptions"></datalist>
 		              <datalist id="inmoPostalOptions"></datalist>
 
-			              <div class="crm-side-sep" aria-hidden="true"></div>
+				              <div class="crm-side-sep" aria-hidden="true"></div>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-dash" title="Dashboard Gestoría">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+				                <span class="crm-side-txt">Dash</span>
+				              </button>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-crm" title="Clientes Gestoría">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+				                <span class="crm-side-txt">Clientes</span>
+				              </button>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-docs" title="Inbox documental">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+				                <span class="crm-side-txt">Docs</span>
+				              </button>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-agenda" title="Agenda Gestoría">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+				                <span class="crm-side-txt">Agenda</span>
+				              </button>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-fact" title="Presupuestos Gestoría">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+				                <span class="crm-side-txt">Presup.</span>
+				              </button>
+				              <button type="button" class="crm-side-item crm-side-gestoria hidden" data-crm-service-tab="gestoria-conta" title="Contabilidad Gestoría">
+				                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
+				                <span class="crm-side-txt">Conta</span>
+				              </button>
+				              <div class="crm-side-sep crm-side-gestoria hidden" aria-hidden="true"></div>
 			              <button type="button" class="crm-side-item hidden-context" data-crm-view="fin" title="Financiaciones">
 			                <span class="crm-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
 			                <span class="crm-side-txt">Finan.</span>
@@ -4128,7 +4153,7 @@
 	                      Pregunta (opcional)
 	                      <textarea id="copilotWebQuestion" name="question" rows="3" placeholder="Ej. ¿qué cambios introduce y qué impacto tiene en el registro horario o en vacaciones?"></textarea>
 	                    </label>
-	                    <label class="span-2 u-row u-gap-10 u-items-center">
+	                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
 	                      <input type="checkbox" id="copilotWebSaveLibrary" name="save_library" value="1" />
 	                      Guardar esta URL en la biblioteca legal (área/tema actuales)
 	                    </label>
@@ -9749,14 +9774,14 @@
             Gestoría partner (slug, opcional)
             <input name="partner_workspace_slug" placeholder="ej. gestoria_velazquez" />
           </label>
-          <label class="span-2 u-row u-gap-10 u-items-center">
+          <label class="span-2" style="display:flex;gap:10px;align-items:center">
             <input type="checkbox" name="enable_all" />
             Activar todos los módulos (demo)
           </label>
           <div class="span-2">
             <strong>Módulos para el cliente</strong>
             <p class="muted">Recomendado: Importador Facturas + Registro horario + Portal + Documental.</p>
-            <div id="workspaceCustomerModules" class="form-grid u-gap-10 u-mt-10" style="grid-template-columns:repeat(2,minmax(0,1fr));"></div>
+            <div id="workspaceCustomerModules" class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px"></div>
           </div>
           <button type="submit" class="hidden" aria-hidden="true"></button>
         </form>

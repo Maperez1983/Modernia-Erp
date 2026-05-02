@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v314";
+const APP_SW_VERSION = "v315";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20607,6 +20607,19 @@ const syncCrmTecnocloudVerticalNav = () => {
 
   applyToRoot(crmWorkspaceTabs);
   applyToRoot(crmLightningSidebar);
+
+  // Sidebar Gestoría: reutiliza el patrón "Lightning" pero navega por tabs propios (gestoria-*)
+  // en lugar de views (data-crm-view). Se muestra solo en contexto Gestoría.
+  try {
+    if (crmLightningSidebar) {
+      crmLightningSidebar.querySelectorAll(".crm-side-gestoria").forEach((node) => {
+        node.classList.toggle("hidden", !isGestoria);
+      });
+      crmLightningSidebar.querySelectorAll('[data-crm-service-tab].crm-side-gestoria').forEach((btn) => {
+        btn.classList.toggle("active", isGestoria && String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
+      });
+    }
+  } catch (e) {}
 
   // No mezclar pantallas: Gestoría NO debe mostrar el workspace del CRM Inmobiliaria.
   // Reutilizamos el estilo (topbar / módulos). La vista activa la decide `setCrmWorkspaceView`.
@@ -61777,6 +61790,20 @@ if (crmLightningSidebar) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
       return;
     }
+    const svcBtn = closestFromEvent(event, "[data-crm-service-tab]");
+    if (svcBtn) {
+      const tab = String(svcBtn.dataset.crmServiceTab || "").trim();
+      if (tab) {
+        try {
+          openGestoriaServiceTab(tab);
+        } catch {
+          try {
+            setTab(tab);
+          } catch (e) {}
+        }
+      }
+      return;
+    }
     const manualBtn = closestFromEvent(event, "[data-crm-manual]");
     if (manualBtn) {
       event.preventDefault();
@@ -61857,7 +61884,9 @@ if (crmInsertList) {
       const servicio =
         vertical === "fin"
           ? "financiaciones"
-          : (vertical === "seguros" ? "seguros" : "inmobiliaria");
+          : (vertical === "seguros"
+            ? "seguros"
+            : (vertical === "gestoria" ? "gestoria" : "inmobiliaria"));
       openActionCreator("", "", servicio, {
         lock_service: true,
         servicio,
@@ -61865,6 +61894,19 @@ if (crmInsertList) {
         default_responsable: getCurrentUser(),
       });
     } else if (key === "cliente") {
+      const vertical = resolveCrmTecnocloudVertical();
+      if (vertical === "gestoria") {
+        openGestoriaServiceTab("gestoria-crm");
+        try {
+          setGestoriaCrmView("alta");
+        } catch (e) {}
+        window.setTimeout(() => {
+          try {
+            focusElementInView(gestoriaAltaForm);
+          } catch (e) {}
+        }, 0);
+        return;
+      }
       setCrmClienteModalOpen(true);
     } else if (key === "hipoteca") {
       openFinCrm();
