@@ -2375,10 +2375,16 @@ const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
 const gestoriaDashboardPaneRenta = document.getElementById("gestoriaDashboardPaneRenta");
 const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardPaneModelos");
-const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
-const gestoriaDashboardPaneContabilidad = document.getElementById("gestoriaDashboardPaneContabilidad");
-const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
-const gestoriaDashboardEmpresaScope = document.getElementById("gestoriaDashboardEmpresaScope");
+ const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
+ const gestoriaDashboardPaneContabilidad = document.getElementById("gestoriaDashboardPaneContabilidad");
+ const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
+ const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
+ const gestoriaDashboardServiciosTabs = document.getElementById("gestoriaDashboardServiciosTabs");
+ const gestoriaDashServiciosKpis = document.getElementById("gestoriaDashServiciosKpis");
+ const gestoriaDashServiciosChart = document.getElementById("gestoriaDashServiciosChart");
+ const gestoriaDashServiciosTable = document.getElementById("gestoriaDashServiciosTable");
+ const gestoriaDashServiciosInfo = document.getElementById("gestoriaDashServiciosInfo");
+ const gestoriaDashboardEmpresaScope = document.getElementById("gestoriaDashboardEmpresaScope");
 const gestoriaDashRentaEjercicio = document.getElementById("gestoriaDashRentaEjercicio");
 const gestoriaDashRentaReload = document.getElementById("gestoriaDashRentaReload");
 const gestoriaDashRentaKpis = document.getElementById("gestoriaDashRentaKpis");
@@ -26090,6 +26096,57 @@ const INMOBILIARIA_TIPOS_PROCEDENCIA = [
   "Otro",
 ];
 
+// Procedencia (origen) para clientes globales (cualquier servicio).
+const CLIENTE_PROCEDENCIA_CANALES = [
+  "",
+  "Colaborador interno",
+  "Referido",
+  "Web",
+  "Portal",
+  "Teléfono",
+  "WhatsApp",
+  "Email",
+  "Redes sociales",
+  "Google",
+  "Oficina",
+  "Cartel",
+  "Escaparate",
+  "Buzoneo",
+  "Colaborador externo",
+  "Evento",
+  "Importación",
+  "Otro",
+];
+
+const CLIENTE_PROCEDENCIA_DETALLE_BY_CANAL = {
+  Web: ["Formulario", "Chat", "Landing", "Otro"],
+  Portal: ["Idealista", "Fotocasa", "Habitaclia", "Yaencontre", "Kyero", "Otro"],
+  "Redes sociales": ["Instagram", "Facebook", "TikTok", "LinkedIn", "YouTube", "Otro"],
+  Google: ["Google Ads", "Google Maps", "SEO", "Otro"],
+  "Teléfono": ["Entrante", "Saliente"],
+  WhatsApp: ["Entrante", "Saliente"],
+  Email: ["Entrante", "Saliente"],
+  Referido: ["Cliente", "Amigo/Familia", "Empresa colaboradora", "Otro"],
+  Oficina: ["Walk-in", "Llamada desde oficina", "Otro"],
+  Cartel: ["En calle", "En inmueble", "Otro"],
+  Escaparate: ["Oficina", "Otro"],
+  Buzoneo: ["Zona", "Campaña", "Otro"],
+  "Colaborador externo": ["Agencia", "Partner", "Otro"],
+  Evento: ["Networking", "Feria", "Otro"],
+  Importación: ["Rentas", "Seguros", "Financiaciones", "Otro"],
+};
+
+const getClienteProcedenciaDetalleOptions = (canal) => {
+  const raw = String(canal || "").trim();
+  if (!raw) return [];
+  const direct = CLIENTE_PROCEDENCIA_DETALLE_BY_CANAL[raw];
+  if (Array.isArray(direct)) return direct;
+  // Fallback por normalización (evita romper si el texto viene con diferencias menores).
+  const key = normalizeSimple(raw);
+  const match = Object.keys(CLIENTE_PROCEDENCIA_DETALLE_BY_CANAL).find((k) => normalizeSimple(k) === key);
+  return match ? (CLIENTE_PROCEDENCIA_DETALLE_BY_CANAL[match] || []) : [];
+};
+
 const INMOBILIARIA_TIPOS_INMUEBLE = [
   "",
   "Piso",
@@ -26667,8 +26724,54 @@ const CLIENTE_FIELDS_BASE = [
   { key: "id_personal", label: "Id. personal", type: "text" },
   {
     key: "captado_por_user_id",
-    label: "Traído por",
+    label: "Referido por",
     type: "select",
+    section: "Origen",
+    options: () => {
+      const users = Array.isArray(state.usersList) ? state.usersList : [];
+      const opts = users
+        .map((u) => {
+          const id = String(u?.id || "").trim();
+          if (!id) return null;
+          const name = `${u?.nombre || ""} ${u?.apellido || ""}`.replace(/\s+/g, " ").trim();
+          const user = String(u?.usuario || "").trim();
+          const email = String(u?.email || "").trim();
+          const label = (name || user || email || id) + (user ? ` (@${user})` : "");
+          return { value: id, label };
+        })
+        .filter(Boolean);
+      try {
+        opts.sort((a, b) =>
+          String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" })
+        );
+      } catch (e) {}
+      return [{ value: "", label: "-" }, ...opts];
+    },
+  },
+  {
+    key: "procedencia_canal",
+    label: "Procedencia",
+    type: "select",
+    section: "Origen",
+    options: CLIENTE_PROCEDENCIA_CANALES,
+  },
+  {
+    key: "procedencia_detalle",
+    label: "Detalle procedencia",
+    type: "select",
+    section: "Origen",
+    options: () => {
+      const canalInput = document.querySelector('.inline-input[data-target="cliente"][data-field="procedencia_canal"]');
+      const canal = String(canalInput?.value || state.currentClienteData?.procedencia_canal || "").trim();
+      const items = getClienteProcedenciaDetalleOptions(canal);
+      return ["", ...items];
+    },
+  },
+  {
+    key: "procedencia_user_id",
+    label: "Colaborador interno",
+    type: "select",
+    section: "Origen",
     options: () => {
       const users = Array.isArray(state.usersList) ? state.usersList : [];
       const opts = users
