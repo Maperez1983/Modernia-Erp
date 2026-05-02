@@ -69707,6 +69707,16 @@ class Handler(BaseHTTPRequestHandler):
 
             poliza_strict_expr = "NULLIF(TRIM(s.poliza_numero), '')"
             poliza_key_expr = f"COALESCE({poliza_strict_expr}, s.id)"
+
+            # Conteo "real": deduplica por nº de póliza normalizado; si falta, usa (compañía|tomador|fecha_efecto).
+            poliza_norm_expr = (
+                "REPLACE(REPLACE(REPLACE(REPLACE(LOWER(TRIM(COALESCE(s.poliza_numero, ''))), ' ', ''), '.', ''), '-', ''), '_', '')"
+            )
+            fecha_efecto_key = "SUBSTR(COALESCE(CAST(s.fecha_efecto AS TEXT), ''), 1, 10)"
+            real_policy_key_expr = (
+                f"CASE WHEN {poliza_norm_expr} <> '' THEN {poliza_norm_expr} ELSE "
+                f"LOWER(TRIM(COALESCE(s.compania, ''))) || '|' || LOWER(TRIM(COALESCE(s.tomador, ''))) || '|' || {fecha_efecto_key} END"
+            )
             estado_bucket_expr = seguro_estado_bucket_expr("s")
 
             total = conn.execute(
@@ -69719,6 +69729,17 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
+            total_real = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT {real_policy_key_expr}) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+
             total_con_numero = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -69741,6 +69762,18 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
+            en_vigor_real = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT {real_policy_key_expr}) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+
             en_vigor_con_numero = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -69886,8 +69919,10 @@ class Handler(BaseHTTPRequestHandler):
                 self,
                 {
                     "total": total["total"] if total else 0,
+                    "total_real": total_real["total"] if total_real else 0,
                     "total_con_numero": total_con_numero["total"] if total_con_numero else 0,
                     "en_vigor": en_vigor["total"] if en_vigor else 0,
+                    "en_vigor_real": en_vigor_real["total"] if en_vigor_real else 0,
                     "en_vigor_con_numero": en_vigor_con_numero["total"] if en_vigor_con_numero else 0,
                     "en_vigor_sin_numero": en_vigor_sin_numero["total"] if en_vigor_sin_numero else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
