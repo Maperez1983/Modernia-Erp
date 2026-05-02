@@ -3506,6 +3506,60 @@ def is_gestoria_dashboard_active_state(value):
     return state in {"ALTA", "ACTIVO", "ACTIVA"}
 
 
+GESTORIA_TRABAJO_CATEGORY_KEYS = {
+    "laboral",
+    "fiscal",
+    "contable",
+    "registro",
+    "sociedades",
+    "rentas",
+    "trafico",
+    "herencias",
+    "expedientes",
+    "tasaciones",
+    "otros",
+}
+
+
+def normalize_gestoria_trabajo_category(value):
+    key = str(value or "").strip().lower()
+    return key if key in GESTORIA_TRABAJO_CATEGORY_KEYS else ""
+
+
+def classify_gestoria_trabajo_category(tipo_trabajo):
+    text = normalize_lookup_text(tipo_trabajo or "")
+    if not text:
+        return "otros"
+    if "HERENC" in text:
+        return "herencias"
+    if "TRAFIC" in text or "TRANSFER" in text or "MATRICUL" in text:
+        return "trafico"
+    if "TASACI" in text:
+        return "tasaciones"
+    if "RENTA" in text or "MODELO 100" in text or "DECLARACION" in text:
+        return "rentas"
+    if (
+        "EXPEDIENT" in text
+        or "ADMINISTRAT" in text
+        or "IMV" in text
+        or "BECA" in text
+        or "BRECHA" in text
+        or "CONDOMINIO" in text
+    ):
+        return "expedientes"
+    if "LABOR" in text:
+        return "laboral"
+    if "FISCAL" in text or "HACIENDA" in text or "AEAT" in text or ("MODELO" in text and "MODELO 100" not in text):
+        return "fiscal"
+    if "CONTAB" in text:
+        return "contable"
+    if "REGISTRO" in text or "MERCANTIL" in text:
+        return "registro"
+    if "CONSTITUCION" in text or "SOCIEDAD" in text:
+        return "sociedades"
+    return "otros"
+
+
 def is_active_service_state(value, fecha_fin=None):
     state = normalize_lookup_text(value or "")
     if state and state in {"INACTIVO", "BAJA", "CANCELADO", "ANULADO", "FINALIZADO"}:
@@ -29243,6 +29297,44 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_modelos", "responsable", "responsable TEXT")
     ensure_column(conn, "gestoria_trabajos", "responsable", "responsable TEXT")
     ensure_column(conn, "gestoria_trabajos", "sla_dias", "sla_dias INTEGER")
+    ensure_column(conn, "gestoria_trabajos", "tipo_categoria", "tipo_categoria TEXT")
+    try:
+        conn.execute(
+            """
+            UPDATE gestoria_trabajos
+            SET tipo_categoria = CASE
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%herenc%' THEN 'herencias'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%trafic%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%transfer%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%matricul%'
+                THEN 'trafico'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%tasaci%' THEN 'tasaciones'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%renta%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE 'modelo 100%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%declaraci%'
+                THEN 'rentas'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%expedient%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%administrat%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%imv%'
+                THEN 'expedientes'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%labor%' THEN 'laboral'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%fiscal%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%hacienda%'
+                   OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%aeat%'
+                THEN 'fiscal'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%contab%' THEN 'contable'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%registro%' OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%mercantil%'
+                THEN 'registro'
+              WHEN LOWER(COALESCE(tipo_trabajo,'')) LIKE '%constituc%' OR LOWER(COALESCE(tipo_trabajo,'')) LIKE '%sociedad%'
+                THEN 'sociedades'
+              ELSE 'otros'
+            END
+            WHERE COALESCE(NULLIF(tipo_categoria,''), '') = ''
+              AND COALESCE(NULLIF(tipo_trabajo,''), '') != ''
+            """
+        )
+    except Exception:
+        pass
     ensure_column(conn, "acciones", "responsable", "responsable TEXT")
     ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
@@ -45244,13 +45336,16 @@ class Handler(BaseHTTPRequestHandler):
             )
             audit("gestoria_cliente", payload.get("cliente"), "crear", json.dumps(payload), payload.get("usuario"))
         elif parsed.path == "/api/gestoria_trabajos":
+            tipo_categoria = normalize_gestoria_trabajo_category(payload.get("tipo_categoria")) or classify_gestoria_trabajo_category(
+                payload.get("tipo_trabajo")
+            )
             conn.execute(
                 """
                 INSERT INTO gestoria_trabajos (
-                  id, empresa_id, cliente_id, tipo_trabajo, estado,
+                  id, empresa_id, cliente_id, tipo_trabajo, tipo_categoria, estado,
                   fecha_inicio, fecha_fin, sla_dias, responsable, importe, notas, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -45258,6 +45353,7 @@ class Handler(BaseHTTPRequestHandler):
                     empresa["id"],
                     payload.get("cliente_id"),
                     payload.get("tipo_trabajo"),
+                    tipo_categoria,
                     payload.get("estado"),
                     payload.get("fecha_inicio"),
                     payload.get("fecha_fin"),
@@ -45275,8 +45371,15 @@ class Handler(BaseHTTPRequestHandler):
             if not trabajo_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            if "tipo_categoria" in payload:
+                payload["tipo_categoria"] = normalize_gestoria_trabajo_category(payload.get("tipo_categoria")) or classify_gestoria_trabajo_category(
+                    payload.get("tipo_trabajo")
+                )
+            elif "tipo_trabajo" in payload:
+                payload["tipo_categoria"] = classify_gestoria_trabajo_category(payload.get("tipo_trabajo"))
             allowed = (
                 "tipo_trabajo",
+                "tipo_categoria",
                 "estado",
                 "fecha_inicio",
                 "fecha_fin",
@@ -64179,7 +64282,7 @@ class Handler(BaseHTTPRequestHandler):
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
-                SELECT gt.id, gt.tipo_trabajo, gt.estado, gt.fecha_inicio, gt.fecha_fin,
+                SELECT gt.id, gt.tipo_trabajo, gt.tipo_categoria, gt.estado, gt.fecha_inicio, gt.fecha_fin,
                        gt.sla_dias, gt.responsable, gt.importe, gt.notas, gt.cliente_id,
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_trabajos gt
@@ -65846,13 +65949,47 @@ class Handler(BaseHTTPRequestHandler):
                     # Segmentación de trabajos (totales y abiertos).
                     seg = conn.execute(
                         f"""
-                        SELECT
-                          SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1 ELSE 0 END) AS herencias_total,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%' THEN 1 ELSE 0 END) AS trafico_total,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%' THEN 1 ELSE 0 END) AS expedientes_total,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1 ELSE 0 END) AS tasaciones_total,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1 ELSE 0 END) AS rentas_total,
-                          SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+	                        SELECT
+	                          SUM(
+	                            CASE
+	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
+	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
+	                              ELSE 0
+	                            END
+	                          ) AS herencias_total,
+	                          SUM(
+	                            CASE
+	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
+	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+	                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
+	                              ) THEN 1
+	                              ELSE 0
+	                            END
+	                          ) AS trafico_total,
+	                          SUM(
+	                            CASE
+	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
+	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+	                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
+	                              ) THEN 1
+	                              ELSE 0
+	                            END
+	                          ) AS expedientes_total,
+	                          SUM(
+	                            CASE
+	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
+	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
+	                              ELSE 0
+	                            END
+	                          ) AS tasaciones_total,
+	                          SUM(
+	                            CASE
+	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
+	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
+	                              ELSE 0
+	                            END
+	                          ) AS rentas_total,
+	                          SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
                         FROM gestoria_trabajos gt
                         WHERE gt.empresa_id IN ({placeholders_emp})
                         """,

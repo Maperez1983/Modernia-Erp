@@ -50778,6 +50778,11 @@ const renderGestoriaDashGeneralEconomy = (economics = {}) => {
       note: prev ? `${pct(current.total_ingresos, previous.total_ingresos).toFixed(1)}% vs ${prev}` : "—",
     },
     {
+      title: `Rentas cobradas ${latest}`,
+      value: euroFormatter.format(Number(current.total_rentas_cobradas || 0)),
+      note: prev ? `${pct(current.total_rentas_cobradas, previous.total_rentas_cobradas).toFixed(1)}% vs ${prev}` : "—",
+    },
+    {
       title: `Gastos ${latest}`,
       value: euroFormatter.format(Number(current.total_gastos || 0)),
       note: prev ? `${pct(current.total_gastos, previous.total_gastos).toFixed(1)}% vs ${prev}` : "—",
@@ -50797,18 +50802,22 @@ const renderGestoriaDashGeneralEconomy = (economics = {}) => {
   const labels = (Array.isArray(economics.labels) ? economics.labels : []).map((m, idx) => GESTORIA_DASH_MONTHS_ES[idx] || String(m || ""));
   const ingresos = Array.isArray(current.ingresos) ? current.ingresos : [];
   const gastos = Array.isArray(current.gastos) ? current.gastos : [];
+  const rentas = Array.isArray(current.rentas_cobradas) ? current.rentas_cobradas : [];
   const prevIngresos = prev && Array.isArray(previous.ingresos) ? previous.ingresos : [];
   const prevGastos = prev && Array.isArray(previous.gastos) ? previous.gastos : [];
+  const prevRentas = prev && Array.isArray(previous.rentas_cobradas) ? previous.rentas_cobradas : [];
 
   drawBarChart(
     gestoriaDashGeneralEconomyChart,
     labels,
     [
       { label: `Ingresos ${latest}`, values: ingresos, color: "#22c55e", format: (v) => euroFormatter.format(Number(v || 0)) },
+      { label: `Rentas cobradas ${latest}`, values: rentas, color: "#8b5cf6", format: (v) => euroFormatter.format(Number(v || 0)) },
       { label: `Gastos ${latest}`, values: gastos, color: "#ef4444", format: (v) => euroFormatter.format(Number(v || 0)) },
       ...(prev
         ? [
             { type: "line", label: `Ingresos ${prev}`, values: prevIngresos, color: "#16a34a", lineWidth: 2, pointRadius: 2, format: (v) => euroFormatter.format(Number(v || 0)) },
+            { type: "line", label: `Rentas ${prev}`, values: prevRentas, color: "rgba(139,92,246,0.75)", lineWidth: 2, pointRadius: 2, format: (v) => euroFormatter.format(Number(v || 0)) },
             { type: "line", label: `Gastos ${prev}`, values: prevGastos, color: "#dc2626", lineWidth: 2, pointRadius: 2, format: (v) => euroFormatter.format(Number(v || 0)) },
           ]
         : []),
@@ -52927,8 +52936,8 @@ const loadSegurosKpis = () => {
   }
   const renderHeaderMiniKpis = (data) => {
     if (!segurosHeaderMiniKpis) return;
-    const total = Number(data?.total || 0);
-    const enVigor = Number(data?.en_vigor || 0);
+    const total = Number((data && data.total_real != null ? data.total_real : data?.total) || 0);
+    const enVigor = Number((data && data.en_vigor_real != null ? data.en_vigor_real : data?.en_vigor) || 0);
     const vencen30 = Number(data?.vencen_30 || 0);
     const faltantes = Number(data?.faltantes || 0);
     const prima = Number(data?.prima_total || 0);
@@ -52959,7 +52968,8 @@ const loadSegurosKpis = () => {
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas registradas", data.total || 0);
+    addKpi("Pólizas (real)", data.total_real ?? data.total ?? 0);
+    addKpi("Pólizas (filas)", data.total || 0);
     if (Number(data.total_con_numero || 0) > 0) {
       addKpi("Con nº póliza", data.total_con_numero || 0);
     }
