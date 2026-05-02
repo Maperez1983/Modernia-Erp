@@ -24131,6 +24131,12 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             return entry_s
         return f"renta-{ejercicio_s}-{entry_s}" if ejercicio_s else entry_s
 
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return []
+
     q_raw = str(q or "").strip()
     q_lookup = normalize_lookup_text(q_raw)
     estado_norm = normalize_lookup_text(estado or "")
@@ -24170,17 +24176,18 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
     )
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
     where = [
         "COALESCE(cg.mod_renta, 0) = 1",
         f"""EXISTS (
             SELECT 1
             FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
+            WHERE ce.empresa_id IN ({placeholders_emp})
               AND ce.cliente_id = c.id
               AND {service_filter}
           )""",
     ]
-    values = [empresa_id]
+    values = list(empresa_ids)
     where_clause = " AND ".join(where) if where else "1=1"
 
     rows = conn.execute(
@@ -24200,7 +24207,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
-            WHERE ce2.empresa_id = ?
+            WHERE ce2.empresa_id IN ({placeholders_emp})
               AND ce2.cliente_id = c.id
               AND {service_filter_exists}
             ORDER BY
@@ -24219,7 +24226,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
 	        ORDER BY {order_by}
 	        LIMIT ?
 	        """,
-	        tuple([empresa_id] + values + [prefetch_limit]),
+	        tuple(values + values + [prefetch_limit]),
 	    ).fetchall()
     items = []
     selected_cliente_ids = []
@@ -24270,17 +24277,17 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             if cached is None:
                 try:
                     trow = conn.execute(
-                        """
+                        f"""
                         SELECT responsable
                         FROM gestoria_trabajos
-                        WHERE empresa_id = ?
+                        WHERE empresa_id IN ({placeholders_emp})
                           AND cliente_id = ?
                           AND tipo_trabajo = 'Declaración en periodo'
                           AND COALESCE(notas, '') LIKE ?
                         ORDER BY updated_at DESC, created_at DESC
                         LIMIT 1
                         """,
-                        (empresa_id, row["cliente_id"], f"%Renta {latest_year}%"),
+                        tuple([*empresa_ids, row["cliente_id"], f"%Renta {latest_year}%"]),
                     ).fetchone()
                 except Exception:
                     trow = None
@@ -25575,6 +25582,12 @@ def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, e
 
 
 def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {"ejercicio": "", "counts": {}, "responsables": [], "campaigns": [], "unpaid": [], "unassigned": [], "missing": [], "months": []}
+
     ejercicio_raw = str(ejercicio or "").strip()
     ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
     if not ejercicio_val:
@@ -25592,6 +25605,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "'administracion fincas', 'administración fincas')"
     )
 
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
         f"""
         SELECT
@@ -25603,7 +25617,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
-            WHERE ce2.empresa_id = ?
+            WHERE ce2.empresa_id IN ({placeholders_emp})
               AND ce2.cliente_id = c.id
               AND {service_filter_exists}
             ORDER BY
@@ -25622,13 +25636,13 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           AND EXISTS (
             SELECT 1
             FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
+            WHERE ce.empresa_id IN ({placeholders_emp})
               AND ce.cliente_id = c.id
               AND {service_filter}
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        (empresa_id, empresa_id),
+        tuple([*empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
@@ -25792,6 +25806,11 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
 
 
 def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return [], []
     ejercicio_raw = str(ejercicio or "").strip()
     ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
     if not ejercicio_val:
@@ -25811,6 +25830,7 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
         "'administracion fincas', 'administración fincas')"
     )
 
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
         f"""
         SELECT
@@ -25830,7 +25850,7 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
-            WHERE ce2.empresa_id = ?
+            WHERE ce2.empresa_id IN ({placeholders_emp})
               AND ce2.cliente_id = c.id
               AND {service_filter_exists}
             ORDER BY
@@ -25849,13 +25869,13 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
           AND EXISTS (
             SELECT 1
             FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
+            WHERE ce.empresa_id IN ({placeholders_emp})
               AND ce.cliente_id = c.id
               AND {service_filter}
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        (empresa_id, empresa_id),
+        tuple([*empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
@@ -25983,6 +26003,12 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
     - `count`: número total de campañas en Borrador (ejercicio)
     - `rows`: preview (top N) para mostrar en el dashboard
     """
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {"ejercicio": "", "count": 0, "rows": []}
+
     ejercicio_raw = str(ejercicio or "").strip()
     ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
     if not ejercicio_val:
@@ -26004,6 +26030,7 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
     )
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
     rows = conn.execute(
         f"""
@@ -26016,7 +26043,7 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
-            WHERE ce2.empresa_id = ?
+            WHERE ce2.empresa_id IN ({placeholders_emp})
               AND ce2.cliente_id = c.id
               AND {service_filter_exists}
             ORDER BY
@@ -26035,13 +26062,13 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
           AND EXISTS (
             SELECT 1
             FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
+            WHERE ce.empresa_id IN ({placeholders_emp})
               AND ce.cliente_id = c.id
               AND {service_filter}
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        (empresa_id, empresa_id),
+        tuple([*empresa_ids, *empresa_ids]),
     ).fetchall()
 
     pending_count = 0
@@ -62118,9 +62145,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/gestoria_renta_cards":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             q = params.get("q", [""])[0]
             estado = params.get("estado", [""])[0]
@@ -62131,7 +62160,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 items = collect_gestoria_renta_card_items(
                     conn,
-                    empresa_id,
+                    empresa_ids,
                     q=q,
                     estado=estado,
                     limit=limit,
@@ -62149,13 +62178,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/gestoria_renta_dashboard":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ejercicio = params.get("ejercicio", [""])[0]
             try:
-                payload = compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=ejercicio)
+                payload = compute_gestoria_renta_dashboard(conn, empresa_ids, ejercicio=ejercicio)
             except Exception as exc:
                 try:
                     Handler._record_api_error("/api/gestoria_renta_dashboard", exc)
@@ -62167,9 +62198,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/gestoria_renta_export":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ejercicio = params.get("ejercicio", [""])[0]
             kind = str(params.get("kind", ["all"])[0] or "all").strip().lower()
@@ -62177,7 +62210,7 @@ class Handler(BaseHTTPRequestHandler):
             fields_mode = str(params.get("fields", ["full"])[0] or "full").strip().lower()
             q = params.get("q", [""])[0]
             try:
-                campaigns, missing = collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio=ejercicio, q=q)
+                campaigns, missing = collect_gestoria_renta_campaign_rows(conn, empresa_ids, ejercicio=ejercicio, q=q)
                 selected_rows = []
                 headers = []
                 if kind == "missing":
@@ -64208,13 +64241,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/gestoria_dashboard":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
             now_ts = time.time()
-            cache_key = str(empresa_id or "").strip()
+            cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
             if cache_key:
                 try:
                     with Handler._gestoria_dashboard_lock:
@@ -64232,6 +64267,7 @@ class Handler(BaseHTTPRequestHandler):
                 "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
                 "'administracion fincas', 'administración fincas')"
             )
+            placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
             payload = {
                 "counts": {
@@ -64262,9 +64298,9 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT COUNT(DISTINCT c.id) AS total
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id = ? AND {service_filter}
+                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchone()
                 payload["counts"]["total"] = int(row_value(total, "total", 0) or 0)
             except Exception as exc:
@@ -64280,10 +64316,10 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT DISTINCT c.id AS cliente_id, ce.estado
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id = ?
+                    WHERE ce.empresa_id IN ({placeholders_emp})
                       AND {service_filter}
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchall()
                 active_ids = {
                     str(row_value(row, "cliente_id", "") or "").strip()
@@ -64305,10 +64341,10 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
                     FROM cliente_gestoria cg
                     JOIN clientes_empresas ce ON ce.cliente_id = cg.cliente_id
-                    WHERE ce.empresa_id = ? AND {service_filter}
+                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
                     GROUP BY cg.tipo_cliente
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchall()
                 for row in tipos:
                     tipo = str(row_value(row, "tipo", "") or "").strip()
@@ -64337,12 +64373,12 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT COUNT(*) AS total
                     FROM gestoria_modelos m
                     JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
-                    WHERE ce.empresa_id = ? AND {service_filter}
+                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
                       AND m.proxima_fecha IS NOT NULL
                       AND length(m.proxima_fecha) >= 7
                       AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
                     """,
-                    (empresa_id, today.strftime("%Y-%m")),
+                    tuple([*empresa_ids, today.strftime("%Y-%m")]),
                 ).fetchone()
                 payload["counts"]["modelos_mes"] = int(row_value(modelos_mes, "total", 0) or 0)
             except Exception as exc:
@@ -64358,13 +64394,13 @@ class Handler(BaseHTTPRequestHandler):
                     FROM gestoria_modelos m
                     JOIN clientes c ON c.id = m.cliente_id
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id = ? AND {service_filter}
+                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
                       AND m.proxima_fecha IS NOT NULL
                       AND date(m.proxima_fecha) BETWEEN date(?) AND date(?)
                     ORDER BY m.proxima_fecha ASC
                     LIMIT 12
                     """,
-                    (empresa_id, today.isoformat(), next_30.isoformat()),
+                    tuple([*empresa_ids, today.isoformat(), next_30.isoformat()]),
                 ).fetchall()
                 payload["modelos"] = [dict(r) for r in modelos]
             except Exception as exc:
@@ -64380,14 +64416,14 @@ class Handler(BaseHTTPRequestHandler):
                     FROM gestoria_modelos m
                     JOIN clientes c ON c.id = m.cliente_id
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id = ? AND {service_filter}
+                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
                       AND m.proxima_fecha IS NOT NULL
                       AND date(m.proxima_fecha) < date(?)
                       AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
                     ORDER BY m.proxima_fecha ASC
                     LIMIT 12
                     """,
-                    (empresa_id, today.isoformat()),
+                    tuple([*empresa_ids, today.isoformat()]),
                 ).fetchall()
                 payload["modelos_vencidos"] = [dict(r) for r in modelos_vencidos]
             except Exception as exc:
@@ -64397,7 +64433,7 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
             try:
-                renta_summary = compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", limit=12)
+                renta_summary = compute_gestoria_renta_pending_summary(conn, empresa_ids, ejercicio="", limit=12)
                 payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
@@ -64408,17 +64444,17 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 presupuestos_estudio = conn.execute(
-                    """
+                    f"""
                     SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id = ?
+                    WHERE p.empresa_id IN ({placeholders_emp})
                       AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
                       AND LOWER(COALESCE(p.estado, '')) = 'estudio'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchall()
                 payload["presupuestos_estudio"] = [dict(r) for r in presupuestos_estudio]
                 payload["counts"]["presupuestos_estudio"] = len(presupuestos_estudio)
@@ -64430,17 +64466,17 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 presupuestos_rechazados = conn.execute(
-                    """
+                    f"""
                     SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id = ?
+                    WHERE p.empresa_id IN ({placeholders_emp})
                       AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
                       AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchall()
                 payload["presupuestos_rechazados"] = [dict(r) for r in presupuestos_rechazados]
             except Exception as exc:
@@ -64451,18 +64487,18 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 encargos_pendientes = conn.execute(
-                    """
+                    f"""
                     SELECT p.fecha, p.fecha_encargo, p.titulo, p.encargo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id = ?
+                    WHERE p.empresa_id IN ({placeholders_emp})
                       AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
                       AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
                       AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
                     ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    (empresa_id,),
+                    tuple(empresa_ids),
                 ).fetchall()
                 payload["encargos_pendientes"] = [dict(r) for r in encargos_pendientes]
                 payload["counts"]["encargos_pendientes"] = len(encargos_pendientes)
@@ -64474,16 +64510,16 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 acciones_pendientes = conn.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) AS total
                     FROM acciones a
-                    WHERE a.empresa_id = ?
+                    WHERE a.empresa_id IN ({placeholders_emp})
                       AND LOWER(a.servicio) = 'gestoria'
                       AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
                       AND a.fecha IS NOT NULL
                       AND date(a.fecha) >= date(?)
                     """,
-                    (empresa_id, today.isoformat()),
+                    tuple([*empresa_ids, today.isoformat()]),
                 ).fetchone()
                 payload["counts"]["acciones_pendientes"] = int(row_value(acciones_pendientes, "total", 0) or 0)
             except Exception as exc:
@@ -64494,13 +64530,13 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 acciones = conn.execute(
-                    """
+                    f"""
                     SELECT a.fecha, a.hora,
                            COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                            a.tipo, a.estado
                     FROM acciones a
                     LEFT JOIN clientes c ON c.id = a.cliente_id
-                    WHERE a.empresa_id = ?
+                    WHERE a.empresa_id IN ({placeholders_emp})
                       AND LOWER(a.servicio) = 'gestoria'
                       AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
                       AND a.fecha IS NOT NULL
@@ -64508,7 +64544,7 @@ class Handler(BaseHTTPRequestHandler):
                     ORDER BY a.fecha ASC, a.hora ASC
                     LIMIT 10
                     """,
-                    (empresa_id, today.isoformat(), next_14.isoformat()),
+                    tuple([*empresa_ids, today.isoformat(), next_14.isoformat()]),
                 ).fetchall()
                 payload["acciones"] = [dict(r) for r in acciones]
             except Exception as exc:
@@ -64519,13 +64555,13 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 acciones_vencidas = conn.execute(
-                    """
+                    f"""
                     SELECT a.fecha, a.hora,
                            COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                            a.tipo, a.estado
                     FROM acciones a
                     LEFT JOIN clientes c ON c.id = a.cliente_id
-                    WHERE a.empresa_id = ?
+                    WHERE a.empresa_id IN ({placeholders_emp})
                       AND LOWER(a.servicio) = 'gestoria'
                       AND a.fecha IS NOT NULL
                       AND date(a.fecha) < date(?)
@@ -64533,7 +64569,7 @@ class Handler(BaseHTTPRequestHandler):
                     ORDER BY a.fecha ASC, a.hora ASC
                     LIMIT 10
                     """,
-                    (empresa_id, today.isoformat()),
+                    tuple([*empresa_ids, today.isoformat()]),
                 ).fetchall()
                 payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
             except Exception as exc:

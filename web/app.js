@@ -1618,6 +1618,7 @@ const state = {
   crmInmoEmpresaId: "",
   crmSegurosEmpresaId: "",
   crmGestoriaEmpresaId: "",
+  gestoriaScopeEmpresaId: "",
   crmFinEmpresaId: "",
   currentModule: "empresas",
   currentInmuebleId: "",
@@ -2352,6 +2353,7 @@ const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSecti
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneResumen = document.getElementById("gestoriaDashboardPaneResumen");
 const gestoriaDashboardPaneRenta = document.getElementById("gestoriaDashboardPaneRenta");
+const gestoriaDashboardEmpresaScope = document.getElementById("gestoriaDashboardEmpresaScope");
 const gestoriaDashRentaEjercicio = document.getElementById("gestoriaDashRentaEjercicio");
 const gestoriaDashRentaReload = document.getElementById("gestoriaDashRentaReload");
 const gestoriaDashRentaKpis = document.getElementById("gestoriaDashRentaKpis");
@@ -50005,10 +50007,12 @@ const renderGestoriaRentaDashboard = (payload) => {
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
   const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
-    const empresa = resolveCrmGestoriaEmpresa();
-    if (!empresa) return;
+    const workspaceId = String(state.currentWorkspaceId || "").trim();
+    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+    if (!workspaceId) return;
     const params = new URLSearchParams();
-    params.set("empresa_id", empresa.id);
+    params.set("workspace_id", workspaceId);
+    if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
     if (ejercicio) params.set("ejercicio", ejercicio);
     if (kind) params.set("kind", kind);
     if (fields) params.set("fields", fields);
@@ -50651,6 +50655,8 @@ const renderGestoriaRentaDashboard = (payload) => {
 const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa || !gestoriaDashRentaEjercicio || !gestoriaDashRentaReload) return;
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
   ensureGestoriaDashRentaEjercicioOptions();
   if (gestoriaDashRentaEjercicio.dataset.bound !== "1") {
     gestoriaDashRentaEjercicio.dataset.bound = "1";
@@ -50666,7 +50672,7 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   if (
     !force &&
     state.gestoriaRentaDashCache &&
-    state.gestoriaRentaDashCache.empresaId === empresa.id &&
+    String(state.gestoriaRentaDashCache.empresaId || "") === String(scopeEmpresaId || "") &&
     String(state.gestoriaRentaDashCache.ejercicio || "") === String(ejercicio || "") &&
     isFreshCache
   ) {
@@ -50676,9 +50682,11 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   gestoriaDashRentaReload.disabled = true;
   gestoriaDashRentaReload.textContent = "Cargando...";
   try {
-    const data = await api(`/api/gestoria_renta_dashboard?empresa_id=${empresa.id}&ejercicio=${encodeURIComponent(ejercicio)}`);
+    const qs = new URLSearchParams({ workspace_id: workspaceId, ejercicio: String(ejercicio || "") });
+    if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+    const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
-    state.gestoriaRentaDashCache = { empresaId: empresa.id, ejercicio, payload: data, ts: Date.now() };
+    state.gestoriaRentaDashCache = { empresaId: scopeEmpresaId, ejercicio, payload: data, ts: Date.now() };
     if (!state.gestoriaRentaDashView) state.gestoriaRentaDashView = "overview";
     renderGestoriaRentaDashboard(data);
   } catch (err) {
@@ -50692,13 +50700,40 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
 const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (!workspaceId) return;
+
+  if (gestoriaDashboardEmpresaScope && gestoriaDashboardEmpresaScope.dataset.bound !== "1") {
+    gestoriaDashboardEmpresaScope.dataset.bound = "1";
+    gestoriaDashboardEmpresaScope.addEventListener("change", () => {
+      state.gestoriaScopeEmpresaId = String(gestoriaDashboardEmpresaScope.value || "").trim();
+      try {
+        if (state.gestoriaRentaDashCache) state.gestoriaRentaDashCache.ts = 0;
+      } catch {}
+      loadGestoriaDashboard();
+      loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+    });
+  }
+  if (gestoriaDashboardEmpresaScope) {
+    const current = String(state.gestoriaScopeEmpresaId || "").trim();
+    gestoriaDashboardEmpresaScope.innerHTML = "";
+    gestoriaDashboardEmpresaScope.appendChild(createOption("", "Todas las empresas"));
+    (state.empresas || []).forEach((row) => {
+      if (!row?.id) return;
+      gestoriaDashboardEmpresaScope.appendChild(createOption(row.id, row.nombre || row.id));
+    });
+    gestoriaDashboardEmpresaScope.value = current;
+  }
   initGestoriaDashboardTabs();
   setGestoriaDashboardPane(state.gestoriaDashboardPane || "resumen");
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
+  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+  const qsBase = new URLSearchParams({ workspace_id: workspaceId });
+  if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
   Promise.all([
-    api(`/api/gestoria_dashboard?empresa_id=${empresa.id}`),
-    api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`),
+    api(`/api/gestoria_dashboard?${qsBase.toString()}`),
+    api(`/api/gestoria_trabajos?${qsBase.toString()}`),
   ]).then(([data, trabajosData]) => {
     const counts = data.counts || {};
     if (gestoriaKpiTotal) gestoriaKpiTotal.textContent = counts.total ?? 0;
