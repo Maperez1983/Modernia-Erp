@@ -5342,16 +5342,63 @@
                 <div class="kpi-value" id="gestoriaKpiPresupuestosEstudio">0</div>
                 <div class="muted">Pendientes de interesarse</div>
               </div>
-              <div class="card kpi-card">
-                <h3>Encargos pendientes</h3>
-                <div class="kpi-value" id="gestoriaKpiEncargosPendientes">0</div>
-                <div class="muted">Aceptados sin formalizar</div>
-              </div>
-            </div>
-            <div class="crm-split">
-              <div class="form-card">
-                <h3>Alertas · Modelos próximos</h3>
-                <p class="muted">Vencimientos en los próximos 30 días.</p>
+	              <div class="card kpi-card">
+	                <h3>Encargos pendientes</h3>
+	                <div class="kpi-value" id="gestoriaKpiEncargosPendientes">0</div>
+	                <div class="muted">Aceptados sin formalizar</div>
+	              </div>
+	            </div>
+	            <div class="crm-split">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Economía · Ingresos y gastos</h3>
+	                    <p class="muted">Histórico mensual (año actual vs anteriores).</p>
+	                  </div>
+	                </div>
+	                <div class="grid dashboard-kpis" id="gestoriaDashGeneralEconomyKpis"></div>
+	                <canvas id="gestoriaDashGeneralEconomyChart" class="workspace-overview-chart" style="width:100%;height:280px;"></canvas>
+	              </div>
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Clientes · Autónomo / Empresa</h3>
+	                    <p class="muted">Evolución mensual y variación anual.</p>
+	                  </div>
+	                </div>
+	                <div class="grid dashboard-kpis" id="gestoriaDashGeneralClientesKpis"></div>
+	                <canvas id="gestoriaDashGeneralClientesChart" class="workspace-overview-chart" style="width:100%;height:280px;"></canvas>
+	              </div>
+	            </div>
+	            <div class="crm-split">
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Segmentación · Trabajos</h3>
+	                    <p class="muted">Volumen por tipo (herencias, tráfico, expedientes, tasaciones, rentas).</p>
+	                  </div>
+	                </div>
+	                <div class="grid dashboard-kpis" id="gestoriaDashGeneralTrabajosKpis"></div>
+	                <canvas id="gestoriaDashGeneralTrabajosChart" class="workspace-overview-chart" style="width:100%;height:260px;"></canvas>
+	              </div>
+	              <div class="form-card">
+	                <div class="section-head">
+	                  <div>
+	                    <h3>Productividad · Equipo gestoría</h3>
+	                    <p class="muted">Responsables con servicio gestoría activo.</p>
+	                  </div>
+	                  <div class="toolbar">
+	                    <button type="button" class="secondary" id="gestoriaDashGeneralProdReload">Actualizar</button>
+	                  </div>
+	                </div>
+	                <div id="gestoriaDashGeneralProdTable"></div>
+	                <div class="footer" id="gestoriaDashGeneralProdInfo"></div>
+	              </div>
+	            </div>
+	            <div class="crm-split">
+	              <div class="form-card">
+	                <h3>Alertas · Modelos próximos</h3>
+	                <p class="muted">Vencimientos en los próximos 30 días.</p>
                 <div id="gestoriaAlertModelos"></div>
               </div>
               <div class="form-card">
@@ -10115,13 +10162,13 @@
             }
           })();
         </script>
-		    <script src="app-routing.js?v=10"></script>
+		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=722"></script>
+												    <script src="app.js?v=723"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=320";
+											        const TARGET_SW = "/sw.js?v=321";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";

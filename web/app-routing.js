@@ -63,6 +63,12 @@
         return;
       }
       if (crm === "gestoria") {
+        const requestedTab = (params.get("tab") || "").trim();
+        if (requestedTab && typeof deps.openGestoriaServiceTab === "function") {
+          deps.openGestoriaServiceTab(requestedTab);
+          deps.ui?.refreshContext(deps.state);
+          return;
+        }
         deps.openGestoriaCrm();
         deps.ui?.refreshContext(deps.state);
         return;
@@ -73,6 +79,12 @@
         return;
       }
       if (crm === "fin") {
+        const requestedTab = (params.get("tab") || "").trim();
+        if (requestedTab && typeof deps.openFinServiceTab === "function") {
+          deps.openFinServiceTab(requestedTab);
+          deps.ui?.refreshContext(deps.state);
+          return;
+        }
         deps.openFinCrm();
         deps.ui?.refreshContext(deps.state);
         return;

@@ -2591,6 +2591,15 @@ const gestoriaAlertGestionesProximas = document.getElementById("gestoriaAlertGes
 const gestoriaAlertDays = document.getElementById("gestoriaAlertDays");
 const gestoriaRentaCampaignBanner = document.getElementById("gestoriaRentaCampaignBanner");
 const gestoriaResponsablesTable = document.getElementById("gestoriaResponsablesTable");
+const gestoriaDashGeneralEconomyKpis = document.getElementById("gestoriaDashGeneralEconomyKpis");
+const gestoriaDashGeneralEconomyChart = document.getElementById("gestoriaDashGeneralEconomyChart");
+const gestoriaDashGeneralClientesKpis = document.getElementById("gestoriaDashGeneralClientesKpis");
+const gestoriaDashGeneralClientesChart = document.getElementById("gestoriaDashGeneralClientesChart");
+const gestoriaDashGeneralTrabajosKpis = document.getElementById("gestoriaDashGeneralTrabajosKpis");
+const gestoriaDashGeneralTrabajosChart = document.getElementById("gestoriaDashGeneralTrabajosChart");
+const gestoriaDashGeneralProdReload = document.getElementById("gestoriaDashGeneralProdReload");
+const gestoriaDashGeneralProdTable = document.getElementById("gestoriaDashGeneralProdTable");
+const gestoriaDashGeneralProdInfo = document.getElementById("gestoriaDashGeneralProdInfo");
 const gestoriaAgendaForm = document.getElementById("gestoriaAgendaForm");
 const gestoriaAgendaStatus = document.getElementById("gestoriaAgendaStatus");
 const gestoriaAgendaClienteInput = document.getElementById("gestoriaAgendaClienteInput");
@@ -4380,6 +4389,13 @@ const isWorkspaceMemberManagerRole = (value) => {
 const canManageCurrentWorkspace = () => {
   const user = getAuthScopeUser();
   if (user && isPrivilegedUser(user)) return true;
+  return isWorkspaceMemberManagerRole(state.currentWorkspaceMemberRole || "");
+};
+
+const canAccessGestoriaAdminDashboard = () => {
+  const user = getAuthScopeUser();
+  if (user && isPrivilegedUser(user)) return true;
+  if (user && isPrivilegedRole(user.rol || "")) return true;
   return isWorkspaceMemberManagerRole(state.currentWorkspaceMemberRole || "");
 };
 
@@ -20500,8 +20516,9 @@ const updateExplorerHeader = (empresaName) => {
     if (!canGestoria && currentTab === "gestoria-crm") setTab("operativa");
   }
   if (gestoriaDashTab) {
-    gestoriaDashTab.classList.toggle("hidden", !canGestoria);
-    if (!canGestoria && currentTab === "gestoria-dash") setTab("operativa");
+    const canDash = canGestoria && canAccessGestoriaAdminDashboard();
+    gestoriaDashTab.classList.toggle("hidden", !canDash);
+    if (!canDash && currentTab === "gestoria-dash") setTab("gestoria-crm");
   }
   if (gestoriaDocsTab) {
     gestoriaDocsTab.classList.toggle("hidden", !canGestoria);
@@ -22549,7 +22566,7 @@ const openGestoriaCrm = () => {
     }
   })();
   if (!userCanAccessService("gestoria")) return;
-  openGestoriaServiceTab("gestoria-dash");
+  openGestoriaServiceTab(canAccessGestoriaAdminDashboard() ? "gestoria-dash" : "gestoria-crm");
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
@@ -22560,6 +22577,10 @@ const openGestoriaCrm = () => {
 
 const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!userCanAccessService("gestoria")) return;
+  let tab = String(targetTab || "gestoria-dash").trim() || "gestoria-dash";
+  if (tab === "gestoria-dash" && !canAccessGestoriaAdminDashboard()) {
+    tab = "gestoria-crm";
+  }
   const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
@@ -22607,7 +22628,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   openCompany(empresa.nombre, { allowRestricted: true });
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
-  setTab(targetTab);
+  setTab(tab);
   try {
     const currentParams = new URLSearchParams(window.location.search);
     currentParams.delete("empresa");
@@ -22615,7 +22636,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     currentParams.delete("cliente");
     // Mantener deep-links de póliza si se usan (Seguros); en Gestoría no aplica.
     currentParams.set("crm", "gestoria");
-    currentParams.set("tab", targetTab);
+    currentParams.set("tab", tab);
     setUrlParams(currentParams);
   } catch (e) {}
   updateTableVisibility();
@@ -50515,6 +50536,193 @@ const loadGestoriaDocsWorkspace = () => {
   loadGestoriaAuditoria();
 };
 
+const GESTORIA_DASH_MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+const renderGestoriaDashGeneralEconomy = (economics = {}) => {
+  if (!gestoriaDashGeneralEconomyChart || !gestoriaDashGeneralEconomyKpis) return;
+  const years = Array.isArray(economics.years) ? economics.years.map((y) => Number(y || 0)).filter(Boolean) : [];
+  const series = economics.series || {};
+  if (!years.length || !series) {
+    gestoriaDashGeneralEconomyKpis.innerHTML = "<p class='muted'>Sin datos económicos.</p>";
+    return;
+  }
+  const latest = Math.max(...years);
+  const prev = years.includes(latest - 1) ? latest - 1 : null;
+  const current = series[String(latest)] || {};
+  const previous = prev ? (series[String(prev)] || {}) : {};
+
+  const pct = (curr, base) => {
+    const b = Number(base || 0);
+    const c = Number(curr || 0);
+    if (!b) return 0;
+    return ((c - b) / b) * 100;
+  };
+
+  gestoriaDashGeneralEconomyKpis.innerHTML = "";
+  [
+    {
+      title: `Ingresos ${latest}`,
+      value: euroFormatter.format(Number(current.total_ingresos || 0)),
+      note: prev ? `${pct(current.total_ingresos, previous.total_ingresos).toFixed(1)}% vs ${prev}` : "—",
+    },
+    {
+      title: `Gastos ${latest}`,
+      value: euroFormatter.format(Number(current.total_gastos || 0)),
+      note: prev ? `${pct(current.total_gastos, previous.total_gastos).toFixed(1)}% vs ${prev}` : "—",
+    },
+    {
+      title: `Neto ${latest}`,
+      value: euroFormatter.format(Number(current.total_neto || 0)),
+      note: prev ? `${pct(current.total_neto, previous.total_neto).toFixed(1)}% vs ${prev}` : "—",
+    },
+  ].forEach((card) => {
+    const el = document.createElement("div");
+    el.className = "card kpi-card";
+    el.innerHTML = `<h3>${escapeHtml(card.title)}</h3><div class="kpi-value">${escapeHtml(card.value)}</div><div class="muted">${escapeHtml(card.note)}</div>`;
+    gestoriaDashGeneralEconomyKpis.appendChild(el);
+  });
+
+  const labels = (Array.isArray(economics.labels) ? economics.labels : []).map((m, idx) => GESTORIA_DASH_MONTHS_ES[idx] || String(m || ""));
+  const ingresos = Array.isArray(current.ingresos) ? current.ingresos : [];
+  const gastos = Array.isArray(current.gastos) ? current.gastos : [];
+  const prevIngresos = prev && Array.isArray(previous.ingresos) ? previous.ingresos : [];
+  const prevGastos = prev && Array.isArray(previous.gastos) ? previous.gastos : [];
+
+  drawBarChart(
+    gestoriaDashGeneralEconomyChart,
+    labels,
+    [
+      { label: `Ingresos ${latest}`, values: ingresos, color: "#22c55e", format: (v) => euroFormatter.format(Number(v || 0)) },
+      { label: `Gastos ${latest}`, values: gastos, color: "#ef4444", format: (v) => euroFormatter.format(Number(v || 0)) },
+      ...(prev
+        ? [
+            { type: "line", label: `Ingresos ${prev}`, values: prevIngresos, color: "#16a34a", lineWidth: 2, pointRadius: 2, format: (v) => euroFormatter.format(Number(v || 0)) },
+            { type: "line", label: `Gastos ${prev}`, values: prevGastos, color: "#dc2626", lineWidth: 2, pointRadius: 2, format: (v) => euroFormatter.format(Number(v || 0)) },
+          ]
+        : []),
+    ],
+    { legend: true, showValues: false, tooltip: true, axisMaxChars: 3 }
+  );
+};
+
+const renderGestoriaDashGeneralClientes = (clientesHist = {}) => {
+  if (!gestoriaDashGeneralClientesChart || !gestoriaDashGeneralClientesKpis) return;
+  const years = Array.isArray(clientesHist.years) ? clientesHist.years.map((y) => Number(y || 0)).filter(Boolean) : [];
+  const series = clientesHist.series || {};
+  if (!years.length || !series) {
+    gestoriaDashGeneralClientesKpis.innerHTML = "<p class='muted'>Sin histórico de clientes.</p>";
+    return;
+  }
+  const latest = Math.max(...years);
+  const prev = years.includes(latest - 1) ? latest - 1 : null;
+  const current = series[String(latest)] || {};
+  const previous = prev ? (series[String(prev)] || {}) : {};
+  const curA = Array.isArray(current.autonomos) ? current.autonomos : [];
+  const curE = Array.isArray(current.empresas) ? current.empresas : [];
+  const prevA = prev && Array.isArray(previous.autonomos) ? previous.autonomos : [];
+  const prevE = prev && Array.isArray(previous.empresas) ? previous.empresas : [];
+  const idx = Math.max(0, new Date().getMonth());
+  const snapA = Number(curA[idx] ?? (curA[curA.length - 1] ?? 0));
+  const snapE = Number(curE[idx] ?? (curE[curE.length - 1] ?? 0));
+  const snapPrevA = prev ? Number(prevA[idx] ?? 0) : 0;
+  const snapPrevE = prev ? Number(prevE[idx] ?? 0) : 0;
+  const delta = (c, p) => Number(c || 0) - Number(p || 0);
+
+  gestoriaDashGeneralClientesKpis.innerHTML = "";
+  [
+    { title: "Autónomos", value: numberFormatter.format(snapA), note: prev ? `${delta(snapA, snapPrevA) >= 0 ? "+" : ""}${delta(snapA, snapPrevA)} vs ${prev}` : "—" },
+    { title: "Empresas", value: numberFormatter.format(snapE), note: prev ? `${delta(snapE, snapPrevE) >= 0 ? "+" : ""}${delta(snapE, snapPrevE)} vs ${prev}` : "—" },
+    { title: "Total", value: numberFormatter.format(snapA + snapE), note: prev ? `${delta(snapA + snapE, snapPrevA + snapPrevE) >= 0 ? "+" : ""}${delta(snapA + snapE, snapPrevA + snapPrevE)} vs ${prev}` : "—" },
+  ].forEach((card) => {
+    const el = document.createElement("div");
+    el.className = "card kpi-card";
+    el.innerHTML = `<h3>${escapeHtml(card.title)}</h3><div class="kpi-value">${escapeHtml(String(card.value))}</div><div class="muted">${escapeHtml(card.note)}</div>`;
+    gestoriaDashGeneralClientesKpis.appendChild(el);
+  });
+
+  const labels = (Array.isArray(clientesHist.labels) ? clientesHist.labels : []).map((m, i) => GESTORIA_DASH_MONTHS_ES[i] || String(m || ""));
+  drawBarChart(
+    gestoriaDashGeneralClientesChart,
+    labels,
+    [
+      { type: "line", label: `Autónomos ${latest}`, values: curA, color: "#0ea5e9", lineWidth: 2, pointRadius: 2 },
+      { type: "line", label: `Empresas ${latest}`, values: curE, color: "#f59e0b", lineWidth: 2, pointRadius: 2 },
+      ...(prev
+        ? [
+            { type: "line", label: `Autónomos ${prev}`, values: prevA, color: "rgba(14,165,233,0.55)", lineWidth: 2, pointRadius: 2 },
+            { type: "line", label: `Empresas ${prev}`, values: prevE, color: "rgba(245,158,11,0.55)", lineWidth: 2, pointRadius: 2 },
+          ]
+        : []),
+    ],
+    { legend: true, showValues: false, tooltip: true, axisMaxChars: 3 }
+  );
+};
+
+const renderGestoriaDashGeneralTrabajos = (segmentacion = {}) => {
+  if (!gestoriaDashGeneralTrabajosKpis || !gestoriaDashGeneralTrabajosChart) return;
+  const safe = (k) => Number(segmentacion?.[k] || 0);
+  const cards = [
+    { title: "Herencias", value: safe("herencias_total"), note: "Total" },
+    { title: "Tráfico", value: safe("trafico_total"), note: "Total" },
+    { title: "Expedientes", value: safe("expedientes_total"), note: "Total" },
+    { title: "Tasaciones", value: safe("tasaciones_total"), note: "Total" },
+    { title: "Rentas", value: safe("rentas_total"), note: "Total" },
+  ];
+  gestoriaDashGeneralTrabajosKpis.innerHTML = "";
+  cards.forEach((card) => {
+    const el = document.createElement("div");
+    el.className = "card kpi-card";
+    el.innerHTML = `<h3>${escapeHtml(card.title)}</h3><div class="kpi-value">${escapeHtml(String(card.value))}</div><div class="muted">${escapeHtml(card.note)}</div>`;
+    gestoriaDashGeneralTrabajosKpis.appendChild(el);
+  });
+  drawBarChart(
+    gestoriaDashGeneralTrabajosChart,
+    cards.map((c) => c.title),
+    [{ label: "Trabajos", values: cards.map((c) => Number(c.value || 0)), color: "#0B1D33" }],
+    { legend: false, showValues: true, tooltip: true, axisMaxChars: 12, rotateLabels: true }
+  );
+};
+
+const renderGestoriaDashGeneralProductividad = (productividad = {}) => {
+  if (!gestoriaDashGeneralProdTable || !gestoriaDashGeneralProdInfo) return;
+  const rows = Array.isArray(productividad.rows) ? productividad.rows : [];
+  if (!rows.length) {
+    gestoriaDashGeneralProdTable.innerHTML = "<p class='muted'>Sin datos de productividad.</p>";
+    gestoriaDashGeneralProdInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["persona", "abiertos", "creados 30d", "completados 30d"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.nombre || row.usuario || "-",
+      row.abiertos ?? 0,
+      row.creados_30d ?? 0,
+      row.completados_30d ?? 0,
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaDashGeneralProdTable.innerHTML = "";
+  gestoriaDashGeneralProdTable.appendChild(table);
+  gestoriaDashGeneralProdInfo.textContent = `Mostrando ${rows.length} personas.`;
+};
+
 const initGestoriaDashboardTabs = () => {
   if (!gestoriaDashboardTabs || gestoriaDashboardTabs.dataset.ready === "1") return;
   gestoriaDashboardTabs.dataset.ready = "1";
@@ -51804,10 +52012,19 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
 	    if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
 	    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
-	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
-	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
+    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
+    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
+
+    renderGestoriaDashGeneralEconomy(data.economics || {});
+    renderGestoriaDashGeneralClientes(data.clientes_hist || {});
+    renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
+    renderGestoriaDashGeneralProductividad(data.productividad || {});
+    if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {
+      gestoriaDashGeneralProdReload.dataset.bound = "1";
+      gestoriaDashGeneralProdReload.addEventListener("click", () => loadGestoriaDashboard());
+    }
 
     const renderAlertList = (target, items, emptyText, lineBuilder) => {
       if (!target) return;
