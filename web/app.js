@@ -50493,25 +50493,57 @@ const initGestoriaDashboardTabs = () => {
   if (!gestoriaDashboardTabs || gestoriaDashboardTabs.dataset.ready === "1") return;
   gestoriaDashboardTabs.dataset.ready = "1";
   gestoriaDashboardTabs.addEventListener("click", (event) => {
-    const btn = closestFromEvent(event, "[data-gestoria-dashboard-pane]");
+    const btn = closestFromEvent(event, "[data-gestoria-dashboard-view]");
     if (!btn) return;
-    setGestoriaDashboardPane(btn.dataset.gestoriaDashboardPane);
+    setGestoriaDashboardView(btn.dataset.gestoriaDashboardView);
   });
 };
 
-const setGestoriaDashboardPane = (paneKey = "resumen") => {
-  const key = paneKey === "renta" ? "renta" : "resumen";
-  state.gestoriaDashboardPane = key;
+const normalizeGestoriaDashboardView = (viewKey = "") => {
+  const raw = String(viewKey || "").trim().toLowerCase();
+  if (!raw) return "general";
+  if (raw === "resumen") return "general";
+  if (raw === "general") return "general";
+  if (raw === "renta") return "renta";
+  if (raw === "modelos") return "modelos";
+  if (raw === "gestiones") return "gestiones";
+  if (raw === "contabilidad") return "contabilidad";
+  if (raw === "documentos") return "documentos";
+  return "general";
+};
+
+const resolveGestoriaDashboardEmpresaId = () => {
+  const scoped = String(state.gestoriaScopeEmpresaId || "").trim();
+  if (scoped) return scoped;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa?.id) return "";
+  return String(empresa.id || "").trim();
+};
+
+const setGestoriaDashboardView = (viewKey = "general") => {
+  const key = normalizeGestoriaDashboardView(viewKey);
+  state.gestoriaDashboardView = key;
+  // Compatibilidad con estado anterior ("resumen"/"renta")
+  state.gestoriaDashboardPane = key === "general" ? "resumen" : key;
+
   if (gestoriaDashboardTabs) {
-    gestoriaDashboardTabs.querySelectorAll("[data-gestoria-dashboard-pane]").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.gestoriaDashboardPane === key);
+    gestoriaDashboardTabs.querySelectorAll("[data-gestoria-dashboard-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.gestoriaDashboardView === key);
     });
   }
-  if (gestoriaDashboardPaneResumen) gestoriaDashboardPaneResumen.classList.toggle("hidden", key !== "resumen");
+
+  if (gestoriaDashboardPaneGeneral) gestoriaDashboardPaneGeneral.classList.toggle("hidden", key !== "general");
   if (gestoriaDashboardPaneRenta) gestoriaDashboardPaneRenta.classList.toggle("hidden", key !== "renta");
-  if (key === "renta") {
-    loadGestoriaRentaDashboard().catch(() => {});
-  }
+  if (gestoriaDashboardPaneModelos) gestoriaDashboardPaneModelos.classList.toggle("hidden", key !== "modelos");
+  if (gestoriaDashboardPaneGestiones) gestoriaDashboardPaneGestiones.classList.toggle("hidden", key !== "gestiones");
+  if (gestoriaDashboardPaneContabilidad) gestoriaDashboardPaneContabilidad.classList.toggle("hidden", key !== "contabilidad");
+  if (gestoriaDashboardPaneDocumentos) gestoriaDashboardPaneDocumentos.classList.toggle("hidden", key !== "documentos");
+
+  if (key === "renta") loadGestoriaRentaDashboard().catch(() => {});
+  if (key === "modelos") loadGestoriaDashboardModelos().catch(() => {});
+  if (key === "gestiones") loadGestoriaDashboardGestiones().catch(() => {});
+  if (key === "contabilidad") loadGestoriaDashboardContabilidad().catch(() => {});
+  if (key === "documentos") loadGestoriaDashboardDocumentos().catch(() => {});
 };
 
 const ensureGestoriaDashRentaEjercicioOptions = (selected = "") => {
@@ -50522,6 +50554,463 @@ const ensureGestoriaDashRentaEjercicioOptions = (selected = "") => {
   gestoriaDashRentaEjercicio.innerHTML = "";
   years.forEach((y) => gestoriaDashRentaEjercicio.appendChild(createOption(y, y)));
   gestoriaDashRentaEjercicio.value = years.includes(current) ? current : years[0];
+};
+
+const gestoriaDashComputeDueDate = (row = {}) => {
+  try {
+    if (row?.fecha_fin) return String(row.fecha_fin || "").trim();
+    const inicio = String(row?.fecha_inicio || "").trim();
+    const slaRaw = row?.sla_dias;
+    if (!inicio || slaRaw == null || slaRaw === "") return "";
+    const base = new Date(inicio);
+    const days = parseInt(slaRaw, 10);
+    if (Number.isNaN(base.getTime()) || Number.isNaN(days)) return "";
+    const due = new Date(base.getTime() + days * 86400000);
+    return due.toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+};
+
+const renderGestoriaDashKpis = (target, items = []) => {
+  if (!target) return;
+  const cards = Array.isArray(items) ? items : [];
+  if (!cards.length) {
+    target.innerHTML = "";
+    return;
+  }
+  target.innerHTML = cards
+    .map(
+      (card) => `
+      <div class="card kpi-card">
+        <h3>${escapeHtml(card.title || "")}</h3>
+        <div class="kpi-value">${escapeHtml(String(card.value ?? ""))}</div>
+        <div class="muted">${escapeHtml(card.note || "")}</div>
+      </div>`
+    )
+    .join("");
+};
+
+const loadGestoriaDashboardModelos = async ({ force = false } = {}) => {
+  if (!gestoriaDashModelosTable || !gestoriaDashModelosInfo || !gestoriaDashModelosReload) return;
+  const empresaId = resolveGestoriaDashboardEmpresaId();
+  if (!empresaId) {
+    gestoriaDashModelosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaDashModelosInfo.textContent = "";
+    return;
+  }
+  const scope = String(gestoriaDashModelosScope?.value || "proximos").trim() || "proximos";
+
+  if (gestoriaDashModelosScope && gestoriaDashModelosScope.dataset.bound !== "1") {
+    gestoriaDashModelosScope.dataset.bound = "1";
+    gestoriaDashModelosScope.addEventListener("change", () => loadGestoriaDashboardModelos({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashModelosReload.dataset.bound !== "1") {
+    gestoriaDashModelosReload.dataset.bound = "1";
+    gestoriaDashModelosReload.addEventListener("click", () => loadGestoriaDashboardModelos({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashModelosOpenCrm && gestoriaDashModelosOpenCrm.dataset.bound !== "1") {
+    gestoriaDashModelosOpenCrm.dataset.bound = "1";
+    gestoriaDashModelosOpenCrm.addEventListener("click", () => {
+      openGestoriaServiceTab("gestoria-crm");
+      focusElementInView(gestoriaModelosOverviewTable);
+    });
+  }
+
+  const cacheAgeMs = Date.now() - Number(state.gestoriaDashModelosCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
+  if (
+    !force &&
+    state.gestoriaDashModelosCache &&
+    String(state.gestoriaDashModelosCache.empresaId || "") === String(empresaId || "") &&
+    String(state.gestoriaDashModelosCache.scope || "") === String(scope || "") &&
+    isFreshCache
+  ) {
+    const payload = state.gestoriaDashModelosCache.payload || {};
+    renderGestoriaDashboardModelos(payload.rows || []);
+    return;
+  }
+
+  gestoriaDashModelosReload.disabled = true;
+  gestoriaDashModelosReload.textContent = "Cargando...";
+  try {
+    const params = new URLSearchParams({ empresa_id: empresaId, scope });
+    const data = await api(`/api/gestoria_modelos?${params.toString()}`);
+    if (data?.error) throw new Error(String(data.error));
+    state.gestoriaDashModelosCache = { empresaId, scope, payload: data, ts: Date.now() };
+    renderGestoriaDashboardModelos(data.rows || []);
+  } catch (err) {
+    gestoriaDashModelosTable.innerHTML = `<p class="muted">No se pudieron cargar los modelos: ${escapeHtml(String(err?.message || err || ""))}</p>`;
+    gestoriaDashModelosInfo.textContent = "";
+  } finally {
+    gestoriaDashModelosReload.disabled = false;
+    gestoriaDashModelosReload.textContent = "Actualizar";
+  }
+};
+
+const renderGestoriaDashboardModelos = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    gestoriaDashModelosTable.innerHTML = "<p class='muted'>Sin modelos para este filtro.</p>";
+    gestoriaDashModelosInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["cliente", "modelo", "proxima_fecha", "estado", "responsable"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 40).forEach((row) => {
+    const tr = document.createElement("tr");
+    const cols = ["cliente", "modelo", "proxima_fecha", "estado", "responsable"];
+    const values = [
+      row.cliente || "-",
+      row.modelo || "-",
+      row.proxima_fecha || "-",
+      row.estado || "-",
+      row.responsable || "-",
+    ];
+    values.forEach((value, idx) => {
+      const td = document.createElement("td");
+      const formatted = formatCell(cols[idx], value);
+      td.textContent = formatted === null ? "" : formatted;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaDashModelosTable.innerHTML = "";
+  gestoriaDashModelosTable.appendChild(table);
+  gestoriaDashModelosInfo.textContent = `Mostrando ${Math.min(items.length, 40)} modelos.`;
+};
+
+const loadGestoriaDashboardGestiones = async ({ force = false } = {}) => {
+  if (!gestoriaDashTrabajosTable || !gestoriaDashTrabajosInfo || !gestoriaDashTrabajosReload) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    gestoriaDashTrabajosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaDashTrabajosInfo.textContent = "";
+    if (gestoriaDashTrabajosKpis) gestoriaDashTrabajosKpis.innerHTML = "";
+    return;
+  }
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+  const estadoFiltro = String(gestoriaDashTrabajosEstado?.value || "").trim().toLowerCase();
+  const qs = new URLSearchParams();
+  if (workspaceId) qs.set("workspace_id", workspaceId);
+  else qs.set("empresa_id", String(empresa.id || "").trim());
+  if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+
+  if (gestoriaDashTrabajosEstado && gestoriaDashTrabajosEstado.dataset.bound !== "1") {
+    gestoriaDashTrabajosEstado.dataset.bound = "1";
+    gestoriaDashTrabajosEstado.addEventListener("change", () => loadGestoriaDashboardGestiones({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashTrabajosReload.dataset.bound !== "1") {
+    gestoriaDashTrabajosReload.dataset.bound = "1";
+    gestoriaDashTrabajosReload.addEventListener("click", () => loadGestoriaDashboardGestiones({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashTrabajosOpenCrm && gestoriaDashTrabajosOpenCrm.dataset.bound !== "1") {
+    gestoriaDashTrabajosOpenCrm.dataset.bound = "1";
+    gestoriaDashTrabajosOpenCrm.addEventListener("click", () => openGestoriaServiceTab("gestoria-crm"));
+  }
+
+  const cacheAgeMs = Date.now() - Number(state.gestoriaDashTrabajosCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
+  if (
+    !force &&
+    state.gestoriaDashTrabajosCache &&
+    String(state.gestoriaDashTrabajosCache.qs || "") === String(qs.toString()) &&
+    isFreshCache
+  ) {
+    renderGestoriaDashboardGestiones(state.gestoriaDashTrabajosCache.rows || [], { estadoFiltro });
+    return;
+  }
+
+  gestoriaDashTrabajosReload.disabled = true;
+  gestoriaDashTrabajosReload.textContent = "Cargando...";
+  try {
+    const data = await api(`/api/gestoria_trabajos?${qs.toString()}`);
+    if (data?.error) throw new Error(String(data.error));
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    state.gestoriaDashTrabajosCache = { qs: qs.toString(), rows, ts: Date.now() };
+    renderGestoriaDashboardGestiones(rows, { estadoFiltro });
+  } catch (err) {
+    gestoriaDashTrabajosTable.innerHTML = `<p class="muted">No se pudieron cargar las gestiones: ${escapeHtml(String(err?.message || err || ""))}</p>`;
+    gestoriaDashTrabajosInfo.textContent = "";
+    if (gestoriaDashTrabajosKpis) gestoriaDashTrabajosKpis.innerHTML = "";
+  } finally {
+    gestoriaDashTrabajosReload.disabled = false;
+    gestoriaDashTrabajosReload.textContent = "Actualizar";
+  }
+};
+
+const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {}) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const normalizedEstado = String(estadoFiltro || "").trim();
+  const filtered = normalizedEstado
+    ? items.filter((row) => String(row?.estado || "").trim().toLowerCase() === normalizedEstado)
+    : items;
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isDone = (row) => normalizeSimple(String(row?.estado || "")) === "completado";
+  const due = (row) => gestoriaDashComputeDueDate(row) || "";
+  const isOverdue = (row) => {
+    const d = due(row);
+    return Boolean(d) && d < todayIso && !isDone(row);
+  };
+
+  const counts = filtered.reduce(
+    (acc, row) => {
+      const st = normalizeSimple(String(row?.estado || ""));
+      if (st === "encurso") acc.enCurso += 1;
+      else if (st === "enespera") acc.enEspera += 1;
+      else if (st === "completado") acc.completado += 1;
+      if (isOverdue(row)) acc.vencidas += 1;
+      return acc;
+    },
+    { enCurso: 0, enEspera: 0, completado: 0, vencidas: 0 }
+  );
+
+  if (gestoriaDashTrabajosKpis) {
+    renderGestoriaDashKpis(gestoriaDashTrabajosKpis, [
+      { title: "En curso", value: numberFormatter.format(counts.enCurso), note: "Trabajo activo" },
+      { title: "En espera", value: numberFormatter.format(counts.enEspera), note: "Pendientes de respuesta" },
+      { title: "Completadas", value: numberFormatter.format(counts.completado), note: "Cerradas" },
+      { title: "Vencidas", value: numberFormatter.format(counts.vencidas), note: "Fuera de plazo" },
+    ]);
+  }
+
+  if (!filtered.length) {
+    gestoriaDashTrabajosTable.innerHTML = "<p class='muted'>Sin gestiones.</p>";
+    gestoriaDashTrabajosInfo.textContent = "";
+    return;
+  }
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["cliente", "tipo_trabajo", "estado", "fecha_inicio", "fecha_fin", "responsable"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  filtered.slice(0, 50).forEach((row) => {
+    const tr = document.createElement("tr");
+    const dueDate = due(row);
+    const cols = ["cliente", "tipo_trabajo", "estado", "fecha_inicio", "fecha_fin", "responsable"];
+    const values = [
+      row.cliente || "-",
+      row.tipo_trabajo || "-",
+      row.estado || "-",
+      row.fecha_inicio || "-",
+      dueDate || "-",
+      row.responsable || "-",
+    ];
+    values.forEach((value, idx) => {
+      const td = document.createElement("td");
+      const formatted = formatCell(cols[idx], value);
+      td.textContent = formatted === null ? "" : formatted;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  gestoriaDashTrabajosTable.innerHTML = "";
+  gestoriaDashTrabajosTable.appendChild(table);
+  gestoriaDashTrabajosInfo.textContent = `Mostrando ${Math.min(filtered.length, 50)} gestiones.`;
+};
+
+const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
+  if (!gestoriaDashContaTable || !gestoriaDashContaInfo || !gestoriaDashContaReload) return;
+  const empresaId = resolveGestoriaDashboardEmpresaId();
+  if (!empresaId) {
+    gestoriaDashContaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaDashContaInfo.textContent = "";
+    if (gestoriaDashContaKpis) gestoriaDashContaKpis.innerHTML = "";
+    return;
+  }
+
+  if (gestoriaDashContaReload.dataset.bound !== "1") {
+    gestoriaDashContaReload.dataset.bound = "1";
+    gestoriaDashContaReload.addEventListener("click", () => loadGestoriaDashboardContabilidad({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashContaOpen && gestoriaDashContaOpen.dataset.bound !== "1") {
+    gestoriaDashContaOpen.dataset.bound = "1";
+    gestoriaDashContaOpen.addEventListener("click", () => openGestoriaServiceTab("gestoria-conta"));
+  }
+
+  const cacheAgeMs = Date.now() - Number(state.gestoriaDashContaCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
+  if (!force && state.gestoriaDashContaCache && String(state.gestoriaDashContaCache.empresaId || "") === String(empresaId || "") && isFreshCache) {
+    renderGestoriaDashboardContabilidad(state.gestoriaDashContaCache.rows || [], state.gestoriaDashContaCache.summary || {});
+    return;
+  }
+
+  gestoriaDashContaReload.disabled = true;
+  gestoriaDashContaReload.textContent = "Cargando...";
+  try {
+    const params = new URLSearchParams({ empresa_id: empresaId, limit: "60" });
+    const data = await api(`/api/gestoria_contabilidad?${params.toString()}`);
+    if (data?.error) throw new Error(String(data.error));
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const summary = data.summary || {};
+    state.gestoriaDashContaCache = { empresaId, rows, summary, ts: Date.now() };
+    renderGestoriaDashboardContabilidad(rows, summary);
+  } catch (err) {
+    gestoriaDashContaTable.innerHTML = `<p class="muted">No se pudo cargar contabilidad: ${escapeHtml(String(err?.message || err || ""))}</p>`;
+    if (gestoriaDashContaKpis) gestoriaDashContaKpis.innerHTML = "";
+    gestoriaDashContaInfo.textContent = "";
+  } finally {
+    gestoriaDashContaReload.disabled = false;
+    gestoriaDashContaReload.textContent = "Actualizar";
+  }
+};
+
+const renderGestoriaDashboardContabilidad = (rows = [], summary = {}) => {
+  if (gestoriaDashContaKpis) {
+    const total = Number(summary?.total_rows || 0);
+    const ingresos = Number(summary?.ingresos || 0);
+    const gastos = Number(summary?.gastos || 0);
+    renderGestoriaDashKpis(gestoriaDashContaKpis, [
+      { title: "Asientos", value: numberFormatter.format(total), note: "Totales" },
+      { title: "Ingresos", value: euroFormatter.format(ingresos), note: "Suma importes" },
+      { title: "Gastos", value: euroFormatter.format(gastos), note: "Suma importes" },
+    ]);
+  }
+
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    gestoriaDashContaTable.innerHTML = "<p class='muted'>Sin asientos contables.</p>";
+    gestoriaDashContaInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["fecha", "cliente", "concepto", "tipo", "importe"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 30).forEach((row) => {
+    const tr = document.createElement("tr");
+    const cols = ["fecha", "cliente", "concepto", "tipo", "importe"];
+    const values = [row.fecha || "-", row.cliente || "-", row.concepto || "-", row.tipo || "-", row.importe ?? "-"];
+    values.forEach((value, idx) => {
+      const td = document.createElement("td");
+      const formatted = formatCell(cols[idx], value);
+      td.textContent = formatted === null ? "" : formatted;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaDashContaTable.innerHTML = "";
+  gestoriaDashContaTable.appendChild(table);
+  gestoriaDashContaInfo.textContent = `Mostrando ${Math.min(items.length, 30)} asientos.`;
+};
+
+const loadGestoriaDashboardDocumentos = async ({ force = false } = {}) => {
+  if (!gestoriaDashDocsRecent || !gestoriaDashDocsInfo || !gestoriaDashDocsReload) return;
+  const empresaId = resolveGestoriaDashboardEmpresaId();
+  if (!empresaId) {
+    gestoriaDashDocsRecent.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaDashDocsInfo.textContent = "";
+    if (gestoriaDashDocsKpis) gestoriaDashDocsKpis.innerHTML = "";
+    return;
+  }
+
+  if (gestoriaDashDocsReload.dataset.bound !== "1") {
+    gestoriaDashDocsReload.dataset.bound = "1";
+    gestoriaDashDocsReload.addEventListener("click", () => loadGestoriaDashboardDocumentos({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashDocsOpen && gestoriaDashDocsOpen.dataset.bound !== "1") {
+    gestoriaDashDocsOpen.dataset.bound = "1";
+    gestoriaDashDocsOpen.addEventListener("click", () => openGestoriaServiceTab("gestoria-docs"));
+  }
+
+  const cacheAgeMs = Date.now() - Number(state.gestoriaDashDocsCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
+  if (!force && state.gestoriaDashDocsCache && String(state.gestoriaDashDocsCache.empresaId || "") === String(empresaId || "") && isFreshCache) {
+    renderGestoriaDashboardDocumentos(state.gestoriaDashDocsCache.rows || []);
+    return;
+  }
+
+  gestoriaDashDocsReload.disabled = true;
+  gestoriaDashDocsReload.textContent = "Cargando...";
+  try {
+    const params = new URLSearchParams({ empresa_id: empresaId, limit: "50" });
+    const data = await api(`/api/gestoria_docs?${params.toString()}`);
+    if (data?.error) throw new Error(String(data.error));
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    state.gestoriaDashDocsCache = { empresaId, rows, ts: Date.now() };
+    renderGestoriaDashboardDocumentos(rows);
+  } catch (err) {
+    gestoriaDashDocsRecent.innerHTML = `<p class="muted">No se pudieron cargar documentos: ${escapeHtml(String(err?.message || err || ""))}</p>`;
+    gestoriaDashDocsInfo.textContent = "";
+    if (gestoriaDashDocsKpis) gestoriaDashDocsKpis.innerHTML = "";
+  } finally {
+    gestoriaDashDocsReload.disabled = false;
+    gestoriaDashDocsReload.textContent = "Actualizar";
+  }
+};
+
+const renderGestoriaDashboardDocumentos = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (gestoriaDashDocsKpis) {
+    const pending = items.filter((r) => normalizeSimple(String(r?.estado || "")) && normalizeSimple(String(r?.estado || "")) !== "ok").length;
+    renderGestoriaDashKpis(gestoriaDashDocsKpis, [
+      { title: "Recientes", value: numberFormatter.format(items.length), note: "Últimos documentos" },
+      { title: "Pendientes", value: numberFormatter.format(pending), note: "Estado ≠ OK" },
+    ]);
+  }
+
+  if (!items.length) {
+    gestoriaDashDocsRecent.innerHTML = "<p class='muted'>Sin documentos recientes.</p>";
+    gestoriaDashDocsInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["fecha", "cliente", "nombre", "tipo", "estado"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 30).forEach((row) => {
+    const tr = document.createElement("tr");
+    const cols = ["fecha", "cliente", "nombre", "tipo", "estado"];
+    const values = [row.fecha || "-", row.cliente || "-", row.nombre || "-", row.tipo || "-", row.estado || "-"];
+    values.forEach((value, idx) => {
+      const td = document.createElement("td");
+      const formatted = formatCell(cols[idx], value);
+      td.textContent = formatted === null ? "" : formatted;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaDashDocsRecent.innerHTML = "";
+  gestoriaDashDocsRecent.appendChild(table);
+  gestoriaDashDocsInfo.textContent = `Mostrando ${Math.min(items.length, 30)} documentos.`;
 };
 
 const openClienteRentaFromDashboard = (clienteId) => {
@@ -51269,7 +51758,7 @@ const loadGestoriaDashboard = () => {
     gestoriaDashboardEmpresaScope.value = current;
   }
   initGestoriaDashboardTabs();
-  setGestoriaDashboardPane(state.gestoriaDashboardPane || "resumen");
+  setGestoriaDashboardView(state.gestoriaDashboardView || state.gestoriaDashboardPane || "general");
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
