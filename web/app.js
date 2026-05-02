@@ -172,14 +172,48 @@ const api = async (path) => {
   throw new Error("No se pudo completar la petición.");
 };
 
+function attachEmpresaIdForServiceRequest(url, payload) {
+  const out = payload && typeof payload === "object" ? { ...payload } : {};
+  if (out.empresa_id) return out;
+  const path = String(url || "").split("?")[0] || "";
+  const hasCliente = Boolean(String(out.cliente_id || "").trim());
+  const hasRecord = Boolean(String(out.id || "").trim());
+  if (!hasCliente && !hasRecord) return out;
+
+  const setEmpresa = (empresaId) => {
+    const id = String(empresaId || "").trim();
+    if (!id) return;
+    out.empresa_id = id;
+  };
+
+  if (path.startsWith("/api/gestoria_") || path === "/api/cliente_gestoria_update" || path === "/api/gestoria_update") {
+    setEmpresa(resolveCrmGestoriaEmpresa()?.id);
+    return out;
+  }
+  if (path.startsWith("/api/seguros_") || path === "/api/seguros" || path === "/api/seguros_update") {
+    setEmpresa(resolveCrmSegurosEmpresa()?.id);
+    return out;
+  }
+  if (path.startsWith("/api/hipotecas") || path.startsWith("/api/fin_") || path.startsWith("/api/financiaciones")) {
+    setEmpresa(resolveCrmFinEmpresa()?.id);
+    return out;
+  }
+  if (path.startsWith("/api/inmo_") || path.startsWith("/api/inmuebles") || path.startsWith("/api/crm_")) {
+    setEmpresa(resolveCrmInmoEmpresa()?.id);
+    return out;
+  }
+  return out;
+}
+
 const apiPost = async (url, payload = {}) => {
+  const enrichedPayload = attachEmpresaIdForServiceRequest(url, payload);
   let res;
   try {
     res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(enrichedPayload),
     });
   } catch (err) {
     const message = err?.name === "AbortError"
@@ -1204,6 +1238,7 @@ const showClienteDocOcrModal = (fields = {}, meta = {}) =>
   });
 
 const postJsonWithDbRetry = async (url, payload, options = {}) => {
+  const enrichedPayload = attachEmpresaIdForServiceRequest(url, payload);
   const maxRetries = Math.max(1, Number(options.maxRetries || 5));
   const baseDelayMs = Math.max(50, Number(options.baseDelayMs || 350));
   const timeoutMs = Math.max(3000, Number(options.timeoutMs || 20000));
@@ -1218,7 +1253,7 @@ const postJsonWithDbRetry = async (url, payload, options = {}) => {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload || {}),
+        body: JSON.stringify(enrichedPayload || {}),
         signal: controller ? controller.signal : undefined,
       });
       if (timeoutId) {
