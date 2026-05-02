@@ -19706,9 +19706,11 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
         conn.execute(
             """
             INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion, estado, created_at, updated_at
+              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
+              procedencia_canal, procedencia_detalle, procedencia_user_id,
+              estado, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -19720,6 +19722,9 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
                 extra.get("email"),
                 extra.get("fecha_nacimiento"),
                 extra.get("direccion"),
+                "Importación",
+                "Seguros",
+                None,
                 "Activo",
                 now,
                 now,
@@ -19910,9 +19915,11 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     conn.execute(
         """
         INSERT INTO clientes (
-          id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion, estado, created_at, updated_at
+          id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
+          procedencia_canal, procedencia_detalle, procedencia_user_id,
+          estado, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -19925,6 +19932,9 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             normalize_email(extra.get("email")) or None,
             (extra.get("fecha_nacimiento") or "").strip() or None,
             (extra.get("direccion") or "").strip() or None,
+            "Importación",
+            "Inmobiliaria",
+            None,
             "Inactivo",
             now,
             now,
@@ -27245,9 +27255,11 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
         conn.execute(
             """
             INSERT INTO clientes (
-              id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion, estado, created_at, updated_at
+              id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
+              procedencia_canal, procedencia_detalle, procedencia_user_id,
+              estado, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -27260,6 +27272,9 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
                 extra.get("email"),
                 extra.get("fecha_nacimiento"),
                 extra.get("direccion"),
+                "Importación",
+                "Financiaciones",
+                None,
                 "Activo",
                 now,
                 now,
@@ -27853,6 +27868,17 @@ def ensure_tables(db_path):
         ensure_column(conn, "clientes", "captado_por_user_id", "captado_por_user_id TEXT")
     except Exception:
         pass
+    # Procedencia del cliente (canal + detalle). Se usa para dashboards/atribución y debe estar
+    # disponible independientemente del servicio que haya creado el cliente.
+    for col_name, col_sql in {
+        "procedencia_canal": "procedencia_canal TEXT",
+        "procedencia_detalle": "procedencia_detalle TEXT",
+        "procedencia_user_id": "procedencia_user_id TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "clientes", col_name, col_sql)
+        except Exception:
+            pass
     try:
         ensure_column(conn, "clientes_empresas", "captado_por_user_id", "captado_por_user_id TEXT")
     except Exception:
@@ -35409,10 +35435,12 @@ def ensure_workspace_budget_client(
         cliente_id = os.urandom(16).hex()
         conn.execute(
             """
-            INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, estado, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-            """,
+	            INSERT INTO clientes (
+	              id, nombre, tipo_persona, nif, telefono, email,
+	              procedencia_canal, procedencia_detalle, procedencia_user_id,
+	              estado, created_at, updated_at
+	            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+	            """,
             (
                 cliente_id,
                 lookup,
@@ -35420,6 +35448,9 @@ def ensure_workspace_budget_client(
                 nif or None,
                 str(cliente_telefono or "").strip() or None,
                 str(cliente_email or "").strip() or None,
+                "Importación",
+                "Sistema",
+                None,
                 "Lead",
                 now,
                 now,
@@ -43135,6 +43166,9 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/seguros_campanas_delete": "seguros",
                         "/api/seguros_ocr": "seguros",
                         "/api/seguros_ocr_async": "seguros",
+                        "/api/seguros_recibos": "seguros",
+                        "/api/seguros_recibos_update": "seguros",
+                        "/api/seguros_recibos_delete": "seguros",
                         # Financiaciones/hipotecas
                         "/api/hipotecas": "financiaciones",
                         "/api/hipotecas_update": "financiaciones",
@@ -58121,16 +58155,28 @@ class Handler(BaseHTTPRequestHandler):
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
             captado_por_user_id = str(payload.get("captado_por_user_id") or "").strip() or actor_user_id
+            procedencia_canal = str(payload.get("procedencia_canal") or "").strip()
+            procedencia_detalle = str(payload.get("procedencia_detalle") or "").strip()
+            procedencia_user_id = str(payload.get("procedencia_user_id") or "").strip()
+            if not procedencia_canal:
+                if actor_user_id:
+                    procedencia_canal = "Colaborador interno"
+                    procedencia_user_id = procedencia_user_id or actor_user_id
+                else:
+                    procedencia_canal = "Importación"
+            if normalize_lookup_text(procedencia_canal) in ("COLABORADOR INTERNO", "INTERNO", "USUARIO"):
+                procedencia_user_id = procedencia_user_id or actor_user_id
             cliente_id = payload.get("id") or os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO clientes (
                   id, nombre, tipo_persona, nif, telefono, movil, otro_telefono, email, fecha_nacimiento,
                   direccion, direccion_numero, codigo_postal, localidad, poblacion, provincia,
-                  id_personal, captado_por_user_id, cliente_generico_web, tiene_pedido, viabilidad, fecha_estudio, valor_maximo_piso,
+                  id_personal, captado_por_user_id, procedencia_canal, procedencia_detalle, procedencia_user_id,
+                  cliente_generico_web, tiene_pedido, viabilidad, fecha_estudio, valor_maximo_piso,
                   perfil_kiron, estudio_vip, tipo, perfil, estado, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -58151,6 +58197,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("provincia"),
                     payload.get("id_personal"),
                     captado_por_user_id,
+                    procedencia_canal,
+                    procedencia_detalle,
+                    procedencia_user_id,
                     parse_boolish(payload.get("cliente_generico_web")),
                     parse_boolish(payload.get("tiene_pedido")),
                     payload.get("viabilidad"),
@@ -58361,6 +58410,9 @@ class Handler(BaseHTTPRequestHandler):
                 "provincia",
                 "id_personal",
                 "captado_por_user_id",
+                "procedencia_canal",
+                "procedencia_detalle",
+                "procedencia_user_id",
                 "cliente_generico_web",
                 "tiene_pedido",
                 "viabilidad",

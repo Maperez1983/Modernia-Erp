@@ -576,6 +576,7 @@ CREATE TABLE IF NOT EXISTS gestoria_trabajos (
   empresa_id TEXT,
   cliente_id TEXT,
   tipo_trabajo TEXT,
+  tipo_categoria TEXT,
   estado TEXT,
   fecha_inicio TEXT,
   fecha_fin TEXT,

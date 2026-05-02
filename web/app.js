@@ -2247,12 +2247,13 @@ const clientesDetail = document.getElementById("clientesDetail");
 const clienteDetailTitle = document.getElementById("clienteDetailTitle");
 const clienteDetailSubtitle = document.getElementById("clienteDetailSubtitle");
 const clienteDetailBack = document.getElementById("clienteDetailBack");
-const clienteSaveBtn = document.getElementById("clienteSaveBtn");
-const clienteSaveStatus = document.getElementById("clienteSaveStatus");
-const clienteTabs = document.getElementById("clienteTabs");
-const clienteTabDatos = document.getElementById("clienteTabDatos");
-const clienteTabRelaciones = document.getElementById("clienteTabRelaciones");
-const clienteTabEconomicos = document.getElementById("clienteTabEconomicos");
+	const clienteSaveBtn = document.getElementById("clienteSaveBtn");
+	const clienteSaveStatus = document.getElementById("clienteSaveStatus");
+	const clienteTabs = document.getElementById("clienteTabs");
+	const clienteLightningSidebar = document.getElementById("clienteLightningSidebar");
+	const clienteTabDatos = document.getElementById("clienteTabDatos");
+	const clienteTabRelaciones = document.getElementById("clienteTabRelaciones");
+	const clienteTabEconomicos = document.getElementById("clienteTabEconomicos");
 const clienteTabDashboard = document.getElementById("clienteTabDashboard");
 const clienteDashboardRentaPanel = document.getElementById("clienteDashboardRentaPanel");
 const clienteDashboardRentaContent = document.getElementById("clienteDashboardRentaContent");
@@ -22905,6 +22906,11 @@ const setClienteTab = (tab) => {
   clienteTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
+  if (clienteLightningSidebar) {
+    clienteLightningSidebar.querySelectorAll("[data-cliente-tab]").forEach((btn) => {
+      btn.classList.toggle("active", String(btn.dataset.clienteTab || "") === String(tab || ""));
+    });
+  }
   const showExpediente = tab === "datos";
   const showConfig = tab === "profesional";
   const showServicios = tab === "servicios";
@@ -70023,6 +70029,16 @@ if (clienteTabs) {
     const btn = closestFromEvent(event, "[data-tab]");
     if (!btn) return;
     setClienteTab(btn.dataset.tab);
+  });
+}
+
+if (clienteLightningSidebar) {
+  clienteLightningSidebar.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-cliente-tab]");
+    if (!btn) return;
+    const tab = String(btn.dataset.clienteTab || "").trim();
+    if (!tab) return;
+    setClienteTab(tab);
   });
 }
 
