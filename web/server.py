@@ -2470,10 +2470,18 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
         us = f"REPLACE({stripped}, ',', '')"
         dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
-        looks_like_dot_thousands = (
-            f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
-            f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
-        )
+        backend = getattr(conn, "__crm_backend__", "") or ""
+        if backend == "postgres":
+            # Postgres: no soporta `GLOB`. Usamos regex y RIGHT() para detectar sufijo de 3 dígitos (miles).
+            looks_like_dot_thousands = (
+                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                f"AND RIGHT({stripped}, 3) ~ '^[0-9]{{3}}$')"
+            )
+        else:
+            looks_like_dot_thousands = (
+                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+            )
         dot_thousands = f"REPLACE({stripped}, '.', '')"
         normalized = (
             f"CASE "
@@ -30946,10 +30954,17 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
         us = f"REPLACE({stripped}, ',', '')"
         dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
-        looks_like_dot_thousands = (
-            f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
-            f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
-        )
+        backend = getattr(conn, "__crm_backend__", "") or ""
+        if backend == "postgres":
+            looks_like_dot_thousands = (
+                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                f"AND RIGHT({stripped}, 3) ~ '^[0-9]{{3}}$')"
+            )
+        else:
+            looks_like_dot_thousands = (
+                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+            )
         dot_thousands = f"REPLACE({stripped}, '.', '')"
         normalized = (
             f"CASE "
@@ -68964,10 +68979,17 @@ class Handler(BaseHTTPRequestHandler):
                 eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
                 us = f"REPLACE({stripped}, ',', '')"
                 dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
-                looks_like_dot_thousands = (
-                    f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
-                    f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
-                )
+                backend = getattr(conn, "__crm_backend__", "") or ""
+                if backend == "postgres":
+                    looks_like_dot_thousands = (
+                        f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                        f"AND RIGHT({stripped}, 3) ~ '^[0-9]{{3}}$')"
+                    )
+                else:
+                    looks_like_dot_thousands = (
+                        f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                        f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+                    )
                 dot_thousands = f"REPLACE({stripped}, '.', '')"
                 normalized = (
                     f"CASE "
