@@ -114,8 +114,8 @@ body.crm-context-vertical #explorerSection .app-lightning-topbar {
 
 /* Seguros (CRM vertical): centrar el shell Lightning completo dentro del layout estándar. */
 body.crm-context-seguros.crm-context-vertical #crmSection .crm-lightning-shell {
-  width: min(var(--layout-max), calc(100% - (var(--layout-gutter) * 2)));
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
 }
 
 body.crm-context-vertical #explorerSection > .section-head {
