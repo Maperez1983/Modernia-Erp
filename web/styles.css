@@ -95,6 +95,18 @@ body.crm-context-vertical #explorerSection {
   border-radius: 0;
 }
 
+/* Seguros (CRM vertical): mantenemos el "modo app" pero centrado como el resto del sistema. */
+body.crm-context-seguros.crm-context-vertical #explorerSection {
+  padding: 26px var(--layout-gutter) 64px;
+  padding-bottom: calc(64px + var(--safe-bottom));
+}
+
+body.crm-context-seguros.crm-context-vertical #explorerSection .app-lightning-shell {
+  max-width: var(--layout-max);
+  width: 100%;
+  margin: 0 auto;
+}
+
 body.crm-context-vertical #explorerSection > .section-head {
   display: none;
 }
