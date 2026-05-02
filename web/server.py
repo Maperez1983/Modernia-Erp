@@ -57547,6 +57547,19 @@ class Handler(BaseHTTPRequestHandler):
                 updates["valor_maximo_piso"] = parse_optional_float(updates.get("valor_maximo_piso"))
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
+            # Resync de nombre: muchas tablas guardan un snapshot `cliente_nombre`/`cliente`
+            # para poder operar sin join. Si el usuario renombra el cliente, esas copias se
+            # quedan desactualizadas y las cards/fichas pueden seguir mostrando el nombre antiguo.
+            nombre_resync = ""
+            try:
+                if "nombre" in updates:
+                    nombre_resync = re.sub(r"\s+", " ", str(updates.get("nombre") or "")).strip()
+                if not nombre_resync:
+                    row_nombre = conn.execute("SELECT nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+                    nombre_resync = str(row_nombre["nombre"] or "").strip() if row_nombre else ""
+            except Exception:
+                nombre_resync = ""
+            resync_rows = {"acciones": 0, "hipotecas": 0}
             updated = False
             for attempt in range(10):
                 try:
@@ -57556,6 +57569,24 @@ class Handler(BaseHTTPRequestHandler):
                         f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                         values,
                     )
+                    # Propaga el nombre a tablas denormalizadas (best-effort).
+                    if nombre_resync:
+                        try:
+                            cur = conn.execute(
+                                "UPDATE acciones SET cliente_nombre = ?, updated_at = datetime(?) WHERE cliente_id = ?",
+                                (nombre_resync, now, cliente_id),
+                            )
+                            resync_rows["acciones"] = int(getattr(cur, "rowcount", 0) or 0)
+                        except Exception:
+                            pass
+                        try:
+                            cur = conn.execute(
+                                "UPDATE hipotecas SET cliente = ?, updated_at = datetime(?) WHERE cliente_id = ?",
+                                (nombre_resync, now, cliente_id),
+                            )
+                            resync_rows["hipotecas"] = int(getattr(cur, "rowcount", 0) or 0)
+                        except Exception:
+                            pass
                     # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
                     try:
                         rels = conn.execute(
@@ -57595,7 +57626,7 @@ class Handler(BaseHTTPRequestHandler):
             if not updated:
                 json_response(self, {"error": "No se pudo guardar el cliente"}, status=503)
                 return
-            response = {"ok": True, "id": cliente_id, "sync": sync}
+            response = {"ok": True, "id": cliente_id, "sync": sync, "resync": resync_rows}
             if sync_warning:
                 response["warning"] = sync_warning
             conn.commit()
