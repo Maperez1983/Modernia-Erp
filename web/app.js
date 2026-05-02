@@ -11674,7 +11674,8 @@ const renderWorkspaceRrhhHub = () => {
 	              }).join("")}
 	            </select>
 	          </label>
-	          <button type="button" class="secondary" id="rrhhEconMemoriaBtn" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">Memoria económica (CSV)</button>
+	          <button type="button" class="secondary" id="rrhhEconMemoriaBtn" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">Memoria (PDF)</button>
+	          <button type="button" class="secondary ghost" id="rrhhEconMemoriaCsvBtn" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">CSV</button>
 	          <span id="rrhhEconDashboardStatus" class="muted"></span>
 	        </div>
 	        <div id="rrhhEconDashboardKpis" class="kpi-grid" style="margin-top:12px;"></div>
@@ -14124,6 +14125,18 @@ const renderWorkspaceRrhhHub = () => {
 	    memoriaBtn.addEventListener("click", () => {
 	      const personaId = String(memoriaBtn.dataset.rrhhPersonaId || "").trim();
 	      const empresaId = String(memoriaBtn.dataset.rrhhEmpresaId || "").trim();
+	      const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
+	      if (!personaId || !empresaId) return;
+	      const url = `/api/workspace_rrhh_memoria_economica?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}&format=pdf`;
+	      window.location.href = url;
+	    });
+	  }
+
+	  const memoriaCsvBtn = document.getElementById("rrhhEconMemoriaCsvBtn");
+	  if (memoriaCsvBtn) {
+	    memoriaCsvBtn.addEventListener("click", () => {
+	      const personaId = String(memoriaCsvBtn.dataset.rrhhPersonaId || "").trim();
+	      const empresaId = String(memoriaCsvBtn.dataset.rrhhEmpresaId || "").trim();
 	      const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
 	      if (!personaId || !empresaId) return;
 	      const url = `/api/workspace_rrhh_memoria_economica?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}&format=csv`;

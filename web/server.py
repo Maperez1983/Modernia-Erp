@@ -13530,6 +13530,121 @@ def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, 
     }
 
 
+def _render_rrhh_memoria_pdf(*, persona_nombre: str, ejercicio: str, kpis: dict, by_month: dict) -> bytes:
+    if not rl_canvas or not rl_colors:
+        raise ValueError("PDF no disponible (reportlab no instalado)")
+    name = str(persona_nombre or "").strip() or "Trabajador"
+    year = str(ejercicio or "").strip() or str(datetime.now().year)
+
+    def eur(v):
+        try:
+            return f"{float(v):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "0,00 €"
+
+    def pct(v):
+        try:
+            return f"{float(v):.2f}%".replace(".", ",")
+        except Exception:
+            return "0,00%"
+
+    buf = BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=(595.28, 841.89))  # A4
+    w, h = 595.28, 841.89
+    margin = 36
+
+    # Header
+    c.setFillColor(rl_colors.HexColor("#0b1b2a"))
+    c.rect(0, h - 86, w, 86, stroke=0, fill=1)
+    c.setFillColor(rl_colors.white)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin, h - 42, "Memoria económica")
+    c.setFont("Helvetica", 11)
+    c.drawString(margin, h - 62, f"{name} · Ejercicio {year}")
+
+    # KPI cards
+    cards = [
+        ("Facturado", eur(kpis.get("facturado_total", 0))),
+        ("Comisión cobrada", eur(kpis.get("comision_cobrada", 0))),
+        ("Coste (nómina)", eur(kpis.get("coste_total", 0))),
+        ("Beneficio", eur(kpis.get("beneficio", 0))),
+        ("Rentabilidad", pct(kpis.get("rentabilidad_pct", 0))),
+    ]
+    c.setFillColor(rl_colors.black)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(margin, h - 120, "KPIs")
+    x0 = margin
+    y0 = h - 160
+    card_w = (w - margin * 2 - 12) / 2
+    card_h = 46
+    gap = 12
+    c.setFont("Helvetica", 9)
+    for i, (label, value) in enumerate(cards):
+        col = i % 2
+        row = i // 2
+        x = x0 + col * (card_w + gap)
+        y = y0 - row * (card_h + gap)
+        c.setFillColor(rl_colors.HexColor("#f6f7f9"))
+        c.roundRect(x, y, card_w, card_h, 8, stroke=0, fill=1)
+        c.setFillColor(rl_colors.HexColor("#172b3a"))
+        c.setFont("Helvetica", 9)
+        c.drawString(x + 12, y + card_h - 16, label)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x + 12, y + 14, value)
+
+    # Chart: Comision cobrada vs Coste (por mes)
+    c.setFillColor(rl_colors.HexColor("#172b3a"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(margin, h - 330, "Evolución mensual (comisión cobrada vs coste nómina)")
+    chart_x = margin
+    chart_y = h - 620
+    chart_w = w - margin * 2
+    chart_h = 250
+    c.setFillColor(rl_colors.HexColor("#ffffff"))
+    c.roundRect(chart_x, chart_y, chart_w, chart_h, 10, stroke=1, fill=1)
+
+    series = []
+    for m in range(1, 13):
+        r = by_month.get(m) or {}
+        com_c = float(r.get("comision_cobrada") or 0)
+        coste = float(r.get("nomina_bruto") or 0) + float(r.get("nomina_ss_empresa") or 0)
+        series.append((m, com_c, coste))
+    max_val = max([v for _m, a, b in series for v in (a, b)] + [1.0])
+    inner_pad = 18
+    bx0 = chart_x + inner_pad
+    by0 = chart_y + inner_pad
+    bw = chart_w - inner_pad * 2
+    bh = chart_h - inner_pad * 2
+    bar_gap = 6
+    pair_w = bw / 12
+    bar_w = (pair_w - bar_gap) / 2
+    c.setStrokeColor(rl_colors.HexColor("#e3e7ee"))
+    for i in range(6):
+        yy = by0 + (bh * i / 5)
+        c.line(bx0, yy, bx0 + bw, yy)
+    for i, (m, com_c, coste) in enumerate(series):
+        px = bx0 + i * pair_w
+        h1 = (com_c / max_val) * bh
+        h2 = (coste / max_val) * bh
+        c.setFillColor(rl_colors.HexColor("#2f80ed"))
+        c.rect(px, by0, bar_w, h1, stroke=0, fill=1)
+        c.setFillColor(rl_colors.HexColor("#f2994a"))
+        c.rect(px + bar_w + bar_gap, by0, bar_w, h2, stroke=0, fill=1)
+        c.setFillColor(rl_colors.HexColor("#5b6b7a"))
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(px + pair_w / 2, chart_y + 6, f"{m:02d}")
+
+    c.setFillColor(rl_colors.HexColor("#2f80ed"))
+    c.setFont("Helvetica", 8)
+    c.drawString(chart_x + 16, chart_y + chart_h - 14, "■ Comisión cobrada")
+    c.setFillColor(rl_colors.HexColor("#f2994a"))
+    c.drawString(chart_x + 140, chart_y + chart_h - 14, "■ Coste nómina")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def process_renta_ocr_job(payload, conn):
     raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=None, session=None)
     tmp_path = None
@@ -61039,15 +61154,12 @@ class Handler(BaseHTTPRequestHandler):
             if not str(empresa_id or "").strip():
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            year = str(ejercicio or "").strip()
-            if not re.match(r"^20[0-9]{2}$", year or ""):
-                year = str(datetime.now().year)
-            if fmt != "csv":
-                json_response(self, {"error": "format no soportado (usa csv)"}, status=400)
-                return
-            dash = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=year)
-            nominas = _fetch_rrhh_nominas_ocr(conn, workspace_id, persona_id, ejercicio=year)
-            by_month = {m: {"nomina_bruto": 0.0, "nomina_neto": 0.0, "nomina_ss_empresa": 0.0, "comision_cobrada": 0.0, "comision_total": 0.0} for m in range(1, 13)}
+                year = str(ejercicio or "").strip()
+                if not re.match(r"^20[0-9]{2}$", year or ""):
+                    year = str(datetime.now().year)
+                dash = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=year)
+                nominas = _fetch_rrhh_nominas_ocr(conn, workspace_id, persona_id, ejercicio=year)
+                by_month = {m: {"nomina_bruto": 0.0, "nomina_neto": 0.0, "nomina_ss_empresa": 0.0, "comision_cobrada": 0.0, "comision_total": 0.0} for m in range(1, 13)}
             for n in nominas:
                 f = n.get("nomina_fields") or {}
                 try:
@@ -61079,9 +61191,9 @@ class Handler(BaseHTTPRequestHandler):
                 if st == "cobrado":
                     by_month[m]["comision_cobrada"] += com
 
-            manual_all = fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, service="", ejercicio=year)
-            for it in manual_all or []:
-                _add_item(it)
+                manual_all = fetch_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, service="", ejercicio=year)
+                for it in manual_all or []:
+                    _add_item(it)
             for sk in ["renta", "seguros", "hipotecas", "gestoria", "fincas"]:
                 try:
                     payload = compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona_id, sk, ejercicio=year)
@@ -61090,12 +61202,37 @@ class Handler(BaseHTTPRequestHandler):
                 for it in payload.get("items") or []:
                     _add_item(it)
 
-            persona_name = str(persona_row["nombre"] or "trabajador").strip() or "trabajador"
-            persona_slug = re.sub(r"[^a-z0-9]+", "_", normalize_lookup_text(persona_name)).strip("_") or "trabajador"
-            filename = f"memoria_economica_{persona_slug}_{year}.csv"
-            output = StringIO()
-            writer = csv.writer(output)
-            writer.writerow(["Ejercicio", year])
+                persona_name = str(persona_row["nombre"] or "trabajador").strip() or "trabajador"
+                persona_slug = re.sub(r"[^a-z0-9]+", "_", normalize_lookup_text(persona_name)).strip("_") or "trabajador"
+                if fmt == "pdf":
+                    filename = f"memoria_economica_{persona_slug}_{year}.pdf"
+                    try:
+                        payload_bytes = _render_rrhh_memoria_pdf(
+                            persona_nombre=persona_name,
+                            ejercicio=year,
+                            kpis=dash.get("kpis") or {},
+                            by_month=by_month,
+                        )
+                    except Exception as exc:
+                        json_response(self, {"error": str(exc) or "No se pudo generar PDF"}, status=500)
+                        return
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+                    self.send_header("Content-Type", "application/pdf")
+                    self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                    self.send_header("Content-Length", str(len(payload_bytes)))
+                    self.end_headers()
+                    self.wfile.write(payload_bytes)
+                    return
+                if fmt != "csv":
+                    json_response(self, {"error": "format no soportado (usa csv o pdf)"}, status=400)
+                    return
+                filename = f"memoria_economica_{persona_slug}_{year}.csv"
+                output = StringIO()
+                writer = csv.writer(output)
+                writer.writerow(["Ejercicio", year])
             writer.writerow([])
             k = dash.get("kpis") or {}
             writer.writerow(["Facturado total", k.get("facturado_total", 0)])
