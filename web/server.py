@@ -25045,7 +25045,30 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
               c.nombre,
               c.nif,
               cg.renta_detalles,
-              COALESCE(c.captado_por_user_id, '') AS captado_por_user_id
+              COALESCE(
+                NULLIF((
+                  SELECT ce_link.captado_por_user_id
+                  FROM clientes_empresas ce_link
+                  WHERE ce_link.empresa_id = ?
+                    AND ce_link.cliente_id = c.id
+                    AND {service_filter.replace("ce.", "ce_link.")}
+                  LIMIT 1
+                ), ''),
+                COALESCE(c.captado_por_user_id, ''),
+                ''
+              ) AS captado_por_user_id,
+              COALESCE(
+                NULLIF((
+                  SELECT ce_link2.procedencia_canal
+                  FROM clientes_empresas ce_link2
+                  WHERE ce_link2.empresa_id = ?
+                    AND ce_link2.cliente_id = c.id
+                    AND {service_filter.replace("ce.", "ce_link2.")}
+                  LIMIT 1
+                ), ''),
+                COALESCE(c.procedencia_canal, ''),
+                ''
+              ) AS canal
             FROM cliente_gestoria cg
             JOIN clientes c ON c.id = cg.cliente_id
             WHERE COALESCE(cg.mod_renta, 0) = 1
@@ -25057,7 +25080,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
               AND {service_filter}
           )
         """,
-        (empresa_id,),
+        (empresa_id, empresa_id, empresa_id),
     ).fetchall()
 
     items = []
@@ -25120,6 +25143,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
                     "precio_servicio": round(precio, 2),
                     "base_imponible": round(base_imponible, 2),
                     "comision": round(comision, 2),
+                    "canal": str(row_dict.get("canal") or "").strip(),
                     "responsable": str(entry.get("responsable") or "").strip(),
                 }
             )
