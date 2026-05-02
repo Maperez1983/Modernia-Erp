@@ -32283,18 +32283,27 @@ const updateTableVisibility = () => {
     "fin-crm",
     "fin-sim",
   ].includes(currentTab);
-  // "CRM vertical" (modo app): solo Inmobiliaria + Seguros + Fin. Gestoría sigue usando el tab-bar (no es vertical).
+  // "CRM vertical" (modo app): identidad visual unificada (Inmobiliaria/Seguros/Fin/Gestoría).
   const isVerticalCrmContext =
     currentTab === "crm" ||
     currentTab === "seguros-crm" ||
     currentTab === "fin-crm" ||
     currentTab === "fin-sim" ||
+    [
+      "gestoria-dash",
+      "gestoria-crm",
+      "gestoria-docs",
+      "gestoria-agenda",
+      "gestoria-fact",
+      "gestoria-conta",
+    ].includes(currentTab) ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
     crmContext === "seguros" ||
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
-    crmContext === "hipotecas";
+    crmContext === "hipotecas" ||
+    crmContext === "gestoria";
   const isInmuebleDetailOpen = Boolean(inmuebleDetail && !inmuebleDetail.classList.contains("hidden"));
   const treatInmuebleDetailAsInmo = isInmoVertical && isInmuebleDetailOpen;
   // Anti-mezcla: si el usuario venía de Inmobiliaria con el detalle abierto, al entrar en Seguros/Fin
@@ -32302,18 +32311,27 @@ const updateTableVisibility = () => {
   if (!isInmoVertical && isInmuebleDetailOpen && inmuebleDetail) {
     inmuebleDetail.classList.add("hidden");
   }
-  // Shell "Tecnocloud-like" (CRM inmobiliaria/seguros/fin). Gestoría NO debería ocultar el tab-bar general.
+  // Shell "Lightning" (Tecnocloud-like): misma UI para Inmobiliaria/Seguros/Fin/Gestoría.
   const isTecnocloudShellContext =
     currentTab === "crm" ||
     currentTab === "seguros-crm" ||
     currentTab === "fin-crm" ||
     currentTab === "fin-sim" ||
+    [
+      "gestoria-dash",
+      "gestoria-crm",
+      "gestoria-docs",
+      "gestoria-agenda",
+      "gestoria-fact",
+      "gestoria-conta",
+    ].includes(currentTab) ||
     crmContext === "inmo" ||
     crmContext === "inmobiliaria" ||
     crmContext === "seguros" ||
     crmContext === "fin" ||
     crmContext === "financiaciones" ||
     crmContext === "hipotecas" ||
+    crmContext === "gestoria" ||
     treatInmuebleDetailAsInmo;
   const isCrmContext =
     currentTab === "crm" ||
@@ -32341,7 +32359,7 @@ const updateTableVisibility = () => {
   const isClientesModule = state.currentModule === "clientes";
   // Tema: identidad corporativa unificada (misma base visual que CRM Inmobiliaria).
   document.body.classList.add("theme-operativa");
-  const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
+  const hideCompanySummary = isClientePage || isTecnocloudShellContext || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
   const isFinSim = currentTab === "fin-sim";
   const selectedCompany =
     state.currentEmpresaName ||
@@ -32358,8 +32376,8 @@ const updateTableVisibility = () => {
   // pestañas de otros servicios (Seguros/Financiaciones/Campañas/etc) porque confunde.
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
-    // Dentro del CRM inmobiliario el tab-bar general se considera duplicado (confunde).
-    viewTabs.classList.toggle("hidden", isTecnocloudShellContext && !isGestoriaContext);
+    // Dentro del shell "Lightning" el tab-bar general es duplicado (confunde).
+    viewTabs.classList.toggle("hidden", isTecnocloudShellContext);
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
@@ -32529,6 +32547,12 @@ const updateTableVisibility = () => {
           "seguros-crm",
           "fin-crm",
           "fin-sim",
+          "gestoria-dash",
+          "gestoria-crm",
+          "gestoria-docs",
+          "gestoria-agenda",
+          "gestoria-fact",
+          "gestoria-conta",
         ].includes(currentTab)
     );
   }
@@ -37168,7 +37192,30 @@ const renderDashboard = (empresaName, empresaId) => {
   }
   updateTableVisibility();
 
-  api(`/api/dashboard?empresa_id=${empresaId}`).then((data) => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (inmoDashboardEmpresaScope && inmoDashboardEmpresaScope.dataset.bound !== "1") {
+    inmoDashboardEmpresaScope.dataset.bound = "1";
+    inmoDashboardEmpresaScope.addEventListener("change", () => {
+      state.inmoScopeEmpresaId = String(inmoDashboardEmpresaScope.value || "").trim();
+      renderDashboard(empresaName, empresaId);
+    });
+  }
+  if (inmoDashboardEmpresaScope) {
+    const current = String(state.inmoScopeEmpresaId || "").trim();
+    inmoDashboardEmpresaScope.innerHTML = "";
+    inmoDashboardEmpresaScope.appendChild(createOption("", "Todas las empresas"));
+    (state.empresas || []).forEach((row) => {
+      if (!row?.id) return;
+      inmoDashboardEmpresaScope.appendChild(createOption(row.id, row.nombre || row.id));
+    });
+    inmoDashboardEmpresaScope.value = current;
+  }
+  const scopeEmpresaId = String(state.inmoScopeEmpresaId || "").trim();
+  const qs = new URLSearchParams();
+  if (workspaceId) qs.set("workspace_id", workspaceId);
+  if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+  else if (!workspaceId) qs.set("empresa_id", empresaId);
+  api(`/api/dashboard?${qs.toString()}`).then((data) => {
     lastDashboardData = data;
     const availableYears = buildYearIndex([
       data.ventas || [],
@@ -37456,14 +37503,33 @@ const renderFincasDashboard = (empresaId) => {
   }
   fincasDashboardSection.classList.remove("hidden");
   updateTableVisibility();
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (fincasDashboardEmpresaScope && fincasDashboardEmpresaScope.dataset.bound !== "1") {
+    fincasDashboardEmpresaScope.dataset.bound = "1";
+    fincasDashboardEmpresaScope.addEventListener("change", () => {
+      state.fincasScopeEmpresaId = String(fincasDashboardEmpresaScope.value || "").trim();
+      renderFincasDashboard(empresaId);
+    });
+  }
+  if (fincasDashboardEmpresaScope) {
+    const current = String(state.fincasScopeEmpresaId || "").trim();
+    fincasDashboardEmpresaScope.innerHTML = "";
+    fincasDashboardEmpresaScope.appendChild(createOption("", "Todas las empresas"));
+    (state.empresas || []).forEach((row) => {
+      if (!row?.id) return;
+      fincasDashboardEmpresaScope.appendChild(createOption(row.id, row.nombre || row.id));
+    });
+    fincasDashboardEmpresaScope.value = current;
+  }
+  const scopeEmpresaId = String(state.fincasScopeEmpresaId || "").trim();
   const selectedYear =
     String(fincasDashboardYearSelect?.value || "").trim() ||
     String(yearSelect?.value || "").trim() ||
     String(new Date().getFullYear());
-  const params = new URLSearchParams({
-    empresa_id: empresaId,
-    year: selectedYear,
-  });
+  const params = new URLSearchParams({ year: selectedYear });
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
+  else if (!workspaceId) params.set("empresa_id", empresaId);
   // Dashboard/KPIs deben reflejar toda la cartera (en vigor, etc.),
   // no solo pólizas con PDF ya enlazado.
   params.set("uploaded_only", "0");

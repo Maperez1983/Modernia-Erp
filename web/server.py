@@ -2731,6 +2731,129 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
     }
 
 
+def compute_fincas_seguros_dashboard_payload_multi(conn, empresa_ids, year, uploaded_only):
+    ids = [str(eid or "").strip() for eid in list(empresa_ids or []) if str(eid or "").strip()]
+    if not ids:
+        return compute_fincas_seguros_dashboard_payload(conn, "", year, uploaded_only)
+
+    payloads = [compute_fincas_seguros_dashboard_payload(conn, eid, year, uploaded_only) for eid in ids]
+
+    def merge_by_label(rows):
+        merged = {}
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or "").strip() or "Sin asignar"
+            try:
+                merged[label] = float(merged.get(label) or 0) + float(row.get("total") or 0)
+            except Exception:
+                continue
+        out = [{"label": k, "total": v} for k, v in merged.items()]
+        out.sort(key=lambda x: (-float(x.get("total") or 0), str(x.get("label") or "").lower()))
+        return out
+
+    def merge_by_key(rows, key_field, numeric_fields):
+        merged = {}
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get(key_field) or "").strip()
+            if not key:
+                continue
+            bucket = merged.setdefault(key, {key_field: key})
+            for field in numeric_fields:
+                try:
+                    bucket[field] = float(bucket.get(field) or 0) + float(row.get(field) or 0)
+                except Exception:
+                    bucket[field] = float(bucket.get(field) or 0)
+        out = list(merged.values())
+        out.sort(key=lambda x: str(x.get(key_field) or ""))
+        return out
+
+    current = {"year": str(year or "").strip()}
+    for p in payloads:
+        row = p.get("current") or {}
+        for key in (
+            "presupuesto",
+            "contratada",
+            "en_vigor",
+            "rechazada",
+            "presupuesto_total",
+            "contratada_total",
+            "en_vigor_total",
+            "rechazada_total",
+        ):
+            current[key] = int(current.get(key) or 0) + int(row.get(key) or 0)
+    current["aceptadas"] = int(current.get("contratada") or 0) + int(current.get("en_vigor") or 0)
+    current["aceptadas_total"] = int(current.get("contratada_total") or 0) + int(current.get("en_vigor_total") or 0)
+    closed_year = current["aceptadas"] + int(current.get("rechazada") or 0)
+    closed_total = current["aceptadas_total"] + int(current.get("rechazada_total") or 0)
+    current["conversion"] = (current["aceptadas"] / closed_year * 100.0) if closed_year else 0.0
+    current["conversion_total"] = (current["aceptadas_total"] / closed_total * 100.0) if closed_total else 0.0
+
+    ingresos = 0.0
+    gastos = 0.0
+    for eid in ids:
+        cont = compute_seguros_contabilidad_totals(conn, eid, year=str(year or "").strip() or None)
+        ingresos += float(cont.get("ingresos") or 0.0)
+        gastos += float(cont.get("gastos") or 0.0)
+    rentabilidad = round(ingresos - gastos, 2)
+    current["rentabilidad"] = rentabilidad
+    current["margen_rentabilidad"] = round((rentabilidad / ingresos * 100.0) if ingresos else 0.0, 2)
+
+    series_rows = []
+    month_rows = []
+    responsables_rows = []
+    comision_comp_rows = []
+    comision_ramo_rows = []
+    prima_comp_rows = []
+    prima_ramo_rows = []
+    renov_rows = []
+    opp_rows = []
+    for p in payloads:
+        series_rows.extend([dict(item) for item in (p.get("series") or []) if isinstance(item, dict)])
+        month_rows.extend([dict(item) for item in (p.get("series_en_vigor_mes") or []) if isinstance(item, dict)])
+        responsables_rows.extend([dict(item) for item in (p.get("responsables") or []) if isinstance(item, dict)])
+        comision_comp_rows.extend([dict(item) for item in (p.get("comision_companias") or []) if isinstance(item, dict)])
+        comision_ramo_rows.extend([dict(item) for item in (p.get("comision_ramos") or []) if isinstance(item, dict)])
+        prima_comp_rows.extend([dict(item) for item in (p.get("prima_companias") or []) if isinstance(item, dict)])
+        prima_ramo_rows.extend([dict(item) for item in (p.get("prima_ramos") or []) if isinstance(item, dict)])
+        renov_rows.extend([dict(item) for item in (p.get("renovaciones_anulaciones_mes") or []) if isinstance(item, dict)])
+        opp_rows.extend([dict(item) for item in (p.get("oportunidades_abiertas") or []) if isinstance(item, dict)])
+
+    series = merge_by_key(series_rows, "year", ["presupuesto", "contratada", "en_vigor", "rechazada"])
+    for item in series:
+        accepted = int(item.get("contratada") or 0) + int(item.get("en_vigor") or 0)
+        closed = accepted + int(item.get("rechazada") or 0)
+        item["conversion"] = (accepted / closed * 100.0) if closed else 0.0
+        for k in ("presupuesto", "contratada", "en_vigor", "rechazada"):
+            item[k] = int(item.get(k) or 0)
+
+    months = merge_by_key(month_rows, "month", ["altas"])
+    acumulado = 0
+    for item in months:
+        altas = int(item.get("altas") or 0)
+        acumulado += altas
+        item["altas"] = altas
+        item["acumulado"] = acumulado
+
+    renov = merge_by_key(renov_rows, "month", ["renovadas", "anuladas"])
+    oportunidades = merge_by_label(opp_rows)[:12]
+
+    return {
+        "current": current,
+        "series": series,
+        "series_en_vigor_mes": months,
+        "responsables": merge_by_label(responsables_rows),
+        "comision_companias": merge_by_label(comision_comp_rows),
+        "comision_ramos": merge_by_label(comision_ramo_rows),
+        "prima_companias": merge_by_label(prima_comp_rows),
+        "prima_ramos": merge_by_label(prima_ramo_rows),
+        "renovaciones_anulaciones_mes": renov,
+        "oportunidades_abiertas": oportunidades,
+    }
+
+
 def normalize_auto_seguro_commission_assignments(conn, now=None):
     now = now or datetime.now(timezone.utc).isoformat()
     try:
@@ -67121,15 +67244,24 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/fincas_seguros_dashboard":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             year = (params.get("year", [""])[0] or "").strip()
             uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = [empresa_id] if empresa_id else []
+            if not empresa_ids:
+                if not workspace_id:
+                    json_response(self, {"error": "workspace_id requerido si no hay empresa_id"}, status=400)
+                    return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            empresa_ids = [str(eid or "").strip() for eid in (empresa_ids or []) if str(eid or "").strip()]
+            if not empresa_ids:
+                json_response(self, {"error": "No hay empresas en el workspace"}, status=400)
                 return
             now_ts = time.time()
             year_key = year if (year.isdigit() and len(year) == 4) else ""
-            cache_key = (empresa_id, year_key, 1 if uploaded_only else 0)
+            empresas_key = ",".join(sorted(empresa_ids))
+            cache_key = (empresas_key, year_key, 1 if uploaded_only else 0)
             cached_payload = None
             try:
                 with Handler._fincas_seguros_dash_lock:
@@ -67142,7 +67274,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 cached_payload = None
             try:
-                payload = compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_only)
+                if len(empresa_ids) == 1:
+                    payload = compute_fincas_seguros_dashboard_payload(conn, empresa_ids[0], year, uploaded_only)
+                else:
+                    payload = compute_fincas_seguros_dashboard_payload_multi(conn, empresa_ids, year, uploaded_only)
             except Exception as exc:
                 Handler._record_api_error("/api/fincas_seguros_dashboard", exc)
                 if cached_payload:
@@ -68440,10 +68575,213 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/dashboard":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            empresa_ids = [empresa_id] if empresa_id else []
+            if not empresa_ids:
+                if not workspace_id:
+                    json_response(self, {"error": "workspace_id requerido si no hay empresa_id"}, status=400)
+                    return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            empresa_ids = [str(eid or "").strip() for eid in (empresa_ids or []) if str(eid or "").strip()]
+            if not empresa_ids:
+                json_response(self, {"error": "No hay empresas en el workspace"}, status=400)
                 return
+
+            if len(empresa_ids) > 1:
+                placeholders = ",".join(["?"] * len(empresa_ids))
+                now_ts = time.time()
+                empresa_key = ",".join(sorted(empresa_ids))
+                if empresa_key:
+                    try:
+                        with Handler._dashboard_lock:
+                            cached = Handler._dashboard_cache.get(empresa_key)
+                            if cached and isinstance(cached[1], dict) and cached[0] > now_ts:
+                                json_response(self, cached[1])
+                                return
+                    except Exception:
+                        pass
+
+                def _q_all(sql):
+                    try:
+                        return conn.execute(sql, empresa_ids).fetchall()
+                    except Exception:
+                        return []
+
+                def _q_one(sql):
+                    try:
+                        return conn.execute(sql, empresa_ids).fetchone()
+                    except Exception:
+                        return None
+
+                ventas = _q_all(
+                    f"""
+                    SELECT anio AS year, COUNT(*) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                comision_series = _q_all(
+                    f"""
+                    SELECT anio AS year, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
+                    FROM movimientos
+                    WHERE empresa_id IN ({placeholders})
+                      AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                volumen_cierre = _q_all(
+                    f"""
+                    SELECT anio AS year,
+                           ROUND(SUM(COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0)), 2) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                volumen_salida = _q_all(
+                    f"""
+                    SELECT anio AS year,
+                           ROUND(SUM(COALESCE(precio_encargo, 0)), 2) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                captaciones_series = _q_all(
+                    f"""
+                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
+                           COUNT(*) AS total
+                    FROM captaciones
+                    WHERE empresa_id IN ({placeholders})
+                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
+                    ORDER BY year
+                    """
+                )
+                inmuebles_series = _q_all(
+                    f"""
+                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
+                           COUNT(*) AS total
+                    FROM inmuebles
+                    WHERE empresa_id IN ({placeholders})
+                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
+                    ORDER BY year
+                    """
+                )
+                visitas_series = _q_all(
+                    f"""
+                    SELECT anio AS year, SUM(COALESCE(num_visitas, 0)) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                plazos_series = _q_all(
+                    f"""
+                    SELECT anio AS year,
+                           ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """
+                )
+                summary = _q_one(
+                    f"""
+                    SELECT
+                      COUNT(*) AS compraventas_total,
+                      ROUND(AVG(CASE WHEN COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0) > 0
+                        THEN COALESCE(precio_escritura, precio_propuesta, precio_contrato) END), 2) AS ticket_medio,
+                      ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS plazo_medio_dias,
+                      ROUND(AVG(CASE WHEN desviacion_pct IS NOT NULL THEN desviacion_pct END), 2) AS desviacion_media_pct,
+                      SUM(COALESCE(num_visitas, 0)) AS visitas_total,
+                      ROUND(AVG(CASE WHEN COALESCE(num_visitas, 0) > 0 THEN num_visitas END), 1) AS visitas_media
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                    """
+                )
+                captacion_summary = _q_one(
+                    f"""
+                    SELECT
+                      COUNT(*) AS captaciones_total,
+                      SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS captaciones_activas
+                    FROM captaciones
+                    WHERE empresa_id IN ({placeholders})
+                    """
+                )
+                inmuebles_total = _q_one(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM inmuebles
+                    WHERE empresa_id IN ({placeholders})
+                    """
+                )
+                alquileres = _q_all(
+                    f"""
+                    SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
+                           COUNT(*) AS total,
+                           SUM(COALESCE(precio, 0)) AS facturado
+                    FROM alquileres
+                    WHERE empresa_id IN ({placeholders})
+                      AND fecha IS NOT NULL
+                      AND length(fecha) >= 4
+                    GROUP BY substr(NULLIF(fecha, ''), 1, 4)
+                    ORDER BY substr(NULLIF(fecha, ''), 1, 4)
+                    """
+                )
+
+                payload = {
+                    "mode": "inmobiliaria",
+                    "ventas": [dict(r) for r in ventas],
+                    "ingresos": [dict(r) for r in comision_series],
+                    "cierres": [dict(r) for r in volumen_cierre],
+                    "salidas": [dict(r) for r in volumen_salida],
+                    "gastos": [dict(r) for r in volumen_salida],
+                    "captaciones": [dict(r) for r in captaciones_series],
+                    "inmuebles": [dict(r) for r in inmuebles_series],
+                    "visitas": [dict(r) for r in visitas_series],
+                    "plazos": [dict(r) for r in plazos_series],
+                    "alquileres": [dict(r) for r in alquileres],
+                    "summary": {
+                        "compraventas_total": int(summary["compraventas_total"] or 0) if summary else 0,
+                        "ticket_medio": float(summary["ticket_medio"] or 0) if summary else 0,
+                        "plazo_medio_dias": float(summary["plazo_medio_dias"] or 0) if summary else 0,
+                        "desviacion_media_pct": float(summary["desviacion_media_pct"] or 0) if summary else 0,
+                        "visitas_total": int(summary["visitas_total"] or 0) if summary else 0,
+                        "visitas_media": float(summary["visitas_media"] or 0) if summary else 0,
+                        "captaciones_total": int(captacion_summary["captaciones_total"] or 0) if captacion_summary else 0,
+                        "captaciones_activas": int(captacion_summary["captaciones_activas"] or 0) if captacion_summary else 0,
+                        "inmuebles_total": int(inmuebles_total["total"] or 0) if inmuebles_total else 0,
+                    },
+                }
+                if empresa_key:
+                    try:
+                        with Handler._dashboard_lock:
+                            Handler._dashboard_cache[empresa_key] = (now_ts + 8.0, payload)
+                    except Exception:
+                        pass
+                json_response(self, payload)
+                return
+
+            empresa_id = empresa_ids[0]
             now_ts = time.time()
             empresa_key = str(empresa_id or "").strip()
             cached_payload = None
