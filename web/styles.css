@@ -11745,9 +11745,15 @@ body.theme-operativa .crm-header,
 body.theme-operativa .company-card,
 body.theme-operativa .inline-row,
 body.theme-operativa .renta-detail-card,
+body.theme-operativa .gestoria-renta-overview-card,
 body.theme-operativa .agenda-side,
 body.theme-operativa .crm-mini-card,
 body.theme-operativa .crm-kanban-card,
+body.theme-operativa .workspace-gestoria-card,
+body.theme-operativa .workspace-mini-kpi,
+body.theme-operativa .workspace-context-strip,
+body.theme-operativa .workspace-summary-row,
+body.theme-operativa .workspace-document-row,
 body.theme-operativa .agenda-day {
   border-radius: var(--v2-card-radius);
   border: 1px solid var(--v2-card-border);
@@ -11760,7 +11766,9 @@ body.theme-operativa .card:hover,
 body.theme-operativa .form-card:hover,
 body.theme-operativa .data-card:hover,
 body.theme-operativa .dashboard-card:hover,
-body.theme-operativa .company-card:hover {
+body.theme-operativa .company-card:hover,
+body.theme-operativa .gestoria-renta-overview-card:hover,
+body.theme-operativa .gestoria-renta-overview-card:focus-visible {
   border-color: var(--v2-card-border-hover);
   box-shadow: var(--v2-card-shadow-hover);
 }
