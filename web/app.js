@@ -26624,6 +26624,31 @@ const CLIENTE_FIELDS_BASE = [
   { key: "otro_telefono", label: "Otro teléfono", type: "text" },
   { key: "email", label: "Email", type: "text" },
   { key: "id_personal", label: "Id. personal", type: "text" },
+  {
+    key: "captado_por_user_id",
+    label: "Traído por",
+    type: "select",
+    options: () => {
+      const users = Array.isArray(state.usersList) ? state.usersList : [];
+      const opts = users
+        .map((u) => {
+          const id = String(u?.id || "").trim();
+          if (!id) return null;
+          const name = `${u?.nombre || ""} ${u?.apellido || ""}`.replace(/\s+/g, " ").trim();
+          const user = String(u?.usuario || "").trim();
+          const email = String(u?.email || "").trim();
+          const label = (name || user || email || id) + (user ? ` (@${user})` : "");
+          return { value: id, label };
+        })
+        .filter(Boolean);
+      try {
+        opts.sort((a, b) =>
+          String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" })
+        );
+      } catch (e) {}
+      return [{ value: "", label: "-" }, ...opts];
+    },
+  },
   { key: "fecha_nacimiento", label: "Fecha nacimiento", type: "date" },
   { key: "hijos_count", label: "Hijos", type: "number" },
   { key: "direccion", label: "Dirección", type: "text" },
@@ -28783,13 +28808,14 @@ const renderEditableGrid = (grid, fields, data, target) => {
       data && data[field.key] !== undefined && data[field.key] !== null
         ? data[field.key]
         : "";
-    if (field.type === "select") {
-      input = document.createElement("select");
-      const options = field.options || [];
-      const normalizedOptions = options.map((option) => {
-        if (option && typeof option === "object") {
-          return { value: String(option.value ?? ""), label: String(option.label ?? option.value ?? "") };
-        }
+	    if (field.type === "select") {
+	      input = document.createElement("select");
+	      const options =
+	        typeof field.options === "function" ? (field.options() || []) : (field.options || []);
+	      const normalizedOptions = options.map((option) => {
+	        if (option && typeof option === "object") {
+	          return { value: String(option.value ?? ""), label: String(option.label ?? option.value ?? "") };
+	        }
         return { value: String(option ?? ""), label: String(option ?? "") };
       });
       normalizedOptions.forEach((option) => {
@@ -61661,11 +61687,11 @@ const openClienteDetail = (id) => {
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const trHead = document.createElement("tr");
-        ["empresa", "servicio", "estado", "fecha_inicio", "fecha_fin", "accion"].forEach((col) => {
-          const th = document.createElement("th");
-          th.textContent = formatHeader(col);
-          trHead.appendChild(th);
-        });
+	        ["empresa", "servicio", "traido_por", "estado", "fecha_inicio", "fecha_fin", "accion"].forEach((col) => {
+	          const th = document.createElement("th");
+	          th.textContent = formatHeader(col);
+	          trHead.appendChild(th);
+	        });
         thead.appendChild(trHead);
         table.appendChild(thead);
         const tbody = document.createElement("tbody");
@@ -61682,12 +61708,49 @@ const openClienteDetail = (id) => {
           servicioSelect.addEventListener("change", () => {
             saveClienteEmpresaField(row.rel_id, "servicio", servicioSelect.value);
           });
-          servicioTd.appendChild(servicioSelect);
-          tr.appendChild(servicioTd);
+	          servicioTd.appendChild(servicioSelect);
+	          tr.appendChild(servicioTd);
 
-          const estadoTd = document.createElement("td");
-          const estadoInput = document.createElement("input");
-          estadoInput.value = row.estado || "";
+	          const captadoTd = document.createElement("td");
+	          const captadoSelect = document.createElement("select");
+	          captadoSelect.classList.add("inline-input");
+	          const captadoCurrent = String(row.captado_por_user_id || cliente.captado_por_user_id || "").trim();
+	          const captadoOptions = (() => {
+	            const users = Array.isArray(state.usersList) ? state.usersList : [];
+	            const opts = users
+	              .map((u) => {
+	                const id = String(u?.id || "").trim();
+	                if (!id) return null;
+	                const name = `${u?.nombre || ""} ${u?.apellido || ""}`.replace(/\\s+/g, " ").trim();
+	                const user = String(u?.usuario || "").trim();
+	                const email = String(u?.email || "").trim();
+	                const label = (name || user || email || id) + (user ? ` (@${user})` : "");
+	                return { value: id, label };
+	              })
+	              .filter(Boolean);
+	            try {
+	              opts.sort((a, b) =>
+	                String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" })
+	              );
+	            } catch (e) {}
+	            return [{ value: "", label: "-" }, ...opts];
+	          })();
+	          captadoOptions.forEach((opt) => {
+	            captadoSelect.appendChild(createOption(opt.value, opt.label));
+	          });
+	          if (captadoCurrent && !captadoOptions.some((opt) => String(opt.value) === captadoCurrent)) {
+	            captadoSelect.appendChild(createOption(captadoCurrent, captadoCurrent));
+	          }
+	          captadoSelect.value = captadoCurrent;
+	          captadoSelect.addEventListener("change", () => {
+	            saveClienteEmpresaField(row.rel_id, "captado_por_user_id", captadoSelect.value);
+	          });
+	          captadoTd.appendChild(captadoSelect);
+	          tr.appendChild(captadoTd);
+
+	          const estadoTd = document.createElement("td");
+	          const estadoInput = document.createElement("input");
+	          estadoInput.value = row.estado || "";
           estadoInput.classList.add("inline-input");
           estadoInput.addEventListener("change", () => {
             saveClienteEmpresaField(row.rel_id, "estado", estadoInput.value);

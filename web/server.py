@@ -24975,14 +24975,15 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
     )
     rows = conn.execute(
         f"""
-        SELECT
-          c.id AS cliente_id,
-          c.nombre,
-          c.nif,
-          cg.renta_detalles
-        FROM cliente_gestoria cg
-        JOIN clientes c ON c.id = cg.cliente_id
-        WHERE COALESCE(cg.mod_renta, 0) = 1
+            SELECT
+              c.id AS cliente_id,
+              c.nombre,
+              c.nif,
+              cg.renta_detalles,
+              COALESCE(c.captado_por_user_id, '') AS captado_por_user_id
+            FROM cliente_gestoria cg
+            JOIN clientes c ON c.id = cg.cliente_id
+            WHERE COALESCE(cg.mod_renta, 0) = 1
           AND EXISTS (
             SELECT 1
             FROM clientes_empresas ce
@@ -25001,17 +25002,27 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
     comision_cobradas = 0.0
 
     for row in rows or []:
-        renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
+        row_dict = dict(row) if not isinstance(row, dict) else row
+        captado_por_user_id = str(row_dict.get("captado_por_user_id") or "").strip()
+        captado_by_me = bool(usuario_id) and bool(captado_por_user_id) and captado_por_user_id == usuario_id
+        if not captado_by_me:
+            if usuario_id and captado_por_user_id:
+                continue
+        renta_payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         if ejercicio_val:
             entries = [e for e in entries if str(e.get("ejercicio") or "").strip() == ejercicio_val]
         for entry in entries:
-            responsable = normalize_lookup_text(entry.get("responsable") or "")
-            if not responsable or responsable not in matchers:
-                continue
-            estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status") or "")
+            if not captado_by_me:
+                responsable = normalize_lookup_text(entry.get("responsable") or "")
+                if not responsable or responsable not in matchers:
+                    continue
+            estado = normalize_renta_presentacion_status(
+                entry.get("estado_presentacion") or entry.get("doc_status") or ""
+            )
             is_presentada = estado == "Presentada"
             is_cobrada = int(entry.get("cobrada") or 0) == 1
+
             precio = parse_money_value(entry.get("precio_servicio"))
             iva_pct = entry.get("iva_pct")
             try:
@@ -25029,12 +25040,17 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
                 comision_cobradas += comision
             items.append(
                 {
-                    "cliente_id": row["cliente_id"],
-                    "cliente_nombre": row["nombre"],
-                    "cliente_nif": row["nif"],
+                    "cliente_id": row_dict.get("cliente_id"),
+                    "cliente_nombre": row_dict.get("nombre"),
+                    "cliente_nif": row_dict.get("nif"),
                     "ejercicio": str(entry.get("ejercicio") or "").strip(),
                     "estado_presentacion": estado or "-",
-                    "presentacion_fecha": str(entry.get("presentacion_fecha") or entry.get("fecha_presentacion") or entry.get("doc_fecha") or "").strip(),
+                    "presentacion_fecha": str(
+                        entry.get("presentacion_fecha")
+                        or entry.get("fecha_presentacion")
+                        or entry.get("doc_fecha")
+                        or ""
+                    ).strip(),
                     "cobrada": 1 if is_cobrada else 0,
                     "precio_servicio": round(precio, 2),
                     "base_imponible": round(base_imponible, 2),
@@ -25129,13 +25145,18 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
           COALESCE(s.poliza_numero, '') AS poliza_numero,
           COALESCE(s.produccion, '') AS responsable,
           COALESCE(s.estado_poliza, s.estado, '') AS estado,
-          s.comision,
-          s.prima_total,
-          COALESCE(s.fecha_efecto, '') AS fecha_efecto,
-          COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento
-        FROM seguros s
-        LEFT JOIN clientes c ON c.id = s.cliente_id
-        WHERE {' AND '.join(where)}
+              s.comision,
+              s.prima_total,
+              COALESCE(s.fecha_efecto, '') AS fecha_efecto,
+              COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento,
+              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id
+            FROM seguros s
+            LEFT JOIN clientes c ON c.id = s.cliente_id
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = s.cliente_id
+             AND ce.empresa_id = s.empresa_id
+             AND LOWER(COALESCE(ce.servicio, '')) LIKE '%seguro%'
+            WHERE {' AND '.join(where)}
         """,
         values,
     ).fetchall()
@@ -25147,15 +25168,21 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
     comision_cobradas = 0.0
 
     for row in rows or []:
-        responsable = normalize_lookup_text(row["responsable"] or "")
-        if not responsable or responsable not in matchers:
-            continue
-        comision_cobrada = parse_money_value(row["comision"])
+        row_dict = dict(row) if not isinstance(row, dict) else row
+        captado_por_user_id = str(row_dict.get("captado_por_user_id") or "").strip()
+        captado_by_me = bool(usuario_id) and bool(captado_por_user_id) and captado_por_user_id == usuario_id
+        if not captado_by_me:
+            if usuario_id and captado_por_user_id:
+                continue
+            responsable = normalize_lookup_text(row_dict.get("responsable") or "")
+            if not responsable or responsable not in matchers:
+                continue
+        comision_cobrada = parse_money_value(row_dict.get("comision"))
         if comision_cobrada <= 0:
             continue
         # En seguros tratamos la comision como "cobrada" si la póliza no está de baja/cancelada.
         try:
-            bucket = seguro_estado_bucket_value(dict(row))
+            bucket = seguro_estado_bucket_value(row_dict)
         except Exception:
             bucket = ""
         # Tratamos como "cobrada" si la póliza está en vigor/contratada (heurística).
@@ -25169,19 +25196,20 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
         items.append(
             {
                 "service": "seguros",
-                "ref_id": row["id"],
-                "cliente_id": row["cliente_id"],
-                "cliente_nombre": row["cliente_nombre"],
-                "cliente_nif": row["cliente_nif"],
-                "compania": row["compania"],
-                "ramo": row["ramo"],
-                "poliza_numero": row["poliza_numero"],
-                "fecha": str(row["fecha_efecto"] or "").strip() or str(row["fecha_vencimiento"] or "").strip(),
-                "estado": str(row.get("estado") or "").strip() or "-",
+                "ref_id": row_dict.get("id"),
+                "cliente_id": row_dict.get("cliente_id"),
+                "cliente_nombre": row_dict.get("cliente_nombre"),
+                "cliente_nif": row_dict.get("cliente_nif"),
+                "compania": row_dict.get("compania"),
+                "ramo": row_dict.get("ramo"),
+                "poliza_numero": row_dict.get("poliza_numero"),
+                "fecha": str(row_dict.get("fecha_efecto") or "").strip()
+                or str(row_dict.get("fecha_vencimiento") or "").strip(),
+                "estado": str(row_dict.get("estado") or "").strip() or "-",
                 "cobrada": 1 if is_cobrada else 0,
                 "comision_cobrada": round(comision_cobrada, 2),
                 "comision": round(comision_trabajador, 2),
-                "responsable": str(row["responsable"] or "").strip(),
+                "responsable": str(row_dict.get("responsable") or "").strip(),
             }
         )
 
@@ -25263,16 +25291,24 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
           COALESCE(h.asesor, '') AS responsable,
           COALESCE(h.estado, '') AS estado,
           COALESCE(h.fecha_firma, '') AS fecha_firma,
-          h.comision_modernia,
-          h.comision,
-          h.cesion,
-          h.comision_juan
-        FROM hipotecas h
-        LEFT JOIN clientes c ON c.id = h.cliente_id
-        WHERE {' AND '.join(where)}
-        """,
-        values,
-    ).fetchall()
+              h.comision_modernia,
+              h.comision,
+              h.cesion,
+              h.comision_juan,
+              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id
+            FROM hipotecas h
+            LEFT JOIN clientes c ON c.id = h.cliente_id
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = h.cliente_id
+             AND ce.empresa_id = h.empresa_id
+             AND (
+               LOWER(COALESCE(ce.servicio, '')) LIKE '%hipotec%'
+               OR LOWER(COALESCE(ce.servicio, '')) LIKE '%financ%'
+             )
+            WHERE {' AND '.join(where)}
+            """,
+            values,
+        ).fetchall()
 
     items = []
     count_total = 0
@@ -25281,17 +25317,23 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
     comision_cobradas = 0.0
 
     for row in rows or []:
-        responsable = normalize_lookup_text(row["responsable"] or "")
-        if not responsable or responsable not in matchers:
-            continue
+        row_dict = dict(row) if not isinstance(row, dict) else row
+        captado_por_user_id = str(row_dict.get("captado_por_user_id") or "").strip()
+        captado_by_me = bool(usuario_id) and bool(captado_por_user_id) and captado_por_user_id == usuario_id
+        if not captado_by_me:
+            if usuario_id and captado_por_user_id:
+                continue
+            responsable = normalize_lookup_text(row_dict.get("responsable") or "")
+            if not responsable or responsable not in matchers:
+                continue
         # "Nos deja 700€" -> usamos comision_modernia si existe; si no comision.
-        comision_cobrada = parse_money_value(row["comision_modernia"])
+        comision_cobrada = parse_money_value(row_dict.get("comision_modernia"))
         if comision_cobrada <= 0:
-            comision_cobrada = parse_money_value(row["comision"])
+            comision_cobrada = parse_money_value(row_dict.get("comision"))
         if comision_cobrada <= 0:
             continue
-        estado_norm = normalize_lookup_text(row.get("estado") or "")
-        is_cobrada = "firm" in estado_norm or str(row.get("fecha_firma") or "").strip() != ""
+        estado_norm = normalize_lookup_text(row_dict.get("estado") or "")
+        is_cobrada = "FIRM" in estado_norm or str(row_dict.get("fecha_firma") or "").strip() != ""
         comision_trabajador = comision_cobrada * 0.10
         count_total += 1
         comision_total += comision_trabajador
@@ -25301,19 +25343,19 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
         items.append(
             {
                 "service": "hipotecas",
-                "ref_id": row["id"],
-                "cliente_id": row["cliente_id"],
-                "cliente_nombre": row["cliente_nombre"],
-                "cliente_nif": row["cliente_nif"],
-                "banco": row["banco"],
-                "oficina": row["oficina"],
-                "inmobiliaria_compra": row["inmobiliaria_compra"],
-                "fecha": str(row.get("fecha_firma") or "").strip(),
-                "estado": str(row.get("estado") or "").strip() or "-",
+                "ref_id": row_dict.get("id"),
+                "cliente_id": row_dict.get("cliente_id"),
+                "cliente_nombre": row_dict.get("cliente_nombre"),
+                "cliente_nif": row_dict.get("cliente_nif"),
+                "banco": row_dict.get("banco"),
+                "oficina": row_dict.get("oficina"),
+                "inmobiliaria_compra": row_dict.get("inmobiliaria_compra"),
+                "fecha": str(row_dict.get("fecha_firma") or "").strip(),
+                "estado": str(row_dict.get("estado") or "").strip() or "-",
                 "cobrada": 1 if is_cobrada else 0,
                 "comision_cobrada": round(comision_cobrada, 2),
                 "comision": round(comision_trabajador, 2),
-                "responsable": str(row["responsable"] or "").strip(),
+                "responsable": str(row_dict.get("responsable") or "").strip(),
             }
         )
 
@@ -25376,38 +25418,47 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
     if not matchers:
         return {"kpis": {}, "items": []}
 
-    keys = [normalize_lookup_text(k) for k in (servicio_keys or [])]
-    keys = [k for k in keys if k]
-    if not keys:
-        return {"kpis": {}, "items": []}
-    placeholders = ",".join(["?"] * len(keys))
+        keys = [str(k or "").strip().lower() for k in (servicio_keys or []) if str(k or "").strip()]
+        # Dedup para reducir placeholders y joins.
+        try:
+            keys = list(dict.fromkeys(keys))
+        except Exception:
+            pass
+        if not keys:
+            return {"kpis": {}, "items": []}
+        placeholders = ",".join(["?"] * len(keys))
 
-    where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
-    values = [workspace_id, empresa_id, *keys]
+        where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
+        values = [workspace_id, empresa_id, *keys]
     if ejercicio_val:
         where.append("SUBSTR(NULLIF(f.fecha_emision,''), 1, 4) = ?")
         values.append(ejercicio_val)
 
-    rows = conn.execute(
-        f"""
-        SELECT
-          f.cliente_id,
-          COALESCE(c.nombre, '') AS cliente_nombre,
-          COALESCE(c.nif, '') AS cliente_nif,
-          COALESCE(f.responsable, '') AS responsable,
-          SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
-          MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
-          MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
-          COUNT(*) AS num_facturas,
-          SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
-        FROM workspace_facturacion f
-        LEFT JOIN clientes c ON c.id = f.cliente_id
-        WHERE {' AND '.join(where)}
-          AND COALESCE(f.cliente_id,'') != ''
-        GROUP BY f.cliente_id, COALESCE(f.responsable,'')
-        """,
-        values,
-    ).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT
+              f.cliente_id,
+              COALESCE(c.nombre, '') AS cliente_nombre,
+              COALESCE(c.nif, '') AS cliente_nif,
+              COALESCE(f.responsable, '') AS responsable,
+              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+              SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
+              MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
+              MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
+              COUNT(*) AS num_facturas,
+              SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
+            FROM workspace_facturacion f
+            LEFT JOIN clientes c ON c.id = f.cliente_id
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = f.cliente_id
+             AND ce.empresa_id = f.empresa_id
+             AND LOWER(TRIM(COALESCE(ce.servicio,''))) IN ({placeholders})
+            WHERE {' AND '.join(where)}
+              AND COALESCE(f.cliente_id,'') != ''
+            GROUP BY f.cliente_id, COALESCE(f.responsable,''), COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '')
+            """,
+            values + keys,
+        ).fetchall()
 
     items = []
     clientes = 0
@@ -25415,16 +25466,22 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
     comision_total = 0.0
 
     for row in rows or []:
-        responsable = normalize_lookup_text(row["responsable"] or "")
-        if not responsable or responsable not in matchers:
-            continue
-        total_facturado = parse_money_value(row["total_facturado"])
+        row_dict = dict(row) if not isinstance(row, dict) else row
+        captado_por_user_id = str(row_dict.get("captado_por_user_id") or "").strip()
+        captado_by_me = bool(usuario_id) and bool(captado_por_user_id) and captado_por_user_id == usuario_id
+        if not captado_by_me:
+            if usuario_id and captado_por_user_id:
+                continue
+            responsable = normalize_lookup_text(row_dict.get("responsable") or "")
+            if not responsable or responsable not in matchers:
+                continue
+        total_facturado = parse_money_value(row_dict.get("total_facturado"))
         if total_facturado <= 0:
             continue
-        num_facturas = int(row["num_facturas"] or 0)
-        num_cobradas = int(row["num_cobradas"] or 0)
+        num_facturas = int(row_dict.get("num_facturas") or 0)
+        num_cobradas = int(row_dict.get("num_cobradas") or 0)
         pendientes = max(0, num_facturas - num_cobradas)
-        is_cobrada = (num_facturas > 0 and pendientes == 0)
+        is_cobrada = num_facturas > 0 and pendientes == 0
         comision = total_facturado * 0.10
         clientes += 1
         facturado_total += total_facturado
@@ -25432,17 +25489,17 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
         items.append(
             {
                 "service": "facturacion",
-                "cliente_id": row["cliente_id"],
-                "cliente_nombre": row["cliente_nombre"],
-                "cliente_nif": row["cliente_nif"],
-                "fecha": str(row["last_fecha"] or row["first_fecha"] or "").strip(),
+                "cliente_id": row_dict.get("cliente_id"),
+                "cliente_nombre": row_dict.get("cliente_nombre"),
+                "cliente_nif": row_dict.get("cliente_nif"),
+                "fecha": str(row_dict.get("last_fecha") or row_dict.get("first_fecha") or "").strip(),
                 "facturado_anual": round(total_facturado, 2),
                 "comision": round(comision, 2),
                 "num_facturas": num_facturas,
                 "num_cobradas": num_cobradas,
                 "pendientes": pendientes,
                 "cobrada": 1 if is_cobrada else 0,
-                "responsable": str(row["responsable"] or "").strip(),
+                "responsable": str(row_dict.get("responsable") or "").strip(),
             }
         )
 
@@ -26860,13 +26917,13 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     if services_filter and not cliente_has_servicio(conn, cliente_id, services_filter):
         return {"error": "Cliente no disponible para este servicio"}
 
-    empresas_query = """
-        SELECT ce.id AS rel_id, ce.empresa_id, e.nombre AS empresa, ce.servicio, ce.estado,
-               ce.fecha_inicio, ce.fecha_fin
-        FROM clientes_empresas ce
-        LEFT JOIN empresas e ON e.id = ce.empresa_id
-        WHERE ce.cliente_id = ?
-    """
+        empresas_query = """
+            SELECT ce.id AS rel_id, ce.empresa_id, e.nombre AS empresa, ce.servicio, ce.captado_por_user_id,
+                   ce.estado, ce.fecha_inicio, ce.fecha_fin
+            FROM clientes_empresas ce
+            LEFT JOIN empresas e ON e.id = ce.empresa_id
+            WHERE ce.cliente_id = ?
+        """
     values = [cliente_id]
     if services_filter:
         placeholders = ",".join(["?"] * len(services_filter))
@@ -65126,18 +65183,26 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-            if path == "/api/gestoria_dashboard":
-                empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
-                workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
-                empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
-                if not empresa_ids:
-                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
-                    return
+	            if path == "/api/gestoria_dashboard":
+	                empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+	                workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+	                empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+	                if not empresa_ids:
+	                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+	                    return
+	                session = getattr(self, "auth_session", None) or self._current_session()
+	                rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
+	                is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
+	                    is_superadmin_actor(None, session)
+	                )
+	                if not is_admin_actor:
+	                    json_response(self, {"error": "Solo disponible para usuarios admin."}, status=403)
+	                    return
 
-                # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
-                now_ts = time.time()
-                cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
-                if cache_key:
+	                # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
+	                now_ts = time.time()
+	                cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
+	                if cache_key:
                     try:
                         with Handler._gestoria_dashboard_lock:
                             cached = Handler._gestoria_dashboard_cache.get(cache_key)
@@ -65160,10 +65225,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
-                payload = {
-                    "counts": {
-                        "total": 0,
-                        "activos": 0,
+	                payload = {
+	                    "counts": {
+	                        "total": 0,
+	                        "activos": 0,
                         "autonomos": 0,
                         "empresas": 0,
                         "puntuales": 0,
@@ -65180,9 +65245,13 @@ class Handler(BaseHTTPRequestHandler):
                     "presupuestos_estudio": [],
                     "presupuestos_rechazados": [],
                     "encargos_pendientes": [],
-                    "acciones": [],
-                    "acciones_vencidas": [],
-                }
+	                    "acciones": [],
+	                    "acciones_vencidas": [],
+	                    "economics": {},
+	                    "clientes_hist": {},
+	                    "segmentacion_trabajos": {},
+	                    "productividad": {},
+	                }
 
                 try:
                     total = conn.execute(
@@ -65482,8 +65551,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            try:
-                acciones_vencidas = conn.execute(
+	            try:
+	                acciones_vencidas = conn.execute(
                     f"""
                     SELECT a.fecha, a.hora,
                            COALESCE(c.nombre, a.cliente_nombre) AS cliente,
@@ -65500,17 +65569,233 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     tuple([*empresa_ids, today.isoformat()]),
                 ).fetchall()
-                payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
-            except Exception as exc:
+	                payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
+	            except Exception as exc:
                 try:
                     Handler._record_api_error("/api/gestoria_dashboard:acciones_vencidas", exc)
                 except Exception:
-                    pass
+	                    pass
 
-            if cache_key:
-                try:
-                    with Handler._gestoria_dashboard_lock:
-                        Handler._gestoria_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
+	            # --- Dashboard general (admin): economía + históricos + segmentación + productividad.
+	            try:
+	                current_year = int(datetime.now().year)
+	            except Exception:
+	                current_year = int(today.strftime("%Y"))
+	            years = [current_year - 2, current_year - 1, current_year]
+	            month_labels = [f"{m:02d}" for m in range(1, 13)]
+
+	            try:
+	                year_placeholders = ",".join(["?"] * len(years))
+	                econ_rows = conn.execute(
+	                    f"""
+	                    SELECT
+	                      substr(NULLIF(gc.fecha,''), 1, 7) AS ym,
+	                      SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
+	                      SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
+	                    FROM gestoria_contabilidad gc
+	                    WHERE gc.empresa_id IN ({placeholders_emp})
+	                      AND gc.fecha IS NOT NULL
+	                      AND length(gc.fecha) >= 7
+	                      AND substr(gc.fecha, 1, 4) IN ({year_placeholders})
+	                    GROUP BY substr(NULLIF(gc.fecha,''), 1, 7)
+	                    """,
+	                    tuple([*empresa_ids, *[str(y) for y in years]]),
+	                ).fetchall()
+	                econ_map = {str(row_value(r, "ym", "") or ""): dict(r) for r in (econ_rows or [])}
+	                econ_series = {}
+	                for y in years:
+	                    ingresos = []
+	                    gastos = []
+	                    for m in month_labels:
+	                        ym = f"{y}-{m}"
+	                        row = econ_map.get(ym) or {}
+	                        ingresos.append(float(row_value(row, "ingresos", 0) or 0))
+	                        gastos.append(float(row_value(row, "gastos", 0) or 0))
+	                    econ_series[str(y)] = {
+	                        "ingresos": ingresos,
+	                        "gastos": gastos,
+	                        "neto": [i - g for i, g in zip(ingresos, gastos)],
+	                        "total_ingresos": sum(ingresos),
+	                        "total_gastos": sum(gastos),
+	                        "total_neto": sum(ingresos) - sum(gastos),
+	                    }
+	                payload["economics"] = {"years": years, "labels": month_labels, "series": econ_series}
+	            except Exception as exc:
+	                try:
+	                    Handler._record_api_error("/api/gestoria_dashboard:economics", exc)
+	                except Exception:
+	                    pass
+
+	            try:
+	                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por tipo_cliente.
+	                link_rows = conn.execute(
+	                    f"""
+	                    WITH ce_latest AS (
+	                      SELECT
+	                        ce.cliente_id,
+	                        COALESCE(NULLIF(ce.estado,''), '') AS estado,
+	                        COALESCE(NULLIF(ce.fecha_inicio,''), ce.created_at) AS fecha_inicio,
+	                        NULLIF(ce.fecha_fin,'') AS fecha_fin,
+	                        ROW_NUMBER() OVER (
+	                          PARTITION BY ce.cliente_id
+	                          ORDER BY datetime(COALESCE(ce.updated_at, ce.created_at)) DESC
+	                        ) AS rn
+	                      FROM clientes_empresas ce
+	                      WHERE ce.empresa_id IN ({placeholders_emp})
+	                        AND {service_filter}
+	                    )
+	                    SELECT
+	                      ce_latest.cliente_id,
+	                      ce_latest.estado,
+	                      ce_latest.fecha_inicio,
+	                      ce_latest.fecha_fin,
+	                      cg.tipo_cliente AS tipo_cliente
+	                    FROM ce_latest
+	                    LEFT JOIN cliente_gestoria cg ON cg.cliente_id = ce_latest.cliente_id
+	                    WHERE ce_latest.rn = 1
+	                    """,
+	                    tuple(empresa_ids),
+	                ).fetchall()
+	                clients = [dict(r) for r in (link_rows or [])]
+
+	                def _active_at(row, day):
+	                    estado = normalize_lookup_text(row.get("estado") or "")
+	                    if estado not in {"ALTA", "ACTIVO", "ACTIVA"}:
+	                        return False
+	                    start = parse_iso_date(row.get("fecha_inicio"))
+	                    end = parse_iso_date(row.get("fecha_fin"))
+	                    if start and start > day:
+	                        return False
+	                    if end and end < day:
+	                        return False
+	                    return True
+
+	                client_years = [current_year - 1, current_year]
+	                client_series = {str(y): {"autonomos": [], "empresas": []} for y in client_years}
+	                totals = {str(y): {"autonomos": 0, "empresas": 0} for y in client_years}
+	                for y in client_years:
+	                    for m in range(1, 13):
+	                        last_day = calendar.monthrange(int(y), int(m))[1]
+	                        day = datetime(int(y), int(m), int(last_day)).date()
+	                        a_count = 0
+	                        e_count = 0
+	                        for row in clients:
+	                            if not _active_at(row, day):
+	                                continue
+	                            tipo = normalize_lookup_text(row.get("tipo_cliente") or "")
+	                            if tipo in {"AUTONOMO", "AUTONOMOS"}:
+	                                a_count += 1
+	                            elif tipo in {"EMPRESA", "EMPRESAS"}:
+	                                e_count += 1
+	                        client_series[str(y)]["autonomos"].append(a_count)
+	                        client_series[str(y)]["empresas"].append(e_count)
+	                    totals[str(y)]["autonomos"] = client_series[str(y)]["autonomos"][-1] if client_series[str(y)]["autonomos"] else 0
+	                    totals[str(y)]["empresas"] = client_series[str(y)]["empresas"][-1] if client_series[str(y)]["empresas"] else 0
+	                payload["clientes_hist"] = {"years": client_years, "labels": month_labels, "series": client_series, "totals": totals}
+	            except Exception as exc:
+	                try:
+	                    Handler._record_api_error("/api/gestoria_dashboard:clientes_hist", exc)
+	                except Exception:
+	                    pass
+
+	            try:
+	                # Segmentación de trabajos (totales y abiertos).
+	                seg = conn.execute(
+	                    f"""
+	                    SELECT
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1 ELSE 0 END) AS herencias_total,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%' THEN 1 ELSE 0 END) AS trafico_total,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%' THEN 1 ELSE 0 END) AS expedientes_total,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1 ELSE 0 END) AS tasaciones_total,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1 ELSE 0 END) AS rentas_total,
+	                      SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+	                    FROM gestoria_trabajos gt
+	                    WHERE gt.empresa_id IN ({placeholders_emp})
+	                    """,
+	                    tuple(empresa_ids),
+	                ).fetchone()
+	                payload["segmentacion_trabajos"] = dict(seg) if seg else {}
+	            except Exception as exc:
+	                try:
+	                    Handler._record_api_error("/api/gestoria_dashboard:segmentacion_trabajos", exc)
+	                except Exception:
+	                    pass
+
+	            try:
+	                # Productividad por responsable + usuarios con servicio gestoría.
+	                perf_rows = conn.execute(
+	                    f"""
+	                    SELECT
+	                      COALESCE(NULLIF(gt.responsable,''), 'Sin responsable') AS responsable,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 1 ELSE 0 END) AS completados_total,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')
+	                                AND date(COALESCE(NULLIF(gt.fecha_fin,''), gt.updated_at, gt.created_at)) >= date('now','-30 day')
+	                          THEN 1 ELSE 0 END) AS completados_30d,
+	                      SUM(CASE WHEN date(gt.created_at) >= date('now','-30 day') THEN 1 ELSE 0 END) AS creados_30d,
+	                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 0 ELSE 1 END) AS abiertos
+	                    FROM gestoria_trabajos gt
+	                    WHERE gt.empresa_id IN ({placeholders_emp})
+	                    GROUP BY COALESCE(NULLIF(gt.responsable,''), 'Sin responsable')
+	                    ORDER BY abiertos DESC, completados_30d DESC
+	                    LIMIT 50
+	                    """,
+	                    tuple(empresa_ids),
+	                ).fetchall()
+	                perf = [dict(r) for r in (perf_rows or [])]
+
+	                users = conn.execute(
+	                    """
+	                    SELECT id, nombre, apellido, usuario, email, rol, servicio
+	                    FROM usuarios
+	                    WHERE COALESCE(activo, 1) = 1
+	                      AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+	                    ORDER BY LOWER(COALESCE(nombre, '')) ASC
+	                    """
+	                ).fetchall()
+	                user_rows = [dict(r) for r in (users or [])]
+
+	                perf_map = {}
+	                for row in perf:
+	                    key = normalize_lookup_text(row.get("responsable") or "")
+	                    if not key:
+	                        continue
+	                    perf_map[key] = row
+
+	                out = []
+	                for u in user_rows:
+	                    full = " ".join([str(u.get("nombre") or "").strip(), str(u.get("apellido") or "").strip()]).strip()
+	                    keys = [
+	                        normalize_lookup_text(u.get("usuario") or ""),
+	                        normalize_lookup_text(full or ""),
+	                        normalize_lookup_text(u.get("nombre") or ""),
+	                    ]
+	                    found = None
+	                    for k in keys:
+	                        if k and k in perf_map:
+	                            found = perf_map[k]
+	                            break
+	                    out.append(
+	                        {
+	                            "id": u.get("id"),
+	                            "usuario": u.get("usuario") or "",
+	                            "nombre": full or (u.get("usuario") or ""),
+	                            "rol": u.get("rol") or "",
+	                            "abiertos": int((found or {}).get("abiertos") or 0),
+	                            "creados_30d": int((found or {}).get("creados_30d") or 0),
+	                            "completados_30d": int((found or {}).get("completados_30d") or 0),
+	                        }
+	                    )
+	                payload["productividad"] = {"rows": out, "origen_responsables": perf[:20]}
+	            except Exception as exc:
+	                try:
+	                    Handler._record_api_error("/api/gestoria_dashboard:productividad", exc)
+	                except Exception:
+	                    pass
+
+	            if cache_key:
+	                try:
+	                    with Handler._gestoria_dashboard_lock:
+	                        Handler._gestoria_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
                         if len(Handler._gestoria_dashboard_cache) > 200:
                             for k, (exp, _val) in list(Handler._gestoria_dashboard_cache.items())[:80]:
                                 if exp <= now_ts:
