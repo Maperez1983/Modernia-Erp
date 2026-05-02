@@ -2371,13 +2371,38 @@ const gestoriaAltaPersonaFields = gestoriaAltaForm
   : [];
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
-const gestoriaDashboardPaneResumen = document.getElementById("gestoriaDashboardPaneResumen");
+const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
 const gestoriaDashboardPaneRenta = document.getElementById("gestoriaDashboardPaneRenta");
+const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardPaneModelos");
+const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
+const gestoriaDashboardPaneContabilidad = document.getElementById("gestoriaDashboardPaneContabilidad");
+const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
 const gestoriaDashboardEmpresaScope = document.getElementById("gestoriaDashboardEmpresaScope");
 const gestoriaDashRentaEjercicio = document.getElementById("gestoriaDashRentaEjercicio");
 const gestoriaDashRentaReload = document.getElementById("gestoriaDashRentaReload");
 const gestoriaDashRentaKpis = document.getElementById("gestoriaDashRentaKpis");
 const gestoriaDashRentaContent = document.getElementById("gestoriaDashRentaContent");
+const gestoriaDashModelosScope = document.getElementById("gestoriaDashModelosScope");
+const gestoriaDashModelosReload = document.getElementById("gestoriaDashModelosReload");
+const gestoriaDashModelosOpenCrm = document.getElementById("gestoriaDashModelosOpenCrm");
+const gestoriaDashModelosTable = document.getElementById("gestoriaDashModelosTable");
+const gestoriaDashModelosInfo = document.getElementById("gestoriaDashModelosInfo");
+const gestoriaDashTrabajosEstado = document.getElementById("gestoriaDashTrabajosEstado");
+const gestoriaDashTrabajosReload = document.getElementById("gestoriaDashTrabajosReload");
+const gestoriaDashTrabajosOpenCrm = document.getElementById("gestoriaDashTrabajosOpenCrm");
+const gestoriaDashTrabajosKpis = document.getElementById("gestoriaDashTrabajosKpis");
+const gestoriaDashTrabajosTable = document.getElementById("gestoriaDashTrabajosTable");
+const gestoriaDashTrabajosInfo = document.getElementById("gestoriaDashTrabajosInfo");
+const gestoriaDashContaReload = document.getElementById("gestoriaDashContaReload");
+const gestoriaDashContaOpen = document.getElementById("gestoriaDashContaOpen");
+const gestoriaDashContaKpis = document.getElementById("gestoriaDashContaKpis");
+const gestoriaDashContaTable = document.getElementById("gestoriaDashContaTable");
+const gestoriaDashContaInfo = document.getElementById("gestoriaDashContaInfo");
+const gestoriaDashDocsReload = document.getElementById("gestoriaDashDocsReload");
+const gestoriaDashDocsOpen = document.getElementById("gestoriaDashDocsOpen");
+const gestoriaDashDocsKpis = document.getElementById("gestoriaDashDocsKpis");
+const gestoriaDashDocsRecent = document.getElementById("gestoriaDashDocsRecent");
+const gestoriaDashDocsInfo = document.getElementById("gestoriaDashDocsInfo");
 const gestoriaDocsSection = document.getElementById("gestoriaDocsSection");
 const gestoriaContaSection = document.getElementById("gestoriaContaSection");
 const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
@@ -11655,13 +11680,13 @@ const renderWorkspaceRrhhHub = () => {
 	    const ejercicio = String(new Date().getFullYear()).trim();
 	    const dashYear = String(state.workspaceRrhhEconomicosDashboardYear || "").trim() || ejercicio;
 	    return `
-	      <div class="workspace-rrhh-panel-card">
-	        <div class="section-head">
-	          <div>
-	            <h4>Dashboard</h4>
-	            <p class="muted">KPIs de rendimiento y rentabilidad (facturado vs coste).</p>
-	          </div>
-	        </div>
+		      <div class="workspace-rrhh-panel-card">
+		        <div class="section-head">
+		          <div>
+		            <h4>Dashboard</h4>
+		            <p class="muted">KPIs de rendimiento y rentabilidad (comisión/ingresos vs coste laboral).</p>
+		          </div>
+		        </div>
 	        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
 	          <label class="muted">Ejercicio
 	            <select id="rrhhEconDashboardYear" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">
@@ -11675,10 +11700,39 @@ const renderWorkspaceRrhhHub = () => {
 	          <button type="button" class="secondary ghost" id="rrhhEconMemoriaCsvBtn" data-rrhh-persona-id="${escapeHtml(pId)}" data-rrhh-empresa-id="${escapeHtml(eId)}">CSV</button>
 	          <span id="rrhhEconDashboardStatus" class="muted"></span>
 	        </div>
-	        <div id="rrhhEconDashboardKpis" class="kpi-grid" style="margin-top:12px;"></div>
-	      </div>
-	    `;
-	  };
+		        <div id="rrhhEconDashboardKpis" class="kpi-grid" style="margin-top:12px;"></div>
+		        <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+		          <div class="section-head">
+		            <div>
+		              <h4 style="margin:0;">Rentabilidad · Evolución mensual</h4>
+		              <p class="muted">Coste laboral vs comisión (y cobertura salarial).</p>
+		            </div>
+		          </div>
+		          <div class="workspace-overview-chart-wrap" style="margin-top:10px;">
+		            <canvas id="rrhhEconDashboardChart" class="workspace-overview-chart" style="width:100%;height:260px;"></canvas>
+		          </div>
+		        </div>
+		        <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+		          <div class="section-head">
+		            <div>
+		              <h4 style="margin:0;">KPIs por servicio</h4>
+		              <p class="muted">Acciones/expedientes y comisiones generadas según tu servicio.</p>
+		            </div>
+		          </div>
+		          <div id="rrhhEconDashboardServices" class="kpi-grid" style="margin-top:12px;"></div>
+		        </div>
+		        <div class="workspace-rrhh-panel-card" style="margin-top:12px;">
+		          <div class="section-head">
+		            <div>
+		              <h4 style="margin:0;">Pendientes</h4>
+		              <p class="muted">Trabajos/expedientes sin cerrar o sin cobrar.</p>
+		            </div>
+		          </div>
+		          <div id="rrhhEconDashboardPending" class="workspace-rrhh-list" style="margin-top:12px;"></div>
+		        </div>
+		      </div>
+		    `;
+		  };
 
 		  const renderRrhhEconomicosPanel = ({ personaId = "", empresaId = "" } = {}) => {
 		    const pId = String(personaId || "").trim();
@@ -13715,22 +13769,41 @@ const renderWorkspaceRrhhHub = () => {
 		    `;
 		  };
 
-		  const renderDashboard = () => {
-		    if (manager) {
-		      return `
-		        <div class="workspace-rrhh-panel-card">
-		          <div class="section-head">
-		            <div>
-		              <h4>Dashboard</h4>
-		              <p class="muted">Disponible en modo “self”.</p>
-		            </div>
-		          </div>
-		        </div>
-		      `;
-		    }
-		    // En modo trabajador, el dashboard coincide con el contenido actual de "Personal".
-		    return renderPlantilla();
-		  };
+			  const renderDashboard = () => {
+			    if (manager) {
+			      return `
+			        <div class="workspace-rrhh-panel-card">
+			          <div class="section-head">
+			            <div>
+			              <h4>Dashboard</h4>
+			              <p class="muted">Disponible en modo “self”.</p>
+			            </div>
+			          </div>
+			        </div>
+			      `;
+			    }
+			    const authUserId = String(getAuthScopeUser?.()?.id || "").trim();
+			    const persona =
+			      selectedEmployee ||
+			      employees.find((row) => authUserId && String(row?.usuario_id || "").trim() === authUserId) ||
+			      employees.find((row) => Number(row?.usuario_manual || 0) === 1) ||
+			      null;
+			    const personaId = String(persona?.id || selectedPersonaId || "").trim();
+			    const empresaId = String(persona?.empresa_id || "").trim();
+			    if (!personaId) {
+			      return `
+			        <div class="workspace-rrhh-panel-card">
+			          <div class="section-head">
+			            <div>
+			              <h4>Dashboard</h4>
+			              <p class="muted">No se pudo localizar tu ficha de RRHH. Contacta con un administrador.</p>
+			            </div>
+			          </div>
+			        </div>
+			      `;
+			    }
+			    return renderRrhhEconomicosDashboardPanel({ personaId, empresaId });
+			  };
 
 		  const panelHtml =
 		    tab === "equipo" ? renderEquipo()
@@ -14695,39 +14768,144 @@ const renderWorkspaceRrhhHub = () => {
 	    }
 		  }
 
-	  async function loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId) {
-	    const status = document.getElementById("rrhhEconDashboardStatus");
-	    const kpisEl = document.getElementById("rrhhEconDashboardKpis");
-	    const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
-	    try {
-	      if (status) status.textContent = "Cargando KPIs…";
-	      if (kpisEl) kpisEl.innerHTML = "";
-	      const data = await api(
-	        `/api/workspace_rrhh_economicos_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}`
-	      );
-	      if (data?.error) throw new Error(data.error);
-	      const k = data?.kpis || {};
-	      const cards = [
-	        { label: "Facturado", value: euroFormatter.format(parseMoneyValue(k.facturado_total || 0)) },
-	        { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(k.comision_total || 0)) },
-	        { label: "Comisión cobrada", value: euroFormatter.format(parseMoneyValue(k.comision_cobrada || 0)) },
-	        { label: "Coste (nómina)", value: euroFormatter.format(parseMoneyValue(k.coste_total || 0)) },
-	        { label: "Beneficio", value: euroFormatter.format(parseMoneyValue(k.beneficio || 0)) },
-	        { label: "Rentabilidad", value: `${Number(k.rentabilidad_pct || 0).toFixed(2).replace(".", ",")}%` },
-	      ];
-	      if (kpisEl) {
-	        kpisEl.innerHTML = cards
-	          .map(
-	            (c) =>
-	              `<div class="kpi-card"><div class="kpi-label">${escapeHtml(c.label)}</div><div class="kpi-value">${escapeHtml(c.value)}</div></div>`
-	          )
-	          .join("");
-	      }
-	      if (status) status.textContent = `Ejercicio ${escapeHtml(year)} · ${Number(k.items || 0)} apuntes (${Number(k.cobradas || 0)} cobrados)`;
-	    } catch (err) {
-	      if (status) status.textContent = err?.message || "No se pudieron cargar KPIs.";
-	    }
-	  }
+		  async function loadWorkspaceRrhhEconomicosDashboard(personaId, empresaId) {
+		    const status = document.getElementById("rrhhEconDashboardStatus");
+		    const kpisEl = document.getElementById("rrhhEconDashboardKpis");
+		    const servicesEl = document.getElementById("rrhhEconDashboardServices");
+		    const chartCanvas = document.getElementById("rrhhEconDashboardChart");
+		    const pendingEl = document.getElementById("rrhhEconDashboardPending");
+		    const year = String(state.workspaceRrhhEconomicosDashboardYear || new Date().getFullYear()).trim();
+		    try {
+		      if (status) status.textContent = "Cargando KPIs…";
+		      if (kpisEl) kpisEl.innerHTML = "";
+		      if (servicesEl) servicesEl.innerHTML = "";
+		      if (pendingEl) pendingEl.innerHTML = "";
+		      const data = await api(
+		        `/api/workspace_rrhh_economicos_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&ejercicio=${encodeURIComponent(year)}`
+		      );
+		      if (data?.error) throw new Error(data.error);
+		      const k = data?.kpis || {};
+		      const cards = [
+		        { label: "Facturado", value: euroFormatter.format(parseMoneyValue(k.facturado_total || 0)) },
+		        { label: "Comisión total", value: euroFormatter.format(parseMoneyValue(k.comision_total || 0)) },
+		        { label: "Comisión cobrada", value: euroFormatter.format(parseMoneyValue(k.comision_cobrada || 0)) },
+		        { label: "Coste (nómina)", value: euroFormatter.format(parseMoneyValue(k.coste_total || 0)) },
+		        { label: "Beneficio", value: euroFormatter.format(parseMoneyValue(k.beneficio || 0)) },
+		        { label: "Rentabilidad", value: `${Number(k.rentabilidad_pct || 0).toFixed(2).replace(".", ",")}%` },
+		        { label: "Pendiente (cobro)", value: euroFormatter.format(Math.max(0, parseMoneyValue(k.comision_total || 0) - parseMoneyValue(k.comision_cobrada || 0))) },
+		      ];
+		      if (kpisEl) {
+		        kpisEl.innerHTML = cards
+		          .map(
+		            (c) =>
+		              `<div class="kpi-card"><div class="kpi-label">${escapeHtml(c.label)}</div><div class="kpi-value">${escapeHtml(c.value)}</div></div>`
+		          )
+		          .join("");
+		      }
+		      if (status) status.textContent = `Ejercicio ${escapeHtml(year)} · ${Number(k.items || 0)} expedientes (${Number(k.cobradas || 0)} cobrados)`;
+
+		      // KPIs por servicio.
+		      const serviceLabels = {
+		        renta: "Renta",
+		        gestoria: "Gestoría",
+		        fincas: "Fincas",
+		        seguros: "Seguros",
+		        hipotecas: "Hipotecas",
+		      };
+		      const services = data?.services || {};
+		      const serviceCards = [];
+		      Object.keys(serviceLabels).forEach((key) => {
+		        const sk = String(key);
+		        const svc = services?.[sk] || {};
+		        const kk = svc?.kpis || {};
+		        const hasData = Object.keys(kk || {}).length > 0;
+		        if (!hasData) return;
+		        if (sk === "renta") {
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Presentadas`, value: numberFormatter.format(Number(kk.presentadas || 0)) });
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Cobradas`, value: numberFormatter.format(Number(kk.cobradas || 0)) });
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Comisión cobrada`, value: euroFormatter.format(parseMoneyValue(kk.comision_cobradas || 0)) });
+		          return;
+		        }
+		        if (sk === "gestoria" || sk === "fincas") {
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Clientes`, value: numberFormatter.format(Number(kk.clientes || 0)) });
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Facturado`, value: euroFormatter.format(parseMoneyValue(kk.facturado_total || 0)) });
+		          serviceCards.push({ label: `${serviceLabels[sk]} · Comisión`, value: euroFormatter.format(parseMoneyValue(kk.comision_total || 0)) });
+		          return;
+		        }
+		        serviceCards.push({ label: `${serviceLabels[sk]} · Expedientes`, value: numberFormatter.format(Number(kk.items || 0)) });
+		        serviceCards.push({ label: `${serviceLabels[sk]} · Cerrados`, value: numberFormatter.format(Number(kk.cobradas || 0)) });
+		        serviceCards.push({ label: `${serviceLabels[sk]} · Comisión cobrada`, value: euroFormatter.format(parseMoneyValue(kk.comision_cobradas || 0)) });
+		      });
+		      if (servicesEl) {
+		        servicesEl.innerHTML = serviceCards.length
+		          ? serviceCards.map((c) => `<div class="kpi-card"><div class="kpi-label">${escapeHtml(c.label)}</div><div class="kpi-value">${escapeHtml(c.value)}</div></div>`).join("")
+		          : "<p class='muted'>Sin KPIs por servicio para este ejercicio.</p>";
+		      }
+
+		      // Gráfico mensual (coste vs comisión cobrada + cobertura).
+		      try {
+		        const series = data?.series || {};
+		        const labels = Array.isArray(series.labels) ? series.labels : [];
+		        const coste = Array.isArray(series.coste) ? series.coste : [];
+		        const comC = Array.isArray(series.comision_cobrada) ? series.comision_cobrada : [];
+		        const idx = Array.isArray(series.indice_rentabilidad_pct) ? series.indice_rentabilidad_pct : [];
+		        if (chartCanvas && labels.length) {
+		          drawBarChart(
+		            chartCanvas,
+		            labels.map((l) => String(l || "").slice(5)),
+		            [
+		              { label: "Coste", values: coste, color: "rgba(11, 29, 51, 0.18)" },
+		              { label: "Comisión cobrada", values: comC, color: getCssVar(chartCanvas, "--gold", "#F2C14E") },
+		              { label: "Cobertura (%)", values: idx, color: "rgba(11, 29, 51, 0.82)", type: "line", yAxis: "right" },
+		            ],
+		            { legend: true, tooltip: true, secondaryAxisFormat: (value) => `${Math.round(Number(value || 0))}%` }
+		          );
+		        }
+		      } catch (e) {}
+
+		      // Pendientes: top 10.
+		      const pending = data?.pending || {};
+		      const top = Array.isArray(pending.top) ? pending.top : [];
+		      const serviceLabel = (sk) =>
+		        sk === "manual"
+		          ? "Manual"
+		          : sk === "renta"
+		            ? "Renta"
+		            : sk === "gestoria"
+		              ? "Gestoría"
+		              : sk === "fincas"
+		                ? "Fincas"
+		                : sk === "seguros"
+		                  ? "Seguros"
+		                  : sk === "hipotecas"
+		                    ? "Hipotecas"
+		                    : String(sk || "-");
+		      if (pendingEl) {
+		        if (!top.length) {
+		          pendingEl.innerHTML = "<p class='muted'>Sin pendientes detectados para este ejercicio.</p>";
+		        } else {
+		          pendingEl.innerHTML = top
+		            .map((it) => {
+		              const svc = serviceLabel(it.service);
+		              const kind = String(it.kind || "cobro") === "cierre" ? "Sin cerrar" : "Sin cobrar";
+		              const label = String(it.label || "Expediente").trim() || "Expediente";
+		              const meta = String(it.meta || "").trim();
+		              return `
+		                <div class="workspace-rrhh-row">
+		                  <div>
+		                    <strong>${escapeHtml(label)}</strong>
+		                    <div class="muted">${escapeHtml(`${svc} · ${kind}${meta ? ` · ${meta}` : ""}`)}</div>
+		                  </div>
+		                </div>
+		              `;
+		            })
+		            .join("");
+		        }
+		      }
+		    } catch (err) {
+		      if (status) status.textContent = err?.message || "No se pudieron cargar KPIs.";
+		    }
+		  }
 
 	  const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
   if (personalForm) {
@@ -20748,14 +20926,20 @@ const resolveCrmTecnocloudVertical = () => {
   } catch {
     crmContext = "";
   }
+  const tab = String(currentTab || "").trim();
+  const isExplicitCrmTab =
+    tab === "crm" || tab === "seguros-crm" || tab === "fin-crm" || tab === "fin-sim" || tab.startsWith("gestoria");
+  // Evita que el "contexto CRM" se quede pegado en pantallas transversales (Clientes, Admin, Holding, etc.).
+  if (!crmContext && !isExplicitCrmTab) return "";
   // Tab explícito tiene prioridad sobre querystring (evita "mezclas" por URLs antiguas).
-  if (currentTab === "seguros-crm") return "seguros";
-  if (currentTab === "fin-crm" || currentTab === "fin-sim") return "fin";
-  if (currentTab === "crm") return "inmo";
-  if (currentTab && currentTab.startsWith("gestoria")) return "gestoria";
+  if (tab === "seguros-crm") return "seguros";
+  if (tab === "fin-crm" || tab === "fin-sim") return "fin";
+  if (tab === "crm") return "inmo";
+  if (tab.startsWith("gestoria")) return "gestoria";
   if (crmContext === "gestoria") return "gestoria";
   if (crmContext === "seguros") return "seguros";
   if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") return "fin";
+  if (crmContext === "inmo" || crmContext === "inmobiliaria") return "inmo";
   return "inmo";
 };
 
@@ -20840,7 +21024,7 @@ const syncCrmTecnocloudVerticalNav = () => {
   }
   if (crmLightningSidebar) {
     // Sidebar estilo "Lightning" en Inmobiliaria, Gestoría y Financiaciones.
-    crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria || vertical === "fin"));
+    crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria || vertical === "fin" || vertical === "seguros"));
   }
   if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
     // No mezclar pantallas: el detalle de inmueble es exclusivo de Inmobiliaria.
@@ -20867,7 +21051,7 @@ const syncCrmTecnocloudVerticalNav = () => {
     if (hipotecaTabs) hipotecaTabs.classList.toggle("hidden", vertical === "fin");
   } catch (e) {}
 
-  const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin";
+  const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin" || vertical === "seguros";
   [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
     if (btn) btn.classList.toggle("hidden", !showInmoChrome);
   });

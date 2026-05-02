@@ -13481,6 +13481,8 @@ def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, 
 
     service_keys = ["renta", "seguros", "hipotecas", "gestoria", "fincas"]
     services = {}
+    pending = {"total": 0, "services": {}, "top": []}
+    service_payloads = {}
     facturado_total = 0.0
     comision_total = 0.0
     comision_cobrada = 0.0
@@ -13499,12 +13501,26 @@ def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, 
         comision_total += com
         if st == "cobrado":
             comision_cobrada += com
+        if st != "cobrado":
+            pending["total"] += 1
+            pending["services"].setdefault("manual", {"pendientes": 0})
+            pending["services"]["manual"]["pendientes"] += 1
+            if len(pending["top"]) < 10:
+                pending["top"].append(
+                    {
+                        "service": "manual",
+                        "label": str(it.get("cliente_nombre") or it.get("descripcion") or "Apunte manual").strip() or "Apunte manual",
+                        "meta": str(it.get("fecha") or "").strip(),
+                        "kind": "cobro",
+                    }
+                )
 
     for sk in service_keys:
         try:
             payload = compute_workspace_rrhh_productividad(conn, ws, eid, pid, sk, ejercicio=year)
         except Exception:
             payload = {"kpis": {}, "items": []}
+        service_payloads[sk] = payload
         k = payload.get("kpis") or {}
         facturado_total += float(parse_money_value(k.get("facturado_total") or 0) or 0)
         comision_total += float(parse_money_value(k.get("comision_total") or 0) or 0)
@@ -13516,10 +13532,112 @@ def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, 
             com = float(parse_money_value(it.get("comision") or 0) or 0)
             if st == "cobrado":
                 comision_cobrada += com
+
+            is_pending = False
+            kind = "cobro"
+            if sk == "renta":
+                estado = str(it.get("estado_presentacion") or "").strip()
+                if estado and estado.lower() != "presentada":
+                    is_pending = True
+                    kind = "cierre"
+                elif int(it.get("cobrada") or 0) != 1:
+                    is_pending = True
+                    kind = "cobro"
+            elif sk in {"seguros", "hipotecas"}:
+                if int(it.get("cobrada") or 0) != 1:
+                    is_pending = True
+                    kind = "cobro"
+            elif sk in {"gestoria", "fincas"}:
+                if int(it.get("pendientes") or 0) > 0:
+                    is_pending = True
+                    kind = "cobro"
+            else:
+                if st != "cobrado":
+                    is_pending = True
+                    kind = "cobro"
+
+            if is_pending:
+                pending["total"] += 1
+                svc_row = pending["services"].setdefault(sk, {"pendientes": 0})
+                svc_row["pendientes"] += 1
+                if len(pending["top"]) < 10:
+                    label = (
+                        str(it.get("cliente_nombre") or it.get("cliente") or "").strip()
+                        or str(it.get("cliente_nif") or "").strip()
+                        or str(it.get("poliza_numero") or it.get("banco") or it.get("cliente_id") or "").strip()
+                        or "Expediente"
+                    )
+                    meta = str(
+                        it.get("fecha")
+                        or it.get("presentacion_fecha")
+                        or it.get("fecha_firma")
+                        or it.get("ejercicio")
+                        or ""
+                    ).strip()
+                    pending["top"].append({"service": sk, "label": label, "meta": meta, "kind": kind})
         services[sk] = {"kpis": k}
 
     beneficio = facturado_total - coste_total
     rentabilidad_pct = (beneficio / coste_total) * 100.0 if coste_total > 0 else 0.0
+
+    # Serie mensual (para gráficos): coste laboral vs comisiones y cobertura (comisión cobrada / coste).
+    series = {
+        "labels": [],
+        "coste": [],
+        "comision_total": [],
+        "comision_cobrada": [],
+        "indice_rentabilidad_pct": [],
+    }
+    if year:
+        by_month = {m: {"coste": 0.0, "comision_total": 0.0, "comision_cobrada": 0.0} for m in range(1, 13)}
+
+        for n in nominas:
+            f = n.get("nomina_fields") or {}
+            try:
+                m = int(f.get("month") or 0)
+            except Exception:
+                m = 0
+            if m < 1 or m > 12:
+                continue
+            bruto = float(parse_money_value(f.get("bruto") or 0) or 0)
+            ss_emp = float(parse_money_value(f.get("ss_empresa") or 0) or 0)
+            by_month[m]["coste"] += bruto + ss_emp
+
+        def _month_from_date(raw):
+            s = str(raw or "").strip()
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+                try:
+                    return int(s[5:7])
+                except Exception:
+                    return 0
+            return 0
+
+        def _add_item(it):
+            st = str(it.get("estado_cobro") or ("cobrado" if int(it.get("cobrada") or 0) == 1 else "pendiente")).strip().lower()
+            m = _month_from_date(it.get("fecha_cobro") or it.get("fecha") or it.get("presentacion_fecha") or it.get("fecha_firma"))
+            if m < 1 or m > 12:
+                return
+            com = float(parse_money_value(it.get("comision") or 0) or 0)
+            by_month[m]["comision_total"] += com
+            if st == "cobrado":
+                by_month[m]["comision_cobrada"] += com
+
+        for it in manual_all or []:
+            _add_item(it)
+        for payload in service_payloads.values():
+            for it in payload.get("items") or []:
+                _add_item(it)
+
+        for m in range(1, 13):
+            series["labels"].append(f"{year}-{m:02d}")
+            coste = float(by_month[m]["coste"] or 0)
+            com_t = float(by_month[m]["comision_total"] or 0)
+            com_c = float(by_month[m]["comision_cobrada"] or 0)
+            series["coste"].append(round(coste, 2))
+            series["comision_total"].append(round(com_t, 2))
+            series["comision_cobrada"].append(round(com_c, 2))
+            idx = (com_c / coste) * 100.0 if coste > 0 else 0.0
+            series["indice_rentabilidad_pct"].append(round(idx, 2))
 
     return {
         "kpis": {
@@ -13535,6 +13653,8 @@ def compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, 
             "cobradas": int(cobradas_count),
         },
         "services": services,
+        "pending": pending,
+        "series": series,
     }
 
 
