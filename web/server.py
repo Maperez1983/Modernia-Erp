@@ -4682,8 +4682,8 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
             else f'<span class="badge badge-bad">NO CUADRA · Δ {money(cuadre_delta)}</span>'
         )
         liq_section = f"""
-	      <div class="panel" data-print-section="comprador" style="grid-column: 1 / -1;">
-	        <h2>Liquidación comprador</h2>
+          <div class="panel" data-print-section="comprador" style="grid-column: 1 / -1;">
+            <h2>Liquidación comprador</h2>
         <dl>
           <dt>Precio compra vivienda</dt><dd>{money(comprador.get("precio_compra"))}</dd>
           <dt>Escriturado</dt><dd>{money(comprador.get("escriturado"))}</dd>
@@ -24640,14 +24640,14 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
               ce2.updated_at DESC
             LIMIT 1
           ) AS servicio_estado
-	        FROM cliente_gestoria cg
-	        JOIN clientes c ON c.id = cg.cliente_id
-	        WHERE {where_clause}
-	        ORDER BY {order_by}
-	        LIMIT ?
-	        """,
-	        tuple(values + values + [prefetch_limit]),
-	    ).fetchall()
+            FROM cliente_gestoria cg
+            JOIN clientes c ON c.id = cg.cliente_id
+            WHERE {where_clause}
+            ORDER BY {order_by}
+            LIMIT ?
+            """,
+            tuple(values + values + [prefetch_limit]),
+        ).fetchall()
     items = []
     selected_cliente_ids = []
     renta_doc_id_owner = {}
@@ -26034,6 +26034,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           c.nif,
           c.estado AS cliente_estado,
           cg.renta_detalles,
+          c.empresa_id AS cliente_empresa_id,
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
@@ -26053,16 +26054,19 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         FROM cliente_gestoria cg
         JOIN clientes c ON c.id = cg.cliente_id
         WHERE COALESCE(cg.mod_renta, 0) = 1
-          AND EXISTS (
-            SELECT 1
-            FROM clientes_empresas ce
-            WHERE ce.empresa_id IN ({placeholders_emp})
-              AND ce.cliente_id = c.id
-              AND {service_filter}
+          AND (
+            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+            OR EXISTS (
+              SELECT 1
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders_emp})
+                AND ce.cliente_id = c.id
+                AND {service_filter}
+            )
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        tuple([*empresa_ids, *empresa_ids]),
+        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
@@ -26117,6 +26121,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "clientes_renta": len(rows),
         "campanas_ejercicio": len(campaigns),
         "sin_campana": max(len(rows) - len(campaigns), 0),
+        "sin_vincular_servicio": 0,
         "presentadas": 0,
         "borrador": 0,
         "con_precio": 0,
@@ -26182,6 +26187,28 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 months[month]["borrador"] += 1
             else:
                 months[month]["presentadas"] += 1
+
+    # Calidad de datos: clientes con renta pero sin vínculo explícito clientes_empresas para Gestoría.
+    try:
+        sin_link = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM cliente_gestoria cg
+            JOIN clientes c ON c.id = cg.cliente_id
+            WHERE COALESCE(cg.mod_renta, 0) = 1
+              AND COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+              AND NOT EXISTS (
+                SELECT 1 FROM clientes_empresas ce
+                WHERE ce.cliente_id = c.id
+                  AND ce.empresa_id IN ({placeholders_emp})
+                  AND {service_filter}
+              )
+            """,
+            tuple([*empresa_ids, *empresa_ids]),
+        ).fetchone()
+        counts["sin_vincular_servicio"] = int(row_value(sin_link, "total", 0) or 0)
+    except Exception:
+        counts["sin_vincular_servicio"] = 0
 
     unpaid = [
         item for item in campaigns if float(item.get("precio_servicio") or 0.0) > 0.0001 and int(item.get("cobrada") or 0) != 1
@@ -28512,14 +28539,14 @@ def ensure_tables(db_path):
           cliente2_prestamo_entidad TEXT,
           cliente2_prestamo_resto REAL,
           ingresos_conjuntos REAL,
-	          entidades_financieras TEXT,
-	          avalistas TEXT,
-	          aportacion_cv REAL,
-	          sim_params_json TEXT,
-	          notas TEXT,
-	          notas_ocr TEXT,
-	          calidad_ocr TEXT,
-	          campos_ocr TEXT,
+              entidades_financieras TEXT,
+              avalistas TEXT,
+              aportacion_cv REAL,
+              sim_params_json TEXT,
+              notas TEXT,
+              notas_ocr TEXT,
+              calidad_ocr TEXT,
+              campos_ocr TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -42655,11 +42682,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/legal_radar_import",
             "/api/legal_radar_digest",
-	            "/api/copilot_web_fetch",
-	            "/api/copilot_web_ask",
-	            "/api/iivtnu_municipios",
-		            "/api/iivtnu_cp_lookup",
-		            "/api/iivtnu_simulate",
+                "/api/copilot_web_fetch",
+                "/api/copilot_web_ask",
+                "/api/iivtnu_municipios",
+                    "/api/iivtnu_cp_lookup",
+                    "/api/iivtnu_simulate",
             "/api/iivtnu_pdf_parse",
             "/api/iivtnu_param_upsert",
             "/api/irpf_ganancia_simulate",
@@ -42686,10 +42713,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/acciones_update",
             "/api/acciones_delete",
             "/api/cliente_gestoria_update",
-	            "/api/renta_quick_ocr",
-	            "/api/renta_quick_attach",
-	            "/api/renta_entry_ocr_reprocess",
-	            "/api/renta_quick_note",
+                "/api/renta_quick_ocr",
+                "/api/renta_quick_attach",
+                "/api/renta_entry_ocr_reprocess",
+                "/api/renta_quick_note",
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
             "/api/gestoria_modelos_delete",
@@ -42725,21 +42752,21 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_set_password",
             "/api/workspace_customer_create",
             "/api/empresa_create",
-	            "/api/workspace_empresa_link",
-	            "/api/workspace_empresa_unlink",
-	            "/api/workspace_member_upsert",
-	            "/api/workspace_member_set",
-	            "/api/workspace_member_delete",
-	            "/api/workspace_members_reset",
-	            "/api/workspace_update",
-	            "/api/workspace_delete",
-	            "/api/workspace_module_update",
-	            "/api/admin_seed_modernia_users",
-	            "/api/admin_user_force_reset_invite",
-	            "/api/workspace_facturacion",
-	            "/api/workspace_series",
-	            "/api/workspace_inbox",
-	            "/api/workspace_inbox_review",
+                "/api/workspace_empresa_link",
+                "/api/workspace_empresa_unlink",
+                "/api/workspace_member_upsert",
+                "/api/workspace_member_set",
+                "/api/workspace_member_delete",
+                "/api/workspace_members_reset",
+                "/api/workspace_update",
+                "/api/workspace_delete",
+                "/api/workspace_module_update",
+                "/api/admin_seed_modernia_users",
+                "/api/admin_user_force_reset_invite",
+                "/api/workspace_facturacion",
+                "/api/workspace_series",
+                "/api/workspace_inbox",
+                "/api/workspace_inbox_review",
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
             "/api/workspace_registro_notifications",
@@ -42758,22 +42785,22 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_kiosk_token",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
-	            "/api/workspace_registro_periodo_lock",
-		            "/api/workspace_rrhh_profile",
-		            "/api/workspace_rrhh_productividad_manual_upsert",
-		            "/api/workspace_rrhh_productividad_manual_delete",
-		            "/api/workspace_rrhh_productividad_manual_bulk_update",
-		            "/api/workspace_rrhh_turnos",
-	            "/api/workspace_rrhh_ausencia",
+                "/api/workspace_registro_periodo_lock",
+                    "/api/workspace_rrhh_profile",
+                    "/api/workspace_rrhh_productividad_manual_upsert",
+                    "/api/workspace_rrhh_productividad_manual_delete",
+                    "/api/workspace_rrhh_productividad_manual_bulk_update",
+                    "/api/workspace_rrhh_turnos",
+                "/api/workspace_rrhh_ausencia",
             "/api/workspace_rrhh_ausencia_estado",
             "/api/workspace_rrhh_gasto",
             "/api/workspace_rrhh_gasto_estado",
-	            "/api/workspace_rrhh_documento",
-	            "/api/workspace_rrhh_reset",
-	            "/api/workspace_rrhh_cleanup",
-	            "/api/workspace_presupuestos",
-	            "/api/workspace_contratos",
-	            "/api/workspace_contrato_copilot",
+                "/api/workspace_rrhh_documento",
+                "/api/workspace_rrhh_reset",
+                "/api/workspace_rrhh_cleanup",
+                "/api/workspace_presupuestos",
+                "/api/workspace_contratos",
+                "/api/workspace_contrato_copilot",
             "/api/workspace_fincas_comunidades",
             "/api/workspace_fincas_incidencias",
             "/api/workspace_fincas_proveedores",
@@ -52668,14 +52695,14 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente2_prestamo_entidad",
                 "cliente2_prestamo_resto",
                 "ingresos_conjuntos",
-	                "entidades_financieras",
-	                "avalistas",
-	                "aportacion_cv",
-	                "sim_params_json",
-	                "notas",
-	                "notas_ocr",
-	                "calidad_ocr",
-	                "campos_ocr",
+                    "entidades_financieras",
+                    "avalistas",
+                    "aportacion_cv",
+                    "sim_params_json",
+                    "notas",
+                    "notas_ocr",
+                    "calidad_ocr",
+                    "campos_ocr",
             )
             if dup_id:
                 row = conn.execute(
@@ -52716,10 +52743,10 @@ class Handler(BaseHTTPRequestHandler):
                       cliente2_fecha_nacimiento, cliente2_estado_civil, cliente2_regimen, cliente2_hijos, cliente2_profesion,
                       cliente2_tipo_contrato, cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
                       cliente2_prestamo_activo, cliente2_prestamo_entidad, cliente2_prestamo_resto,
-	                      ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv, sim_params_json,
-	                      notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
+                          ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv, sim_params_json,
+                          notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
                     ) VALUES (
-	                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -52768,15 +52795,15 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("cliente2_prestamo_activo"),
                         payload.get("cliente2_prestamo_entidad"),
                         payload.get("cliente2_prestamo_resto"),
-	                        payload.get("ingresos_conjuntos"),
-	                        payload.get("entidades_financieras"),
-	                        payload.get("avalistas"),
-	                        payload.get("aportacion_cv"),
-	                        payload.get("sim_params_json"),
-	                        payload.get("notas"),
-	                        payload.get("notas_ocr"),
-	                        payload.get("calidad_ocr"),
-	                        payload.get("campos_ocr"),
+                            payload.get("ingresos_conjuntos"),
+                            payload.get("entidades_financieras"),
+                            payload.get("avalistas"),
+                            payload.get("aportacion_cv"),
+                            payload.get("sim_params_json"),
+                            payload.get("notas"),
+                            payload.get("notas_ocr"),
+                            payload.get("calidad_ocr"),
+                            payload.get("campos_ocr"),
                         now,
                         now,
                     ),
@@ -52891,13 +52918,13 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente2_prestamo_resto",
                 "ingresos_conjuntos",
                 "entidades_financieras",
-	                "avalistas",
-	                "aportacion_cv",
-	                "sim_params_json",
-	                "notas",
-	                "notas_ocr",
-	                "calidad_ocr",
-	                "campos_ocr",
+                    "avalistas",
+                    "aportacion_cv",
+                    "sim_params_json",
+                    "notas",
+                    "notas_ocr",
+                    "calidad_ocr",
+                    "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not row_empresa_id:
@@ -58483,15 +58510,15 @@ class Handler(BaseHTTPRequestHandler):
                     "responsable": payload.get("responsable", current_entry.get("responsable")),
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
                     "forma_cobro": forma_cobro,
-	                    "remesada": remesada_val,
-	                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
-	                    "doc_key": doc_key or current_entry.get("doc_key") or "",
-	                    "doc_url": doc_url or current_entry.get("doc_url") or "",
-	                    "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
-	                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
-	                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
-	                }
-	            )
+                        "remesada": remesada_val,
+                        "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+                        "doc_key": doc_key or current_entry.get("doc_key") or "",
+                        "doc_url": doc_url or current_entry.get("doc_url") or "",
+                        "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
+                        "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+                        "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+                    }
+                )
             upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
             trabajo = conn.execute(
                 """
@@ -58878,14 +58905,14 @@ class Handler(BaseHTTPRequestHandler):
                     "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
                     "forma_cobro": forma_cobro,
                     "remesada": remesada_val,
-		                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
-	                    "doc_key": doc_key or current_entry.get("doc_key") or "",
-	                    "doc_url": doc_url or current_entry.get("doc_url") or "",
-	                    "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
-	                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
-	                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
-	                }
-	            )
+                            "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+                        "doc_key": doc_key or current_entry.get("doc_key") or "",
+                        "doc_url": doc_url or current_entry.get("doc_url") or "",
+                        "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
+                        "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+                        "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+                    }
+                )
             upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
             ocr_job_id = ""
             if doc_key:
@@ -64950,132 +64977,175 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if path == "/api/gestoria_dashboard":
-            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
-            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
-            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
-            if not empresa_ids:
-                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
-                return
-            # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
-            now_ts = time.time()
-            cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
-            if cache_key:
-                try:
-                    with Handler._gestoria_dashboard_lock:
-                        cached = Handler._gestoria_dashboard_cache.get(cache_key)
-                        if cached and cached[0] > now_ts and isinstance(cached[1], dict):
-                            json_response(self, cached[1])
-                            return
-                except Exception:
-                    pass
+            if path == "/api/gestoria_dashboard":
+                empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+                workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+                empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+                if not empresa_ids:
+                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                    return
 
-            today = datetime.now().date()
-            next_30 = today + timedelta(days=30)
-            next_14 = today + timedelta(days=14)
-            service_filter = (
-                "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-                "'administracion fincas', 'administración fincas')"
-            )
-            placeholders_emp = ",".join(["?"] * len(empresa_ids))
-
-            payload = {
-                "counts": {
-                    "total": 0,
-                    "activos": 0,
-                    "autonomos": 0,
-                    "empresas": 0,
-                    "puntuales": 0,
-                    "modelos_mes": 0,
-                    "rentas_pendientes_presentar": 0,
-                    "acciones_pendientes": 0,
-                    "presupuestos_estudio": 0,
-                    "encargos_pendientes": 0,
-                },
-                "modelos": [],
-                "modelos_vencidos": [],
-                "rentas_pendientes": [],
-                "presupuestos_estudio": [],
-                "presupuestos_rechazados": [],
-                "encargos_pendientes": [],
-                "acciones": [],
-                "acciones_vencidas": [],
-            }
-
-            try:
-                total = conn.execute(
-                    f"""
-                    SELECT COUNT(DISTINCT c.id) AS total
-                    FROM clientes c
-                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
-                    """,
-                    tuple(empresa_ids),
-                ).fetchone()
-                payload["counts"]["total"] = int(row_value(total, "total", 0) or 0)
-            except Exception as exc:
-                try:
-                    Handler._record_api_error("/api/gestoria_dashboard:total", exc)
-                except Exception:
-                    pass
-
-            active_ids = set()
-            try:
-                active_rows = conn.execute(
-                    f"""
-                    SELECT DISTINCT c.id AS cliente_id, ce.estado
-                    FROM clientes c
-                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE ce.empresa_id IN ({placeholders_emp})
-                      AND {service_filter}
-                    """,
-                    tuple(empresa_ids),
-                ).fetchall()
-                active_ids = {
-                    str(row_value(row, "cliente_id", "") or "").strip()
-                    for row in active_rows
-                    if is_gestoria_dashboard_active_state(row_value(row, "estado", ""))
-                }
-                active_ids.discard("")
-                payload["counts"]["activos"] = len(active_ids)
-            except Exception as exc:
-                try:
-                    Handler._record_api_error("/api/gestoria_dashboard:active", exc)
-                except Exception:
-                    pass
-
-            tipos_map = {}
-            try:
-                tipos = conn.execute(
-                    f"""
-                    SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
-                    FROM cliente_gestoria cg
-                    JOIN clientes_empresas ce ON ce.cliente_id = cg.cliente_id
-                    WHERE ce.empresa_id IN ({placeholders_emp}) AND {service_filter}
-                    GROUP BY cg.tipo_cliente
-                    """,
-                    tuple(empresa_ids),
-                ).fetchall()
-                for row in tipos:
-                    tipo = str(row_value(row, "tipo", "") or "").strip()
-                    if not tipo:
-                        continue
+                # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
+                now_ts = time.time()
+                cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
+                if cache_key:
                     try:
-                        tipos_map[tipo] = int(row_value(row, "total", 0) or 0)
+                        with Handler._gestoria_dashboard_lock:
+                            cached = Handler._gestoria_dashboard_cache.get(cache_key)
+                            if cached and cached[0] > now_ts and isinstance(cached[1], dict):
+                                json_response(self, cached[1])
+                                return
                     except Exception:
-                        tipos_map[tipo] = 0
-            except Exception as exc:
+                        pass
+
+                today = datetime.now().date()
+                next_30 = today + timedelta(days=30)
+                next_14 = today + timedelta(days=14)
+                service_filter = (
+                    "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+                    "'administracion fincas', 'administración fincas')"
+                )
+                service_filter_join = (
+                    "LOWER(ce_join.servicio) IN ('gestoria', 'gestoría', "
+                    "'administracion fincas', 'administración fincas')"
+                )
+                placeholders_emp = ",".join(["?"] * len(empresa_ids))
+
+                payload = {
+                    "counts": {
+                        "total": 0,
+                        "activos": 0,
+                        "autonomos": 0,
+                        "empresas": 0,
+                        "puntuales": 0,
+                        "modelos_mes": 0,
+                        "rentas_pendientes_presentar": 0,
+                        "sin_vincular_servicio": 0,
+                        "acciones_pendientes": 0,
+                        "presupuestos_estudio": 0,
+                        "encargos_pendientes": 0,
+                    },
+                    "modelos": [],
+                    "modelos_vencidos": [],
+                    "rentas_pendientes": [],
+                    "presupuestos_estudio": [],
+                    "presupuestos_rechazados": [],
+                    "encargos_pendientes": [],
+                    "acciones": [],
+                    "acciones_vencidas": [],
+                }
+
                 try:
-                    Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
-                except Exception:
-                    pass
+                    total = conn.execute(
+                        f"""
+                        SELECT COUNT(DISTINCT c.id) AS total
+                        FROM clientes c
+                        LEFT JOIN clientes_empresas ce_join
+                          ON ce_join.cliente_id = c.id
+                         AND ce_join.empresa_id IN ({placeholders_emp})
+                         AND {service_filter_join}
+                        WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                           OR ce_join.id IS NOT NULL
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchone()
+                    payload["counts"]["total"] = int(row_value(total, "total", 0) or 0)
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:total", exc)
+                    except Exception:
+                        pass
 
-            def tipo_count(*labels):
-                return sum(int(tipos_map.get(label, 0) or 0) for label in labels)
+                active_ids = set()
+                try:
+                    active_rows = conn.execute(
+                        f"""
+                        SELECT DISTINCT
+                          c.id AS cliente_id,
+                          COALESCE(NULLIF(ce_join.estado,''), NULLIF(c.estado,''), '') AS estado
+                        FROM clientes c
+                        LEFT JOIN clientes_empresas ce_join
+                          ON ce_join.cliente_id = c.id
+                         AND ce_join.empresa_id IN ({placeholders_emp})
+                         AND {service_filter_join}
+                        WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                           OR ce_join.id IS NOT NULL
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchall()
+                    active_ids = {
+                        str(row_value(row, "cliente_id", "") or "").strip()
+                        for row in active_rows
+                        if is_gestoria_dashboard_active_state(row_value(row, "estado", ""))
+                    }
+                    active_ids.discard("")
+                    payload["counts"]["activos"] = len(active_ids)
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:active", exc)
+                    except Exception:
+                        pass
 
-            payload["counts"]["autonomos"] = tipo_count("Autónomo", "Autonomo")
-            payload["counts"]["empresas"] = tipo_count("Empresa", "Empresas")
-            payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
+                try:
+                    sin_vincular = conn.execute(
+                        f"""
+                        SELECT COUNT(*) AS total
+                        FROM clientes c
+                        WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                          AND NOT EXISTS (
+                            SELECT 1
+                            FROM clientes_empresas ce
+                            WHERE ce.cliente_id = c.id
+                              AND ce.empresa_id IN ({placeholders_emp})
+                              AND {service_filter}
+                          )
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchone()
+                    payload["counts"]["sin_vincular_servicio"] = int(row_value(sin_vincular, "total", 0) or 0)
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:sin_vincular", exc)
+                    except Exception:
+                        pass
+
+                tipos_map = {}
+                try:
+                    tipos = conn.execute(
+                        f"""
+                        SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
+                        FROM cliente_gestoria cg
+                        JOIN clientes c ON c.id = cg.cliente_id
+                        LEFT JOIN clientes_empresas ce_join
+                          ON ce_join.cliente_id = c.id
+                         AND ce_join.empresa_id IN ({placeholders_emp})
+                         AND {service_filter_join}
+                        WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                           OR ce_join.id IS NOT NULL
+                        GROUP BY cg.tipo_cliente
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchall()
+                    for row in tipos:
+                        tipo = str(row_value(row, "tipo", "") or "").strip()
+                        if not tipo:
+                            continue
+                        try:
+                            tipos_map[tipo] = int(row_value(row, "total", 0) or 0)
+                        except Exception:
+                            tipos_map[tipo] = 0
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
+                    except Exception:
+                        pass
+
+                def tipo_count(*labels):
+                    return sum(int(tipos_map.get(label, 0) or 0) for label in labels)
+
+                payload["counts"]["autonomos"] = tipo_count("Autónomo", "Autonomo")
+                payload["counts"]["empresas"] = tipo_count("Empresa", "Empresas")
+                payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
 
             try:
                 modelos_mes = conn.execute(
