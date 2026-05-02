@@ -2197,9 +2197,29 @@ const resolveEventTargetElement = (event) => {
 };
 
 const closestFromEvent = (event, selector) => {
+  const sel = String(selector || "").trim();
+  if (!sel) return null;
+  // Safari/iOS: algunos targets (p.ej. <use> dentro de SVG) no exponen `closest()`
+  // o no devuelven el botón correctamente. Usamos `composedPath()` como fallback robusto.
+  try {
+    const path = typeof event?.composedPath === "function" ? event.composedPath() : null;
+    if (Array.isArray(path) && path.length) {
+      for (const node of path) {
+        if (!node || node.nodeType !== 1) continue;
+        if (typeof node.closest === "function") {
+          const hit = node.closest(sel);
+          if (hit) return hit;
+        }
+        if (node.parentElement && typeof node.parentElement.closest === "function") {
+          const hit = node.parentElement.closest(sel);
+          if (hit) return hit;
+        }
+      }
+    }
+  } catch (e) {}
   const el = resolveEventTargetElement(event);
   if (!el || typeof el.closest !== "function") return null;
-  return el.closest(selector);
+  return el.closest(sel);
 };
 
 const initDensityToggle = () => {
