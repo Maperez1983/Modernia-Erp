@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-				    <link rel="stylesheet" href="styles.css?v=244" />
+				    <link rel="stylesheet" href="styles.css?v=245" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2453,7 +2453,7 @@
 	              Foto del edificio (opcional)
 	              <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
 	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
-	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden u-mt-10" alt="Foto edificio" style="width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	            </label>
             <label class="span-2">
               Título (opcional)
@@ -2580,7 +2580,7 @@
 	                <input type="hidden" name="foto_edificio_key" />
 	                <input id="workspaceFincasCommunityBuildingPhoto" type="file" accept="image/*" />
 	                <div id="workspaceFincasCommunityBuildingPhotoStatus" class="muted"></div>
-	                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+	                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden u-mt-10" alt="Foto edificio" style="width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	              </label>
 	              <p class="muted span-2">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
 	              <div class="form-actions span-2">
@@ -3229,7 +3229,7 @@
 		                        <option>Otro</option>
 		                      </select>
 		                    </label>
-		                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
+		                    <label class="span-2 u-row u-gap-10 u-items-center">
 		                      <input type="checkbox" name="allow_duplicate" value="1" />
 		                      Permitir duplicado (solo si estás seguro)
 		                    </label>
@@ -4128,7 +4128,7 @@
 	                      Pregunta (opcional)
 	                      <textarea id="copilotWebQuestion" name="question" rows="3" placeholder="Ej. ¿qué cambios introduce y qué impacto tiene en el registro horario o en vacaciones?"></textarea>
 	                    </label>
-	                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
+	                    <label class="span-2 u-row u-gap-10 u-items-center">
 	                      <input type="checkbox" id="copilotWebSaveLibrary" name="save_library" value="1" />
 	                      Guardar esta URL en la biblioteca legal (área/tema actuales)
 	                    </label>
@@ -9749,14 +9749,14 @@
             Gestoría partner (slug, opcional)
             <input name="partner_workspace_slug" placeholder="ej. gestoria_velazquez" />
           </label>
-          <label class="span-2" style="display:flex;gap:10px;align-items:center">
+          <label class="span-2 u-row u-gap-10 u-items-center">
             <input type="checkbox" name="enable_all" />
             Activar todos los módulos (demo)
           </label>
           <div class="span-2">
             <strong>Módulos para el cliente</strong>
             <p class="muted">Recomendado: Importador Facturas + Registro horario + Portal + Documental.</p>
-            <div id="workspaceCustomerModules" class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px"></div>
+            <div id="workspaceCustomerModules" class="form-grid u-gap-10 u-mt-10" style="grid-template-columns:repeat(2,minmax(0,1fr));"></div>
           </div>
           <button type="submit" class="hidden" aria-hidden="true"></button>
         </form>
@@ -9974,11 +9974,11 @@
         </script>
 		    <script src="app-routing.js?v=7"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=710"></script>
+												    <script src="app.js?v=711"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=311";
+											        const TARGET_SW = "/sw.js?v=312";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";
