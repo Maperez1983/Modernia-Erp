@@ -25236,12 +25236,13 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
           COALESCE(s.estado_poliza, s.estado, '') AS estado,
               s.comision,
               s.prima_total,
-              COALESCE(s.fecha_efecto, '') AS fecha_efecto,
-              COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento,
-              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id
-            FROM seguros s
-            LEFT JOIN clientes c ON c.id = s.cliente_id
-            LEFT JOIN clientes_empresas ce
+	              COALESCE(s.fecha_efecto, '') AS fecha_efecto,
+	              COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento,
+	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+	              COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
+	            FROM seguros s
+	            LEFT JOIN clientes c ON c.id = s.cliente_id
+	            LEFT JOIN clientes_empresas ce
               ON ce.cliente_id = s.cliente_id
              AND ce.empresa_id = s.empresa_id
              AND LOWER(COALESCE(ce.servicio, '')) LIKE '%seguro%'
@@ -25295,12 +25296,13 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
                 "fecha": str(row_dict.get("fecha_efecto") or "").strip()
                 or str(row_dict.get("fecha_vencimiento") or "").strip(),
                 "estado": str(row_dict.get("estado") or "").strip() or "-",
-                "cobrada": 1 if is_cobrada else 0,
-                "comision_cobrada": round(comision_cobrada, 2),
-                "comision": round(comision_trabajador, 2),
-                "responsable": str(row_dict.get("responsable") or "").strip(),
-            }
-        )
+	                "cobrada": 1 if is_cobrada else 0,
+	                "comision_cobrada": round(comision_cobrada, 2),
+	                "comision": round(comision_trabajador, 2),
+	                "canal": str(row_dict.get("canal") or "").strip(),
+	                "responsable": str(row_dict.get("responsable") or "").strip(),
+	            }
+	        )
 
     try:
         items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
@@ -25380,14 +25382,15 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
           COALESCE(h.asesor, '') AS responsable,
           COALESCE(h.estado, '') AS estado,
           COALESCE(h.fecha_firma, '') AS fecha_firma,
-              h.comision_modernia,
-              h.comision,
-              h.cesion,
-              h.comision_juan,
-              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id
-            FROM hipotecas h
-            LEFT JOIN clientes c ON c.id = h.cliente_id
-            LEFT JOIN clientes_empresas ce
+	              h.comision_modernia,
+	              h.comision,
+	              h.cesion,
+	              h.comision_juan,
+	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+	              COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
+	            FROM hipotecas h
+	            LEFT JOIN clientes c ON c.id = h.cliente_id
+	            LEFT JOIN clientes_empresas ce
               ON ce.cliente_id = h.cliente_id
              AND ce.empresa_id = h.empresa_id
              AND (
@@ -25441,12 +25444,13 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
                 "inmobiliaria_compra": row_dict.get("inmobiliaria_compra"),
                 "fecha": str(row_dict.get("fecha_firma") or "").strip(),
                 "estado": str(row_dict.get("estado") or "").strip() or "-",
-                "cobrada": 1 if is_cobrada else 0,
-                "comision_cobrada": round(comision_cobrada, 2),
-                "comision": round(comision_trabajador, 2),
-                "responsable": str(row_dict.get("responsable") or "").strip(),
-            }
-        )
+	                "cobrada": 1 if is_cobrada else 0,
+	                "comision_cobrada": round(comision_cobrada, 2),
+	                "comision": round(comision_trabajador, 2),
+	                "canal": str(row_dict.get("canal") or "").strip(),
+	                "responsable": str(row_dict.get("responsable") or "").strip(),
+	            }
+	        )
 
     try:
         items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
@@ -25527,13 +25531,14 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
             f"""
             SELECT
               f.cliente_id,
-              COALESCE(c.nombre, '') AS cliente_nombre,
-              COALESCE(c.nif, '') AS cliente_nif,
-              COALESCE(f.responsable, '') AS responsable,
-              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
-              SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
-              MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
-              MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
+	              COALESCE(c.nombre, '') AS cliente_nombre,
+	              COALESCE(c.nif, '') AS cliente_nif,
+	              COALESCE(f.responsable, '') AS responsable,
+	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+	              MAX(COALESCE(ce.procedencia_canal, c.procedencia_canal, '')) AS canal,
+	              SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
+	              MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
+	              MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
               COUNT(*) AS num_facturas,
               SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
             FROM workspace_facturacion f
@@ -25588,6 +25593,7 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
                 "num_cobradas": num_cobradas,
                 "pendientes": pendientes,
                 "cobrada": 1 if is_cobrada else 0,
+                "canal": str(row_dict.get("canal") or "").strip(),
                 "responsable": str(row_dict.get("responsable") or "").strip(),
             }
         )
@@ -27005,14 +27011,22 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     services_filter = services_filter or []
     if services_filter and not cliente_has_servicio(conn, cliente_id, services_filter):
         return {"error": "Cliente no disponible para este servicio"}
-
-        empresas_query = """
-            SELECT ce.id AS rel_id, ce.empresa_id, e.nombre AS empresa, ce.servicio, ce.captado_por_user_id,
-                   ce.estado, ce.fecha_inicio, ce.fecha_fin
-            FROM clientes_empresas ce
-            LEFT JOIN empresas e ON e.id = ce.empresa_id
-            WHERE ce.cliente_id = ?
-        """
+    empresas_query = """
+        SELECT
+          ce.id AS rel_id,
+          ce.empresa_id,
+          e.nombre AS empresa,
+          ce.servicio,
+          ce.captado_por_user_id,
+          ce.procedencia_canal,
+          ce.procedencia_cliente_id,
+          ce.estado,
+          ce.fecha_inicio,
+          ce.fecha_fin
+        FROM clientes_empresas ce
+        LEFT JOIN empresas e ON e.id = ce.empresa_id
+        WHERE ce.cliente_id = ?
+    """
     values = [cliente_id]
     if services_filter:
         placeholders = ",".join(["?"] * len(services_filter))
@@ -27953,6 +27967,8 @@ def ensure_tables(db_path):
         "procedencia_canal": "procedencia_canal TEXT",
         "procedencia_detalle": "procedencia_detalle TEXT",
         "procedencia_user_id": "procedencia_user_id TEXT",
+        # Referencia a un cliente existente cuando la procedencia es "Referido" (cliente relacionado).
+        "procedencia_cliente_id": "procedencia_cliente_id TEXT",
     }.items():
         try:
             ensure_column(conn, "clientes", col_name, col_sql)
@@ -27962,6 +27978,15 @@ def ensure_tables(db_path):
         ensure_column(conn, "clientes_empresas", "captado_por_user_id", "captado_por_user_id TEXT")
     except Exception:
         pass
+    # Procedencia por servicio (vínculo cliente-empresa): permite registrar canal sin tocar RRHH.
+    for col_name, col_sql in {
+        "procedencia_canal": "procedencia_canal TEXT",
+        "procedencia_cliente_id": "procedencia_cliente_id TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "clientes_empresas", col_name, col_sql)
+        except Exception:
+            pass
     # Performance: índices básicos en tablas muy consultadas (evita timeouts/502 en Render para listados).
     # Best-effort: no bloqueamos arranque si alguna tabla aún no existe en un dataset legacy.
     try:
@@ -58286,6 +58311,7 @@ class Handler(BaseHTTPRequestHandler):
             procedencia_canal = str(payload.get("procedencia_canal") or "").strip()
             procedencia_detalle = str(payload.get("procedencia_detalle") or "").strip()
             procedencia_user_id = str(payload.get("procedencia_user_id") or "").strip()
+            procedencia_cliente_id = str(payload.get("procedencia_cliente_id") or "").strip()
             if not procedencia_canal:
                 if actor_user_id:
                     procedencia_canal = "Colaborador interno"
@@ -58300,11 +58326,11 @@ class Handler(BaseHTTPRequestHandler):
                 INSERT INTO clientes (
                   id, nombre, tipo_persona, nif, telefono, movil, otro_telefono, email, fecha_nacimiento,
                   direccion, direccion_numero, codigo_postal, localidad, poblacion, provincia,
-                  id_personal, captado_por_user_id, procedencia_canal, procedencia_detalle, procedencia_user_id,
+                  id_personal, captado_por_user_id, procedencia_canal, procedencia_detalle, procedencia_user_id, procedencia_cliente_id,
                   cliente_generico_web, tiene_pedido, viabilidad, fecha_estudio, valor_maximo_piso,
                   perfil_kiron, estudio_vip, tipo, perfil, estado, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -58328,6 +58354,7 @@ class Handler(BaseHTTPRequestHandler):
                     procedencia_canal,
                     procedencia_detalle,
                     procedencia_user_id,
+                    procedencia_cliente_id or None,
                     parse_boolish(payload.get("cliente_generico_web")),
                     parse_boolish(payload.get("tiene_pedido")),
                     payload.get("viabilidad"),
@@ -58541,6 +58568,7 @@ class Handler(BaseHTTPRequestHandler):
                 "procedencia_canal",
                 "procedencia_detalle",
                 "procedencia_user_id",
+                "procedencia_cliente_id",
                 "cliente_generico_web",
                 "tiene_pedido",
                 "viabilidad",
@@ -58655,7 +58683,15 @@ class Handler(BaseHTTPRequestHandler):
             if not rel_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("servicio", "estado", "fecha_inicio", "fecha_fin", "captado_por_user_id")
+            allowed = (
+                "servicio",
+                "estado",
+                "fecha_inicio",
+                "fecha_fin",
+                "captado_por_user_id",
+                "procedencia_canal",
+                "procedencia_cliente_id",
+            )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)

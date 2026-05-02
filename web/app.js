@@ -14466,27 +14466,29 @@ const renderWorkspaceRrhhHub = () => {
             } else {
               left.innerHTML = nameHtml;
             }
-            const right = document.createElement("div");
-            right.className = "inline-actions";
-            const meta = document.createElement("div");
-            meta.className = "muted";
-            if (String(it?.source || "") === "manual") {
-              const st = String(it?.estado_cobro || (it.cobrada ? "cobrado" : "pendiente")).toLowerCase();
-              const paidLabel = st === "cobrado" ? "Cobrado" : st === "parcial" ? "Parcial" : st === "anulado" ? "Anulado" : "Pendiente";
-              const baseLabel = euroFormatter.format(parseMoneyValue(it.importe_base || 0));
+	            const right = document.createElement("div");
+	            right.className = "inline-actions";
+	            const meta = document.createElement("div");
+	            meta.className = "muted";
+              const canalRaw = String(it?.canal || "").trim();
+              const canalTag = canalRaw ? ` · Canal: ${canalRaw}` : "";
+	            if (String(it?.source || "") === "manual") {
+	              const st = String(it?.estado_cobro || (it.cobrada ? "cobrado" : "pendiente")).toLowerCase();
+	              const paidLabel = st === "cobrado" ? "Cobrado" : st === "parcial" ? "Parcial" : st === "anulado" ? "Anulado" : "Pendiente";
+	              const baseLabel = euroFormatter.format(parseMoneyValue(it.importe_base || 0));
               const pctLabel = `${parseMoneyValue(it.comision_pct || 0)}%`;
               meta.textContent = `Manual · ${paidLabel} · ${it.descripcion || ""} · Base: ${baseLabel} · Comisión (${pctLabel}): ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-            } else if (serviceKey === "renta") {
-              meta.textContent = `Renta ${it.ejercicio || ""} · ${it.estado_presentacion || ""} · ${it.cobrada ? "Cobrada" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-            } else if (serviceKey === "seguros") {
-              meta.textContent = `Seguro ${it.poliza_numero || ""} · ${it.compania || ""} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-            } else if (serviceKey === "hipotecas") {
-              meta.textContent = `Hipoteca ${it.banco || ""} · ${it.oficina || it.inmobiliaria_compra || ""} · ${it.cobrada ? "Firmada" : (it.estado || "Pendiente")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-            } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
-              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)} (${String(it.num_cobradas || 0)} cobradas, ${String(it.pendientes || 0)} pendientes)`;
-            } else {
-              meta.textContent = `${it.cobrada ? "Cobrado" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}`;
-            }
+	            } else if (serviceKey === "renta") {
+	              meta.textContent = `Renta ${it.ejercicio || ""} · ${it.estado_presentacion || ""} · ${it.cobrada ? "Cobrada" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}${canalTag}`;
+	            } else if (serviceKey === "seguros") {
+	              meta.textContent = `Seguro ${it.poliza_numero || ""} · ${it.compania || ""} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Bonificación: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}${canalTag}`;
+	            } else if (serviceKey === "hipotecas") {
+	              meta.textContent = `Hipoteca ${it.banco || ""} · ${it.oficina || it.inmobiliaria_compra || ""} · ${it.cobrada ? "Firmada" : (it.estado || "Pendiente")} · Ingreso: ${euroFormatter.format(parseMoneyValue(it.comision_cobrada || 0))} · Comisión trabajador: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}${canalTag}`;
+	            } else if (serviceKey === "gestoria" || serviceKey === "fincas") {
+	              meta.textContent = `${serviceKey === "gestoria" ? "Gestoría" : "Fincas"} · ${it.cobrada ? "Cobrado" : "Pendiente"} · Base imponible anual: ${euroFormatter.format(parseMoneyValue(it.facturado_anual || 0))} · Comisión trabajador (10%): ${euroFormatter.format(parseMoneyValue(it.comision || 0))} · Facturas: ${String(it.num_facturas || 0)} (${String(it.num_cobradas || 0)} cobradas, ${String(it.pendientes || 0)} pendientes)${canalTag}`;
+	            } else {
+	              meta.textContent = `${it.cobrada ? "Cobrado" : "Pendiente"} · Comisión: ${euroFormatter.format(parseMoneyValue(it.comision || 0))}${canalTag}`;
+	            }
 	            right.appendChild(meta);
 	            if (canEditEconomicos && String(it?.source || "") === "manual") {
 	              const edit = document.createElement("button");
@@ -38902,6 +38904,27 @@ const loadClientesList = () => {
   });
 };
 
+// Lista completa de clientes (sin filtrar por servicio) para selectores globales (p. ej. "Cliente relacionado").
+const loadClientesAllList = () => {
+  return api("/api/clientes_list").then((data) => {
+    const list = Array.isArray(data) ? data : [];
+    list.sort((a, b) => {
+      const nameA = normalizeNombre(formatNombreCliente(a.nombre));
+      const nameB = normalizeNombre(formatNombreCliente(b.nombre));
+      return nameA.localeCompare(nameB, "es", { numeric: true, sensitivity: "base" });
+    });
+    state.clientesAllList = list;
+    state.clientesAllListLoadedAt = Date.now();
+    return state.clientesAllList;
+  });
+};
+
+const ensureClientesAllList = async () => {
+  const loaded = Array.isArray(state.clientesAllList) ? state.clientesAllList : [];
+  if (loaded.length) return loaded;
+  return loadClientesAllList();
+};
+
 const refreshClientesSummary = async () => {
   try {
     const [_, __, list] = await Promise.all([loadClientesCardStats(), loadClientesStats(), loadClientesList()]);
@@ -62138,7 +62161,7 @@ const openClienteDetail = (id) => {
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const trHead = document.createElement("tr");
-	        ["empresa", "servicio", "traido_por", "estado", "fecha_inicio", "fecha_fin", "accion"].forEach((col) => {
+	        ["empresa", "servicio", "canal", "referido_por", "estado", "fecha_inicio", "fecha_fin", "accion"].forEach((col) => {
 	          const th = document.createElement("th");
 	          th.textContent = formatHeader(col);
 	          trHead.appendChild(th);
@@ -62162,42 +62185,102 @@ const openClienteDetail = (id) => {
 	          servicioTd.appendChild(servicioSelect);
 	          tr.appendChild(servicioTd);
 
-	          const captadoTd = document.createElement("td");
-	          const captadoSelect = document.createElement("select");
-	          captadoSelect.classList.add("inline-input");
-	          const captadoCurrent = String(row.captado_por_user_id || cliente.captado_por_user_id || "").trim();
-	          const captadoOptions = (() => {
-	            const users = Array.isArray(state.usersList) ? state.usersList : [];
-	            const opts = users
-	              .map((u) => {
-	                const id = String(u?.id || "").trim();
-	                if (!id) return null;
-	                const name = `${u?.nombre || ""} ${u?.apellido || ""}`.replace(/\\s+/g, " ").trim();
-	                const user = String(u?.usuario || "").trim();
-	                const email = String(u?.email || "").trim();
-	                const label = (name || user || email || id) + (user ? ` (@${user})` : "");
-	                return { value: id, label };
-	              })
-	              .filter(Boolean);
-	            try {
-	              opts.sort((a, b) =>
-	                String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" })
-	              );
-	            } catch (e) {}
-	            return [{ value: "", label: "-" }, ...opts];
-	          })();
-	          captadoOptions.forEach((opt) => {
-	            captadoSelect.appendChild(createOption(opt.value, opt.label));
+	          const canalTd = document.createElement("td");
+	          const canalSelect = document.createElement("select");
+	          canalSelect.classList.add("inline-input");
+	          const canalOptions = ["", "Oficina", "Internet", "Cliente relacionado", "Colaborador interno"];
+	          canalOptions.forEach((opt) => {
+	            canalSelect.appendChild(createOption(opt, opt || "-"));
 	          });
-	          if (captadoCurrent && !captadoOptions.some((opt) => String(opt.value) === captadoCurrent)) {
-	            captadoSelect.appendChild(createOption(captadoCurrent, captadoCurrent));
+	          const canalCurrent = String(row.procedencia_canal || "").trim();
+	          if (canalCurrent && !canalOptions.some((opt) => String(opt) === canalCurrent)) {
+	            canalSelect.appendChild(createOption(canalCurrent, canalCurrent));
 	          }
-	          captadoSelect.value = captadoCurrent;
-	          captadoSelect.addEventListener("change", () => {
-	            saveClienteEmpresaField(row.rel_id, "captado_por_user_id", captadoSelect.value);
+	          canalSelect.value = canalCurrent;
+	          canalSelect.addEventListener("change", () => {
+	            saveClienteEmpresaField(row.rel_id, "procedencia_canal", canalSelect.value);
+	            void renderReferidoControl();
 	          });
-	          captadoTd.appendChild(captadoSelect);
-	          tr.appendChild(captadoTd);
+	          canalTd.appendChild(canalSelect);
+	          tr.appendChild(canalTd);
+
+	          const referidoTd = document.createElement("td");
+	          const renderReferidoControl = async () => {
+	            referidoTd.innerHTML = "";
+	            const key = normalizeSimple(canalSelect.value || "");
+	            if (key === "colaboradorinterno") {
+	              const captadoSelect = document.createElement("select");
+	              captadoSelect.classList.add("inline-input");
+	              const captadoCurrent = String(row.captado_por_user_id || cliente.captado_por_user_id || "").trim();
+	              const captadoOptions = (() => {
+	                const users = Array.isArray(state.usersList) ? state.usersList : [];
+	                const opts = users
+	                  .map((u) => {
+	                    const id = String(u?.id || "").trim();
+	                    if (!id) return null;
+	                    const name = `${u?.nombre || ""} ${u?.apellido || ""}`.replace(/\\s+/g, " ").trim();
+	                    const user = String(u?.usuario || "").trim();
+	                    const email = String(u?.email || "").trim();
+	                    const label = (name || user || email || id) + (user ? ` (@${user})` : "");
+	                    return { value: id, label };
+	                  })
+	                  .filter(Boolean);
+	                try {
+	                  opts.sort((a, b) =>
+	                    String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" })
+	                  );
+	                } catch (e) {}
+	                return [{ value: "", label: "-" }, ...opts];
+	              })();
+	              captadoOptions.forEach((opt) => {
+	                captadoSelect.appendChild(createOption(opt.value, opt.label));
+	              });
+	              if (captadoCurrent && !captadoOptions.some((opt) => String(opt.value) === captadoCurrent)) {
+	                captadoSelect.appendChild(createOption(captadoCurrent, captadoCurrent));
+	              }
+	              captadoSelect.value = captadoCurrent;
+	              captadoSelect.addEventListener("change", () => {
+	                saveClienteEmpresaField(row.rel_id, "captado_por_user_id", captadoSelect.value);
+	              });
+	              referidoTd.appendChild(captadoSelect);
+	              return;
+	            }
+	            if (key === "clienterelacionado") {
+	              const select = document.createElement("select");
+	              select.classList.add("inline-input");
+	              select.appendChild(createOption("", "-"));
+	              let clientesAll = [];
+	              try {
+	                clientesAll = await ensureClientesAllList();
+	              } catch (e) {
+	                clientesAll = [];
+	              }
+	              (clientesAll || []).forEach((c) => {
+	                const id = String(c?.id || "").trim();
+	                if (!id) return;
+	                if (String(id) === String(cliente?.id || "")) return;
+	                const nif = String(c?.nif || "").trim();
+	                const label = `${formatNombreCliente(c?.nombre || "") || c?.nombre || id}${nif ? ` · ${nif}` : ""}`;
+	                select.appendChild(createOption(id, label));
+	              });
+	              const current = String(row.procedencia_cliente_id || "").trim();
+	              if (current && !Array.from(select.options).some((opt) => String(opt.value) === current)) {
+	                select.appendChild(createOption(current, current));
+	              }
+	              select.value = current;
+	              select.addEventListener("change", () => {
+	                saveClienteEmpresaField(row.rel_id, "procedencia_cliente_id", select.value);
+	              });
+	              referidoTd.appendChild(select);
+	              return;
+	            }
+	            const empty = document.createElement("span");
+	            empty.className = "muted";
+	            empty.textContent = "-";
+	            referidoTd.appendChild(empty);
+	          };
+	          void renderReferidoControl();
+	          tr.appendChild(referidoTd);
 
 	          const estadoTd = document.createElement("td");
 	          const estadoInput = document.createElement("input");
