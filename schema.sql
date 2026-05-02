@@ -1655,6 +1655,59 @@ CREATE TABLE IF NOT EXISTS iivtnu_param_sets (
   FOREIGN KEY (municipio_ine) REFERENCES iivtnu_municipios(ine)
 );
 
+-- Seguros: recibos (cobros/impagos) y siniestros (seguimiento operativo).
+CREATE TABLE IF NOT EXISTS seguros_recibos (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  seguro_id TEXT,
+  cliente_id TEXT,
+  referencia TEXT,
+  poliza_numero TEXT,
+  compania TEXT,
+  ramo TEXT,
+  fecha_emision TEXT,
+  fecha_vencimiento TEXT,
+  fecha_cobro TEXT,
+  estado TEXT,
+  prima_total REAL,
+  comision REAL,
+  comision_pct REAL,
+  importe_liquidacion REAL,
+  notas TEXT,
+  doc_key TEXT,
+  doc_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (seguro_id) REFERENCES seguros(id)
+);
+
+CREATE TABLE IF NOT EXISTS seguros_siniestros (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  seguro_id TEXT,
+  cliente_id TEXT,
+  numero_expediente TEXT,
+  compania TEXT,
+  ramo TEXT,
+  fecha_siniestro TEXT,
+  fecha_apertura TEXT,
+  fecha_cierre TEXT,
+  estado TEXT,
+  tipo TEXT,
+  descripcion TEXT,
+  importe_reserva REAL,
+  importe_pagado REAL,
+  gestor TEXT,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (seguro_id) REFERENCES seguros(id)
+);
+
 -- Índices mínimos para rendimiento (CREATE INDEX IF NOT EXISTS es idempotente).
 CREATE INDEX IF NOT EXISTS idx_clientes_empresa_id ON clientes(empresa_id);
 CREATE INDEX IF NOT EXISTS idx_clientes_nif ON clientes(nif);

@@ -5916,6 +5916,14 @@
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
               <span class="tc-mod-label">Conta</span>
             </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="recibos" title="Recibos">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+              <span class="tc-mod-label">Recibos</span>
+            </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="siniestros" title="Siniestros">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
+              <span class="tc-mod-label">Siniestros</span>
+            </button>
           </div>
           <datalist id="segurosCompaniasList">
             <option value="Allianz"></option>
@@ -6725,6 +6733,119 @@
             <div id="segurosContabilidadTable"></div>
             <div class="footer" id="segurosContabilidadInfo"></div>
           </div>
+          </div>
+          <div class="seguros-tab" data-seguros-tab="recibos">
+            <div class="form-card">
+              <h3>Recibos · Seguros</h3>
+              <p class="muted">Registro de recibos/cobros para controlar impagos y comisiones.</p>
+              <form id="segurosRecibosForm" class="form-grid">
+                <label>
+                  Fecha emisión
+                  <input name="fecha_emision" type="date" required />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option value="emitido">Emitido</option>
+                    <option value="cobrado">Cobrado</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="impagado">Impagado</option>
+                    <option value="anulado">Anulado</option>
+                  </select>
+                </label>
+                <label>
+                  Prima total
+                  <input name="prima_total" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label>
+                  Comisión
+                  <input name="comision" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label class="span-2">
+                  Cliente (opcional)
+                  <select id="segurosRecibosCliente" name="cliente_id"></select>
+                </label>
+                <label class="span-2">
+                  Póliza vinculada
+                  <select id="segurosRecibosPoliza" name="seguro_id">
+                    <option value="">Sin vincular</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Notas
+                  <textarea name="notas" rows="2"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Añadir recibo</button>
+                  <span id="segurosRecibosStatus" class="muted"></span>
+                </div>
+              </form>
+              <div class="table-tools">
+                <input id="segurosRecibosSearch" placeholder="Filtrar recibos..." />
+              </div>
+              <div id="segurosRecibosTable"></div>
+              <div class="footer" id="segurosRecibosInfo"></div>
+            </div>
+          </div>
+          <div class="seguros-tab" data-seguros-tab="siniestros">
+            <div class="form-card">
+              <h3>Siniestros · Seguros</h3>
+              <p class="muted">Registro y seguimiento básico de siniestros por póliza.</p>
+              <form id="segurosSiniestrosForm" class="form-grid">
+                <label>
+                  Fecha siniestro
+                  <input name="fecha_siniestro" type="date" required />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option value="abierto">Abierto</option>
+                    <option value="en tramitacion">En tramitación</option>
+                    <option value="cerrado">Cerrado</option>
+                    <option value="rechazado">Rechazado</option>
+                  </select>
+                </label>
+                <label>
+                  Tipo
+                  <input name="tipo" placeholder="Ej. Daños, RC, Auto..." />
+                </label>
+                <label>
+                  Nº expediente
+                  <input name="numero_expediente" placeholder="Opcional" />
+                </label>
+                <label>
+                  Importe reserva
+                  <input name="importe_reserva" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label>
+                  Importe pagado
+                  <input name="importe_pagado" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label class="span-2">
+                  Cliente (opcional)
+                  <select id="segurosSiniestrosCliente" name="cliente_id"></select>
+                </label>
+                <label class="span-2">
+                  Póliza vinculada
+                  <select id="segurosSiniestrosPoliza" name="seguro_id">
+                    <option value="">Sin vincular</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Descripción
+                  <textarea name="descripcion" rows="2"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Añadir siniestro</button>
+                  <span id="segurosSiniestrosStatus" class="muted"></span>
+                </div>
+              </form>
+              <div class="table-tools">
+                <input id="segurosSiniestrosSearch" placeholder="Filtrar siniestros..." />
+              </div>
+              <div id="segurosSiniestrosTable"></div>
+              <div class="footer" id="segurosSiniestrosInfo"></div>
+            </div>
           </div>
         </div>
         <div id="finCrmSection" class="hidden">
