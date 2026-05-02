@@ -11212,8 +11212,8 @@ const renderWorkspaceCopilotHub = () => {
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["plantilla", "equipo", "horario", "turnos", "ausencias", "gastos", "economicos", "docs", "usuarios"].includes(key)) return key;
-  return "plantilla";
+  if (["dashboard", "plantilla", "equipo", "horario", "turnos", "ausencias", "gastos", "economicos", "docs", "usuarios"].includes(key)) return key;
+  return "dashboard";
 };
 
 const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
@@ -11291,13 +11291,13 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	    state.workspaceRrhhEquipoView = "list";
 	  }
 	  // UX: para admin, centralizamos en "Equipo" (Plantilla/Usuarios se integran ahí).
-	  if (manager && ["plantilla", "usuarios"].includes(state.workspaceRrhhTab)) {
+	  if (manager && ["dashboard", "plantilla", "usuarios"].includes(state.workspaceRrhhTab)) {
 	    state.workspaceRrhhTab = "equipo";
 	  }
 	  // Para trabajador, solo su ficha (no Equipo/Usuarios).
-  if (!manager && ["equipo", "usuarios"].includes(state.workspaceRrhhTab)) {
-    state.workspaceRrhhTab = "plantilla";
-  }
+	  if (!manager && ["equipo", "usuarios"].includes(state.workspaceRrhhTab)) {
+	    state.workspaceRrhhTab = "dashboard";
+	  }
 
   if (!manager) {
     state.workspaceRrhhScopeAll = false;
@@ -11478,8 +11478,8 @@ const renderWorkspaceRrhhHub = () => {
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
   let tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
-  if (manager && ["plantilla", "usuarios"].includes(tab)) tab = "equipo";
-  if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "plantilla";
+  if (manager && ["dashboard", "plantilla", "usuarios"].includes(tab)) tab = "equipo";
+  if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "dashboard";
   state.workspaceRrhhTab = tab;
   const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
   const wideLayout = Boolean((manager && tab === "equipo") || !manager);
@@ -11622,11 +11622,13 @@ const renderWorkspaceRrhhHub = () => {
     : [];
   const pendingTeamAusenciasCount = pendingTeamAusencias.length;
 
-  const rrhhTabIcon = (key) => {
-    switch (key) {
-      case "equipo":
-      case "plantilla":
-        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/><path d="M22 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+	  const rrhhTabIcon = (key) => {
+	    switch (key) {
+	      case "dashboard":
+	        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 13h7v7H4zM13 4h7v16h-7zM4 4h7v7H4z" stroke="currentColor" stroke-width="2"/></svg>`;
+	      case "equipo":
+	      case "plantilla":
+	        return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/><path d="M22 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
       case "horario":
         return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       case "turnos":
@@ -11841,7 +11843,7 @@ const renderWorkspaceRrhhHub = () => {
   const renderTabs = () => `
     <div class="tc-modulebar tc-modulebar--micro workspace-rrhh-tabs">
       ${[
-        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
+        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "dashboard", label: "Dashboard" }, { key: "plantilla", label: "Personal" }]),
         { key: "horario", label: "Horario" },
         { key: "turnos", label: "Turnos" },
         { key: "ausencias", label: "Vacaciones" },
@@ -13679,10 +13681,10 @@ const renderWorkspaceRrhhHub = () => {
     </div>
 	  `;
 
-	  const renderEconomicos = () => {
-	    const authUserId = String(getAuthScopeUser?.()?.id || "").trim();
-	    const persona =
-	      selectedEmployee ||
+		  const renderEconomicos = () => {
+		    const authUserId = String(getAuthScopeUser?.()?.id || "").trim();
+		    const persona =
+		      selectedEmployee ||
 	      employees.find((row) => authUserId && String(row?.usuario_id || "").trim() === authUserId) ||
 	      employees.find((row) => Number(row?.usuario_manual || 0) === 1) ||
 	      null;
@@ -13710,11 +13712,29 @@ const renderWorkspaceRrhhHub = () => {
 	        </div>
 	        ${renderRrhhEconomicosPanel({ personaId, empresaId })}
 	      </div>
-	    `;
-	  };
+		    `;
+		  };
+
+		  const renderDashboard = () => {
+		    if (manager) {
+		      return `
+		        <div class="workspace-rrhh-panel-card">
+		          <div class="section-head">
+		            <div>
+		              <h4>Dashboard</h4>
+		              <p class="muted">Disponible en modo “self”.</p>
+		            </div>
+		          </div>
+		        </div>
+		      `;
+		    }
+		    // En modo trabajador, el dashboard coincide con el contenido actual de "Personal".
+		    return renderPlantilla();
+		  };
 
 		  const panelHtml =
 		    tab === "equipo" ? renderEquipo()
+		    : tab === "dashboard" ? renderDashboard()
 		    : tab === "plantilla" ? renderPlantilla()
 		    : tab === "horario" ? renderHorario()
 		    : tab === "turnos" ? renderTurnos()
