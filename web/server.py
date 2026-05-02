@@ -69344,6 +69344,13 @@ class Handler(BaseHTTPRequestHandler):
             estado_bucket_expr = seguro_estado_bucket_expr()
             uploaded_clause = uploaded_policy_filter()
             uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
+            # Normaliza fechas para que DD/MM/YYYY cuente en alertas igual que en KPIs.
+            fecha_efecto_date = seguro_date_sql("fecha_efecto")
+            fecha_venc_raw_date = seguro_date_sql("fecha_vencimiento")
+            fecha_venc_expr = (
+                f"COALESCE({fecha_venc_raw_date}, "
+                f"CASE WHEN {fecha_efecto_date} IS NOT NULL THEN DATE({fecha_efecto_date}, '+1 year') ELSE NULL END)"
+            )
             rows_venc = conn.execute(
                 f"""
                 SELECT
@@ -69355,14 +69362,14 @@ class Handler(BaseHTTPRequestHandler):
                   'vencimiento' AS alert_type,
                   '' AS estado,
                   fecha_efecto,
-                  COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
+                  {fecha_venc_expr} AS fecha_vencimiento
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
-                  AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
+                  AND {fecha_venc_expr} IS NOT NULL
+                  AND DATE({fecha_venc_expr}) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
-                ORDER BY DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) ASC
+                ORDER BY DATE({fecha_venc_expr}) ASC
                 LIMIT 50
                 """,
                 (empresa_id, uploaded_param),
@@ -69378,15 +69385,15 @@ class Handler(BaseHTTPRequestHandler):
                   'entrada_vigor' AS alert_type,
                   estado,
                   fecha_efecto,
-                  COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
+                  {fecha_venc_expr} AS fecha_vencimiento
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND fecha_efecto IS NOT NULL
-                  AND DATE(fecha_efecto) BETWEEN DATE('now','localtime')
+                  AND {fecha_efecto_date} IS NOT NULL
+                  AND DATE({fecha_efecto_date}) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
                   AND {estado_bucket_expr} = 'contratada'
-                ORDER BY DATE(fecha_efecto) ASC
+                ORDER BY DATE({fecha_efecto_date}) ASC
                 LIMIT 50
                 """,
                 (empresa_id, uploaded_param),
@@ -69403,6 +69410,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             in_vigor_expr = in_vigor_policy_filter()
+            # Fechas normalizadas (maneja YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY)
+            # Nota: el bucket de estado usa esta normalización; vencimientos debe usarla también.
+            fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
+            fecha_venc_raw_date = seguro_date_sql("fecha_vencimiento", "s")
+            fecha_venc_expr = (
+                f"COALESCE({fecha_venc_raw_date}, "
+                f"CASE WHEN {fecha_efecto_date} IS NOT NULL THEN DATE({fecha_efecto_date}, '+1 year') ELSE NULL END)"
+            )
             # Importante: muchas queries usan alias `s`. El filtro de subida debe ser:
             # - sin alias para el "probe" (resolve_uploaded_only_param)
             # - con alias para las queries principales (EXISTS usa la PK de la tabla externa)
@@ -69511,10 +69526,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
+                  AND {fecha_venc_expr} IS NOT NULL
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
-                  AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
+                  AND DATE({fecha_venc_expr}) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
                 (empresa_id, uploaded_param),
