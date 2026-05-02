@@ -24671,6 +24671,7 @@ def sanitize_renta_entry(entry):
     sanitized["remesada"] = remesada_val
     sanitized["precio_servicio"] = coerce_renta_money(entry.get("precio_servicio"))
     sanitized["responsable"] = str(entry.get("responsable") or "").strip()
+    sanitized["fecha_cobro"] = str(entry.get("fecha_cobro") or "").strip()
     return sanitized
 
 
@@ -65617,30 +65618,30 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            try:
-                acciones = conn.execute(
-                    f"""
-                    SELECT a.fecha, a.hora,
-                           COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                           a.tipo, a.estado
-                    FROM acciones a
-                    LEFT JOIN clientes c ON c.id = a.cliente_id
-                    WHERE a.empresa_id IN ({placeholders_emp})
-                      AND LOWER(a.servicio) = 'gestoria'
-                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                      AND a.fecha IS NOT NULL
-                      AND date(a.fecha) BETWEEN date(?) AND date(?)
-                    ORDER BY a.fecha ASC, a.hora ASC
-                    LIMIT 10
-                    """,
-                    tuple([*empresa_ids, today.isoformat(), next_14.isoformat()]),
-                ).fetchall()
-                payload["acciones"] = [dict(r) for r in acciones]
-            except Exception as exc:
                 try:
-                    Handler._record_api_error("/api/gestoria_dashboard:acciones", exc)
-                except Exception:
-                    pass
+                    acciones = conn.execute(
+                        f"""
+                        SELECT a.fecha, a.hora,
+                               COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                               a.tipo, a.estado
+                        FROM acciones a
+                        LEFT JOIN clientes c ON c.id = a.cliente_id
+                        WHERE a.empresa_id IN ({placeholders_emp})
+                          AND LOWER(a.servicio) = 'gestoria'
+                          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                          AND a.fecha IS NOT NULL
+                          AND date(a.fecha) BETWEEN date(?) AND date(?)
+                        ORDER BY a.fecha ASC, a.hora ASC
+                        LIMIT 10
+                        """,
+                        tuple([*empresa_ids, today.isoformat(), next_14.isoformat()]),
+                    ).fetchall()
+                    payload["acciones"] = [dict(r) for r in acciones]
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:acciones", exc)
+                    except Exception:
+                        pass
 
                 try:
                     acciones_vencidas = conn.execute(
@@ -65693,22 +65694,74 @@ class Handler(BaseHTTPRequestHandler):
                         tuple([*empresa_ids, *[str(y) for y in years]]),
                     ).fetchall()
                     econ_map = {str(row_value(r, "ym", "") or ""): dict(r) for r in (econ_rows or [])}
+
                     econ_series = {}
+                    years_str = {str(y) for y in years}
+                    renta_by_year_month = {str(y): {m: 0.0 for m in month_labels} for y in years}
+                    renta_missing_by_year = {str(y): 0.0 for y in years}
+
+                    try:
+                        placeholders_emp_renta = ",".join(["?"] * len(empresa_ids))
+                        renta_rows = conn.execute(
+                            f"""
+                            SELECT cg.renta_detalles
+                            FROM cliente_gestoria cg
+                            JOIN clientes c ON c.id = cg.cliente_id
+                            LEFT JOIN clientes_empresas ce
+                              ON ce.cliente_id = c.id
+                             AND ce.empresa_id IN ({placeholders_emp_renta})
+                             AND {service_filter_join}
+                            WHERE COALESCE(cg.mod_renta, 0) = 1
+                              AND (
+                                COALESCE(c.empresa_id, '') IN ({placeholders_emp_renta})
+                                OR ce.id IS NOT NULL
+                              )
+                            """,
+                            tuple([*empresa_ids, *empresa_ids]),
+                        ).fetchall()
+                        for r in renta_rows or []:
+                            renta_detalles = row_value(r, "renta_detalles", "") if r is not None else ""
+                            payload_r = parse_renta_detalles_payload(renta_detalles)
+                            entries = sanitize_renta_entries(payload_r.get("entries") or [])
+                            for e in entries:
+                                ejercicio = str(e.get("ejercicio") or "").strip()
+                                if ejercicio not in years_str:
+                                    continue
+                                if int(e.get("cobrada") or 0) != 1:
+                                    continue
+                                amount = float(coerce_renta_money(e.get("precio_servicio")) or 0.0)
+                                if amount <= 0:
+                                    continue
+                                date_raw = str(e.get("fecha_cobro") or e.get("presentacion_fecha") or "").strip()
+                                month = date_raw[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", date_raw) else ""
+                                if month in month_labels:
+                                    renta_by_year_month[ejercicio][month] += amount
+                                else:
+                                    renta_missing_by_year[ejercicio] += amount
+                    except Exception:
+                        renta_by_year_month = {str(y): {m: 0.0 for m in month_labels} for y in years}
+                        renta_missing_by_year = {str(y): 0.0 for y in years}
+
                     for y in years:
                         ingresos = []
                         gastos = []
+                        rentas = []
                         for m in month_labels:
                             ym = f"{y}-{m}"
                             row = econ_map.get(ym) or {}
                             ingresos.append(float(row_value(row, "ingresos", 0) or 0))
                             gastos.append(float(row_value(row, "gastos", 0) or 0))
+                            rentas.append(round(float(renta_by_year_month.get(str(y), {}).get(m, 0.0) or 0.0), 2))
                         econ_series[str(y)] = {
                             "ingresos": ingresos,
                             "gastos": gastos,
+                            "rentas_cobradas": rentas,
                             "neto": [i - g for i, g in zip(ingresos, gastos)],
                             "total_ingresos": sum(ingresos),
                             "total_gastos": sum(gastos),
                             "total_neto": sum(ingresos) - sum(gastos),
+                            "total_rentas_cobradas": sum(rentas),
+                            "total_rentas_sin_fecha": float(renta_missing_by_year.get(str(y), 0.0) or 0.0),
                         }
                     payload["economics"] = {"years": years, "labels": month_labels, "series": econ_series}
                 except Exception as exc:

@@ -36997,6 +36997,8 @@ const createClienteForHipoteca = async (nombre, sourceRow, columns) => {
     id: randomId(),
     tipo_persona: "Física",
     nombre: String(nombre || "").trim(),
+    procedencia_canal: "Importación",
+    procedencia_detalle: "Financiaciones (BDT)",
   };
   const nif = getHipotecaFieldValue(sourceRow, columns, ["nif", "dni", "documento"]);
   const telefono = getHipotecaFieldValue(sourceRow, columns, ["telefono", "movil", "teléfono"]);
@@ -54809,6 +54811,8 @@ const createClienteFromOcr = async (type, fields) => {
     nombre,
     tipo_persona: "Física",
     nif,
+    procedencia_canal: "Importación",
+    procedencia_detalle: "Seguros (OCR)",
     telefono: fields.telefono || "",
     email: fields.email || "",
     direccion: fields.direccion || "",
@@ -58351,12 +58355,14 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
       if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Creando cliente...";
       try {
         const newId = randomId();
-        const payload = {
-          id: newId,
-          nombre,
-          tipo_persona: "Física",
-          nif,
-        };
+	        const payload = {
+	          id: newId,
+	          nombre,
+	          tipo_persona: "Física",
+	          nif,
+	          procedencia_canal: "Importación",
+	          procedencia_detalle: "Rentas",
+	        };
         const res = await fetch("/api/clientes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
