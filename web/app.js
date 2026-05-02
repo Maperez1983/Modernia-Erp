@@ -51021,7 +51021,9 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   gestoriaDashRentaReload.disabled = true;
   gestoriaDashRentaReload.textContent = "Cargando...";
   try {
-    const qs = new URLSearchParams({ workspace_id: workspaceId, ejercicio: String(ejercicio || "") });
+    const qs = new URLSearchParams({ ejercicio: String(ejercicio || "") });
+    if (workspaceId) qs.set("workspace_id", workspaceId);
+    else qs.set("empresa_id", String(empresa.id || "").trim());
     if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
@@ -51040,7 +51042,6 @@ const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-  if (!workspaceId) return;
 
   if (gestoriaDashboardEmpresaScope && gestoriaDashboardEmpresaScope.dataset.bound !== "1") {
     gestoriaDashboardEmpresaScope.dataset.bound = "1";
@@ -51068,7 +51069,9 @@ const loadGestoriaDashboard = () => {
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
-  const qsBase = new URLSearchParams({ workspace_id: workspaceId });
+  const qsBase = new URLSearchParams();
+  if (workspaceId) qsBase.set("workspace_id", workspaceId);
+  else qsBase.set("empresa_id", String(empresa.id || "").trim());
   if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
