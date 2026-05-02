@@ -22127,8 +22127,9 @@ const openGestoriaCrm = () => {
   } catch (e) {}
 };
 
-const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
+const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!userCanAccessService("gestoria")) return;
+  const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
     loadUsuarios().catch(() => {});
@@ -22149,7 +22150,29 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
     }
   }
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) return;
+  if (!empresa) {
+    if (canRetryEmpresas) {
+      // En algunos flujos (caché vieja / primer arranque / workspace tenant),
+      // `state.empresas` puede venir vacío y esto hace que parezca que los botones “no hacen nada”.
+      api("/api/empresas")
+        .then((empresas) => {
+          if (!Array.isArray(empresas) || !empresas.length) throw new Error("No hay empresas disponibles.");
+          state.empresas = empresas;
+          if (empresaSelect) {
+            empresaSelect.innerHTML = "";
+            empresaSelect.appendChild(createOption("", "Todas las empresas"));
+            empresas.forEach((item) => empresaSelect.appendChild(createOption(item.id, item.nombre)));
+          }
+          openGestoriaServiceTab(targetTab, { retryEmpresas: false });
+        })
+        .catch(() => {
+          alert("No se pudo abrir Gestoría: no hay empresa disponible o falló la carga de empresas.");
+        });
+      return;
+    }
+    alert("No se pudo abrir Gestoría: no hay empresa seleccionada/disponible.");
+    return;
+  }
   openCompany(empresa.nombre, { allowRestricted: true });
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
