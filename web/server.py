@@ -69769,6 +69769,209 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"count": len(items), "items": items[:100]})
             return
 
+        if path == "/api/seguros_renovaciones_queue":
+            empresa_id = params.get("empresa_id", [""])[0]
+            days_ahead = params.get("days_ahead", ["45"])[0]
+            days_past = params.get("days_past", ["0"])[0]
+            uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            estado = (params.get("estado", [""])[0] or "").strip()
+            responsable = (params.get("responsable", [""])[0] or "").strip()
+            q = (params.get("q", [""])[0] or "").strip()
+            limit = params.get("limit", ["200"])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                days_ahead_int = int(days_ahead)
+            except Exception:
+                days_ahead_int = 45
+            try:
+                days_past_int = int(days_past)
+            except Exception:
+                days_past_int = 0
+            try:
+                limit_int = int(limit)
+            except Exception:
+                limit_int = 200
+            days_ahead_int = max(0, min(365, days_ahead_int))
+            days_past_int = max(0, min(365, days_past_int))
+            limit_int = max(10, min(1000, limit_int))
+
+            in_vigor_expr = in_vigor_policy_filter()
+            fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
+            fecha_venc_raw_date = seguro_date_sql("fecha_vencimiento", "s")
+            fecha_venc_expr = (
+                f"COALESCE({fecha_venc_raw_date}, "
+                f"CASE WHEN {fecha_efecto_date} IS NOT NULL THEN DATE({fecha_efecto_date}, '+1 year') ELSE NULL END)"
+            )
+            uploaded_clause_probe = uploaded_policy_filter()
+            uploaded_clause = uploaded_policy_filter("s")
+            uploaded_param = resolve_uploaded_only_param(
+                conn,
+                uploaded_only,
+                empresa_id=empresa_id,
+                uploaded_clause=uploaded_clause_probe,
+            )
+            compania_expr = "LOWER(TRIM(compania))"
+            exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
+            pdf_assoc_expr = "(NULLIF(TRIM(s.poliza_url), '') IS NOT NULL OR NULLIF(TRIM(s.poliza_key), '') IS NOT NULL)"
+
+            poliza_norm_expr = (
+                "REPLACE(REPLACE(REPLACE(REPLACE(LOWER(TRIM(COALESCE(s.poliza_numero, ''))), ' ', ''), '.', ''), '-', ''), '_', '')"
+            )
+            fecha_efecto_key = "SUBSTR(COALESCE(CAST(s.fecha_efecto AS TEXT), ''), 1, 10)"
+            real_policy_key_expr = (
+                f"CASE WHEN {poliza_norm_expr} <> '' THEN {poliza_norm_expr} ELSE "
+                f"LOWER(TRIM(COALESCE(s.compania, ''))) || '|' || LOWER(TRIM(COALESCE(s.tomador, ''))) || '|' || {fecha_efecto_key} END"
+            )
+            today_expr = "DATE('now','localtime')"
+            start_expr = f"DATE('now','localtime', '-{days_past_int} day')" if days_past_int else today_expr
+            end_expr = f"DATE('now','localtime', '+{days_ahead_int} day')"
+
+            candidates = conn.execute(
+                f"""
+                SELECT
+                  s.id,
+                  s.cliente_id,
+                  s.tomador,
+                  s.compania,
+                  s.ramo,
+                  s.poliza_numero,
+                  s.prima_total,
+                  s.comision,
+                  s.porcentaje,
+                  s.estado,
+                  {real_policy_key_expr} AS poliza_key_real,
+                  DATE({fecha_venc_expr}) AS fecha_vencimiento_norm,
+                  CASE WHEN {pdf_assoc_expr} THEN 1 ELSE 0 END AS has_pdf,
+                  COALESCE(s.updated_at, s.created_at) AS sort_ts
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                  AND {in_vigor_expr}
+                  AND {fecha_venc_expr} IS NOT NULL
+                  AND DATE({fecha_venc_expr}) BETWEEN {start_expr} AND {end_expr}
+                ORDER BY DATE({fecha_venc_expr}) ASC, has_pdf DESC, sort_ts DESC
+                LIMIT ?
+                """,
+                (empresa_id, uploaded_param, limit_int * 4),
+            ).fetchall()
+            seen = set()
+            queue = []
+            for row in candidates:
+                pol_key = (row["poliza_key_real"] or "").strip()
+                venc = (row["fecha_vencimiento_norm"] or "").strip()
+                if not pol_key or not venc:
+                    continue
+                uniq = f"{pol_key}|{venc}"
+                if uniq in seen:
+                    continue
+                seen.add(uniq)
+                queue.append(dict(row))
+                if len(queue) >= limit_int:
+                    break
+
+            import hashlib
+
+            backend = getattr(conn, "__crm_backend__", "") or ""
+            now = app_now().isoformat()
+            renewal_ids = []
+            for item in queue:
+                pol_key = (item.get("poliza_key_real") or "").strip()
+                venc = (item.get("fecha_vencimiento_norm") or "").strip()
+                if not pol_key or not venc:
+                    continue
+                rid = hashlib.sha1(f"{empresa_id}|{pol_key}|{venc}".encode("utf-8")).hexdigest()
+                renewal_ids.append(rid)
+                if backend == "postgres":
+                    conn.execute(
+                        """
+                        INSERT INTO seguros_renovaciones (
+                          id, empresa_id, poliza_id, poliza_key, fecha_vencimiento,
+                          estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, 'pendiente', datetime(?), datetime(?)
+                        )
+                        ON CONFLICT (empresa_id, poliza_key, fecha_vencimiento)
+                        DO UPDATE SET
+                          poliza_id = EXCLUDED.poliza_id,
+                          updated_at = EXCLUDED.updated_at
+                        """,
+                        (rid, empresa_id, item["id"], pol_key, venc, now, now),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO seguros_renovaciones (
+                          id, empresa_id, poliza_id, poliza_key, fecha_vencimiento,
+                          estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, 'pendiente', datetime(?), datetime(?)
+                        )
+                        """,
+                        (rid, empresa_id, item["id"], pol_key, venc, now, now),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE seguros_renovaciones
+                        SET poliza_id = ?,
+                            updated_at = datetime(?)
+                        WHERE empresa_id = ?
+                          AND poliza_key = ?
+                          AND fecha_vencimiento = ?
+                        """,
+                        (item["id"], now, empresa_id, pol_key, venc),
+                    )
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+            rows = []
+            if renewal_ids:
+                placeholders = ",".join(["?"] * len(renewal_ids))
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                      r.id AS renovacion_id,
+                      r.estado AS renovacion_estado,
+                      r.responsable AS renovacion_responsable,
+                      r.proxima_accion_fecha,
+                      r.ultimo_contacto_fecha,
+                      r.notas AS renovacion_notas,
+                      r.motivo_perdida,
+                      r.fecha_vencimiento AS renovacion_fecha_vencimiento,
+                      s.*
+                    FROM seguros_renovaciones r
+                    JOIN seguros s ON s.id = r.poliza_id
+                    WHERE r.id IN ({placeholders})
+                    ORDER BY DATE(r.fecha_vencimiento) ASC
+                    """,
+                    renewal_ids,
+                ).fetchall()
+
+            items = [dict(r) for r in rows]
+            if estado:
+                estado_key = normalize_lookup_text(estado)
+                items = [it for it in items if normalize_lookup_text(it.get("renovacion_estado") or "") == estado_key]
+            if responsable:
+                resp_key = normalize_lookup_text(responsable)
+                items = [it for it in items if normalize_lookup_text(it.get("renovacion_responsable") or "") == resp_key]
+            if q:
+                qn = normalize_lookup_text(q)
+
+                def _hit(it):
+                    blob = " ".join(
+                        str(it.get(k) or "")
+                        for k in ("tomador", "compania", "ramo", "poliza_numero", "renovacion_notas")
+                    )
+                    return qn in normalize_lookup_text(blob)
+
+                items = [it for it in items if _hit(it)]
+            json_response(self, {"count": len(items), "items": items})
+            return
+
         if path == "/api/seguros_kpis":
             empresa_id = params.get("empresa_id", [""])[0]
             uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")

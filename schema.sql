@@ -1251,6 +1251,24 @@ CREATE TABLE IF NOT EXISTS seguros_checklist (
   FOREIGN KEY (poliza_id) REFERENCES seguros(id)
 );
 
+CREATE TABLE IF NOT EXISTS seguros_renovaciones (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  poliza_id TEXT,
+  poliza_key TEXT NOT NULL,
+  fecha_vencimiento TEXT NOT NULL,
+  estado TEXT NOT NULL DEFAULT 'pendiente',
+  responsable TEXT,
+  proxima_accion_fecha TEXT,
+  ultimo_contacto_fecha TEXT,
+  notas TEXT,
+  motivo_perdida TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (empresa_id, poliza_key, fecha_vencimiento),
+  FOREIGN KEY (poliza_id) REFERENCES seguros(id)
+);
+
 CREATE TABLE IF NOT EXISTS seguros_eventos (
   id TEXT PRIMARY KEY,
   seguro_id TEXT,
