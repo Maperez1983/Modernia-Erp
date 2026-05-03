@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v350";
+const APP_SW_VERSION = "v352";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -1939,6 +1939,16 @@ const workspaceInboxClienteLookup = document.getElementById("workspaceInboxClien
 const workspaceInboxResetBtn = document.getElementById("workspaceInboxResetBtn");
 const workspaceInboxStatus = document.getElementById("workspaceInboxStatus");
 const workspaceInboxList = document.getElementById("workspaceInboxList");
+const workspaceContaEmpresa = document.getElementById("workspaceContaEmpresa");
+const workspaceContaReload = document.getElementById("workspaceContaReload");
+const workspaceContaKpis = document.getElementById("workspaceContaKpis");
+const workspaceContaInfo = document.getElementById("workspaceContaInfo");
+const workspaceContaFacturasTable = document.getElementById("workspaceContaFacturasTable");
+const workspaceContaFacturasInfo = document.getElementById("workspaceContaFacturasInfo");
+const workspaceContaAsientosTable = document.getElementById("workspaceContaAsientosTable");
+const workspaceContaAsientosInfo = document.getElementById("workspaceContaAsientosInfo");
+const workspaceContaEntriesTable = document.getElementById("workspaceContaEntriesTable");
+const workspaceContaEntriesInfo = document.getElementById("workspaceContaEntriesInfo");
 const workspaceSeriesForm = document.getElementById("workspaceSeriesForm");
 const workspaceSeriesResetBtn = document.getElementById("workspaceSeriesResetBtn");
 const workspaceSeriesStatus = document.getElementById("workspaceSeriesStatus");
@@ -6037,6 +6047,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     badge: "Core económico",
     description: "Facturación, cobros, remesas y control económico compartido.",
   },
+  contabilidad: {
+    section: "workspace_engines",
+    family: "Transversal",
+    badge: "Core económico",
+    description: "Contabilidad por empresa: facturas OCR, asientos, libros y validación económica unificada.",
+  },
   facturas_recibidas: {
     section: "workspace_engines",
     family: "Transversal",
@@ -6567,10 +6583,46 @@ const normalizeWorkspaceViewKey = (value = "") => {
 const normalizeWorkspaceEngineKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   // "rrhh" vive como vista propia del workspace (no como motor de configuración).
-  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "simuladores", "copilot"].includes(key)) {
+  if (
+    [
+      "documental",
+      "facturacion",
+      "contabilidad",
+      "facturas_recibidas",
+      "portal_cliente",
+      "registro_horario",
+      "automatizaciones",
+      "simuladores",
+      "copilot",
+    ].includes(key)
+  ) {
     return key;
   }
   return "documental";
+};
+
+const syncWorkspaceEngineTabsVisibility = () => {
+  if (!isTenantWorkspaceMode()) return;
+  if (!Array.isArray(workspaceEngineButtons) || !workspaceEngineButtons.length) return;
+  const enabledSet = new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeSimple(key)));
+  // Si no hay lista, no filtramos (modo compatible).
+  if (!enabledSet.size) return;
+
+  let firstVisible = "";
+  workspaceEngineButtons.forEach((button) => {
+    const engineKey = normalizeSimple(button?.dataset?.workspaceEngineTab || "");
+    if (!engineKey) return;
+    const isVisible = enabledSet.has(engineKey);
+    button.classList.toggle("hidden", !isVisible);
+    button.hidden = !isVisible;
+    if (!firstVisible && isVisible) firstVisible = engineKey;
+  });
+
+  const desired = normalizeSimple(state.currentWorkspaceEngineView || "");
+  if (desired && enabledSet.has(desired)) return;
+  if (firstVisible) {
+    setWorkspaceEngineView(firstVisible);
+  }
 };
 
 const normalizeTenantSectionKey = (value = "") => {
@@ -8336,6 +8388,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceEngine("facturacion", workspaceBillingForm);
     },
   },
+  contabilidad: {
+    label: "Contabilidad",
+    actionLabel: "Ver panel",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceEngine("contabilidad", workspaceContaKpis, { forceTenantView: true });
+        return;
+      }
+      focusWorkspaceEngine("contabilidad", workspaceContaKpis);
+    },
+  },
   facturas_recibidas: {
     label: "Facturas Recibidas",
     actionLabel: "Ver inbox",
@@ -8521,8 +8584,8 @@ const WORKSPACE_HOME_CONTAINERS = [
     kicker: "Configuración",
     icon: "layers",
     description: "Documental, facturación, portal, automatizaciones y Copilot.",
-    requireAny: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
-    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
+    requireAny: ["documental", "facturacion", "contabilidad", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
+    modules: ["documental", "facturacion", "contabilidad", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     planned: [],
     adminOnly: true,
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
@@ -16634,6 +16697,247 @@ const renderWorkspaceBillingSummary = (data = {}) => {
   `;
 };
 
+const getWorkspaceContabilidadCompanies = () => {
+  const companies = Array.isArray(state.currentWorkspaceDetail?.companies) ? state.currentWorkspaceDetail.companies : [];
+  const activeCompanies = companies.filter((row) => Number(row?.activo ?? 1) === 1);
+  const operational = activeCompanies.filter((row) => normalizeSimple(row?.rol || "") !== "holding");
+  return operational.length ? operational : activeCompanies;
+};
+
+const syncWorkspaceContabilidadEmpresaSelect = () => {
+  if (!workspaceContaEmpresa) return;
+  const companies = getWorkspaceContabilidadCompanies();
+  workspaceContaEmpresa.innerHTML = "";
+  companies.forEach((row) => {
+    if (!row?.id) return;
+    workspaceContaEmpresa.appendChild(createOption(row.id, row.nombre || row.id));
+  });
+
+  const current = String(state.workspaceContaEmpresaId || "").trim();
+  const stillExists = companies.some((row) => String(row.id || "") === current);
+  const next = stillExists ? current : String(companies[0]?.id || "").trim();
+  state.workspaceContaEmpresaId = next;
+  try {
+    localStorage.setItem("crm.workspaceContaEmpresaId", next);
+  } catch (e) {}
+  workspaceContaEmpresa.value = next;
+};
+
+const renderWorkspaceContabilidadFacturas = (rows = []) => {
+  if (!workspaceContaFacturasTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    workspaceContaFacturasTable.innerHTML = "<p class='muted'>Sin facturas OCR registradas.</p>";
+    if (workspaceContaFacturasInfo) workspaceContaFacturasInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Número", "Tipo", "Tercero", "Total", "PDF"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 60).forEach((row) => {
+    const tr = document.createElement("tr");
+    [row.fecha_emision || "-", row.numero || "-", row.tipo || "-", row.tercero || "-", row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"].forEach(
+      (value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      }
+    );
+    const pdfTd = document.createElement("td");
+    if (row.doc_key) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Ver";
+      btn.addEventListener("click", () => openS3File(row.doc_key, ""));
+      pdfTd.appendChild(btn);
+    } else {
+      pdfTd.textContent = "-";
+    }
+    tr.appendChild(pdfTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  workspaceContaFacturasTable.innerHTML = "";
+  workspaceContaFacturasTable.appendChild(table);
+  if (workspaceContaFacturasInfo) workspaceContaFacturasInfo.textContent = `Mostrando ${Math.min(items.length, 60)} facturas.`;
+};
+
+const renderWorkspaceContabilidadAsientos = (rows = []) => {
+  if (!workspaceContaAsientosTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    workspaceContaAsientosTable.innerHTML = "<p class='muted'>Sin asientos registrados.</p>";
+    if (workspaceContaAsientosInfo) workspaceContaAsientosInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 60).forEach((row) => {
+    const tr = document.createElement("tr");
+    [
+      row.fecha || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      row.total_debe ? euroFormatter.format(parseMoneyValue(row.total_debe)) : "-",
+      row.total_haber ? euroFormatter.format(parseMoneyValue(row.total_haber)) : "-",
+      row.factura_numero || "-",
+    ].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  workspaceContaAsientosTable.innerHTML = "";
+  workspaceContaAsientosTable.appendChild(table);
+  if (workspaceContaAsientosInfo) workspaceContaAsientosInfo.textContent = `Mostrando ${Math.min(items.length, 60)} asientos.`;
+};
+
+const renderWorkspaceContabilidadEntries = (rows = []) => {
+  if (!workspaceContaEntriesTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    workspaceContaEntriesTable.innerHTML = "<p class='muted'>Sin anotaciones contables.</p>";
+    if (workspaceContaEntriesInfo) workspaceContaEntriesInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Cliente", "Concepto", "Tipo", "Importe"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.slice(0, 60).forEach((row) => {
+    const tr = document.createElement("tr");
+    const tipo = String(row.tipo || "-");
+    const importe = row.importe != null ? euroFormatter.format(parseMoneyValue(row.importe)) : "-";
+    [row.fecha || "-", row.cliente || "-", row.concepto || "-", tipo || "-", importe].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  workspaceContaEntriesTable.innerHTML = "";
+  workspaceContaEntriesTable.appendChild(table);
+  if (workspaceContaEntriesInfo) workspaceContaEntriesInfo.textContent = `Mostrando ${Math.min(items.length, 60)} anotaciones.`;
+};
+
+const refreshWorkspaceContabilidad = async ({ force = false } = {}) => {
+  if (!workspaceContaReload || !workspaceContaKpis) return;
+  if (!state.currentWorkspaceId) return;
+
+  if (workspaceContaReload.dataset.bound !== "1") {
+    workspaceContaReload.dataset.bound = "1";
+    workspaceContaReload.addEventListener("click", () => refreshWorkspaceContabilidad({ force: true }).catch(() => {}));
+  }
+  if (workspaceContaEmpresa && workspaceContaEmpresa.dataset.bound !== "1") {
+    workspaceContaEmpresa.dataset.bound = "1";
+    workspaceContaEmpresa.addEventListener("change", () => {
+      state.workspaceContaEmpresaId = String(workspaceContaEmpresa.value || "").trim();
+      try {
+        localStorage.setItem("crm.workspaceContaEmpresaId", state.workspaceContaEmpresaId);
+      } catch (e) {}
+      refreshWorkspaceContabilidad({ force: true }).catch(() => {});
+    });
+  }
+
+  syncWorkspaceContabilidadEmpresaSelect();
+  const empresaId = String(state.workspaceContaEmpresaId || "").trim();
+  if (!empresaId) {
+    workspaceContaKpis.innerHTML = "";
+    if (workspaceContaInfo) workspaceContaInfo.textContent = "Sin empresa seleccionada.";
+    renderWorkspaceContabilidadFacturas([]);
+    renderWorkspaceContabilidadAsientos([]);
+    renderWorkspaceContabilidadEntries([]);
+    return;
+  }
+
+  const cacheAgeMs = Date.now() - Number(state.workspaceContaCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
+  if (!force && state.workspaceContaCache && String(state.workspaceContaCache.empresaId || "") === empresaId && isFreshCache) {
+    const payload = state.workspaceContaCache.payload || {};
+    const facturasPayload = state.workspaceContaCache.facturas || {};
+    const asientosPayload = state.workspaceContaCache.asientos || {};
+    const summary = payload.summary || {};
+    renderGestoriaDashKpis(workspaceContaKpis, [
+      { title: "Asientos", value: numberFormatter.format(Number(summary.total_rows || 0)), note: "Anotaciones" },
+      { title: "Ingresos", value: euroFormatter.format(Number(summary.ingresos || 0)), note: "Suma importes" },
+      { title: "Gastos", value: euroFormatter.format(Number(summary.gastos || 0)), note: "Suma importes" },
+      { title: "Resultado", value: euroFormatter.format(Number(summary.resultado || 0)), note: "Ingresos - gastos" },
+    ]);
+    renderWorkspaceContabilidadFacturas(facturasPayload.rows || []);
+    renderWorkspaceContabilidadAsientos(asientosPayload.rows || []);
+    renderWorkspaceContabilidadEntries(payload.rows || []);
+    if (workspaceContaInfo) workspaceContaInfo.textContent = `Empresa ${empresaId}`;
+    return;
+  }
+
+  workspaceContaReload.disabled = true;
+  workspaceContaReload.textContent = "Cargando...";
+  if (workspaceContaInfo) workspaceContaInfo.textContent = "Cargando contabilidad...";
+  try {
+    const params = new URLSearchParams({ empresa_id: empresaId, limit: "200" });
+    const [conta, facturas, asientos] = await Promise.all([
+      api(`/api/gestoria_contabilidad?${params.toString()}`),
+      api(`/api/gestoria_facturas?${new URLSearchParams({ empresa_id: empresaId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_asientos?${new URLSearchParams({ empresa_id: empresaId }).toString()}`).catch(() => ({ rows: [] })),
+    ]);
+    if (conta?.error) throw new Error(String(conta.error));
+    state.workspaceContaCache = { empresaId, payload: conta, facturas, asientos, ts: Date.now() };
+
+    const summary = conta.summary || {};
+    renderGestoriaDashKpis(workspaceContaKpis, [
+      { title: "Anotaciones", value: numberFormatter.format(Number(summary.total_rows || 0)), note: "gestoria_contabilidad" },
+      { title: "Ingresos", value: euroFormatter.format(Number(summary.ingresos || 0)), note: "Suma importes" },
+      { title: "Gastos", value: euroFormatter.format(Number(summary.gastos || 0)), note: "Suma importes" },
+      { title: "Resultado", value: euroFormatter.format(Number(summary.resultado || 0)), note: "Ingresos - gastos" },
+    ]);
+    renderWorkspaceContabilidadFacturas(facturas.rows || []);
+    renderWorkspaceContabilidadAsientos(asientos.rows || []);
+    renderWorkspaceContabilidadEntries(conta.rows || []);
+    if (workspaceContaInfo) {
+      const companyName =
+        (state.currentWorkspaceDetail?.companies || []).find((row) => String(row.id || "") === empresaId)?.nombre || empresaId;
+      workspaceContaInfo.textContent = `Empresa: ${companyName}`;
+    }
+  } catch (err) {
+    workspaceContaKpis.innerHTML = "";
+    renderWorkspaceContabilidadFacturas([]);
+    renderWorkspaceContabilidadAsientos([]);
+    renderWorkspaceContabilidadEntries([]);
+    if (workspaceContaInfo) workspaceContaInfo.textContent = err?.message || "No se pudo cargar la contabilidad.";
+  } finally {
+    workspaceContaReload.disabled = false;
+    workspaceContaReload.textContent = "Actualizar";
+  }
+};
+
 const fillWorkspaceBillingForm = (record = null) => {
   if (!workspaceBillingForm) return;
   hydrateWorkspaceCompanySelects();
@@ -23231,6 +23535,7 @@ const renderClienteContabilidadPanel = () => {
     }
 
     const table = document.createElement("table");
+    table.className = "data-table";
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["Ejercicio", "Estado", "Responsable", "Precio", "Cobro", "Forma", "Remesa", ""].forEach((col) => {
@@ -52577,7 +52882,20 @@ const renderGestoriaRentaDashboard = (payload) => {
     note: `${numberFormatter.format(conPrecio)} con precio`,
   });
 
-  const buildCampaignTable = (items, { title, hint, emptyText, exportKind = "", exportFields = "full", exportResponsableKey = "", printMissing = false } = {}) => {
+  // Dashboard Renta: los listados se muestran bajo demanda (vía KPIs).
+  const rentaViewKey =
+    view === "responsable" ? `responsable:${String(viewParam || "").trim()}` : String(view || "overview");
+  const rentaShowAllState = state.gestoriaRentaDashShowAll || (state.gestoriaRentaDashShowAll = {});
+  const isRentaShowAll = Boolean(rentaShowAllState[rentaViewKey]);
+  const toggleRentaShowAll = () => {
+    rentaShowAllState[rentaViewKey] = !isRentaShowAll;
+    renderGestoriaRentaDashboard(payload);
+  };
+
+  const buildCampaignTable = (
+    items,
+    { title, hint, emptyText, exportKind = "", exportFields = "full", exportResponsableKey = "", printMissing = false, limit = 10 } = {}
+  ) => {
     const card = document.createElement("div");
     card.className = "form-card";
     const head = document.createElement("div");
@@ -52592,6 +52910,14 @@ const renderGestoriaRentaDashboard = (payload) => {
     headLeft.appendChild(p);
     head.appendChild(headLeft);
     const headRight = document.createElement("div");
+    if (items.length > limit) {
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "secondary";
+      toggleBtn.textContent = isRentaShowAll ? "Ver menos" : "Ver todo";
+      toggleBtn.addEventListener("click", toggleRentaShowAll);
+      headRight.appendChild(toggleBtn);
+    }
     if (exportKind) {
       const exportBtn = document.createElement("button");
       exportBtn.type = "button";
@@ -52637,6 +52963,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       return card;
     }
     const table = document.createElement("table");
+    table.className = "data-table";
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["Cliente", "NIF", "Estado", "Fecha", "Responsable", "Precio", "Cobro", "Abrir"].forEach((col) => {
@@ -52647,7 +52974,8 @@ const renderGestoriaRentaDashboard = (payload) => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    items.slice(0, 250).forEach((item) => {
+    const sliceLimit = isRentaShowAll ? 250 : limit;
+    items.slice(0, sliceLimit).forEach((item) => {
       const tr = document.createElement("tr");
       const fecha = formatCell("fecha", item.presentacion_fecha || "") || item.presentacion_fecha || "-";
       const cobro = Number(item.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
@@ -52676,6 +53004,12 @@ const renderGestoriaRentaDashboard = (payload) => {
     });
     table.appendChild(tbody);
     card.appendChild(table);
+    if (!isRentaShowAll && items.length > sliceLimit) {
+      const footer = document.createElement("div");
+      footer.className = "footer muted";
+      footer.textContent = `Mostrando ${sliceLimit} de ${items.length}. Pulsa “Ver todo” para ver el listado completo.`;
+      card.appendChild(footer);
+    }
     return card;
   };
 
@@ -52967,29 +53301,10 @@ const renderGestoriaRentaDashboard = (payload) => {
     );
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
-
-    const split = document.createElement("div");
-    split.className = "crm-split";
-    const topUnpaid = buildCampaignTable(unpaid.slice(0, 12), {
-      title: "Top sin cobrar",
-      hint: "Pendientes de cobro (top 12).",
-      emptyText: "No hay rentas sin cobrar.",
-    });
-    const topUnassigned = buildCampaignTable(unassigned.slice(0, 12), {
-      title: "Top sin responsable",
-      hint: "Sin asignación (top 12).",
-      emptyText: "No hay campañas sin responsable.",
-    });
-    // En overview quitamos el botón Volver (ya estamos en el root).
-    topUnpaid.querySelector("button.secondary.ghost")?.remove();
-    topUnassigned.querySelector("button.secondary.ghost")?.remove();
-    split.appendChild(topUnpaid);
-    split.appendChild(topUnassigned);
-    root.appendChild(split);
-    // Tablas mensuales se obtienen desde el informe CSV y la vista "Cobros sin fecha".
-    const respPreview = buildResponsablesTable(responsables.slice(0, 12));
-    respPreview.querySelector("#gestoriaRentaDashBackBtn2")?.remove();
-    root.appendChild(respPreview);
+    const hint = document.createElement("p");
+    hint.className = "muted";
+    hint.textContent = "Pulsa cualquier KPI para ver el detalle (listados) sin recargar el dashboard.";
+    root.appendChild(hint);
 
     // Pintar charts cuando ya están montados y con tamaño.
     requestAnimationFrame(() => {
