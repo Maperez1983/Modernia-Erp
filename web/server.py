@@ -27278,8 +27278,9 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     cobros_months_list = list(cobros_months.values())
     cobros_months_list.sort(key=lambda x: str(x.get("mes") or ""))
 
-    # Serie del ejercicio actual (facturación/cobro/pendiente por mes de cobro).
-    # Nota: si no hay `fecha_cobro`, el importe se refleja en `cobros_sin_fecha_total`.
+    # Serie del ejercicio actual (facturación/cobro/pendiente por mes).
+    # Importante: en muchos casos se marca "cobrada" pero no se informa `fecha_cobro`.
+    # Para no dejar el gráfico vacío, usamos el mes de presentación como fallback.
     cobro_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
     try:
         month_labels = [f"{m:02d}" for m in range(1, 13)]
@@ -27290,15 +27291,21 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             precio = float(item.get("precio_servicio") or 0.0)
             if precio <= 0.0001:
                 continue
-            ym = str(item.get("mes_cobro") or "").strip()
-            month = ym[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym) else ""
-            if month not in month_labels:
+            ym_pres = str(item.get("mes") or "").strip()
+            ym_cobro = str(item.get("mes_cobro") or "").strip()
+            month_fact = ym_pres[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_pres) else ""
+            if not month_fact:
+                month_fact = ym_cobro[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_cobro) else ""
+            if month_fact not in month_labels:
                 continue
-            fact_m[month] += precio
-            if int(item.get("cobrada") or 0) == 1:
-                cob_m[month] += precio
+            fact_m[month_fact] += precio
+            is_cobrada = int(item.get("cobrada") or 0) == 1
+            month_cob = ym_cobro[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_cobro) else ""
+            month_cob = month_cob if month_cob in month_labels else month_fact
+            if is_cobrada:
+                cob_m[month_cob] += precio
             else:
-                pen_m[month] += precio
+                pen_m[month_fact] += precio
         cobro_series_out = {
             "labels": month_labels,
             "facturacion": [round(float(fact_m[m]), 2) for m in month_labels],
@@ -27321,19 +27328,25 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 precio = float(item.get("precio_servicio") or 0.0)
                 if precio <= 0.0001:
                     continue
-                ym = str(item.get("mes_cobro") or "").strip()
-                month = ym[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym) else ""
-                if month not in month_labels:
+                ym_pres = str(item.get("mes") or "").strip()
+                ym_cobro = str(item.get("mes_cobro") or "").strip()
+                month_fact = ym_pres[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_pres) else ""
+                if not month_fact:
+                    month_fact = ym_cobro[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_cobro) else ""
+                if month_fact not in month_labels:
                     continue
-                fact_m[month] += precio
-                if int(item.get("cobrada") or 0) == 1:
-                    cob_m[month] += precio
-                    key = f"{prev_val}-{month}"
+                fact_m[month_fact] += precio
+                is_cobrada = int(item.get("cobrada") or 0) == 1
+                month_cob = ym_cobro[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym_cobro) else ""
+                month_cob = month_cob if month_cob in month_labels else month_fact
+                if is_cobrada:
+                    cob_m[month_cob] += precio
+                    key = f"{prev_val}-{month_cob}"
                     cobros_prev_months.setdefault(key, {"mes": key, "cobradas": 0, "cobrado": 0.0})
                     cobros_prev_months[key]["cobradas"] += 1
                     cobros_prev_months[key]["cobrado"] += precio
                 else:
-                    pen_m[month] += precio
+                    pen_m[month_fact] += precio
             cobro_prev_series_out = {
                 "labels": month_labels,
                 "facturacion": [round(float(fact_m[m]), 2) for m in month_labels],
