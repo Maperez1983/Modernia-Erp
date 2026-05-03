@@ -65158,6 +65158,102 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/seguros_recibos":
+            empresa_id = params.get("empresa_id", [""])[0]
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            where = ["r.empresa_id = ?"]
+            values = [empresa_id]
+            if seguro_id:
+                where.append("r.seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("r.cliente_id = ?")
+                values.append(cliente_id)
+            if q:
+                where.append(
+                    "("
+                    "LOWER(COALESCE(r.referencia,'')) LIKE ? OR LOWER(COALESCE(r.poliza_numero,'')) LIKE ? "
+                    "OR LOWER(COALESCE(r.compania,'')) LIKE ? OR LOWER(COALESCE(r.ramo,'')) LIKE ? "
+                    "OR LOWER(COALESCE(c.nombre,'')) LIKE ?"
+                    ")"
+                )
+                like = f"%{q}%"
+                values.extend([like, like, like, like, like])
+            rows = conn.execute(
+                f"""
+                SELECT
+                  r.id, r.empresa_id, r.seguro_id, r.cliente_id,
+                  r.referencia, r.poliza_numero, r.compania, r.ramo,
+                  r.fecha_emision, r.fecha_vencimiento, r.fecha_cobro, r.estado,
+                  r.prima_total, r.comision, r.comision_pct, r.importe_liquidacion,
+                  r.notas, r.doc_key, r.doc_url,
+                  COALESCE(c.nombre, '') AS cliente
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {" AND ".join(where)}
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at) DESC
+                LIMIT 500
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_siniestros":
+            empresa_id = params.get("empresa_id", [""])[0]
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            where = ["si.empresa_id = ?"]
+            values = [empresa_id]
+            if seguro_id:
+                where.append("si.seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("si.cliente_id = ?")
+                values.append(cliente_id)
+            if q:
+                where.append(
+                    "("
+                    "LOWER(COALESCE(si.numero_expediente,'')) LIKE ? OR LOWER(COALESCE(si.tipo,'')) LIKE ? "
+                    "OR LOWER(COALESCE(si.descripcion,'')) LIKE ? OR LOWER(COALESCE(si.estado,'')) LIKE ? "
+                    "OR LOWER(COALESCE(si.gestor,'')) LIKE ? OR LOWER(COALESCE(c.nombre,'')) LIKE ? "
+                    "OR LOWER(COALESCE(s.poliza_numero,'')) LIKE ? OR LOWER(COALESCE(si.compania,'')) LIKE ? "
+                    "OR LOWER(COALESCE(si.ramo,'')) LIKE ?"
+                    ")"
+                )
+                like = f"%{q}%"
+                values.extend([like, like, like, like, like, like, like, like, like])
+            rows = conn.execute(
+                f"""
+                SELECT
+                  si.id, si.empresa_id, si.seguro_id, si.cliente_id,
+                  si.numero_expediente, si.compania, si.ramo,
+                  si.fecha_siniestro, si.fecha_apertura, si.fecha_cierre,
+                  si.estado, si.tipo, si.descripcion,
+                  si.importe_reserva, si.importe_pagado, si.gestor, si.notas,
+                  COALESCE(c.nombre, '') AS cliente,
+                  COALESCE(s.poliza_numero, '') AS poliza_numero
+                FROM seguros_siniestros si
+                LEFT JOIN clientes c ON c.id = si.cliente_id
+                LEFT JOIN seguros s ON s.id = si.seguro_id
+                WHERE {" AND ".join(where)}
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(si.fecha_siniestro,'')), ''), si.created_at) DESC
+                LIMIT 500
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
         if path == "/api/seguros_reclamaciones":
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
