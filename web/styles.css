@@ -88,8 +88,9 @@ body.crm-context-vertical main {
 
 /* CRM vertical: modo app consistente (mismo canvas en todos los servicios). */
 body.crm-context-vertical #crmSection .crm-lightning-shell {
-  max-width: var(--layout-max);
-  width: 100%;
+  /* En monitores grandes, el CRM debe aprovechar mejor el espacio. */
+  max-width: none;
+  width: min(2480px, 100%);
   margin: 0 auto;
   padding: 26px var(--layout-gutter) 64px;
   padding-bottom: calc(64px + var(--safe-bottom));
