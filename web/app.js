@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v348";
+const APP_SW_VERSION = "v349";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20657,7 +20657,9 @@ const syncExplorerLightningSidebar = () => {
   // La sidebar "Explorer" (verde) es solo para el Explorador (página empresa).
   // En contexto CRM vertical (Lightning shell), se oculta para evitar duplicidad de navegación y ganar espacio.
   const shouldHideExplorerSidebar =
-    viewTabs.classList.contains("hidden") || document.body.classList.contains("crm-context-vertical");
+    viewTabs.classList.contains("hidden") ||
+    document.body.classList.contains("crm-context-vertical") ||
+    (crmSection && !crmSection.classList.contains("hidden"));
   explorerLightningSidebar.classList.toggle("hidden", shouldHideExplorerSidebar);
 };
 
@@ -32296,6 +32298,7 @@ const loadGestoriaDocsRecent = () => {
       return;
     }
     const table = document.createElement("table");
+    table.className = "data-table";
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["cliente", "nombre", "tipo", "fecha", "estado", "pdf"].forEach((col) => {
@@ -32365,6 +32368,7 @@ const loadGestoriaAuditoria = () => {
         return;
       }
       const table = document.createElement("table");
+      table.className = "data-table";
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
       ["fecha", "usuario", "accion", "cliente", "entidad"].forEach((col) => {
@@ -51680,6 +51684,7 @@ const renderGestoriaDashGeneralProductividad = (productividad = {}) => {
     return;
   }
   const table = document.createElement("table");
+  table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   ["persona", "abiertos", "creados 30d", "completados 30d"].forEach((col) => {
@@ -52322,6 +52327,7 @@ const renderGestoriaDashboardDocumentos = (rows = []) => {
     return;
   }
   const table = document.createElement("table");
+  table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   ["fecha", "cliente", "nombre", "tipo", "estado"].forEach((col) => {
@@ -52443,7 +52449,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       .join("");
     const headHtml = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
     const truncatedNote = rows.length > maxRows ? `<p class="muted">Listado truncado a ${maxRows} filas (de ${rows.length}).</p>` : "";
-    return `${truncatedNote}<table><thead><tr>${headHtml}</tr></thead><tbody>${body}</tbody></table>`;
+    return `${truncatedNote}<table class="data-table"><thead><tr>${headHtml}</tr></thead><tbody>${body}</tbody></table>`;
   };
 
   const setView = (view) => {
@@ -52476,6 +52482,9 @@ const renderGestoriaRentaDashboard = (payload) => {
   const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
   const docsTotal = Number(counts.docs_total || 0);
   const clientesConDoc = Number(counts.clientes_con_doc || 0);
+  const sinPrecio = Number(counts.sin_precio || 0);
+  const cobradasConPrecio = Number(counts.cobradas_con_precio || 0);
+  const sinCobrarConPrecio = Number(counts.sin_cobrar_con_precio || 0);
   addKpi({
     title: "Campañas renta",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
@@ -52494,9 +52503,9 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("presented"),
   });
   addKpi({
-    title: "Rentas cobradas",
+    title: "Marcadas cobradas",
     value: numberFormatter.format(Number(counts.cobradas || 0)),
-    note: `Cobrado: ${formatMoney(cobradoTotal)}`,
+    note: `Con precio: ${numberFormatter.format(cobradasConPrecio)} · Cobrado: ${formatMoney(cobradoTotal)}`,
     onClick: () => setView("paid"),
   });
   addKpi({
@@ -52511,10 +52520,15 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("draft"),
   });
   addKpi({
-    title: "Sin cobrar",
-    value: numberFormatter.format(Number(counts.sin_cobrar || 0)),
+    title: "Pendientes cobro",
+    value: numberFormatter.format(sinCobrarConPrecio),
     note: formatMoney(pendienteTotal),
     onClick: () => setView("unpaid"),
+  });
+  addKpi({
+    title: "Sin precio",
+    value: numberFormatter.format(sinPrecio),
+    note: "Campañas sin importe asignado.",
   });
   addKpi({
     title: "Sin responsable",
@@ -53464,6 +53478,7 @@ const loadGestoriaDashboard = () => {
         }
       });
       const table = document.createElement("table");
+      table.className = "data-table";
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
       ["responsable", "total", "en curso", "en espera", "vencidas"].forEach((col) => {

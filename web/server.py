@@ -27098,8 +27098,11 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "presentadas": 0,
         "borrador": 0,
         "con_precio": 0,
+        "sin_precio": 0,
         "cobradas": 0,
         "sin_cobrar": 0,
+        "cobradas_con_precio": 0,
+        "sin_cobrar_con_precio": 0,
         "sin_responsable": 0,
         "remesadas": 0,
         "no_remesadas": 0,
@@ -27120,12 +27123,17 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             counts["borrador"] += 1
         else:
             counts["presentadas"] += 1
+        is_cobrada = int(item.get("cobrada") or 0) == 1
+        if is_cobrada:
+            counts["cobradas"] += 1
+        else:
+            counts["sin_cobrar"] += 1
         precio = float(item.get("precio_servicio") or 0.0)
         if precio > 0.0001:
             counts["con_precio"] += 1
             counts["facturacion_total"] += precio
-            if int(item.get("cobrada") or 0) == 1:
-                counts["cobradas"] += 1
+            if is_cobrada:
+                counts["cobradas_con_precio"] += 1
                 counts["cobrado_total"] += precio
                 cobro_month = str(item.get("mes_cobro") or "").strip()
                 if cobro_month:
@@ -27137,8 +27145,10 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                     counts["cobros_sin_fecha"] += 1
                     counts["cobros_sin_fecha_total"] += precio
             else:
-                counts["sin_cobrar"] += 1
+                counts["sin_cobrar_con_precio"] += 1
                 counts["pendiente_cobro_total"] += precio
+        else:
+            counts["sin_precio"] += 1
         if int(item.get("remesada") or 0) == 1:
             counts["remesadas"] += 1
             if precio > 0.0001:
