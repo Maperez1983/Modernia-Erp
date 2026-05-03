@@ -86,6 +86,15 @@ body.crm-context-vertical main {
   padding: 0;
 }
 
+/* CRM vertical: modo app consistente (mismo canvas en todos los servicios). */
+body.crm-context-vertical #crmSection .crm-lightning-shell {
+  max-width: var(--layout-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 26px var(--layout-gutter) 64px;
+  padding-bottom: calc(64px + var(--safe-bottom));
+}
+
 body.crm-context-vertical #explorerSection {
   border: none;
   border-top: none;
@@ -429,6 +438,16 @@ button.secondary,
   border-radius: 18px;
   padding: 6px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.tabs.crm-lightning-subbar,
+.tab-group.crm-lightning-subbar,
+.tc-modulebar.crm-lightning-subbar,
+.crm-workspace-tabs.crm-lightning-subbar {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
 }
 
 .tab {
@@ -9578,8 +9597,18 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .dashboard-controls {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 10px;
+}
+
+.form-card > .dashboard {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
 }
 
 .dashboard-controls label {
@@ -11152,6 +11181,13 @@ body.theme-operativa #finDashboardSection {
   gap: 16px;
 }
 
+body.theme-operativa .dashboard {
+  border-color: var(--v2-card-border);
+  border-radius: var(--v2-card-radius);
+  background: var(--v2-card-bg);
+  box-shadow: var(--v2-card-shadow);
+}
+
 body.theme-operativa .dashboard-head {
   padding: 8px 2px;
 }
@@ -11980,6 +12016,35 @@ body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDashboardSection
 /* Gestoría montada: compacta el margen superior que antes dependía de `.dashboard-head`. */
 body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDashboardSection {
   padding-top: 0;
+}
+
+/* Vertical CRM: aplanar contenedores legacy montados dentro del shell (evita “doble card”). */
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDashboardSection.dashboard,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaCrmSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDocsSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaAgendaSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaFactSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaContaSection,
+body.crm-context-vertical #crmSection #crmViewSeguros #segurosCrmSection,
+body.crm-context-vertical #crmSection #crmViewFin #hipotecaSection,
+body.crm-context-vertical #crmSection #crmViewFin #finSimSection {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaCrmSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDocsSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaAgendaSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaFactSection,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaContaSection,
+body.crm-context-vertical #crmSection #crmViewSeguros #segurosCrmSection,
+body.crm-context-vertical #crmSection #crmViewFin #hipotecaSection,
+body.crm-context-vertical #crmSection #crmViewFin #finSimSection {
+  display: grid;
+  gap: 16px;
 }
 
 /* Financiaciones: cuando el topbar ya pinta los módulos (`#crmTopFinModules`), ocultamos la micro-barra interna. */
