@@ -2720,6 +2720,17 @@ const segurosRecibosSummary = document.getElementById("segurosRecibosSummary");
 const segurosRecibosAlerts = document.getElementById("segurosRecibosAlerts");
 const segurosRecibosTable = document.getElementById("segurosRecibosTable");
 const segurosRecibosInfo = document.getElementById("segurosRecibosInfo");
+const segurosHistorialPolizaId = document.getElementById("segurosHistorialPolizaId");
+const segurosHistorialSnapshotMotivo = document.getElementById("segurosHistorialSnapshotMotivo");
+const segurosHistorialSnapshotBtn = document.getElementById("segurosHistorialSnapshotBtn");
+const segurosHistorialSnapshotStatus = document.getElementById("segurosHistorialSnapshotStatus");
+const segurosMovimientosForm = document.getElementById("segurosMovimientosForm");
+const segurosMovimientosStatus = document.getElementById("segurosMovimientosStatus");
+const segurosMovimientosTable = document.getElementById("segurosMovimientosTable");
+const segurosMovimientosInfo = document.getElementById("segurosMovimientosInfo");
+const segurosVersionesTable = document.getElementById("segurosVersionesTable");
+const segurosVersionesInfo = document.getElementById("segurosVersionesInfo");
+const segurosVersionSnapshotPreview = document.getElementById("segurosVersionSnapshotPreview");
 const segurosSiniestrosForm = document.getElementById("segurosSiniestrosForm");
 const segurosSiniestrosStatus = document.getElementById("segurosSiniestrosStatus");
 const segurosSiniestrosCliente = document.getElementById("segurosSiniestrosCliente");
@@ -32747,6 +32758,11 @@ const setSegurosTab = (name) => {
     hydrateSegurosContabilidadFormSelects().catch(() => {});
     loadSegurosContabilidad();
   }
+  if (name === "historial") {
+    populateSegurosOperationalSelects();
+    const seguroId = segurosHistorialPolizaId ? String(segurosHistorialPolizaId.value || "").trim() : "";
+    loadSegurosHistorial(seguroId);
+  }
 };
 
 const initSegurosTabs = () => {
@@ -53893,6 +53909,7 @@ const populateSegurosOperationalSelects = () => {
   fill(segurosEventosPolizaId, optionsAll);
   fill(segurosIpidPolizaId, optionsAll);
   fill(segurosReclamacionPolizaId, optionsAll);
+  fill(segurosHistorialPolizaId, optionsAll);
   if (segurosPolizaAccionStatus) {
     if (!optionsByAction.length) {
       segurosPolizaAccionStatus.textContent =
@@ -53985,6 +54002,142 @@ const loadSegurosEventos = (seguroId = "") => {
       segurosEventosTable.innerHTML = "<p class='muted'>No se pudieron cargar eventos.</p>";
       if (segurosEventosInfo) segurosEventosInfo.textContent = "";
     });
+};
+
+const renderSegurosMovimientosRows = (rows = []) => {
+  if (!segurosMovimientosTable) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    segurosMovimientosTable.innerHTML = "<p class='muted'>Sin movimientos.</p>";
+    if (segurosMovimientosInfo) segurosMovimientosInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Tipo", "Prima", "Comisión", "Notas", "Usuario"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const prima = row.prima_total != null ? formatMoney(row.prima_total) : "-";
+    const comision = row.comision != null ? formatMoney(row.comision) : "-";
+    const values = [
+      row.fecha_movimiento || row.created_at || "-",
+      row.tipo || "-",
+      prima,
+      comision,
+      row.notas || "-",
+      row.created_by || "-",
+    ];
+    values.forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = String(v || "-");
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  segurosMovimientosTable.innerHTML = "";
+  segurosMovimientosTable.appendChild(table);
+  if (segurosMovimientosInfo) segurosMovimientosInfo.textContent = `Mostrando ${rows.length} movimientos.`;
+};
+
+const renderSegurosVersionesRows = (rows = []) => {
+  if (!segurosVersionesTable) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    segurosVersionesTable.innerHTML = "<p class='muted'>Sin snapshots.</p>";
+    if (segurosVersionesInfo) segurosVersionesInfo.textContent = "";
+    if (segurosVersionSnapshotPreview) segurosVersionSnapshotPreview.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Versión", "Fecha", "Motivo", "Usuario", ""].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    [row.version_no != null ? String(row.version_no) : "-", row.created_at || "-", row.motivo || "-", row.created_by || "-"].forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = String(v || "-");
+      tr.appendChild(td);
+    });
+    const actionTd = document.createElement("td");
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "secondary";
+    viewBtn.textContent = "Ver";
+    viewBtn.addEventListener("click", async () => {
+      if (!segurosVersionSnapshotPreview) return;
+      segurosVersionSnapshotPreview.textContent = "Cargando snapshot…";
+      const res = await api(`/api/seguros_version?id=${encodeURIComponent(row.id)}`).catch(() => null);
+      const snap = res && typeof res === "object" ? res.snapshot : null;
+      if (!snap || typeof snap !== "object") {
+        segurosVersionSnapshotPreview.textContent = "No se pudo cargar snapshot.";
+        return;
+      }
+      try {
+        segurosVersionSnapshotPreview.textContent = JSON.stringify(snap, null, 2);
+      } catch {
+        segurosVersionSnapshotPreview.textContent = String(res.snapshot_json || "");
+      }
+    });
+    actionTd.appendChild(viewBtn);
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  segurosVersionesTable.innerHTML = "";
+  segurosVersionesTable.appendChild(table);
+  if (segurosVersionesInfo) segurosVersionesInfo.textContent = `Mostrando ${rows.length} snapshots.`;
+};
+
+const loadSegurosMovimientos = (seguroId = "") => {
+  if (!segurosMovimientosTable) return;
+  if (!seguroId) {
+    segurosMovimientosTable.innerHTML = "<p class='muted'>Selecciona una póliza.</p>";
+    if (segurosMovimientosInfo) segurosMovimientosInfo.textContent = "";
+    return;
+  }
+  api(`/api/seguros_movimientos?seguro_id=${encodeURIComponent(seguroId)}`)
+    .then((data) => renderSegurosMovimientosRows(data.rows || []))
+    .catch(() => {
+      segurosMovimientosTable.innerHTML = "<p class='muted'>No se pudieron cargar movimientos.</p>";
+      if (segurosMovimientosInfo) segurosMovimientosInfo.textContent = "";
+    });
+};
+
+const loadSegurosVersiones = (seguroId = "") => {
+  if (!segurosVersionesTable) return;
+  if (!seguroId) {
+    segurosVersionesTable.innerHTML = "<p class='muted'>Selecciona una póliza.</p>";
+    if (segurosVersionesInfo) segurosVersionesInfo.textContent = "";
+    if (segurosVersionSnapshotPreview) segurosVersionSnapshotPreview.textContent = "";
+    return;
+  }
+  api(`/api/seguros_versiones?seguro_id=${encodeURIComponent(seguroId)}`)
+    .then((data) => renderSegurosVersionesRows(data.rows || []))
+    .catch(() => {
+      segurosVersionesTable.innerHTML = "<p class='muted'>No se pudieron cargar snapshots.</p>";
+      if (segurosVersionesInfo) segurosVersionesInfo.textContent = "";
+      if (segurosVersionSnapshotPreview) segurosVersionSnapshotPreview.textContent = "";
+    });
+};
+
+const loadSegurosHistorial = (seguroId = "") => {
+  loadSegurosMovimientos(seguroId);
+  loadSegurosVersiones(seguroId);
 };
 
 const loadSegurosReclamaciones = (empresaId) => {
@@ -67337,6 +67490,59 @@ if (segurosRecibosForm) {
     segurosRecibosForm.reset();
     hydrateSegurosRecibosFormSelects().catch(() => {});
     loadSegurosRecibos();
+  });
+}
+
+if (segurosHistorialPolizaId) {
+  segurosHistorialPolizaId.addEventListener("change", () => {
+    const seguroId = String(segurosHistorialPolizaId.value || "").trim();
+    loadSegurosHistorial(seguroId);
+  });
+}
+
+if (segurosHistorialSnapshotBtn) {
+  segurosHistorialSnapshotBtn.addEventListener("click", async () => {
+    const seguroId = segurosHistorialPolizaId ? String(segurosHistorialPolizaId.value || "").trim() : "";
+    if (!seguroId) {
+      if (segurosHistorialSnapshotStatus) segurosHistorialSnapshotStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    const motivo = segurosHistorialSnapshotMotivo ? String(segurosHistorialSnapshotMotivo.value || "").trim() : "";
+    if (segurosHistorialSnapshotStatus) segurosHistorialSnapshotStatus.textContent = "Guardando snapshot…";
+    const resp = await postJsonWithDbRetry("/api/seguros_version_snapshot", { seguro_id: seguroId, motivo }).catch((err) => ({
+      error: err?.message || "Error",
+    }));
+    if (resp?.error) {
+      if (segurosHistorialSnapshotStatus) segurosHistorialSnapshotStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosHistorialSnapshotStatus) segurosHistorialSnapshotStatus.textContent = "Snapshot guardado.";
+    loadSegurosVersiones(seguroId);
+  });
+}
+
+if (segurosMovimientosForm) {
+  segurosMovimientosForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const seguroId = segurosHistorialPolizaId ? String(segurosHistorialPolizaId.value || "").trim() : "";
+    if (!seguroId) {
+      if (segurosMovimientosStatus) segurosMovimientosStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    if (segurosMovimientosStatus) segurosMovimientosStatus.textContent = "Creando movimiento…";
+    const formData = new FormData(segurosMovimientosForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.seguro_id = seguroId;
+    const resp = await postJsonWithDbRetry("/api/seguros_movimientos", payload).catch((err) => ({
+      error: err?.message || "Error",
+    }));
+    if (resp?.error) {
+      if (segurosMovimientosStatus) segurosMovimientosStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosMovimientosStatus) segurosMovimientosStatus.textContent = "Movimiento creado.";
+    segurosMovimientosForm.reset();
+    loadSegurosMovimientos(seguroId);
   });
 }
 

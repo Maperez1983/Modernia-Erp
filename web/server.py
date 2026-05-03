@@ -43739,10 +43739,12 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/seguros_update",
 	            "/api/seguros_cambio_compania",
 	            "/api/seguros_delete",
-	            "/api/seguros_poliza_accion",
-	            "/api/seguros_renovaciones_update",
-	            "/api/seguros_enrich",
-	            "/api/seguros_backfill_s3",
+            "/api/seguros_poliza_accion",
+            "/api/seguros_renovaciones_update",
+            "/api/seguros_enrich",
+            "/api/seguros_backfill_s3",
+            "/api/seguros_movimientos",
+            "/api/seguros_version_snapshot",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",
@@ -44044,6 +44046,8 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/seguros_siniestros": "seguros",
                         "/api/seguros_siniestros_update": "seguros",
                         "/api/seguros_siniestros_delete": "seguros",
+                        "/api/seguros_movimientos": "seguros",
+                        "/api/seguros_version_snapshot": "seguros",
                         # Financiaciones/hipotecas
                         "/api/hipotecas": "financiaciones",
                         "/api/hipotecas_update": "financiaciones",
@@ -54723,6 +54727,62 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        elif parsed.path == "/api/seguros_version_snapshot":
+            seguro_id = str(payload.get("seguro_id") or payload.get("id") or "").strip()
+            if not seguro_id:
+                json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+            if not seguro_row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+            motivo = str(payload.get("motivo") or payload.get("reason") or "snapshot_manual").strip() or "snapshot_manual"
+            try:
+                version = save_seguro_version(conn, seguro_row, now, motivo=motivo, created_by=actor or "")
+                conn.commit()
+                json_response(self, {"ok": True, "version": version})
+                return
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo guardar snapshot", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+        elif parsed.path == "/api/seguros_movimientos":
+            seguro_id = str(payload.get("seguro_id") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip()
+            if not seguro_id or not tipo:
+                json_response(self, {"error": "seguro_id y tipo requeridos"}, status=400)
+                return
+            seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+            if not seguro_row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+            try:
+                mov = create_seguro_movimiento(
+                    conn,
+                    seguro_row,
+                    now,
+                    tipo=tipo,
+                    subtipo=payload.get("subtipo") or "",
+                    fecha_movimiento=payload.get("fecha_movimiento") or payload.get("fecha") or "",
+                    fecha_efecto=payload.get("fecha_efecto") or "",
+                    fecha_vencimiento=payload.get("fecha_vencimiento") or "",
+                    prima_neta=payload.get("prima_neta"),
+                    prima_total=payload.get("prima_total"),
+                    comision=payload.get("comision"),
+                    doc_key=payload.get("doc_key") or "",
+                    doc_url=payload.get("doc_url") or "",
+                    notas=payload.get("notas") or "",
+                    payload=payload.get("payload") if isinstance(payload.get("payload"), dict) else None,
+                    created_by=actor or "",
+                )
+                log_seguro_event(conn, seguro_row, "movimiento_alta", now, payload={"tipo": tipo, "movimiento_id": mov.get("id") if mov else ""})
+                conn.commit()
+                json_response(self, {"ok": True, "movimiento": mov})
+                return
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo crear movimiento", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
         elif parsed.path == "/api/seguros_cambio_compania":
             record_id = payload.get("id")
             if not record_id:
@@ -54736,6 +54796,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             fecha_cambio = (payload.get("fecha_cambio") or payload.get("fecha") or now[:10]).strip()
             nueva_poliza = (payload.get("nueva_poliza_numero") or payload.get("poliza_numero") or "").strip()
             if not nueva_poliza:
@@ -54755,6 +54816,10 @@ class Handler(BaseHTTPRequestHandler):
             version_grupo = (row["version_grupo"] or row["id"] or "").strip() or row["id"]
             old_policy = row["poliza_numero"]
             new_id = os.urandom(16).hex()
+            try:
+                save_seguro_version(conn, row, now, motivo="cambio_compania: salida", created_by=actor or "")
+            except Exception:
+                pass
             dup_id = find_existing_seguro_id(
                 conn,
                 row["empresa_id"],
@@ -54864,6 +54929,19 @@ class Handler(BaseHTTPRequestHandler):
                     motivo=payload.get("motivo_baja") or "cambio_compania",
                     payload={"new_id": new_id, "nueva_compania": nueva_compania, "nueva_poliza": nueva_poliza},
                 )
+                try:
+                    create_seguro_movimiento(
+                        conn,
+                        old_row,
+                        now,
+                        tipo="cambio_compania_salida",
+                        fecha_movimiento=fecha_cambio,
+                        notas=payload.get("motivo_baja") or "cambio_compania",
+                        payload={"new_id": new_id, "nueva_compania": nueva_compania, "nueva_poliza": nueva_poliza},
+                        created_by=actor or "",
+                    )
+                except Exception:
+                    pass
             if new_row:
                 log_seguro_event(
                     conn,
@@ -54872,6 +54950,18 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                     payload={"old_id": record_id, "compania_origen": row["compania"], "poliza_origen": old_policy},
                 )
+                try:
+                    create_seguro_movimiento(
+                        conn,
+                        new_row,
+                        now,
+                        tipo="cambio_compania_entrada",
+                        fecha_movimiento=fecha_cambio,
+                        payload={"old_id": record_id, "compania_origen": row["compania"], "poliza_origen": old_policy},
+                        created_by=actor or "",
+                    )
+                except Exception:
+                    pass
                 upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, new_row, now)
             json_response(
@@ -54961,6 +55051,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             if action in ("CONTRATAR", "CONTRATADA", "CONVERTIR CONTRATADA", "CONVERTIR A CONTRATADA"):
                 if not can_transition_seguro_estado(row["estado"], "Contratada"):
                     json_response(
@@ -54972,6 +55063,10 @@ class Handler(BaseHTTPRequestHandler):
                         status=400,
                     )
                     return
+                try:
+                    save_seguro_version(conn, row, now, motivo="poliza_accion: contratar", created_by=actor or "")
+                except Exception:
+                    pass
                 conn.execute(
                     """
                     UPDATE seguros
@@ -54986,6 +55081,10 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "contratada", now)
+                try:
+                    create_seguro_movimiento(conn, row, now, tipo="contratada", fecha_movimiento=now[:10], created_by=actor or "")
+                except Exception:
+                    pass
                 json_response(self, {"ok": True, "id": record_id, "accion": "contratar"})
                 conn.commit()
                 return
@@ -55002,6 +55101,10 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     return
                 fecha_activacion = (payload.get("fecha_activacion") or payload.get("fecha") or now[:10]).strip()
+                try:
+                    save_seguro_version(conn, row, now, motivo="poliza_accion: activar", created_by=actor or "")
+                except Exception:
+                    pass
                 conn.execute(
                     """
                     UPDATE seguros
@@ -55017,6 +55120,18 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "activacion_efecto", now, payload={"fecha": fecha_activacion})
+                try:
+                    create_seguro_movimiento(
+                        conn,
+                        row,
+                        now,
+                        tipo="entrada_vigor",
+                        fecha_movimiento=fecha_activacion,
+                        fecha_efecto=fecha_activacion,
+                        created_by=actor or "",
+                    )
+                except Exception:
+                    pass
                 contabilidad_id = upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision", fecha=fecha_activacion)
                 json_response(self, {"ok": True, "id": record_id, "accion": "activar", "contabilidad_id": contabilidad_id})
                 conn.commit()
@@ -55025,6 +55140,10 @@ class Handler(BaseHTTPRequestHandler):
                 fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
                 nueva_fecha_venc = (payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or "").strip()
                 nueva_ref = (payload.get("nueva_poliza_ref") or payload.get("poliza_numero") or "").strip()
+                try:
+                    save_seguro_version(conn, row, now, motivo="poliza_accion: renovar", created_by=actor or "")
+                except Exception:
+                    pass
                 set_parts = [
                     "estado_renovacion = ?",
                     "renovacion_fecha = ?",
@@ -55049,6 +55168,20 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "renovacion_manual", now, payload={"fecha": fecha_renovacion})
+                try:
+                    create_seguro_movimiento(
+                        conn,
+                        row,
+                        now,
+                        tipo="renovacion",
+                        fecha_movimiento=fecha_renovacion,
+                        fecha_efecto=row.get("fecha_efecto") if isinstance(row, dict) else row["fecha_efecto"],
+                        fecha_vencimiento=row.get("fecha_vencimiento") if isinstance(row, dict) else row["fecha_vencimiento"],
+                        comision=payload.get("comision"),
+                        created_by=actor or "",
+                    )
+                except Exception:
+                    pass
                 contabilidad_id = upsert_seguro_comision_contabilidad(
                     conn,
                     row,
@@ -55062,6 +55195,10 @@ class Handler(BaseHTTPRequestHandler):
             if action in ("ANULAR", "CANCELAR", "CANCEL"):
                 fecha_baja = (payload.get("fecha_baja") or payload.get("fecha") or now[:10]).strip()
                 motivo_baja = (payload.get("motivo_baja") or payload.get("motivo") or "otros").strip()
+                try:
+                    save_seguro_version(conn, row, now, motivo="poliza_accion: anular", created_by=actor or "")
+                except Exception:
+                    pass
                 conn.execute(
                     """
                     UPDATE seguros
@@ -55077,6 +55214,18 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "anulacion", now, motivo=motivo_baja, payload={"fecha_baja": fecha_baja})
+                try:
+                    create_seguro_movimiento(
+                        conn,
+                        row,
+                        now,
+                        tipo="anulacion",
+                        fecha_movimiento=fecha_baja,
+                        created_by=actor or "",
+                        notas=motivo_baja,
+                    )
+                except Exception:
+                    pass
                 json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
                 conn.commit()
                 return
@@ -65145,6 +65294,73 @@ class Handler(BaseHTTPRequestHandler):
                 """
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_movimientos":
+            seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
+            if not seguro_id:
+                json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT
+                  id, seguro_id, empresa_id, cliente_id, tipo, subtipo,
+                  fecha_movimiento, fecha_efecto, fecha_vencimiento,
+                  prima_neta, prima_total, comision, comision_pct,
+                  doc_key, doc_url, notas, payload_json, created_by,
+                  created_at, updated_at
+                FROM seguros_movimientos
+                WHERE seguro_id = ?
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha_movimiento,'')), ''), created_at) DESC, created_at DESC
+                LIMIT 300
+                """,
+                (seguro_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_versiones":
+            seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
+            if not seguro_id:
+                json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT id, seguro_id, version_no, motivo, created_by, created_at
+                FROM seguros_versiones
+                WHERE seguro_id = ?
+                ORDER BY version_no DESC, created_at DESC
+                LIMIT 200
+                """,
+                (seguro_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_version":
+            version_id = str(params.get("id", [""])[0] or "").strip()
+            if not version_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, seguro_id, version_no, motivo, snapshot_json, created_by, created_at
+                FROM seguros_versiones
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (version_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Versión no encontrada"}, status=404)
+                return
+            payload = dict(row)
+            # Si es JSON válido, lo devolvemos parseado para que el frontend lo use directamente.
+            try:
+                payload["snapshot"] = json.loads(payload.get("snapshot_json") or "{}")
+            except Exception:
+                payload["snapshot"] = None
+            json_response(self, payload)
             return
 
         if path == "/api/seguros_cliente":

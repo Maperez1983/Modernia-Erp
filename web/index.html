@@ -6060,6 +6060,10 @@
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
               <span class="tc-mod-label">Recibos</span>
             </button>
+            <button class="tab tc-module" type="button" data-seguros-tab="historial" title="Historial">
+              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clock"></use></svg></span>
+              <span class="tc-mod-label">Historial</span>
+            </button>
             <button class="tab tc-module" type="button" data-seguros-tab="siniestros" title="Siniestros">
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
               <span class="tc-mod-label">Siniestros</span>
@@ -7085,6 +7089,89 @@
 	              <div class="footer" id="segurosRecibosInfo"></div>
 	            </div>
 	          </div>
+          <div class="seguros-tab" data-seguros-tab="historial">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Historial · Movimientos y versiones</h3>
+                  <p class="muted">Suplementos, cambios y snapshots para recuperar si algo se rompe.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label class="span-2">
+                  Póliza
+                  <select id="segurosHistorialPolizaId"></select>
+                </label>
+                <label>
+                  Motivo snapshot
+                  <input id="segurosHistorialSnapshotMotivo" placeholder="Ej. Renovación, suplemento, corrección datos..." />
+                </label>
+                <div class="form-actions">
+                  <button type="button" id="segurosHistorialSnapshotBtn" class="secondary">Guardar snapshot</button>
+                  <span id="segurosHistorialSnapshotStatus" class="muted"></span>
+                </div>
+              </div>
+            </div>
+            <div class="form-card">
+              <h3>Nuevo movimiento</h3>
+              <p class="muted">Registra un suplemento/movimiento para que quede trazabilidad.</p>
+              <form id="segurosMovimientosForm" class="form-grid">
+                <label>
+                  Tipo
+                  <select name="tipo" required>
+                    <option value="suplemento">Suplemento</option>
+                    <option value="renovacion">Renovación</option>
+                    <option value="cambio_datos">Cambio datos</option>
+                    <option value="baja">Baja / anulación</option>
+                    <option value="otros">Otros</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha movimiento
+                  <input name="fecha_movimiento" type="date" required />
+                </label>
+                <label>
+                  Fecha efecto
+                  <input name="fecha_efecto" type="date" />
+                </label>
+                <label>
+                  Nueva vencimiento
+                  <input name="fecha_vencimiento" type="date" />
+                </label>
+                <label>
+                  Prima neta
+                  <input name="prima_neta" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label>
+                  Prima total
+                  <input name="prima_total" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label>
+                  Comisión
+                  <input name="comision" type="number" step="0.01" min="0" placeholder="0,00" />
+                </label>
+                <label class="span-2">
+                  Notas
+                  <textarea name="notas" rows="2"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Crear movimiento</button>
+                  <span id="segurosMovimientosStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+            <div class="form-card">
+              <h3>Movimientos</h3>
+              <div id="segurosMovimientosTable"></div>
+              <div class="footer" id="segurosMovimientosInfo"></div>
+            </div>
+            <div class="form-card">
+              <h3>Versiones (snapshots)</h3>
+              <div id="segurosVersionesTable"></div>
+              <div class="footer" id="segurosVersionesInfo"></div>
+              <pre id="segurosVersionSnapshotPreview" class="muted" style="white-space:pre-wrap;max-height:280px;overflow:auto"></pre>
+            </div>
+          </div>
           <div class="seguros-tab" data-seguros-tab="siniestros">
             <div class="form-card">
               <h3>Siniestros · Seguros</h3>
