@@ -19366,6 +19366,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     codigo_postal = pick([r"\bC(?:[ÓO]D(?:IGO)?)?\s*P(?:OSTAL)?\.?\s*[:\-]?\s*([0-9]{5})\b"])
     if codigo_postal:
         smart_fields["codigo_postal"] = codigo_postal
+    referencia_catastral = pick([
+        r"(?:REFERENCIA\s+)?CATASTRAL\s*[:\-]?\s*([0-9A-Z\s\-]{14,25})",
+        r"REF\.?\s*CATASTRAL\s*[:\-]?\s*([0-9A-Z\s\-]{14,25})",
+    ])
+    if referencia_catastral:
+        ref_norm = re.sub(r"[^0-9A-Z]", "", str(referencia_catastral or "").upper())
+        if 14 <= len(ref_norm) <= 25 and re.search(r"[0-9]", ref_norm):
+            smart_fields["referencia_catastral"] = ref_norm
     tipo_vivienda = pick([r"TIPO\s+DE\s+VIVIENDA\s*[:\-]?\s*([A-Z][^\n\r]{2,40})"])
     if tipo_vivienda:
         smart_fields["tipo_vivienda"] = tipo_vivienda.strip(" ,;:-")
@@ -19433,7 +19441,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         smart_fields = {
             k: v
             for k, v in smart_fields.items()
-            if k in ("direccion_riesgo", "codigo_postal", "tipo_vivienda", "metros2", "anio_construccion", "continente", "contenido")
+            if k in ("direccion_riesgo", "codigo_postal", "referencia_catastral", "tipo_vivienda", "metros2", "anio_construccion", "continente", "contenido")
         }
     elif vida_salud_hint:
         smart_fields = {
@@ -26572,6 +26580,11 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             ejercicio_val = str(datetime.now().year - 1)
         except Exception:
             ejercicio_val = ""
+    prev_val = ""
+    try:
+        prev_val = str(int(ejercicio_val) - 1)
+    except Exception:
+        prev_val = ""
 
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
@@ -26592,6 +26605,16 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           c.estado AS cliente_estado,
           cg.renta_detalles,
           c.empresa_id AS cliente_empresa_id,
+          CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders_emp})
+                AND ce.cliente_id = c.id
+                AND {service_filter}
+            ) THEN 1
+            ELSE 0
+          END AS has_servicio_link,
           (
             SELECT ce2.estado
             FROM clientes_empresas ce2
@@ -26623,26 +26646,74 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
+        tuple([*empresa_ids, *empresa_ids, *empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
+    campaigns_prev = []
     missing = []
+    sin_vincular_rows = []
     for row in rows:
         row_dict = dict(row)
         cliente_id = str(row_dict.get("cliente_id") or "").strip()
         nombre = str(row_dict.get("nombre") or "").strip()
         nif = str(row_dict.get("nif") or "").strip()
         servicio_estado = str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip()
+        has_link = int(row_dict.get("has_servicio_link") or 0) == 1
         payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
         entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
         entry = None
+        entry_prev = None
         for e in entries:
             if str(e.get("ejercicio") or "").strip() == ejercicio_val:
                 entry = e
                 break
+        if prev_val:
+            for e in entries:
+                if str(e.get("ejercicio") or "").strip() == prev_val:
+                    entry_prev = e
+                    break
+        if entry_prev:
+            try:
+                estado_p = normalize_renta_presentacion_status(entry_prev.get("estado_presentacion") or entry_prev.get("doc_status"))
+                responsable_raw_p = str(entry_prev.get("responsable") or "").strip()
+                responsable_label_p = responsable_raw_p or "Sin responsable"
+                responsable_key_p = normalize_lookup_text(responsable_label_p) or "sin-responsable"
+                precio_p = coerce_renta_money(entry_prev.get("precio_servicio")) or 0.0
+                cobrada_p = 1 if parse_boolish(entry_prev.get("cobrada")) else 0
+                forma_cobro_p = str(entry_prev.get("forma_cobro") or "").strip()
+                remesada_p = 1 if parse_boolish(entry_prev.get("remesada")) else 0
+                presentacion_fecha_p = str(entry_prev.get("presentacion_fecha") or "").strip()
+                month_p = presentacion_fecha_p[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha_p) else ""
+                fecha_cobro_p = str(entry_prev.get("fecha_cobro") or "").strip()
+                month_cobro_p = fecha_cobro_p[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", fecha_cobro_p) else ""
+                campaigns_prev.append(
+                    {
+                        "cliente_id": cliente_id,
+                        "cliente": nombre,
+                        "nif": nif,
+                        "estado_servicio": servicio_estado,
+                        "ejercicio": prev_val,
+                        "estado_presentacion": estado_p,
+                        "presentacion_fecha": presentacion_fecha_p,
+                        "mes": month_p,
+                        "fecha_cobro": fecha_cobro_p,
+                        "mes_cobro": month_cobro_p,
+                        "responsable": responsable_raw_p,
+                        "responsable_label": responsable_label_p,
+                        "responsable_key": responsable_key_p,
+                        "precio_servicio": round(float(precio_p or 0.0), 2),
+                        "cobrada": cobrada_p,
+                        "forma_cobro": forma_cobro_p,
+                        "remesada": remesada_p,
+                    }
+                )
+            except Exception:
+                pass
         if not entry:
             missing.append({"cliente_id": cliente_id, "cliente": nombre, "nif": nif, "estado_servicio": servicio_estado})
+            if not has_link and len(sin_vincular_rows) < 250:
+                sin_vincular_rows.append({"cliente_id": cliente_id, "cliente": nombre, "nif": nif, "estado_servicio": servicio_estado})
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
         responsable_raw = str(entry.get("responsable") or "").strip()
@@ -26692,6 +26763,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "remesadas": 0,
         "no_remesadas": 0,
         "remesadas_total": 0.0,
+        "cobros_sin_fecha": 0,
+        "cobros_sin_fecha_total": 0.0,
         "facturacion_total": 0.0,
         "cobrado_total": 0.0,
         "pendiente_cobro_total": 0.0,
@@ -26720,6 +26793,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                     cobros_months[cobro_month]["cobrado"] += precio
                 else:
                     cobros_sin_fecha_total += precio
+                    counts["cobros_sin_fecha"] += 1
+                    counts["cobros_sin_fecha_total"] += precio
             else:
                 counts["sin_cobrar"] += 1
                 counts["pendiente_cobro_total"] += precio
@@ -26803,11 +26878,47 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     cobros_months_list = list(cobros_months.values())
     cobros_months_list.sort(key=lambda x: str(x.get("mes") or ""))
 
+    # Ejercicio anterior: cobros por mes y serie fact/cobro/pendiente (para comparativa).
+    cobros_prev_months = {}
+    cobro_prev_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
+    if prev_val and campaigns_prev:
+        try:
+            month_labels = [f"{m:02d}" for m in range(1, 13)]
+            fact_m = {m: 0.0 for m in month_labels}
+            cob_m = {m: 0.0 for m in month_labels}
+            pen_m = {m: 0.0 for m in month_labels}
+            for item in campaigns_prev:
+                precio = float(item.get("precio_servicio") or 0.0)
+                if precio <= 0.0001:
+                    continue
+                ym = str(item.get("mes_cobro") or "").strip()
+                month = ym[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym) else ""
+                if month not in month_labels:
+                    continue
+                fact_m[month] += precio
+                if int(item.get("cobrada") or 0) == 1:
+                    cob_m[month] += precio
+                    key = f"{prev_val}-{month}"
+                    cobros_prev_months.setdefault(key, {"mes": key, "cobradas": 0, "cobrado": 0.0})
+                    cobros_prev_months[key]["cobradas"] += 1
+                    cobros_prev_months[key]["cobrado"] += precio
+                else:
+                    pen_m[month] += precio
+            cobro_prev_series_out = {
+                "labels": month_labels,
+                "facturacion": [round(float(fact_m[m]), 2) for m in month_labels],
+                "cobrado": [round(float(cob_m[m]), 2) for m in month_labels],
+                "pendiente": [round(float(pen_m[m]), 2) for m in month_labels],
+            }
+        except Exception:
+            cobro_prev_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
+    cobros_prev_months_list = list(cobros_prev_months.values())
+    cobros_prev_months_list.sort(key=lambda x: str(x.get("mes") or ""))
+
     # `campaigns` puede ser grande, pero es un payload de dashboard (no se usa en cards).
     # Limitamos a un máximo razonable para habilitar vistas filtradas en frontend sin otra llamada.
     campaigns_sorted = list(campaigns)
     campaigns_sorted.sort(key=lambda x: (str(x.get("cliente") or ""), str(x.get("nif") or "")))
-
     return {
         "ejercicio": ejercicio_val,
         "counts": {
@@ -26816,6 +26927,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             "cobrado_total": round(float(counts["cobrado_total"]), 2),
             "pendiente_cobro_total": round(float(counts["pendiente_cobro_total"]), 2),
             "remesadas_total": round(float(counts["remesadas_total"]), 2),
+            "cobros_sin_fecha_total": round(float(counts["cobros_sin_fecha_total"]), 2),
         },
         "responsables": [
             {
@@ -26830,6 +26942,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "unpaid": unpaid[:400],
         "unassigned": unassigned[:400],
         "missing": missing[:400],
+        "sin_vincular": sin_vincular_rows[:250],
         "months": months_list,
         "cobros": {
             "months": [
@@ -26837,6 +26950,15 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 for row in cobros_months_list
             ],
             "sin_fecha_total": round(float(cobros_sin_fecha_total or 0.0), 2),
+        },
+        "cobro_series": cobro_series_out,
+        "prev": {
+            "ejercicio": prev_val,
+            "cobros_months": [
+                {**row, "cobrado": round(float(row.get("cobrado") or 0.0), 2)}
+                for row in cobros_prev_months_list
+            ],
+            "cobro_series": cobro_prev_series_out,
         },
     }
 
@@ -42576,6 +42698,8 @@ class Handler(BaseHTTPRequestHandler):
             "seguros_comisiones": "seguros",
             "seguros_checklist": "seguros",
             "seguros_reclamaciones": "seguros",
+            "seguros_recibos": "seguros",
+            "seguros_siniestros": "seguros",
             "gestoria": "gestoria",
             "gestoria_docs": "gestoria",
             "gestoria_trabajos": "gestoria",
@@ -43390,6 +43514,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones_delete",
             "/api/seguros_checklist_generate",
             "/api/seguros_checklist_update",
+            "/api/seguros_recibos",
+            "/api/seguros_recibos_update",
+            "/api/seguros_recibos_delete",
+            "/api/seguros_siniestros",
+            "/api/seguros_siniestros_update",
+            "/api/seguros_siniestros_delete",
             "/api/fin_checklist_generate",
             "/api/fin_checklist_update",
             "/api/ai_seguros_copilot",
@@ -43659,6 +43789,9 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/seguros_recibos": "seguros",
                         "/api/seguros_recibos_update": "seguros",
                         "/api/seguros_recibos_delete": "seguros",
+                        "/api/seguros_siniestros": "seguros",
+                        "/api/seguros_siniestros_update": "seguros",
+                        "/api/seguros_siniestros_delete": "seguros",
                         # Financiaciones/hipotecas
                         "/api/hipotecas": "financiaciones",
                         "/api/hipotecas_update": "financiaciones",
@@ -54787,6 +54920,299 @@ class Handler(BaseHTTPRequestHandler):
                 seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (row["seguro_id"],)).fetchone()
                 log_seguro_event(conn, seguro_row, "reclamacion_delete", now, payload={"reclamacion_id": rec_id})
             json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_recibos":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            seguro_id = str(payload.get("seguro_id") or "").strip() or None
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            fecha_emision = str(payload.get("fecha_emision") or payload.get("fecha") or "").strip()
+            if not empresa_id or not fecha_emision:
+                json_response(self, {"error": "empresa_id y fecha_emision requeridos"}, status=400)
+                return
+            poliza_numero = (payload.get("poliza_numero") or "").strip()
+            compania = (payload.get("compania") or "").strip()
+            ramo = canonicalize_ramo(payload.get("ramo"))
+            referencia = (payload.get("referencia") or "").strip() or None
+            estado = (payload.get("estado") or "emitido").strip() or "emitido"
+            fecha_vencimiento = (payload.get("fecha_vencimiento") or "").strip() or None
+            fecha_cobro = (payload.get("fecha_cobro") or "").strip() or None
+            prima_total = parse_money_value(payload.get("prima_total"))
+            comision = parse_money_value(payload.get("comision"))
+            importe_liquidacion = parse_money_value(payload.get("importe_liquidacion"))
+            if seguro_id:
+                row = conn.execute(
+                    "SELECT id, cliente_id, empresa_id, poliza_numero, compania, ramo FROM seguros WHERE id = ?",
+                    (seguro_id,),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "seguro_id no encontrado"}, status=404)
+                    return
+                if row["empresa_id"] and str(row["empresa_id"]).strip() != empresa_id:
+                    json_response(self, {"error": "seguro_id no pertenece a esa empresa"}, status=400)
+                    return
+                cliente_id = cliente_id or row["cliente_id"]
+                poliza_numero = poliza_numero or (row["poliza_numero"] or "").strip()
+                compania = compania or (row["compania"] or "").strip()
+                ramo = ramo or canonicalize_ramo(row["ramo"])
+            comision_pct = None
+            try:
+                if abs(prima_total) > 0.0001 and abs(comision) > 0.0001:
+                    comision_pct = round((float(comision) / float(prima_total)) * 100.0, 6)
+            except Exception:
+                comision_pct = None
+            rec_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO seguros_recibos (
+                  id, empresa_id, seguro_id, cliente_id, referencia, poliza_numero, compania, ramo,
+                  fecha_emision, fecha_vencimiento, fecha_cobro, estado,
+                  prima_total, comision, comision_pct, importe_liquidacion, notas, doc_key, doc_url,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    rec_id,
+                    empresa_id,
+                    seguro_id,
+                    cliente_id,
+                    referencia,
+                    poliza_numero or None,
+                    compania or None,
+                    ramo or None,
+                    fecha_emision,
+                    fecha_vencimiento,
+                    fecha_cobro,
+                    estado,
+                    prima_total if abs(prima_total) > 0.0001 else None,
+                    comision if abs(comision) > 0.0001 else None,
+                    comision_pct,
+                    importe_liquidacion if abs(importe_liquidacion) > 0.0001 else None,
+                    (payload.get("notas") or "").strip() or None,
+                    (payload.get("doc_key") or "").strip() or None,
+                    (payload.get("doc_url") or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_recibos_update":
+            rec_id = str(payload.get("id") or "").strip()
+            if not rec_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros_recibos WHERE id = ?", (rec_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Recibo no encontrado"}, status=404)
+                return
+            allowed = (
+                "seguro_id",
+                "cliente_id",
+                "referencia",
+                "poliza_numero",
+                "compania",
+                "ramo",
+                "fecha_emision",
+                "fecha_vencimiento",
+                "fecha_cobro",
+                "estado",
+                "prima_total",
+                "comision",
+                "importe_liquidacion",
+                "notas",
+                "doc_key",
+                "doc_url",
+            )
+            updates = {}
+            for key in allowed:
+                if key not in payload:
+                    continue
+                if key == "ramo":
+                    updates[key] = canonicalize_ramo(payload.get(key))
+                elif key in {"prima_total", "comision", "importe_liquidacion"}:
+                    num = parse_money_value(payload.get(key))
+                    updates[key] = num if abs(num) > 0.0001 else None
+                else:
+                    value = payload.get(key)
+                    updates[key] = value.strip() if isinstance(value, str) else value
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            prima_total = updates.get("prima_total", row["prima_total"])
+            comision = updates.get("comision", row["comision"])
+            comision_pct = row["comision_pct"]
+            try:
+                if prima_total is not None and comision is not None and abs(float(prima_total)) > 0.0001 and abs(float(comision)) > 0.0001:
+                    comision_pct = round((float(comision) / float(prima_total)) * 100.0, 6)
+                else:
+                    comision_pct = None
+            except Exception:
+                comision_pct = None
+            updates["comision_pct"] = comision_pct
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, rec_id]
+            conn.execute(
+                f"UPDATE seguros_recibos SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_recibos_delete":
+            rec_id = str(payload.get("id") or "").strip()
+            if not rec_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT id FROM seguros_recibos WHERE id = ?", (rec_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Recibo no encontrado"}, status=404)
+                return
+            conn.execute("DELETE FROM seguros_recibos WHERE id = ?", (rec_id,))
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_siniestros":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            seguro_id = str(payload.get("seguro_id") or "").strip() or None
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            fecha_siniestro = str(payload.get("fecha_siniestro") or payload.get("fecha") or "").strip()
+            if not empresa_id or not fecha_siniestro:
+                json_response(self, {"error": "empresa_id y fecha_siniestro requeridos"}, status=400)
+                return
+            numero_expediente = (payload.get("numero_expediente") or "").strip() or None
+            compania = (payload.get("compania") or "").strip()
+            ramo = canonicalize_ramo(payload.get("ramo"))
+            estado = (payload.get("estado") or "abierto").strip() or "abierto"
+            tipo = (payload.get("tipo") or "").strip() or None
+            descripcion = (payload.get("descripcion") or "").strip() or None
+            gestor = (payload.get("gestor") or "").strip() or None
+            notas = (payload.get("notas") or "").strip() or None
+            importe_reserva = parse_money_value(payload.get("importe_reserva"))
+            importe_pagado = parse_money_value(payload.get("importe_pagado"))
+            if seguro_id:
+                pol = conn.execute(
+                    "SELECT id, cliente_id, empresa_id, compania, ramo FROM seguros WHERE id = ?",
+                    (seguro_id,),
+                ).fetchone()
+                if not pol:
+                    json_response(self, {"error": "seguro_id no encontrado"}, status=404)
+                    return
+                if pol["empresa_id"] and str(pol["empresa_id"]).strip() != empresa_id:
+                    json_response(self, {"error": "seguro_id no pertenece a esa empresa"}, status=400)
+                    return
+                cliente_id = cliente_id or pol["cliente_id"]
+                compania = compania or (pol["compania"] or "").strip()
+                ramo = ramo or canonicalize_ramo(pol["ramo"])
+            fecha_apertura = str(payload.get("fecha_apertura") or fecha_siniestro or now[:10]).strip() or now[:10]
+            fecha_cierre = str(payload.get("fecha_cierre") or "").strip() or None
+            estado_norm = (estado or "").strip().lower()
+            if estado_norm in {"cerrado", "rechazado"} and not fecha_cierre:
+                fecha_cierre = now[:10]
+            sin_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO seguros_siniestros (
+                  id, empresa_id, seguro_id, cliente_id, numero_expediente, compania, ramo,
+                  fecha_siniestro, fecha_apertura, fecha_cierre, estado, tipo, descripcion,
+                  importe_reserva, importe_pagado, gestor, notas, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    sin_id,
+                    empresa_id,
+                    seguro_id,
+                    cliente_id,
+                    numero_expediente,
+                    compania or None,
+                    ramo or None,
+                    fecha_siniestro,
+                    fecha_apertura,
+                    fecha_cierre,
+                    estado,
+                    tipo,
+                    descripcion,
+                    importe_reserva if abs(importe_reserva) > 0.0001 else None,
+                    importe_pagado if abs(importe_pagado) > 0.0001 else None,
+                    gestor,
+                    notas,
+                    now,
+                    now,
+                ),
+            )
+            json_response(self, {"ok": True, "id": sin_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_siniestros_update":
+            sin_id = str(payload.get("id") or "").strip()
+            if not sin_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros_siniestros WHERE id = ?", (sin_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Siniestro no encontrado"}, status=404)
+                return
+            allowed = (
+                "seguro_id",
+                "cliente_id",
+                "numero_expediente",
+                "compania",
+                "ramo",
+                "fecha_siniestro",
+                "fecha_apertura",
+                "fecha_cierre",
+                "estado",
+                "tipo",
+                "descripcion",
+                "importe_reserva",
+                "importe_pagado",
+                "gestor",
+                "notas",
+            )
+            updates = {}
+            for key in allowed:
+                if key not in payload:
+                    continue
+                if key == "ramo":
+                    updates[key] = canonicalize_ramo(payload.get(key))
+                elif key in {"importe_reserva", "importe_pagado"}:
+                    num = parse_money_value(payload.get(key))
+                    updates[key] = num if abs(num) > 0.0001 else None
+                else:
+                    value = payload.get(key)
+                    updates[key] = value.strip() if isinstance(value, str) else value
+            if "estado" in updates:
+                estado_norm = str(updates.get("estado") or "").strip().lower()
+                if estado_norm in {"cerrado", "rechazado"} and not str(updates.get("fecha_cierre") or row["fecha_cierre"] or "").strip():
+                    updates["fecha_cierre"] = now[:10]
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, sin_id]
+            conn.execute(
+                f"UPDATE seguros_siniestros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            json_response(self, {"ok": True, "id": sin_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_siniestros_delete":
+            sin_id = str(payload.get("id") or "").strip()
+            if not sin_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT id FROM seguros_siniestros WHERE id = ?", (sin_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Siniestro no encontrado"}, status=404)
+                return
+            conn.execute("DELETE FROM seguros_siniestros WHERE id = ?", (sin_id,))
+            json_response(self, {"ok": True, "id": sin_id})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_ipid_register":

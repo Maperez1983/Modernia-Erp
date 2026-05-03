@@ -51910,9 +51910,15 @@ const renderGestoriaRentaDashboard = (payload) => {
   const unpaid = Array.isArray(payload?.unpaid) ? payload.unpaid : [];
   const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
   const missing = Array.isArray(payload?.missing) ? payload.missing : [];
+  const sinVincular = Array.isArray(payload?.sin_vincular) ? payload.sin_vincular : [];
   const months = Array.isArray(payload?.months) ? payload.months : [];
   const cobrosMonths = Array.isArray(payload?.cobros?.months) ? payload.cobros.months : [];
   const cobrosSinFechaTotal = Number(payload?.cobros?.sin_fecha_total || 0);
+  const cobroSeries = payload?.cobro_series || {};
+  const prevPayload = payload?.prev || {};
+  const prevEjercicio = String(prevPayload?.ejercicio || "").trim();
+  const prevCobrosMonths = Array.isArray(prevPayload?.cobros_months) ? prevPayload.cobros_months : [];
+  const prevCobroSeries = prevPayload?.cobro_series || {};
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
