@@ -1347,6 +1347,50 @@ CREATE TABLE IF NOT EXISTS seguros_ipid_log (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS seguros_idd_asesoramiento (
+  id TEXT PRIMARY KEY,
+  seguro_id TEXT NOT NULL,
+  cliente_id TEXT,
+  empresa_id TEXT,
+  fecha_asesoramiento TEXT,
+  canal TEXT,
+  necesidades TEXT,
+  recomendacion TEXT,
+  justificacion TEXT,
+  comparacion_json TEXT,
+  documentos_json TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (seguro_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_seguros_idd_empresa_updated
+ON seguros_idd_asesoramiento (empresa_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_seguros_idd_cliente_updated
+ON seguros_idd_asesoramiento (cliente_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS seguros_consentimientos (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  consent_json TEXT NOT NULL,
+  metodo TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (empresa_id, cliente_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_seguros_consent_empresa_updated
+ON seguros_consentimientos (empresa_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_seguros_consent_cliente_updated
+ON seguros_consentimientos (cliente_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS fin_checklist (
   id TEXT PRIMARY KEY,
   asesoramiento_id TEXT NOT NULL,

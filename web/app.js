@@ -2781,14 +2781,31 @@ const segurosRamoListado = document.getElementById("segurosRamoListado");
 const segurosPolizaAccionForm = document.getElementById("segurosPolizaAccionForm");
 const segurosPolizaAccionId = document.getElementById("segurosPolizaAccionId");
 const segurosPolizaAccionTipo = document.getElementById("segurosPolizaAccionTipo");
-const segurosPolizaAccionFecha = document.getElementById("segurosPolizaAccionFecha");
-const segurosPolizaAccionMotivo = document.getElementById("segurosPolizaAccionMotivo");
-const segurosPolizaAccionStatus = document.getElementById("segurosPolizaAccionStatus");
-const segurosComplianceKpis = document.getElementById("segurosComplianceKpis");
-const segurosEventosPolizaId = document.getElementById("segurosEventosPolizaId");
-const segurosEventosRefresh = document.getElementById("segurosEventosRefresh");
-const segurosEventosTable = document.getElementById("segurosEventosTable");
-const segurosEventosInfo = document.getElementById("segurosEventosInfo");
+  const segurosPolizaAccionFecha = document.getElementById("segurosPolizaAccionFecha");
+  const segurosPolizaAccionMotivo = document.getElementById("segurosPolizaAccionMotivo");
+  const segurosPolizaAccionStatus = document.getElementById("segurosPolizaAccionStatus");
+  const segurosComplianceKpis = document.getElementById("segurosComplianceKpis");
+  const segurosComplianceForm = document.getElementById("segurosComplianceForm");
+  const segurosCompliancePoliza = document.getElementById("segurosCompliancePoliza");
+  const segurosComplianceReload = document.getElementById("segurosComplianceReload");
+  const segurosComplianceStatus = document.getElementById("segurosComplianceStatus");
+  const segurosIddFecha = document.getElementById("segurosIddFecha");
+  const segurosIddCanal = document.getElementById("segurosIddCanal");
+  const segurosIddNecesidades = document.getElementById("segurosIddNecesidades");
+  const segurosIddRecomendacion = document.getElementById("segurosIddRecomendacion");
+  const segurosIddJustificacion = document.getElementById("segurosIddJustificacion");
+  const segurosIddComparacion = document.getElementById("segurosIddComparacion");
+  const segurosGdprMarketing = document.getElementById("segurosGdprMarketing");
+  const segurosGdprEmail = document.getElementById("segurosGdprEmail");
+  const segurosGdprWhatsapp = document.getElementById("segurosGdprWhatsapp");
+  const segurosGdprTelefono = document.getElementById("segurosGdprTelefono");
+  const segurosGdprFecha = document.getElementById("segurosGdprFecha");
+  const segurosGdprMetodo = document.getElementById("segurosGdprMetodo");
+  const segurosGdprNotas = document.getElementById("segurosGdprNotas");
+  const segurosEventosPolizaId = document.getElementById("segurosEventosPolizaId");
+  const segurosEventosRefresh = document.getElementById("segurosEventosRefresh");
+  const segurosEventosTable = document.getElementById("segurosEventosTable");
+  const segurosEventosInfo = document.getElementById("segurosEventosInfo");
 const segurosIpidForm = document.getElementById("segurosIpidForm");
 const segurosIpidPolizaId = document.getElementById("segurosIpidPolizaId");
 const segurosIpidFecha = document.getElementById("segurosIpidFecha");
@@ -53892,6 +53909,7 @@ const loadSegurosCrm = () => {
     loadSegurosKpis();
     renderSegurosRamosDashboard();
     populateSegurosOperationalSelects();
+    loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
     loadSegurosComplianceKpis(empresa.id);
     loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
     loadSegurosReclamaciones(empresa.id);
@@ -54381,6 +54399,7 @@ const populateSegurosOperationalSelects = () => {
   fill(segurosIpidPolizaId, optionsAll);
   fill(segurosReclamacionPolizaId, optionsAll);
   fill(segurosHistorialPolizaId, optionsAll);
+  fill(segurosCompliancePoliza, optionsAll);
   if (segurosPolizaAccionStatus) {
     if (!optionsByAction.length) {
       segurosPolizaAccionStatus.textContent =
@@ -54414,6 +54433,10 @@ const loadSegurosComplianceKpis = (empresaId) => {
       add("Pólizas subidas", data.polizas_subidas || 0);
       add("IPID registrados", data.ipid_registrados || 0);
       add("IPID pendientes", data.ipid_pendientes || 0);
+      add("IDD registrados", data.idd_registrados || 0);
+      add("IDD pendientes", data.idd_pendientes || 0);
+      add("Consentimientos", data.consentimientos_registrados || 0);
+      add("Consent. pendientes", data.consentimientos_pendientes || 0);
       add("Reclamaciones abiertas", data.reclamaciones_abiertas || 0);
       segurosComplianceKpis.innerHTML = "";
       segurosComplianceKpis.appendChild(wrapper);
@@ -54421,6 +54444,150 @@ const loadSegurosComplianceKpis = (empresaId) => {
     .catch(() => {
       segurosComplianceKpis.innerHTML = "<p class='muted'>No se pudieron cargar KPIs de compliance.</p>";
     });
+};
+
+const resetSegurosComplianceForm = () => {
+  if (segurosIddFecha) segurosIddFecha.value = "";
+  if (segurosIddCanal) segurosIddCanal.value = "";
+  if (segurosIddNecesidades) segurosIddNecesidades.value = "";
+  if (segurosIddRecomendacion) segurosIddRecomendacion.value = "";
+  if (segurosIddJustificacion) segurosIddJustificacion.value = "";
+  if (segurosIddComparacion) segurosIddComparacion.value = "";
+  if (segurosGdprMarketing) segurosGdprMarketing.checked = false;
+  if (segurosGdprEmail) segurosGdprEmail.checked = false;
+  if (segurosGdprWhatsapp) segurosGdprWhatsapp.checked = false;
+  if (segurosGdprTelefono) segurosGdprTelefono.checked = false;
+  if (segurosGdprFecha) segurosGdprFecha.value = "";
+  if (segurosGdprMetodo) segurosGdprMetodo.value = "";
+  if (segurosGdprNotas) segurosGdprNotas.value = "";
+  if (segurosComplianceStatus) segurosComplianceStatus.textContent = "";
+};
+
+const stringifyMaybeJson = (value) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_err) {
+    return String(value || "");
+  }
+};
+
+const loadSegurosComplianceForm = async (seguroId = "") => {
+  if (!segurosCompliancePoliza) return;
+  const id = String(seguroId || segurosCompliancePoliza.value || "").trim();
+  if (!id) {
+    resetSegurosComplianceForm();
+    if (segurosComplianceStatus) segurosComplianceStatus.textContent = "Selecciona una póliza.";
+    return;
+  }
+  if (segurosComplianceStatus) segurosComplianceStatus.textContent = "Cargando...";
+  let iddRow = {};
+  let consentRow = {};
+  try {
+    const [iddData, consentData] = await Promise.all([
+      api(`/api/seguros_idd?seguro_id=${encodeURIComponent(id)}`).catch(() => ({ row: {} })),
+      api(`/api/seguros_consentimientos?seguro_id=${encodeURIComponent(id)}`).catch(() => ({ row: {} })),
+    ]);
+    iddRow = iddData?.row || {};
+    consentRow = consentData?.row || {};
+  } catch (_err) {
+    iddRow = {};
+    consentRow = {};
+  }
+
+  if (segurosIddFecha) segurosIddFecha.value = String(iddRow.fecha_asesoramiento || "").slice(0, 10);
+  if (segurosIddCanal) segurosIddCanal.value = String(iddRow.canal || "");
+  if (segurosIddNecesidades) segurosIddNecesidades.value = String(iddRow.necesidades || "");
+  if (segurosIddRecomendacion) segurosIddRecomendacion.value = String(iddRow.recomendacion || "");
+  if (segurosIddJustificacion) segurosIddJustificacion.value = String(iddRow.justificacion || "");
+  if (segurosIddComparacion) segurosIddComparacion.value = stringifyMaybeJson(iddRow.comparacion_json || "");
+
+  const consent = consentRow?.consent && typeof consentRow.consent === "object" ? consentRow.consent : {};
+  const canales = consent?.canales && typeof consent.canales === "object" ? consent.canales : {};
+  if (segurosGdprMarketing) segurosGdprMarketing.checked = Boolean(consent.marketing);
+  if (segurosGdprEmail) segurosGdprEmail.checked = Boolean(canales.email);
+  if (segurosGdprWhatsapp) segurosGdprWhatsapp.checked = Boolean(canales.whatsapp);
+  if (segurosGdprTelefono) segurosGdprTelefono.checked = Boolean(canales.telefono);
+  if (segurosGdprFecha) segurosGdprFecha.value = String(consent.fecha || "").slice(0, 10);
+  if (segurosGdprNotas) segurosGdprNotas.value = String(consent.notas || "");
+  if (segurosGdprMetodo) segurosGdprMetodo.value = String(consentRow.metodo || "");
+
+  const parts = [];
+  if (iddRow?.updated_at) {
+    parts.push(`IDD: ${iddRow.updated_by || "Sistema"} · ${iddRow.updated_at}`);
+  }
+  if (consentRow?.updated_at) {
+    parts.push(`GDPR: ${consentRow.updated_by || "Sistema"} · ${consentRow.updated_at}`);
+  }
+  if (segurosComplianceStatus) {
+    segurosComplianceStatus.textContent = parts.length ? `Cargado · ${parts.join(" · ")}` : "Cargado.";
+  }
+};
+
+const saveSegurosComplianceForm = async () => {
+  if (!segurosCompliancePoliza) return;
+  const seguroId = String(segurosCompliancePoliza.value || "").trim();
+  if (!seguroId) {
+    if (segurosComplianceStatus) segurosComplianceStatus.textContent = "Selecciona una póliza.";
+    return;
+  }
+  if (segurosComplianceStatus) segurosComplianceStatus.textContent = "Guardando...";
+
+  const iddPayload = {
+    seguro_id: seguroId,
+    fecha_asesoramiento: segurosIddFecha ? segurosIddFecha.value : "",
+    canal: segurosIddCanal ? segurosIddCanal.value : "",
+    necesidades: segurosIddNecesidades ? segurosIddNecesidades.value : "",
+    recomendacion: segurosIddRecomendacion ? segurosIddRecomendacion.value : "",
+    justificacion: segurosIddJustificacion ? segurosIddJustificacion.value : "",
+    comparacion: segurosIddComparacion ? segurosIddComparacion.value : "",
+  };
+  const iddHas = Object.values(iddPayload)
+    .map((v) => String(v || "").trim())
+    .some((v) => v && v !== seguroId);
+
+  const consent = {
+    marketing: Boolean(segurosGdprMarketing && segurosGdprMarketing.checked),
+    canales: {
+      email: Boolean(segurosGdprEmail && segurosGdprEmail.checked),
+      whatsapp: Boolean(segurosGdprWhatsapp && segurosGdprWhatsapp.checked),
+      telefono: Boolean(segurosGdprTelefono && segurosGdprTelefono.checked),
+    },
+    fecha: segurosGdprFecha ? String(segurosGdprFecha.value || "").trim() : "",
+    notas: segurosGdprNotas ? String(segurosGdprNotas.value || "").trim() : "",
+  };
+  const consentHas =
+    consent.marketing ||
+    consent.canales.email ||
+    consent.canales.whatsapp ||
+    consent.canales.telefono ||
+    Boolean(consent.fecha) ||
+    Boolean(consent.notas);
+  if (!consent.fecha && consentHas) {
+    consent.fecha = new Date().toISOString().slice(0, 10);
+  }
+
+  try {
+    if (iddHas) {
+      await postJsonWithDbRetry("/api/seguros_idd_update", iddPayload, { timeoutMs: 25000 });
+    }
+    if (consentHas) {
+      await postJsonWithDbRetry(
+        "/api/seguros_consentimientos_update",
+        { seguro_id: seguroId, metodo: segurosGdprMetodo ? segurosGdprMetodo.value : "", consent },
+        { timeoutMs: 25000 }
+      );
+    }
+    if (!iddHas && !consentHas) {
+      if (segurosComplianceStatus) segurosComplianceStatus.textContent = "Nada que guardar.";
+      return;
+    }
+    await loadSegurosComplianceForm(seguroId);
+    loadSegurosComplianceKpis(resolveCrmSegurosEmpresa()?.id);
+  } catch (err) {
+    if (segurosComplianceStatus) segurosComplianceStatus.textContent = err?.message ? String(err.message) : "Error al guardar.";
+  }
 };
 
 const loadSegurosEventos = (seguroId = "") => {
@@ -67625,6 +67792,25 @@ if (segurosChecklistGenerate) {
       .catch(() => {
         if (segurosChecklistInfo) segurosChecklistInfo.textContent = "Error al generar.";
       });
+  });
+}
+
+if (segurosCompliancePoliza) {
+  segurosCompliancePoliza.addEventListener("change", () => {
+    loadSegurosComplianceForm(segurosCompliancePoliza.value);
+  });
+}
+
+if (segurosComplianceReload) {
+  segurosComplianceReload.addEventListener("click", () => {
+    loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
+  });
+}
+
+if (segurosComplianceForm) {
+  segurosComplianceForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveSegurosComplianceForm();
   });
 }
 

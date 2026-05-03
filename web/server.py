@@ -30246,6 +30246,59 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS seguros_idd_asesoramiento (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT NOT NULL,
+          cliente_id TEXT,
+          empresa_id TEXT,
+          fecha_asesoramiento TEXT,
+          canal TEXT,
+          necesidades TEXT,
+          recomendacion TEXT,
+          justificacion TEXT,
+          comparacion_json TEXT,
+          documentos_json TEXT,
+          created_by TEXT,
+          updated_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (seguro_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_consentimientos (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          consent_json TEXT NOT NULL,
+          metodo TEXT,
+          created_by TEXT,
+          updated_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (empresa_id, cliente_id)
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_seguros_idd_empresa_updated ON seguros_idd_asesoramiento (empresa_id, updated_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_seguros_idd_cliente_updated ON seguros_idd_asesoramiento (cliente_id, updated_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_seguros_consent_empresa_updated ON seguros_consentimientos (empresa_id, updated_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_seguros_consent_cliente_updated ON seguros_consentimientos (cliente_id, updated_at)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS fin_checklist (
           id TEXT PRIMARY KEY,
           asesoramiento_id TEXT NOT NULL,
@@ -44079,12 +44132,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_version_snapshot",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
-            "/api/seguros_reclamacion_delete",
-            "/api/seguros_ipid_register",
-            "/api/fin_asesoramientos",
-            "/api/fin_asesoramientos_update",
-            "/api/fin_asesoramientos_convert",
-            "/api/seguros_ofertas",
+	            "/api/seguros_reclamacion_delete",
+	            "/api/seguros_ipid_register",
+	            "/api/seguros_idd_update",
+	            "/api/seguros_consentimientos_update",
+	            "/api/fin_asesoramientos",
+	            "/api/fin_asesoramientos_update",
+	            "/api/fin_asesoramientos_convert",
+	            "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -56610,6 +56665,234 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            json_response(self, {"ok": True})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_idd_update":
+            seguro_id = str(payload.get("seguro_id") or payload.get("id") or "").strip()
+            if not seguro_id:
+                json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            seguro_row = conn.execute(
+                "SELECT id, empresa_id, cliente_id FROM seguros WHERE id = ?",
+                (seguro_id,),
+            ).fetchone()
+            if not seguro_row:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            actor = (
+                _session_user_label(getattr(self, "auth_session", None) or self._current_session())
+                or str(payload.get("usuario") or "").strip()
+                or "Sistema"
+            )
+
+            def _canon_text(value):
+                if value is None:
+                    return ""
+                if isinstance(value, (dict, list)):
+                    try:
+                        return json.dumps(value, ensure_ascii=False)
+                    except Exception:
+                        return str(value)
+                if isinstance(value, str):
+                    return value.strip()
+                return str(value)
+
+            def _canon_jsonish(value):
+                text = _canon_text(value)
+                if not text:
+                    return ""
+                if text[:1] in ("{", "["):
+                    try:
+                        parsed_val = json.loads(text)
+                        return json.dumps(parsed_val, ensure_ascii=False)
+                    except Exception:
+                        return text
+                return text
+
+            fecha_ases = str(payload.get("fecha_asesoramiento") or payload.get("fecha") or now[:10]).strip()
+            canal = str(payload.get("canal") or "").strip()
+            necesidades = _canon_text(payload.get("necesidades") or payload.get("needs"))
+            recomendacion = _canon_text(payload.get("recomendacion") or payload.get("recomendación") or payload.get("recommendation"))
+            justificacion = _canon_text(payload.get("justificacion") or payload.get("justificación") or payload.get("motivo"))
+            comparacion_json = _canon_jsonish(payload.get("comparacion") or payload.get("comparacion_json"))
+            documentos_json = _canon_jsonish(payload.get("documentos") or payload.get("documentos_json"))
+
+            existing = conn.execute(
+                "SELECT id FROM seguros_idd_asesoramiento WHERE seguro_id = ?",
+                (seguro_id,),
+            ).fetchone()
+            if existing:
+                record_id = str(existing["id"] or "").strip()
+                conn.execute(
+                    """
+                    UPDATE seguros_idd_asesoramiento
+                    SET fecha_asesoramiento = ?,
+                        canal = ?,
+                        necesidades = ?,
+                        recomendacion = ?,
+                        justificacion = ?,
+                        comparacion_json = ?,
+                        documentos_json = ?,
+                        updated_by = ?,
+                        updated_at = datetime(?)
+                    WHERE seguro_id = ?
+                    """,
+                    (
+                        fecha_ases,
+                        canal,
+                        necesidades,
+                        recomendacion,
+                        justificacion,
+                        comparacion_json,
+                        documentos_json,
+                        actor,
+                        now,
+                        seguro_id,
+                    ),
+                )
+                accion = "actualizar"
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO seguros_idd_asesoramiento (
+                      id, seguro_id, cliente_id, empresa_id,
+                      fecha_asesoramiento, canal, necesidades, recomendacion, justificacion,
+                      comparacion_json, documentos_json,
+                      created_by, updated_by, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?,
+                      ?, ?,
+                      ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        record_id,
+                        seguro_id,
+                        seguro_row["cliente_id"],
+                        seguro_row["empresa_id"],
+                        fecha_ases,
+                        canal,
+                        necesidades,
+                        recomendacion,
+                        justificacion,
+                        comparacion_json,
+                        documentos_json,
+                        actor,
+                        actor,
+                        now,
+                        now,
+                    ),
+                )
+                accion = "crear"
+            try:
+                audit_event(
+                    conn,
+                    str(seguro_row["empresa_id"] or "").strip(),
+                    "seguros_idd_asesoramiento",
+                    record_id,
+                    accion,
+                    usuario=actor,
+                    detalles={"seguro_id": seguro_id, "cliente_id": seguro_row["cliente_id"], "canal": canal, "fecha": fecha_ases},
+                    now=now,
+                )
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/seguros_consentimientos_update":
+            seguro_id = str(payload.get("seguro_id") or payload.get("seguro") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            seguro_row = None
+            if seguro_id:
+                seguro_row = conn.execute(
+                    "SELECT id, empresa_id, cliente_id FROM seguros WHERE id = ?",
+                    (seguro_id,),
+                ).fetchone()
+                if not seguro_row:
+                    json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                    return
+                empresa_id = str(seguro_row["empresa_id"] or "").strip()
+                cliente_id = str(seguro_row["cliente_id"] or "").strip()
+            if not empresa_id or not cliente_id:
+                json_response(self, {"error": "empresa_id y cliente_id requeridos (o seguro_id)"}, status=400)
+                return
+            actor = (
+                _session_user_label(getattr(self, "auth_session", None) or self._current_session())
+                or str(payload.get("usuario") or "").strip()
+                or "Sistema"
+            )
+            consent = payload.get("consent") or payload.get("consentimientos") or {}
+            if not isinstance(consent, dict):
+                consent = {}
+            # Fallback: construir desde campos planos si vienen.
+            if not consent:
+                consent = {
+                    "marketing": bool(payload.get("marketing")),
+                    "canales": {
+                        "email": bool(payload.get("email")),
+                        "whatsapp": bool(payload.get("whatsapp")),
+                        "telefono": bool(payload.get("telefono")),
+                    },
+                    "fecha": str(payload.get("fecha") or now[:10]).strip(),
+                    "notas": str(payload.get("notas") or "").strip(),
+                }
+            try:
+                consent_json = json.dumps(consent, ensure_ascii=False)
+            except Exception:
+                consent_json = str(consent)
+            metodo = str(payload.get("metodo") or "").strip()
+            existing = conn.execute(
+                "SELECT id FROM seguros_consentimientos WHERE empresa_id = ? AND cliente_id = ?",
+                (empresa_id, cliente_id),
+            ).fetchone()
+            if existing:
+                record_id = str(existing["id"] or "").strip()
+                conn.execute(
+                    """
+                    UPDATE seguros_consentimientos
+                    SET consent_json = ?,
+                        metodo = ?,
+                        updated_by = ?,
+                        updated_at = datetime(?)
+                    WHERE empresa_id = ? AND cliente_id = ?
+                    """,
+                    (consent_json, metodo, actor, now, empresa_id, cliente_id),
+                )
+                accion = "actualizar"
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO seguros_consentimientos (
+                      id, empresa_id, cliente_id, consent_json, metodo, created_by, updated_by, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (record_id, empresa_id, cliente_id, consent_json, metodo, actor, actor, now, now),
+                )
+                accion = "crear"
+            try:
+                audit_event(
+                    conn,
+                    empresa_id,
+                    "seguros_consentimientos",
+                    record_id,
+                    accion,
+                    usuario=actor,
+                    detalles={"cliente_id": cliente_id, "seguro_id": seguro_id, "metodo": metodo},
+                    now=now,
+                )
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
         elif parsed.path == "/api/seguros_referidos":
             conn.execute(
                 """
@@ -65761,6 +66044,82 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"row": dict(row) if row else {}})
             return
 
+        if path == "/api/seguros_idd":
+            seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
+            cliente_id = str(params.get("cliente_id", [""])[0] or "").strip()
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            if not seguro_id and not cliente_id and not empresa_id:
+                json_response(self, {"error": "seguro_id, cliente_id o empresa_id requerido"}, status=400)
+                return
+            where = []
+            values = []
+            if seguro_id:
+                where.append("seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("cliente_id = ?")
+                values.append(cliente_id)
+            if empresa_id:
+                where.append("empresa_id = ?")
+                values.append(empresa_id)
+            row = conn.execute(
+                f"""
+                SELECT id, seguro_id, cliente_id, empresa_id, fecha_asesoramiento, canal,
+                       necesidades, recomendacion, justificacion, comparacion_json, documentos_json,
+                       created_by, updated_by, created_at, updated_at
+                FROM seguros_idd_asesoramiento
+                WHERE {' AND '.join(where)}
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                values,
+            ).fetchone()
+            payload = dict(row) if row else {}
+            for key in ("comparacion_json", "documentos_json"):
+                raw = str(payload.get(key) or "").strip()
+                if raw and raw[:1] in ("{", "["):
+                    try:
+                        payload[key] = json.loads(raw)
+                    except Exception:
+                        payload[key] = raw
+            json_response(self, {"row": payload})
+            return
+
+        if path == "/api/seguros_consentimientos":
+            seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            cliente_id = str(params.get("cliente_id", [""])[0] or "").strip()
+            if seguro_id and (not empresa_id or not cliente_id):
+                seguro_row = conn.execute(
+                    "SELECT empresa_id, cliente_id FROM seguros WHERE id = ?",
+                    (seguro_id,),
+                ).fetchone()
+                if seguro_row:
+                    empresa_id = str(seguro_row["empresa_id"] or "").strip()
+                    cliente_id = str(seguro_row["cliente_id"] or "").strip()
+            if not empresa_id or not cliente_id:
+                json_response(self, {"error": "empresa_id y cliente_id requeridos (o seguro_id)"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, empresa_id, cliente_id, consent_json, metodo, created_by, updated_by, created_at, updated_at
+                FROM seguros_consentimientos
+                WHERE empresa_id = ? AND cliente_id = ?
+                """,
+                (empresa_id, cliente_id),
+            ).fetchone()
+            payload = dict(row) if row else {}
+            raw = str(payload.get("consent_json") or "").strip()
+            if raw and raw[:1] in ("{", "["):
+                try:
+                    payload["consent"] = json.loads(raw)
+                except Exception:
+                    payload["consent"] = raw
+            else:
+                payload["consent"] = {}
+            json_response(self, {"row": payload})
+            return
+
         if path == "/api/seguros_referidos":
             rows = conn.execute(
                 """
@@ -66941,12 +67300,51 @@ class Handler(BaseHTTPRequestHandler):
             total_val = int(total["total"] if total and total["total"] is not None else 0)
             ipid_val = int(ipid["total"] if ipid and ipid["total"] is not None else 0)
             abiertas_val = int(abiertas["total"] if abiertas and abiertas["total"] is not None else 0)
+            idd_val = 0
+            consent_val = 0
+            clientes_val = 0
+            try:
+                idd = conn.execute(
+                    "SELECT COUNT(DISTINCT seguro_id) total FROM seguros_idd_asesoramiento WHERE empresa_id = ?",
+                    (empresa_id,),
+                ).fetchone()
+                idd_val = int(idd["total"] if idd and idd["total"] is not None else 0)
+            except Exception:
+                idd_val = 0
+            try:
+                consent = conn.execute(
+                    "SELECT COUNT(DISTINCT cliente_id) total FROM seguros_consentimientos WHERE empresa_id = ?",
+                    (empresa_id,),
+                ).fetchone()
+                consent_val = int(consent["total"] if consent and consent["total"] is not None else 0)
+            except Exception:
+                consent_val = 0
+            try:
+                clientes = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT cliente_id) total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND cliente_id IS NOT NULL
+                      AND TRIM(COALESCE(cliente_id,'')) != ''
+                      AND ({uploaded_clause})
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                clientes_val = int(clientes["total"] if clientes and clientes["total"] is not None else 0)
+            except Exception:
+                clientes_val = 0
             json_response(
                 self,
                 {
                     "polizas_subidas": total_val,
                     "ipid_registrados": ipid_val,
                     "ipid_pendientes": max(total_val - ipid_val, 0),
+                    "idd_registrados": idd_val,
+                    "idd_pendientes": max(total_val - idd_val, 0),
+                    "clientes_con_polizas": clientes_val,
+                    "consentimientos_registrados": consent_val,
+                    "consentimientos_pendientes": max(clientes_val - consent_val, 0),
                     "reclamaciones_abiertas": abiertas_val,
                 },
             )

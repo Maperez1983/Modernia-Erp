@@ -6340,16 +6340,21 @@
             <div class="footer" id="segurosCrmInfo"></div>
           </div>
           </div>
-	          <div class="seguros-tab active" data-seguros-tab="dashboard">
+		          <div class="seguros-tab active" data-seguros-tab="dashboard">
+		          <div class="form-card">
+		            <h3>KPIs</h3>
+		            <p class="muted">Resumen de pólizas.</p>
+		            <div id="segurosKpis"></div>
+		          </div>
 	          <div class="form-card">
-	            <h3>KPIs</h3>
-	            <p class="muted">Resumen de pólizas.</p>
-	            <div id="segurosKpis"></div>
+	            <h3>Cumplimiento (IDD/GDPR)</h3>
+	            <p class="muted">IPID, asesoramiento y consentimientos.</p>
+	            <div id="segurosComplianceKpis"></div>
 	          </div>
-          <div class="form-card">
-            <h3>KPIs por ramo</h3>
-            <p class="muted">Pulsa un ramo para ver sus pólizas y abrir/editar.</p>
-            <div id="segurosRamoKpis" class="cliente-ramo-kpis"></div>
+	          <div class="form-card">
+	            <h3>KPIs por ramo</h3>
+	            <p class="muted">Pulsa un ramo para ver sus pólizas y abrir/editar.</p>
+	            <div id="segurosRamoKpis" class="cliente-ramo-kpis"></div>
             <div id="segurosRamoChart"></div>
             <div id="segurosRamoListado" class="cliente-ramo-listado"></div>
           </div>
@@ -6528,9 +6533,9 @@
             </div>
             <textarea id="segurosAiOutput" rows="6" readonly></textarea>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
                 <h3>Checklist póliza</h3>
                 <p class="muted">Seguimiento de documentación por póliza.</p>
               </div>
@@ -6544,14 +6549,94 @@
                 <select id="segurosChecklistPoliza"></select>
               </label>
             </div>
-            <div id="segurosChecklistTable"></div>
-            <div class="footer" id="segurosChecklistInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Oportunidades de venta cruzada</h3>
-            <p class="muted">Clientes de gestoría sin póliza asignada.</p>
-            <div id="segurosCrmOportunidades"></div>
-          </div>
+	            <div id="segurosChecklistTable"></div>
+	            <div class="footer" id="segurosChecklistInfo"></div>
+	          </div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Cumplimiento IDD/GDPR</h3>
+	                <p class="muted">Trazabilidad de asesoramiento y consentimientos por póliza.</p>
+	              </div>
+	              <div class="form-actions">
+	                <button type="button" class="secondary ghost" id="segurosComplianceReload">Recargar</button>
+	              </div>
+	            </div>
+	            <form id="segurosComplianceForm" class="form-grid">
+	              <label class="span-2">
+	                Póliza
+	                <select id="segurosCompliancePoliza"></select>
+	              </label>
+	              <label>
+	                Fecha asesoramiento
+	                <input id="segurosIddFecha" type="date" />
+	              </label>
+	              <label>
+	                Canal
+	                <select id="segurosIddCanal">
+	                  <option value="">(opcional)</option>
+	                  <option value="presencial">Presencial</option>
+	                  <option value="telefono">Teléfono</option>
+	                  <option value="email">Email</option>
+	                  <option value="whatsapp">WhatsApp</option>
+	                  <option value="video">Vídeo</option>
+	                  <option value="web">Web</option>
+	                </select>
+	              </label>
+	              <label class="span-2">
+	                Necesidades (demanda y necesidades)
+	                <textarea id="segurosIddNecesidades" rows="2"></textarea>
+	              </label>
+	              <label class="span-2">
+	                Recomendación (producto/garantías)
+	                <textarea id="segurosIddRecomendacion" rows="2"></textarea>
+	              </label>
+	              <label class="span-2">
+	                Justificación (por qué es adecuado)
+	                <textarea id="segurosIddJustificacion" rows="2"></textarea>
+	              </label>
+	              <label class="span-2">
+	                Comparación (opcional)
+	                <textarea id="segurosIddComparacion" rows="2" placeholder="Opcional: texto o JSON"></textarea>
+	              </label>
+	              <div class="span-2">
+	                <div class="muted">Consentimientos (GDPR)</div>
+	                <div class="form-actions">
+	                  <label class="ui-check"><input id="segurosGdprMarketing" type="checkbox" /> Marketing</label>
+	                  <label class="ui-check"><input id="segurosGdprEmail" type="checkbox" /> Email</label>
+	                  <label class="ui-check"><input id="segurosGdprWhatsapp" type="checkbox" /> WhatsApp</label>
+	                  <label class="ui-check"><input id="segurosGdprTelefono" type="checkbox" /> Teléfono</label>
+	                </div>
+	              </div>
+	              <label>
+	                Fecha consentimiento
+	                <input id="segurosGdprFecha" type="date" />
+	              </label>
+	              <label>
+	                Método
+	                <select id="segurosGdprMetodo">
+	                  <option value="">(opcional)</option>
+	                  <option value="verbal">Verbal</option>
+	                  <option value="escrito">Escrito</option>
+	                  <option value="digital">Digital</option>
+	                  <option value="portal">Portal</option>
+	                </select>
+	              </label>
+	              <label class="span-2">
+	                Notas
+	                <textarea id="segurosGdprNotas" rows="2"></textarea>
+	              </label>
+	              <div class="form-actions">
+	                <button type="submit">Guardar</button>
+	                <span id="segurosComplianceStatus" class="muted"></span>
+	              </div>
+	            </form>
+	          </div>
+	          <div class="form-card">
+	            <h3>Oportunidades de venta cruzada</h3>
+	            <p class="muted">Clientes de gestoría sin póliza asignada.</p>
+	            <div id="segurosCrmOportunidades"></div>
+	          </div>
           <div class="form-card">
             <h3>Alertas de vencimiento</h3>
             <p class="muted">Pólizas que vencen en los próximos 30 días.</p>
@@ -10844,15 +10929,15 @@
             }
           })();
         </script>
-		    <script src="app-routing.js?v=11"></script>
-		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=744"></script>
-    <script>
-			      (function () {
-			        if (!("serviceWorker" in navigator)) return;
-													        const TARGET_SW = "/sw.js?v=331";
-		        try {
-		          const params = new URLSearchParams(window.location.search || "");
+			    <script src="app-routing.js?v=11"></script>
+			    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+													    <script src="app.js?v=745"></script>
+	    <script>
+				      (function () {
+				        if (!("serviceWorker" in navigator)) return;
+														        const TARGET_SW = "/sw.js?v=332";
+			        try {
+			          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
 		          const cleared = (params.get("swcleared") || "").trim() === "1";
