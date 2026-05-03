@@ -36,10 +36,12 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 import urllib.parse
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -143,9 +145,63 @@ def maybe_write_rclone_config(tmp_dir: Path) -> None:
     os.environ["RCLONE_CONFIG"] = str(conf_path)
 
 
+def ensure_rclone_bin(tmp_dir: Path) -> str:
+    """
+    Render normalmente no trae `rclone` instalado. Si no existe, descargamos un binario
+    estático a un directorio temporal para ejecutar el cron sin pasos manuales.
+    """
+    override = str(os.environ.get("RCLONE_BIN") or "").strip()
+    if override and Path(override).exists():
+        return override
+    found = shutil.which("rclone")
+    if found:
+        os.environ["RCLONE_BIN"] = found
+        return found
+
+    url = str(os.environ.get("RCLONE_DOWNLOAD_URL") or "").strip()
+    if not url:
+        # Render suele ser linux/amd64
+        url = "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
+
+    zip_path = tmp_dir / "rclone.zip"
+    resp = requests.get(url, stream=True, timeout=120)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"No se pudo descargar rclone: HTTP {resp.status_code}: {resp.text[:200]}")
+    with zip_path.open("wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 256):
+            if chunk:
+                f.write(chunk)
+
+    bin_path = tmp_dir / "rclone"
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        member = None
+        for name in zf.namelist():
+            if name.endswith("/rclone") or name == "rclone":
+                member = name
+                break
+        if not member:
+            raise RuntimeError("ZIP de rclone inesperado: no se encontró el binario 'rclone'")
+        extracted = zf.extract(member, path=tmp_dir)
+        extracted_path = Path(extracted)
+        if extracted_path != bin_path:
+            try:
+                extracted_path.replace(bin_path)
+            except Exception:
+                data = extracted_path.read_bytes()
+                bin_path.write_bytes(data)
+
+    try:
+        bin_path.chmod(0o755)
+    except Exception:
+        pass
+    os.environ["RCLONE_BIN"] = str(bin_path)
+    return str(bin_path)
+
+
 def rclone_lsjson(*, remote: str, path: str) -> list[dict]:
     target = f"{remote}:{str(path or '').strip().strip('/')}"
-    cmd = ["rclone", "lsjson", target, "--recursive", "--files-only", "--no-mimetype"]
+    rclone_bin = str(os.environ.get("RCLONE_BIN") or "rclone").strip() or "rclone"
+    cmd = [rclone_bin, "lsjson", target, "--recursive", "--files-only", "--no-mimetype"]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or "").strip()
@@ -165,7 +221,8 @@ def rclone_lsjson(*, remote: str, path: str) -> list[dict]:
 
 def rclone_cat_bytes(*, remote: str, path: str) -> bytes:
     target = f"{remote}:{str(path or '').strip().strip('/')}"
-    proc = subprocess.run(["rclone", "cat", target], capture_output=True, timeout=600)
+    rclone_bin = str(os.environ.get("RCLONE_BIN") or "rclone").strip() or "rclone"
+    proc = subprocess.run([rclone_bin, "cat", target], capture_output=True, timeout=600)
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="ignore").strip()
         raise RuntimeError(f"rclone cat falló: {msg[:500]}")
@@ -506,6 +563,7 @@ def main() -> int:
             with TemporaryDirectory(prefix="rclone_cfg_") as tmp:
                 tmp_dir = Path(tmp)
                 maybe_write_rclone_config(tmp_dir)
+                ensure_rclone_bin(tmp_dir)
 
                 for root in roots:
                     root = str(root or "").strip().strip("/")
