@@ -1337,6 +1337,7 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "financiacion", "nombre": "Financiación", "categoria": "vertical", "sort_order": 70},
     {"key": "fincas", "nombre": "Administración de Fincas", "categoria": "vertical", "sort_order": 80},
     {"key": "facturacion", "nombre": "Facturación", "categoria": "motor", "sort_order": 90},
+    {"key": "contabilidad", "nombre": "Contabilidad", "categoria": "motor", "sort_order": 95},
     {"key": "facturas_recibidas", "nombre": "Importador Facturas", "categoria": "motor", "sort_order": 100},
     {"key": "portal_cliente", "nombre": "Portal Cliente", "categoria": "motor", "sort_order": 110},
     {"key": "registro_horario", "nombre": "Registro Horario", "categoria": "motor", "sort_order": 120},
@@ -1354,8 +1355,8 @@ WORKSPACE_PLAN_PACKAGES = {
     "Pro": {
         "label": "Pro",
         "pitch": "Activa verticales de negocio y motores para operar desde una única base en Verifika².",
-        "focus": ["gestoria", "seguros", "inmobiliaria", "financiacion", "facturacion"],
-        "included": ["Gestoría", "Seguros", "Inmobiliaria", "Financiación", "Facturación", "Portal Cliente"],
+        "focus": ["gestoria", "seguros", "inmobiliaria", "financiacion", "facturacion", "contabilidad"],
+        "included": ["Gestoría", "Seguros", "Inmobiliaria", "Financiación", "Facturación", "Contabilidad", "Portal Cliente"],
     },
     "Enterprise": {
         "label": "Enterprise",
@@ -49169,8 +49170,12 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            row = conn.execute("SELECT workspace_id FROM workspace_modulos WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+            row = conn.execute(
+                "SELECT workspace_id, modulo_key FROM workspace_modulos WHERE id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
             workspace_id = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
+            module_key = str(row_value(row, "modulo_key") or row_value(row, 1) or "").strip() if row else ""
             if not workspace_id:
                 json_response(self, {"error": "módulo no encontrado"}, status=404)
                 return
@@ -49178,7 +49183,53 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+
+            module_key_norm = str(module_key or "").strip().lower()
+
+            # Reglas de consistencia:
+            # - Si Gestoría está activa, Contabilidad debe estar activa (módulo transversal obligatorio).
+            if module_key_norm == "contabilidad" and enabled == 0:
+                gestoria_row = conn.execute(
+                    """
+                    SELECT enabled
+                    FROM workspace_modulos
+                    WHERE workspace_id = ? AND modulo_key = 'gestoria'
+                    LIMIT 1
+                    """,
+                    (workspace_id,),
+                ).fetchone()
+                gestoria_enabled = int(row_value(gestoria_row, "enabled") or row_value(gestoria_row, 0) or 0) if gestoria_row else 0
+                if gestoria_enabled == 1:
+                    json_response(self, {"error": "Contabilidad es obligatoria cuando Gestoría está activa."}, status=400)
+                    return
+
             conn.execute("UPDATE workspace_modulos SET enabled = ?, updated_at = datetime(?) WHERE id = ?", (enabled, now, record_id))
+
+            if module_key_norm == "gestoria" and enabled == 1:
+                try:
+                    existing_conta = conn.execute(
+                        "SELECT id FROM workspace_modulos WHERE workspace_id = ? AND modulo_key = 'contabilidad' LIMIT 1",
+                        (workspace_id,),
+                    ).fetchone()
+                    if not existing_conta:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO workspace_modulos (
+                              id, workspace_id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json, created_at, updated_at
+                            ) VALUES (?, ?, 'contabilidad', 'Contabilidad', 'motor', 1, 95, '{}', datetime(?), datetime(?))
+                            """,
+                            (os.urandom(16).hex(), workspace_id, now, now),
+                        )
+                    conn.execute(
+                        """
+                        UPDATE workspace_modulos
+                        SET enabled = 1, updated_at = datetime(?)
+                        WHERE workspace_id = ? AND modulo_key = 'contabilidad'
+                        """,
+                        (now, workspace_id),
+                    )
+                except Exception:
+                    pass
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
             return
