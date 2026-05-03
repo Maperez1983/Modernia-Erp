@@ -2860,8 +2860,15 @@ const segurosRamosList = document.getElementById("segurosRamosList");
 const seguroOcrPoliza = document.getElementById("seguroOcrPoliza");
 const seguroOcrDireccion = document.getElementById("seguroOcrDireccion");
 const seguroOcrMatricula = document.getElementById("seguroOcrMatricula");
+const seguroOcrMarcaModelo = document.getElementById("seguroOcrMarcaModelo");
+const seguroOcrAnioMatriculacion = document.getElementById("seguroOcrAnioMatriculacion");
+const seguroOcrUsoVehiculo = document.getElementById("seguroOcrUsoVehiculo");
 const seguroOcrDireccionRiesgo = document.getElementById("seguroOcrDireccionRiesgo");
 const seguroOcrRefCatastral = document.getElementById("seguroOcrRefCatastral");
+const seguroOcrTipoVivienda = document.getElementById("seguroOcrTipoVivienda");
+const seguroOcrMetros2 = document.getElementById("seguroOcrMetros2");
+const seguroOcrContinente = document.getElementById("seguroOcrContinente");
+const seguroOcrContenido = document.getElementById("seguroOcrContenido");
 const seguroOcrNacimiento = document.getElementById("seguroOcrNacimiento");
 const seguroOcrFechaEfecto = document.getElementById("seguroOcrFechaEfecto");
 const seguroOcrFechaVencimiento = document.getElementById("seguroOcrFechaVencimiento");
@@ -57284,8 +57291,15 @@ const resetSegurosOcrAggregator = (options = {}) => {
   clearValue(seguroOcrPoliza);
   clearValue(seguroOcrDireccion);
   clearValue(seguroOcrMatricula);
+  clearValue(seguroOcrMarcaModelo);
+  clearValue(seguroOcrAnioMatriculacion);
+  clearValue(seguroOcrUsoVehiculo);
   clearValue(seguroOcrDireccionRiesgo);
   clearValue(seguroOcrRefCatastral);
+  clearValue(seguroOcrTipoVivienda);
+  clearValue(seguroOcrMetros2);
+  clearValue(seguroOcrContinente);
+  clearValue(seguroOcrContenido);
   clearValue(seguroOcrNacimiento);
   clearValue(seguroOcrFechaEfecto);
   clearValue(seguroOcrFechaVencimiento);
@@ -57716,8 +57730,15 @@ const fillSegurosOcrFields = (fields = {}) => {
   if (seguroOcrPoliza) seguroOcrPoliza.value = fields.poliza_numero || "";
   if (seguroOcrDireccion) seguroOcrDireccion.value = fields.direccion || "";
   if (seguroOcrMatricula) seguroOcrMatricula.value = fields.matricula || "";
+  if (seguroOcrMarcaModelo) seguroOcrMarcaModelo.value = fields.marca_modelo || "";
+  if (seguroOcrAnioMatriculacion) seguroOcrAnioMatriculacion.value = fields.anio_matriculacion || "";
+  if (seguroOcrUsoVehiculo) seguroOcrUsoVehiculo.value = fields.uso_vehiculo || "";
   if (seguroOcrDireccionRiesgo) seguroOcrDireccionRiesgo.value = fields.direccion_riesgo || "";
   if (seguroOcrRefCatastral) seguroOcrRefCatastral.value = fields.referencia_catastral || "";
+  if (seguroOcrTipoVivienda) seguroOcrTipoVivienda.value = fields.tipo_vivienda || "";
+  if (seguroOcrMetros2) seguroOcrMetros2.value = fields.metros2 || "";
+  if (seguroOcrContinente) seguroOcrContinente.value = fields.continente || "";
+  if (seguroOcrContenido) seguroOcrContenido.value = fields.contenido || "";
   if (seguroOcrNacimiento) {
     seguroOcrNacimiento.value = normalizeDateInput(fields.fecha_nacimiento || "");
   }
@@ -57782,6 +57803,13 @@ const buildSegurosSmartPayloadFromOcr = () => {
     matricula: seguroOcrMatricula ? seguroOcrMatricula.value.trim() : "",
     direccion_riesgo: seguroOcrDireccionRiesgo ? seguroOcrDireccionRiesgo.value.trim() : "",
     referencia_catastral: seguroOcrRefCatastral ? seguroOcrRefCatastral.value.trim() : "",
+    marca_modelo: seguroOcrMarcaModelo ? seguroOcrMarcaModelo.value.trim() : "",
+    anio_matriculacion: seguroOcrAnioMatriculacion ? seguroOcrAnioMatriculacion.value.trim() : "",
+    uso_vehiculo: seguroOcrUsoVehiculo ? seguroOcrUsoVehiculo.value.trim() : "",
+    tipo_vivienda: seguroOcrTipoVivienda ? seguroOcrTipoVivienda.value.trim() : "",
+    metros2: seguroOcrMetros2 ? seguroOcrMetros2.value.trim() : "",
+    continente: seguroOcrContinente ? seguroOcrContinente.value.trim() : "",
+    contenido: seguroOcrContenido ? seguroOcrContenido.value.trim() : "",
   };
   Object.entries(manualOverrides).forEach(([key, value]) => {
     if (!value) return;
