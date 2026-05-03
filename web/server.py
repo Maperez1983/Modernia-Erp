@@ -27216,6 +27216,36 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     cobros_months_list = list(cobros_months.values())
     cobros_months_list.sort(key=lambda x: str(x.get("mes") or ""))
 
+    # Serie del ejercicio actual (facturación/cobro/pendiente por mes de cobro).
+    # Nota: si no hay `fecha_cobro`, el importe se refleja en `cobros_sin_fecha_total`.
+    cobro_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
+    try:
+        month_labels = [f"{m:02d}" for m in range(1, 13)]
+        fact_m = {m: 0.0 for m in month_labels}
+        cob_m = {m: 0.0 for m in month_labels}
+        pen_m = {m: 0.0 for m in month_labels}
+        for item in campaigns:
+            precio = float(item.get("precio_servicio") or 0.0)
+            if precio <= 0.0001:
+                continue
+            ym = str(item.get("mes_cobro") or "").strip()
+            month = ym[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}$", ym) else ""
+            if month not in month_labels:
+                continue
+            fact_m[month] += precio
+            if int(item.get("cobrada") or 0) == 1:
+                cob_m[month] += precio
+            else:
+                pen_m[month] += precio
+        cobro_series_out = {
+            "labels": month_labels,
+            "facturacion": [round(float(fact_m[m]), 2) for m in month_labels],
+            "cobrado": [round(float(cob_m[m]), 2) for m in month_labels],
+            "pendiente": [round(float(pen_m[m]), 2) for m in month_labels],
+        }
+    except Exception:
+        cobro_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
+
     # Ejercicio anterior: cobros por mes y serie fact/cobro/pendiente (para comparativa).
     cobros_prev_months = {}
     cobro_prev_series_out = {"labels": [], "facturacion": [], "cobrado": [], "pendiente": []}
@@ -28822,6 +28852,26 @@ def ensure_tables(db_path):
             except Exception:
                 pass
             _migration_mark(conn, "perf_indexes_core_v1")
+    except Exception:
+        pass
+    # Rentas/Gestoría: índices para dashboards (evita consultas correlacionadas lentas en SQLite/Render).
+    try:
+        if not _migration_done(conn, "perf_indexes_renta_v1"):
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cliente_gestoria_mod_renta ON cliente_gestoria (mod_renta)")
+            except Exception:
+                pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_clientes_empresas_empresa_cliente ON clientes_empresas (empresa_id, cliente_id)")
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_clientes_empresas_empresa_cliente_servicio_updated ON clientes_empresas (empresa_id, cliente_id, servicio, updated_at)"
+                )
+            except Exception:
+                pass
+            _migration_mark(conn, "perf_indexes_renta_v1")
     except Exception:
         pass
     # Backfill/compat: algunos datasets legacy no tenían todavía tablas base usadas en el dashboard.
@@ -42791,6 +42841,8 @@ class Handler(BaseHTTPRequestHandler):
     _gestoria_docs_recent_cache = {}  # {(empresa_id, limit): (expires_ts, payload_dict)}
     _gestoria_dashboard_lock = threading.Lock()
     _gestoria_dashboard_cache = {}  # {empresa_id: (expires_ts, payload_dict)}
+    _gestoria_renta_dash_lock = threading.Lock()
+    _gestoria_renta_dash_cache = {}  # {(empresa_ids_csv, ejercicio): (expires_ts, payload_dict)}
     _hipoteca_dashboard_lock = threading.Lock()
     _hipoteca_dashboard_cache = {}  # {(empresa_id, year): (expires_ts, payload_dict)}
     _fincas_seguros_dash_lock = threading.Lock()
@@ -65313,7 +65365,27 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ejercicio = params.get("ejercicio", [""])[0]
             try:
+                ids_key = ",".join(sorted([str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip()]))
+                cache_key = (ids_key, str(ejercicio or "").strip())
+                now_ts = time.time()
+                try:
+                    with Handler._gestoria_renta_dash_lock:
+                        cached = Handler._gestoria_renta_dash_cache.get(cache_key)
+                        if cached and cached[0] >= now_ts:
+                            json_response(self, cached[1])
+                            return
+                except Exception:
+                    pass
                 payload = compute_gestoria_renta_dashboard(conn, empresa_ids, ejercicio=ejercicio)
+                try:
+                    with Handler._gestoria_renta_dash_lock:
+                        Handler._gestoria_renta_dash_cache[cache_key] = (now_ts + 10.0, payload)
+                        if len(Handler._gestoria_renta_dash_cache) > 300:
+                            for k, (exp, _val) in list(Handler._gestoria_renta_dash_cache.items())[:120]:
+                                if exp < now_ts:
+                                    Handler._gestoria_renta_dash_cache.pop(k, None)
+                except Exception:
+                    pass
             except Exception as exc:
                 try:
                     Handler._record_api_error("/api/gestoria_renta_dashboard", exc)
