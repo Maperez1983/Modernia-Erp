@@ -527,6 +527,27 @@ CREATE TABLE IF NOT EXISTS seguros (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
+-- Reglas configurables de calidad del dato (Seguros).
+-- Permite definir campos mínimos por compañía/ramo sin tocar código.
+-- `compania_key` puede ir vacío para aplicar a cualquier compañía.
+CREATE TABLE IF NOT EXISTS seguros_quality_rules (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  compania_key TEXT,
+  ramo_key TEXT NOT NULL,
+  field_key TEXT NOT NULL,
+  field_label TEXT,
+  severity TEXT DEFAULT 'warning',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+CREATE INDEX IF NOT EXISTS idx_seguros_quality_rules_empresa
+ON seguros_quality_rules (empresa_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_seguros_quality_rules_scope
+ON seguros_quality_rules (empresa_id, compania_key, ramo_key, enabled);
+
 CREATE TABLE IF NOT EXISTS gestoria (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,

@@ -3260,13 +3260,52 @@ def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit
             payload["missing_fields"] = missing_fields
         issues.append(payload)
 
-    ramo_required = {
+    default_ramo_required = {
         "Auto": [("matricula", "Matrícula")],
         "Hogar": [("direccion_riesgo", "Dirección del riesgo")],
         "Hogar alquiler": [("direccion_riesgo", "Dirección del riesgo")],
         "Comunidad": [("direccion_riesgo", "Dirección del riesgo")],
         "Comercio": [("direccion_riesgo", "Dirección del riesgo")],
     }
+
+    # Reglas configurables desde BD (si existe la tabla).
+    # Estructura: (compania_key, ramo_label) -> [(field_key, field_label), ...]
+    configured_required = {}
+    try:
+        cfg_rows = conn.execute(
+            """
+            SELECT compania_key, ramo_key, field_key, field_label
+            FROM seguros_quality_rules
+            WHERE empresa_id = ? AND COALESCE(enabled, 1) = 1
+            """,
+            (empresa_id,),
+        ).fetchall()
+        for cfg in cfg_rows or []:
+            company_key = normalize_lookup_text(row_value(cfg, "compania_key") or row_value(cfg, 0) or "")
+            raw_ramo = str(row_value(cfg, "ramo_key") or row_value(cfg, 1) or "").strip()
+            ramo_label = canonicalize_ramo(raw_ramo) or raw_ramo
+            field_key = str(row_value(cfg, "field_key") or row_value(cfg, 2) or "").strip()
+            if not ramo_label or not field_key:
+                continue
+            field_label = str(row_value(cfg, "field_label") or row_value(cfg, 3) or "").strip() or field_key
+            configured_required.setdefault((company_key, ramo_label), []).append((field_key, field_label))
+    except Exception:
+        configured_required = {}
+
+    def resolve_required_fields(company_key, ramo_label):
+        if not ramo_label:
+            return []
+        ck = normalize_lookup_text(company_key or "")
+        # 1) Regla específica compañía+ramo
+        fields = configured_required.get((ck, ramo_label))
+        if fields:
+            return fields
+        # 2) Regla genérica por ramo (compañía vacía)
+        fields = configured_required.get(("", ramo_label))
+        if fields:
+            return fields
+        # 3) Fallback defaults en código
+        return default_ramo_required.get(ramo_label) or []
 
     duplicates = {}
     for row in rows_dict:
@@ -3313,7 +3352,7 @@ def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit
                 }
             )
 
-        required = ramo_required.get(ramo_label) or []
+        required = resolve_required_fields(compania_key, ramo_label)
         missing = []
         for field, label in required:
             if not str(row.get(field) or "").strip():
@@ -27916,11 +27955,10 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
 
     ejercicio_raw = str(ejercicio or "").strip()
     ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
-    if not ejercicio_val:
-        try:
-            ejercicio_val = str(datetime.now().year - 1)
-        except Exception:
-            ejercicio_val = ""
+    # Si no se especifica ejercicio, no asumimos (año-1) porque puede no existir aún
+    # y entonces el dashboard mostraría 0. En ese caso inferimos el ejercicio más reciente
+    # presente en los datos (20xx) y contamos sobre ese.
+    infer_latest = not bool(ejercicio_val)
 
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
@@ -27948,16 +27986,27 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
     ).fetchall()
 
     total = 0
+    year_counts = {}
     for row in rows:
         try:
             payload = parse_renta_detalles_payload(row_value(row, "renta_detalles", "") or "")
             entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
             for e in entries:
-                if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                year = str(e.get("ejercicio") or "").strip()
+                if not re.match(r"^20[0-9]{2}$", year or ""):
+                    continue
+                if infer_latest:
+                    year_counts[year] = year_counts.get(year, 0) + 1
+                elif year == ejercicio_val:
                     total += 1
                     break
         except Exception:
             continue
+    if infer_latest:
+        if not year_counts:
+            return {"ejercicio": "", "count": 0}
+        latest_year = max(year_counts.keys())
+        return {"ejercicio": latest_year, "count": int(year_counts.get(latest_year, 0))}
     return {"ejercicio": ejercicio_val, "count": int(total)}
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
