@@ -69794,6 +69794,7 @@ class Handler(BaseHTTPRequestHandler):
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
 
             pdf_assoc_expr = (
+                "("
                 "(NULLIF(TRIM(s.poliza_url), '') IS NOT NULL OR NULLIF(TRIM(s.poliza_key), '') IS NOT NULL)"
                 " OR EXISTS ("
                 "   SELECT 1 FROM gestoria_docs gd"
