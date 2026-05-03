@@ -485,16 +485,17 @@
                 <p class="muted">Selecciona un módulo transversal. Cada uno tiene su propia hoja de configuración.</p>
               </div>
             </div>
-	            <div id="workspaceEngineTabs" class="workspace-engine-nav">
-	              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos · Facturación</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="simuladores">Simuladores</button>
-	              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
-	            </div>
+		            <div id="workspaceEngineTabs" class="workspace-engine-nav">
+		              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos · Facturación</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="contabilidad">Contabilidad</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="simuladores">Simuladores</button>
+		              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
+		            </div>
             <div class="form-actions">
               <button type="button" id="workspaceMotoresBackBtn" class="secondary ghost">Volver al workspace</button>
             </div>
@@ -1671,13 +1672,62 @@
 	              <p class="muted">Colas de trabajo reales por módulo para operar sin salir del Hub.</p>
             </div>
           </div>
-          <div id="workspaceServiceDesks"></div>
-        </div>
-	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
-	          <div class="form-card">
-	            <div class="section-head">
-	              <div>
-	                <h3>Inbox de entrada</h3>
+	          <div id="workspaceServiceDesks"></div>
+	        </div>
+		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="contabilidad" data-workspace-module="contabilidad">
+		          <div class="form-card span-2">
+		            <div class="section-head">
+		              <div>
+		                <h3>Contabilidad por empresa</h3>
+		                <p class="muted">Panel económico transversal: OCR de facturas, asientos y anotaciones contables.</p>
+		              </div>
+		              <div class="inline-row">
+		                <label>
+		                  Empresa
+		                  <select id="workspaceContaEmpresa"></select>
+		                </label>
+		                <button type="button" id="workspaceContaReload" class="secondary ghost">Actualizar</button>
+		              </div>
+		            </div>
+		            <div id="workspaceContaInfo" class="muted"></div>
+		            <div id="workspaceContaKpis" class="grid crm-kpis"></div>
+		          </div>
+		          <div class="form-card">
+		            <div class="section-head">
+		              <div>
+		                <h3>Facturas OCR</h3>
+		                <p class="muted">Facturas detectadas/importadas para esta empresa (ingreso y gasto).</p>
+		              </div>
+		              <span id="workspaceContaFacturasInfo" class="muted"></span>
+		            </div>
+		            <div id="workspaceContaFacturasTable" class="ui-table-scroll"></div>
+		          </div>
+		          <div class="form-card">
+		            <div class="section-head">
+		              <div>
+		                <h3>Asientos</h3>
+		                <p class="muted">Asientos generados automáticamente desde facturas y eventos del sistema.</p>
+		              </div>
+		              <span id="workspaceContaAsientosInfo" class="muted"></span>
+		            </div>
+		            <div id="workspaceContaAsientosTable" class="ui-table-scroll"></div>
+		          </div>
+		          <div class="form-card span-2">
+		            <div class="section-head">
+		              <div>
+		                <h3>Anotaciones</h3>
+		                <p class="muted">Libro simplificado (últimas anotaciones disponibles).</p>
+		              </div>
+		              <span id="workspaceContaEntriesInfo" class="muted"></span>
+		            </div>
+		            <div id="workspaceContaEntriesTable" class="ui-table-scroll"></div>
+		          </div>
+		        </div>
+		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
+		          <div class="form-card">
+		            <div class="section-head">
+		              <div>
+		                <h3>Inbox de entrada</h3>
                 <p class="muted">Bandeja central para documentos entrantes antes de clasificarlos o asignarlos.</p>
               </div>
             </div>
@@ -6350,6 +6400,16 @@
 	            <h3>Cumplimiento (IDD/GDPR)</h3>
 	            <p class="muted">IPID, asesoramiento y consentimientos.</p>
 	            <div id="segurosComplianceKpis"></div>
+	          </div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Calidad del dato</h3>
+	                <p class="muted">Alertas para mantener KPIs, renovaciones y cartera fiables.</p>
+	              </div>
+	              <button type="button" id="segurosQualityReload" class="secondary ghost">Actualizar</button>
+	            </div>
+	            <div id="segurosDataQuality"></div>
 	          </div>
 	          <div class="form-card">
 	            <h3>KPIs por ramo</h3>

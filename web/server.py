@@ -2191,6 +2191,8 @@ def canonicalize_ramo(value):
         return "Responsabilidad civil"
     if key in ("IT", "INCAPACIDAD TEMPORAL", "INCAPACIDAD PERMANENTE"):
         return "Accidentes"
+    if "PROFESIONAL" in key:
+        return "Responsabilidad civil"
     if "RESPONSABILIDAD CIVIL" in key:
         return "Responsabilidad civil"
     if key in (
@@ -3191,6 +3193,186 @@ def compute_fincas_seguros_dashboard_payload_multi(conn, empresa_ids, year, uplo
         "prima_ramos": merge_by_label(prima_ramo_rows),
         "renovaciones_anulaciones_mes": renov,
         "oportunidades_abiertas": oportunidades,
+    }
+
+
+def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit=3000):
+    """
+    Calidad del dato (Seguros): reglas y alertas para asegurar KPIs fiables.
+    """
+    empresa_id = str(empresa_id or "").strip()
+    try:
+        limit_val = int(str(limit or "").strip() or "3000")
+    except Exception:
+        limit_val = 3000
+    limit_val = max(1, min(15000, limit_val))
+
+    uploaded_clause = uploaded_policy_filter()
+    uploaded_param = resolve_uploaded_only_param(
+        conn,
+        bool(uploaded_only),
+        empresa_id=empresa_id,
+        table="seguros",
+        uploaded_clause=uploaded_clause,
+        strict=False,
+    )
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          id, empresa_id, cliente_id, tomador, compania, ramo, poliza_numero,
+          fecha_efecto, fecha_vencimiento, estado, estado_poliza,
+          matricula, direccion_riesgo, referencia_catastral,
+          created_at, updated_at
+        FROM seguros
+        WHERE empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+        ORDER BY COALESCE(updated_at, created_at) DESC
+        LIMIT {limit_val}
+        """,
+        (empresa_id, uploaded_param),
+    ).fetchall()
+    rows_dict = [dict(r) for r in rows]
+
+    today = datetime.now().date()
+    issues = []
+    counts = {}
+
+    def add_issue(rule_key, label, severity, row, *, details=None, missing_fields=None):
+        counts[rule_key] = int(counts.get(rule_key) or 0) + 1
+        payload = {
+            "rule_key": rule_key,
+            "label": label,
+            "severity": severity,
+            "seguro_id": row.get("id") or "",
+            "cliente_id": row.get("cliente_id") or "",
+            "tomador": row.get("tomador") or "",
+            "compania": row.get("compania") or "",
+            "ramo": row.get("ramo") or "",
+            "poliza_numero": row.get("poliza_numero") or "",
+            "fecha_efecto": row.get("fecha_efecto") or "",
+            "fecha_vencimiento": row.get("fecha_vencimiento") or "",
+            "estado_bucket": seguro_estado_bucket_value(row, today=today),
+        }
+        if details:
+            payload["details"] = details
+        if missing_fields:
+            payload["missing_fields"] = missing_fields
+        issues.append(payload)
+
+    ramo_required = {
+        "Auto": [("matricula", "Matrícula")],
+        "Hogar": [("direccion_riesgo", "Dirección del riesgo")],
+        "Hogar alquiler": [("direccion_riesgo", "Dirección del riesgo")],
+        "Comunidad": [("direccion_riesgo", "Dirección del riesgo")],
+        "Comercio": [("direccion_riesgo", "Dirección del riesgo")],
+    }
+
+    duplicates = {}
+    for row in rows_dict:
+        bucket = seguro_estado_bucket_value(row, today=today)
+        in_vigor = bucket == "en_vigor"
+        poliza_raw = str(row.get("poliza_numero") or "").strip()
+        poliza_key = normalize_poliza_key(poliza_raw)
+        compania_key = normalize_lookup_text(row.get("compania") or "")
+        ramo_label = canonicalize_ramo(row.get("ramo")) or (row.get("ramo") or "").strip()
+
+        if in_vigor and not poliza_key:
+            add_issue("en_vigor_sin_numero", "En vigor sin nº de póliza", "warning", row)
+
+        efecto = parse_iso_date(row.get("fecha_efecto"))
+        venc = parse_iso_date(row.get("fecha_vencimiento"))
+        if efecto and venc and venc < efecto:
+            add_issue(
+                "vencimiento_antes_efecto",
+                "Vencimiento anterior a la fecha de efecto",
+                "error",
+                row,
+                details=f"Efecto {efecto.isoformat()} > Vencimiento {venc.isoformat()}",
+            )
+        if in_vigor and venc and venc < today:
+            add_issue(
+                "en_vigor_vencida",
+                "En vigor con vencimiento pasado",
+                "error",
+                row,
+                details=f"Vencida el {venc.isoformat()} (hoy {today.isoformat()})",
+            )
+
+        if poliza_key:
+            dup_key = f"{compania_key}::{poliza_key}" if compania_key else poliza_key
+            duplicates.setdefault(dup_key, []).append(
+                {
+                    "seguro_id": row.get("id") or "",
+                    "cliente_id": row.get("cliente_id") or "",
+                    "tomador": row.get("tomador") or "",
+                    "compania": row.get("compania") or "",
+                    "ramo": row.get("ramo") or "",
+                    "poliza_numero": poliza_raw,
+                    "estado_bucket": bucket,
+                }
+            )
+
+        required = ramo_required.get(ramo_label) or []
+        missing = []
+        for field, label in required:
+            if not str(row.get(field) or "").strip():
+                missing.append(label)
+        if missing:
+            add_issue(
+                "faltan_campos_ramo",
+                f"Faltan campos mínimos ({ramo_label})",
+                "warning",
+                row,
+                missing_fields=missing,
+            )
+
+    duplicate_groups = []
+    for key, items in duplicates.items():
+        if len(items) <= 1:
+            continue
+        counts["duplicados_poliza_numero"] = int(counts.get("duplicados_poliza_numero") or 0) + 1
+        company_part = key.split("::", 1)[0] if "::" in key else ""
+        poliza_part = key.split("::", 1)[1] if "::" in key else key
+        duplicate_groups.append(
+            {
+                "rule_key": "duplicados_poliza_numero",
+                "label": "Duplicado por nº de póliza",
+                "severity": "warning",
+                "compania_key": company_part,
+                "poliza_key": poliza_part,
+                "total": len(items),
+                "items": items[:50],
+            }
+        )
+    duplicate_groups.sort(key=lambda g: (-int(g.get("total") or 0), str(g.get("compania_key") or "")))
+
+    rules_catalog = [
+        {"key": "en_vigor_sin_numero", "label": "En vigor sin nº de póliza", "severity": "warning"},
+        {"key": "en_vigor_vencida", "label": "En vigor con vencimiento pasado", "severity": "error"},
+        {"key": "vencimiento_antes_efecto", "label": "Vencimiento anterior a efecto", "severity": "error"},
+        {"key": "duplicados_poliza_numero", "label": "Duplicados por nº de póliza", "severity": "warning"},
+        {"key": "faltan_campos_ramo", "label": "Campos mínimos por ramo", "severity": "warning"},
+    ]
+    rules = []
+    for rule in rules_catalog:
+        rules.append({**rule, "count": int(counts.get(rule["key"]) or 0)})
+
+    issues.sort(
+        key=lambda it: (
+            0 if str(it.get("severity") or "").lower() == "error" else 1,
+            str(it.get("label") or ""),
+        )
+    )
+
+    return {
+        "empresa_id": empresa_id,
+        "limit": limit_val,
+        "uploaded_only": 1 if uploaded_param else 0,
+        "summary": {k: int(v or 0) for k, v in counts.items()},
+        "rules": rules,
+        "issues": issues[:800],
+        "duplicate_groups": duplicate_groups[:200],
     }
 
 
@@ -19805,7 +19987,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if smart_fields:
         fields.update(smart_fields)
     if "ramo" in fields:
-        fields["ramo"] = canonicalize_ramo(fields.get("ramo"))
+        # OCR: evitar "ramos" basura (p.ej. 'IMPORTE', nombres, frases).
+        # Si no mapea a un ramo canónico conocido, lo dejamos vacío para no distorsionar KPIs.
+        ramo_val = canonicalize_ramo(fields.get("ramo"))
+        canonical_keys = {normalize_lookup_text(item) for item in LEGAL_RAMOS_CANONICAL}
+        if normalize_lookup_text(ramo_val) in canonical_keys:
+            fields["ramo"] = ramo_val
+        else:
+            fields["ramo"] = ""
     return fields
 
 def parse_asesoramiento_block(block):
@@ -27712,6 +27901,122 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         )
 
     return {"ejercicio": ejercicio_val, "count": int(pending_count), "rows": preview}
+
+
+def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
+    """
+    Conteo ligero de campañas de renta para un ejercicio (sin cargar docs ni construir dashboards).
+    Se usa en el dashboard admin de Servicios para que "Rentas" no dependa de `gestoria_trabajos`.
+    """
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {"ejercicio": "", "count": 0}
+
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    rows = conn.execute(
+        f"""
+        SELECT cg.renta_detalles
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND (
+            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+            OR EXISTS (
+              SELECT 1
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders_emp})
+                AND ce.cliente_id = c.id
+                AND {service_filter}
+            )
+          )
+        """,
+        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
+    ).fetchall()
+
+    total = 0
+    for row in rows:
+        try:
+            payload = parse_renta_detalles_payload(row_value(row, "renta_detalles", "") or "")
+            entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
+            for e in entries:
+                if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                    total += 1
+                    break
+        except Exception:
+            continue
+    return {"ejercicio": ejercicio_val, "count": int(total)}
+
+
+def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
+    """
+    Conteo ligero de campañas de renta para un ejercicio (sin cargar docs ni construir dashboards).
+    Se usa en el dashboard admin de Servicios para que "Rentas" no dependa de `gestoria_trabajos`.
+    """
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {"ejercicio": "", "count": 0}
+
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    rows = conn.execute(
+        f"""
+        SELECT cg.renta_detalles
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND (
+            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+            OR EXISTS (
+              SELECT 1
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders_emp})
+                AND ce.cliente_id = c.id
+                AND {service_filter}
+            )
+          )
+        """,
+        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
+    ).fetchall()
+
+    total = 0
+    for row in rows:
+        try:
+            payload = parse_renta_detalles_payload(row_value(row, "renta_detalles", "") or "")
+            entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
+            for e in entries:
+                if str(e.get("ejercicio") or "").strip() == ejercicio_val:
+                    total += 1
+                    break
+        except Exception:
+            continue
+    return {"ejercicio": ejercicio_val, "count": int(total)}
 
 
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
@@ -66934,6 +67239,30 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": rows_dict})
             return
 
+        if path == "/api/seguros_data_quality":
+            empresa_id = params.get("empresa_id", [""])[0]
+            uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            limit = params.get("limit", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                limit_val = int(str(limit or "").strip() or "3000")
+            except Exception:
+                limit_val = 3000
+            limit_val = max(1, min(15000, limit_val))
+            try:
+                payload = compute_seguros_data_quality(conn, empresa_id, uploaded_only=uploaded_only, limit=limit_val)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/seguros_data_quality", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo calcular la calidad del dato."}, status=500)
+                return
+            json_response(self, payload)
+            return
+
         if path == "/api/seguros_insights":
             empresa_id = params.get("empresa_id", [""])[0]
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
@@ -69543,7 +69872,14 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         tuple(empresa_ids),
                     ).fetchone()
-                    payload["segmentacion_trabajos"] = dict(seg) if seg else {}
+                    seg_out = dict(seg) if seg else {}
+                    # Rentas no siempre existen como `gestoria_trabajos`; se registran en `cliente_gestoria.renta_detalles`.
+                    try:
+                        renta_total = compute_gestoria_renta_campaigns_total(conn, empresa_ids, ejercicio="").get("count", 0)
+                        seg_out["rentas_total"] = int(renta_total or 0)
+                    except Exception:
+                        pass
+                    payload["segmentacion_trabajos"] = seg_out
                 except Exception as exc:
                     try:
                         Handler._record_api_error("/api/gestoria_dashboard:segmentacion_trabajos", exc)
