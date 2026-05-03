@@ -2456,6 +2456,7 @@ const gestoriaBudgetsTable = document.getElementById("gestoriaBudgetsTable");
 const gestoriaBudgetsInfo = document.getElementById("gestoriaBudgetsInfo");
 const gestoriaCrmSearch = document.getElementById("gestoriaCrmSearch");
 const gestoriaCrmClientes = document.getElementById("gestoriaCrmClientes");
+const gestoriaCrmFilterControls = document.getElementById("gestoriaCrmFilterControls");
 const gestoriaCrmTipo = document.getElementById("gestoriaCrmTipo");
 const gestoriaCrmSubtipo = document.getElementById("gestoriaCrmSubtipo");
 const gestoriaCrmEstado = document.getElementById("gestoriaCrmEstado");
@@ -2878,6 +2879,12 @@ const segurosAgendaClienteId = document.getElementById("segurosAgendaClienteId")
 const segurosAgendaClientes = document.getElementById("segurosAgendaClientes");
 const segurosAgendaTable = document.getElementById("segurosAgendaTable");
 const segurosAgendaInfo = document.getElementById("segurosAgendaInfo");
+const segurosCadenciaForm = document.getElementById("segurosCadenciaForm");
+const segurosCadenciaPoliza = document.getElementById("segurosCadenciaPoliza");
+const segurosCadenciaType = document.getElementById("segurosCadenciaType");
+const segurosCadenciaResponsable = document.getElementById("segurosCadenciaResponsable");
+const segurosCadenciaNota = document.getElementById("segurosCadenciaNota");
+const segurosCadenciaStatus = document.getElementById("segurosCadenciaStatus");
 const finCrmSearch = document.getElementById("finCrmSearch");
 const finCrmClienteInput = document.getElementById("finCrmClienteInput");
 const finCrmClienteId = document.getElementById("finCrmClienteId");
@@ -33098,6 +33105,11 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
   if (gestoriaCrmUploadRentaBtn) {
     gestoriaCrmUploadRentaBtn.classList.toggle("hidden", tabName !== "renta");
   }
+  // En Renta siempre necesitamos ver los controles extra (ejercicio, carga de PDFs, etc.)
+  // aunque el CRM esté en modo "buscador".
+  if (gestoriaCrmFilterControls && tabName === "renta") {
+    gestoriaCrmFilterControls.classList.remove("hidden");
+  }
   if (gestoriaCrmOpsSplit) {
     gestoriaCrmOpsSplit.classList.toggle("hidden", tabName === "renta");
   }
@@ -51329,7 +51341,7 @@ const loadGestoriaCrm = async () => {
     if (gestoriaCrmSummary) {
       const summaryList = document.createElement("div");
       summaryList.className = "crm-mini-list";
-      rows.slice(0, 15).forEach((row) => {
+      rows.slice(0, 10).forEach((row) => {
         const getValue = (col) => {
           const idx = columns.indexOf(col);
           return idx >= 0 ? row[idx] : "";
@@ -51480,9 +51492,19 @@ const loadGestoriaCrm = async () => {
     const showFull = state.gestoriaCrmFull === true;
     if (gestoriaCrmTable) gestoriaCrmTable.classList.toggle("hidden", !showFull);
     if (gestoriaCrmSummary) gestoriaCrmSummary.classList.toggle("hidden", showFull);
+    // En modo "buscador" (resumen) ocultamos filtros y bloques operativos para que
+    // el botón "Clientes" sea un buscador rápido con fichas (máx. 10).
+    const isRenta = state.gestoriaCrmTab === "renta";
+    if (gestoriaCrmFilterControls) {
+      gestoriaCrmFilterControls.classList.toggle("hidden", !showFull && !isRenta);
+    }
+    const showOperativa = showFull && !isRenta;
+    if (gestoriaCrmOpsSplit) gestoriaCrmOpsSplit.classList.toggle("hidden", !showOperativa);
+    if (gestoriaCrmPipelineCard) gestoriaCrmPipelineCard.classList.toggle("hidden", !showOperativa);
+    if (gestoriaCrmTabs) gestoriaCrmTabs.classList.toggle("hidden", !showFull && !isRenta);
     if (gestoriaCrmToggleView) {
       gestoriaCrmToggleView.classList.remove("hidden");
-      gestoriaCrmToggleView.textContent = showFull ? "Ver resumen" : "Ver tabla completa";
+      gestoriaCrmToggleView.textContent = showFull ? "Volver al buscador" : "Ver panel completo";
     }
   return;
 };
@@ -56166,6 +56188,10 @@ const renderSegurosAiSelect = (data) => {
   const companiaIndex = columns.indexOf("compania");
   segurosAiPoliza.innerHTML = "";
   segurosAiPoliza.appendChild(createOption("", "Selecciona póliza"));
+  if (segurosCadenciaPoliza) {
+    segurosCadenciaPoliza.innerHTML = "";
+    segurosCadenciaPoliza.appendChild(createOption("", "Selecciona póliza"));
+  }
   rows.forEach((row) => {
     const id = idIndex >= 0 ? row[idIndex] : "";
     if (!id) return;
@@ -56174,7 +56200,82 @@ const renderSegurosAiSelect = (data) => {
     const compania = row[companiaIndex] || "-";
     const label = `${tomador} · ${compania} · ${poliza}`;
     segurosAiPoliza.appendChild(createOption(id, label));
+    if (segurosCadenciaPoliza) {
+      segurosCadenciaPoliza.appendChild(createOption(id, label));
+    }
   });
+};
+
+const addDaysIso = (isoDate, deltaDays) => {
+  const base = String(isoDate || "").trim();
+  if (!base) return "";
+  try {
+    const dt = new Date(`${base}T00:00:00`);
+    if (Number.isNaN(dt.getTime())) return "";
+    dt.setDate(dt.getDate() + Number(deltaDays || 0));
+    return dt.toISOString().slice(0, 10);
+  } catch (_) {
+    return "";
+  }
+};
+
+const findSegurosRowById = (seguroId) => {
+  const id = String(seguroId || "").trim();
+  if (!id) return null;
+  const source = state.segurosRamosSource || state.segurosCrmData;
+  const columns = source?.columns || [];
+  const rows = source?.rows || [];
+  const idIndex = columns.indexOf("id");
+  if (idIndex < 0) return null;
+  const row = rows.find((r) => String(r?.[idIndex] || "") === id) || null;
+  return row ? { columns, row } : null;
+};
+
+const buildSegurosCadenceSteps = (cadenceKey, polizaCtx) => {
+  const { columns, row } = polizaCtx;
+  const idx = (name) => columns.indexOf(name);
+  const clienteId = idx("cliente_id") >= 0 ? row[idx("cliente_id")] || "" : "";
+  const clienteNombre = idx("tomador") >= 0 ? row[idx("tomador")] || "" : "";
+  const polizaNumero = idx("poliza_numero") >= 0 ? row[idx("poliza_numero")] || "" : "";
+  const compania = idx("compania") >= 0 ? row[idx("compania")] || "" : "";
+  const ramo = idx("ramo") >= 0 ? row[idx("ramo")] || "" : "";
+  const vencimiento = idx("fecha_vencimiento") >= 0 ? row[idx("fecha_vencimiento")] || "" : "";
+  const recordId = idx("id") >= 0 ? row[idx("id")] || "" : "";
+  const safeTitle = `${clienteNombre || "Cliente"} · ${compania || "-"} · ${polizaNumero || "-"}`.trim();
+
+  if (cadenceKey === "renovacion_45_30_15_7_1") {
+    if (!vencimiento) throw new Error("La póliza no tiene fecha de vencimiento.");
+    const steps = [
+      { offset: -45, tipo: "Renovación", canal: "WhatsApp", asunto: `Renovación · 45 días · ${safeTitle}` },
+      { offset: -30, tipo: "Renovación", canal: "Llamada", asunto: `Renovación · 30 días · ${safeTitle}` },
+      { offset: -15, tipo: "Renovación", canal: "Email", asunto: `Renovación · 15 días · ${safeTitle}` },
+      { offset: -7, tipo: "Renovación", canal: "Llamada", asunto: `Renovación · 7 días · ${safeTitle}` },
+      { offset: -1, tipo: "Renovación", canal: "WhatsApp", asunto: `Renovación · 1 día · ${safeTitle}` },
+    ];
+    return { clienteId, clienteNombre, relatedTipo: "seguros", relatedId: recordId, vencimiento, ramo, compania, polizaNumero, steps };
+  }
+
+  if (cadenceKey === "impago_0_3_7") {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const steps = [
+      { offset: 0, tipo: "Impago", canal: "WhatsApp", asunto: `Impago · hoy · ${safeTitle}` },
+      { offset: 3, tipo: "Impago", canal: "Llamada", asunto: `Impago · +3 días · ${safeTitle}` },
+      { offset: 7, tipo: "Impago", canal: "Llamada", asunto: `Impago · +7 días · ${safeTitle}` },
+    ];
+    return { clienteId, clienteNombre, relatedTipo: "seguros", relatedId: recordId, vencimiento: todayIso, ramo, compania, polizaNumero, steps };
+  }
+
+  if (cadenceKey === "siniestro_1_7_14") {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const steps = [
+      { offset: 1, tipo: "Siniestro", canal: "WhatsApp", asunto: `Siniestro · +1 día · ${safeTitle}` },
+      { offset: 7, tipo: "Siniestro", canal: "Llamada", asunto: `Siniestro · +7 días · ${safeTitle}` },
+      { offset: 14, tipo: "Siniestro", canal: "Llamada", asunto: `Siniestro · +14 días · ${safeTitle}` },
+    ];
+    return { clienteId, clienteNombre, relatedTipo: "seguros", relatedId: recordId, vencimiento: todayIso, ramo, compania, polizaNumero, steps };
+  }
+
+  throw new Error("Cadencia no soportada.");
 };
 
 const getSegurosBdtOcrFields = () => {
@@ -74945,6 +75046,87 @@ if (segurosAgendaForm) {
           segurosAgendaStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (segurosCadenciaForm) {
+  segurosCadenciaForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Creando cadencia…";
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Sin empresa.";
+      return;
+    }
+    const seguroId = segurosCadenciaPoliza ? String(segurosCadenciaPoliza.value || "").trim() : "";
+    const cadenceKey = segurosCadenciaType ? String(segurosCadenciaType.value || "").trim() : "";
+    if (!seguroId) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    const polizaCtx = findSegurosRowById(seguroId);
+    if (!polizaCtx) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "No se encontró la póliza en el CRM.";
+      return;
+    }
+    let cadence = null;
+    try {
+      cadence = buildSegurosCadenceSteps(cadenceKey, polizaCtx);
+    } catch (e) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = e?.message || "Cadencia inválida.";
+      return;
+    }
+    const responsable = segurosCadenciaResponsable ? String(segurosCadenciaResponsable.value || "").trim() : "";
+    const notaBase = segurosCadenciaNota ? String(segurosCadenciaNota.value || "").trim() : "";
+    const count = cadence.steps.length;
+    const ok = window.confirm(`Se van a crear ${count} tareas en la agenda. ¿Continuar?`);
+    if (!ok) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Cancelado.";
+      return;
+    }
+    try {
+      for (const step of cadence.steps) {
+        const fecha = addDaysIso(cadence.vencimiento, step.offset);
+        if (!fecha) continue;
+        const payload = {
+          servicio: "seguros",
+          empresa_nombre: empresa.nombre,
+          cliente_id: cadence.clienteId || "",
+          cliente_nombre: cadence.clienteNombre || "",
+          fecha,
+          hora: "09:00",
+          tipo: step.tipo,
+          modalidad_contacto: step.canal,
+          asunto: step.asunto,
+          estado: "Pendiente",
+          responsable: responsable || "",
+          notas: [
+            notaBase,
+            `Póliza: ${cadence.polizaNumero || "-"}`,
+            `Compañía: ${cadence.compania || "-"}`,
+            `Ramo: ${cadence.ramo || "-"}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          related_id: cadence.relatedId || "",
+          related_tipo: cadence.relatedTipo || "",
+        };
+        const res = await fetch("/api/acciones", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.error) {
+          throw new Error(data?.error || `HTTP ${res.status}`);
+        }
+      }
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Cadencia creada.";
+      loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
+      segurosCadenciaForm.reset();
+    } catch (e) {
+      if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = e?.message || "No se pudo crear la cadencia.";
+    }
   });
 }
 
