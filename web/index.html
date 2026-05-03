@@ -6682,12 +6682,43 @@
             <div class="table-tools">
               <input id="segurosReferidosSearch" placeholder="Filtrar referidos..." />
             </div>
-            <div id="segurosReferidosTable"></div>
-            <div class="footer" id="segurosReferidosInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Agenda · Seguros</h3>
-            <form id="segurosAgendaForm" class="form-grid">
+	            <div id="segurosReferidosTable"></div>
+	            <div class="footer" id="segurosReferidosInfo"></div>
+	          </div>
+	          <div class="form-card">
+	            <h3>Cadencias · Seguros</h3>
+	            <p class="muted">Crea tareas automáticas (renovaciones/impagos/siniestros) en la agenda.</p>
+	            <form id="segurosCadenciaForm" class="form-grid">
+	              <label class="span-2">
+	                Póliza
+	                <select id="segurosCadenciaPoliza" name="seguro_id"></select>
+	              </label>
+	              <label>
+	                Cadencia
+	                <select id="segurosCadenciaType" name="cadencia">
+	                  <option value="renovacion_45_30_15_7_1">Renovación (45/30/15/7/1)</option>
+	                  <option value="impago_0_3_7">Impago (hoy/3/7)</option>
+	                  <option value="siniestro_1_7_14">Siniestro (1/7/14)</option>
+	                </select>
+	              </label>
+	              <label>
+	                Responsable
+	                <select id="segurosCadenciaResponsable" name="responsable" class="responsable-select" data-service="Seguros"></select>
+	              </label>
+	              <label class="span-2">
+	                Nota base (opcional)
+	                <input id="segurosCadenciaNota" name="nota_base" placeholder="Se añadirá a cada tarea" />
+	              </label>
+	              <div class="form-actions span-2">
+	                <button type="submit">Crear cadencia</button>
+	                <span id="segurosCadenciaStatus" class="muted"></span>
+	              </div>
+	            </form>
+	          </div>
+	          <div class="form-card">
+	            <h3>Agenda · Seguros</h3>
+	            <p class="muted">Usa “Hecho” para registrar interacciones (llamada/email/WhatsApp).</p>
+	            <form id="segurosAgendaForm" class="form-grid">
               <label>
                 Cliente
                 <input id="segurosAgendaClienteInput" name="cliente_nombre" list="segurosAgendaClientes" autocomplete="off" />
@@ -6702,15 +6733,27 @@
                 Hora
                 <input name="hora" type="time" />
               </label>
-              <label>
-                Tipo
-                <select name="tipo">
-                  <option>Llamada</option>
-                  <option>Reunión</option>
-                  <option>Seguimiento</option>
-                  <option>Renovación</option>
-                </select>
-              </label>
+	              <label>
+	                Tipo
+	                <select name="tipo">
+	                  <option>Llamada</option>
+	                  <option>Reunión</option>
+	                  <option>Seguimiento</option>
+	                  <option>Renovación</option>
+	                  <option>Impago</option>
+	                  <option>Siniestro</option>
+	                </select>
+	              </label>
+	              <label>
+	                Canal
+	                <select name="modalidad_contacto">
+	                  <option value="">(sin especificar)</option>
+	                  <option>Llamada</option>
+	                  <option>WhatsApp</option>
+	                  <option>Email</option>
+	                  <option>Presencial</option>
+	                </select>
+	              </label>
               <label>
                 Responsable
                 <select name="responsable" class="responsable-select" data-service="Seguros"></select>
@@ -10807,7 +10850,7 @@
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=328";
+												        const TARGET_SW = "/sw.js?v=329";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";
