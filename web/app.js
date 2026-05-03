@@ -24565,6 +24565,9 @@ const setTab = (tabName) => {
     btn.classList.toggle("active", btn.dataset.tab === normalized);
   });
   try {
+    mountCrmVerticalViews();
+  } catch (e) {}
+  try {
     syncExplorerLightningSidebar();
   } catch (e) {}
   updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
@@ -33673,8 +33676,24 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  }
 	};
 
-const mountCrmVerticalViews = () => {
+function mountCrmVerticalViews() {
   const vertical = resolveCrmTecnocloudVertical();
+  try {
+    if (crmGestoriaMount) {
+      [
+        gestoriaDashboardSection,
+        gestoriaCrmSection,
+        gestoriaDocsSection,
+        gestoriaAgendaSection,
+        gestoriaFactSection,
+        gestoriaContaSection,
+      ].forEach((node) => {
+        if (!node) return;
+        if (crmGestoriaMount.contains(node)) return;
+        crmGestoriaMount.appendChild(node);
+      });
+    }
+  } catch (e) {}
   try {
     if (crmSegurosMount && segurosCrmSection && segurosCrmSection.parentElement !== crmSegurosMount) {
       crmSegurosMount.appendChild(segurosCrmSection);
@@ -33687,11 +33706,17 @@ const mountCrmVerticalViews = () => {
     if (crmFinMount && hipotecaSection && hipotecaSection.parentElement !== crmFinMount) {
       crmFinMount.appendChild(hipotecaSection);
     }
+    if (crmFinMount && finSimSection && finSimSection.parentElement !== crmFinMount) {
+      crmFinMount.appendChild(finSimSection);
+    }
     if (hipotecaSection) {
-      hipotecaSection.classList.toggle("hidden", vertical !== "fin");
+      hipotecaSection.classList.toggle("hidden", vertical !== "fin" || currentTab === "fin-sim");
+    }
+    if (finSimSection) {
+      finSimSection.classList.toggle("hidden", vertical !== "fin" || currentTab !== "fin-sim");
     }
   } catch (e) {}
-};
+}
 
 const escapeHtml = (value) =>
   String(value ?? "")
