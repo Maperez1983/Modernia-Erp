@@ -6955,6 +6955,45 @@
             <div id="segurosContabilidadTable"></div>
             <div class="footer" id="segurosContabilidadInfo"></div>
           </div>
+          <div class="form-card">
+            <h3>Reglas de comisión · Seguros</h3>
+            <p class="muted">Define el % esperado por compañía/ramo (opcionalmente añade tipo entre corchetes, p.ej. <code>Hogar [cartera]</code>).</p>
+            <form id="segurosComisionesForm" class="form-grid">
+              <label>
+                Compañía
+                <input name="compania" placeholder="MAPFRE" required />
+              </label>
+              <label>
+                Ramo
+                <input name="ramo" placeholder="Hogar [nueva produccion]" />
+              </label>
+              <label>
+                %
+                <input name="porcentaje" type="number" step="0.01" min="0" placeholder="10,00" required />
+              </label>
+              <label>
+                Vigencia desde
+                <input name="vigencia_desde" type="date" />
+              </label>
+              <label>
+                Vigencia hasta
+                <input name="vigencia_hasta" type="date" />
+              </label>
+              <label class="span-2">
+                Notas
+                <input name="notas" />
+              </label>
+              <div class="form-actions">
+                <button type="submit">Añadir regla</button>
+                <span id="segurosComisionesStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="table-tools">
+              <input id="segurosComisionesSearch" placeholder="Filtrar reglas..." />
+            </div>
+            <div id="segurosComisionesTable"></div>
+            <div class="footer" id="segurosComisionesInfo"></div>
+          </div>
           </div>
           <div class="seguros-tab" data-seguros-tab="recibos">
             <div class="form-card">
@@ -10669,7 +10708,7 @@
         </script>
 		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=736"></script>
+												    <script src="app.js?v=737"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

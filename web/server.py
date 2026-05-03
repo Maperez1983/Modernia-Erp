@@ -2241,6 +2241,90 @@ def canonicalize_ramo(value):
     return raw
 
 
+def seguros_comision_tipo_from_produccion(produccion):
+    value = normalize_lookup_text(produccion or "")
+    if "cambio" in value:
+        return "cartera"
+    return "nueva produccion"
+
+
+def parse_seguros_comision_ramo_tipo(value):
+    raw = str(value or "").strip()
+    match = re.match(r"^(.*)\[(.*)\]\s*$", raw)
+    if not match:
+        return {"ramo": raw, "tipo": ""}
+    return {"ramo": str(match.group(1) or "").strip(), "tipo": str(match.group(2) or "").strip()}
+
+
+def _safe_iso_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        return raw[:10]
+    parsed = parse_iso_date(raw)
+    return parsed.isoformat() if parsed else ""
+
+
+def score_seguros_comision_match(rule, compania_key, ramo_key, tipo_key):
+    row_comp = normalize_company_key(rule.get("compania") or "")
+    if not row_comp or row_comp != compania_key:
+        return -1
+    parsed = parse_seguros_comision_ramo_tipo(rule.get("ramo") or "")
+    row_ramo = normalize_lookup_text(parsed.get("ramo") or "")
+    row_tipo = normalize_lookup_text(parsed.get("tipo") or "")
+    score = 10
+    if row_ramo and ramo_key:
+        if row_ramo == ramo_key:
+            score += 60
+        elif ramo_key in row_ramo or row_ramo in ramo_key:
+            score += 35
+        else:
+            score -= 20
+    if row_tipo == tipo_key and row_tipo:
+        score += 30
+    elif "general" in row_tipo:
+        score += 10
+    elif "variable" in row_tipo:
+        score += 5
+    elif row_tipo:
+        score -= 10
+    return score
+
+
+def pick_seguros_comision_rule(rules, compania, ramo, *, produccion="", fecha_ref=""):
+    compania_key = normalize_company_key(compania or "")
+    if not compania_key:
+        return None
+    tipo_key = normalize_lookup_text(seguros_comision_tipo_from_produccion(produccion))
+    ramo_key = normalize_lookup_text(ramo or "")
+    fecha_ref = _safe_iso_date(fecha_ref)
+
+    best = None
+    best_score = -1
+    for rule in rules or []:
+        if fecha_ref:
+            desde = _safe_iso_date(rule.get("vigencia_desde") or "")
+            hasta = _safe_iso_date(rule.get("vigencia_hasta") or "")
+            if desde and fecha_ref < desde:
+                continue
+            if hasta and fecha_ref > hasta:
+                continue
+        score = score_seguros_comision_match(rule, compania_key, ramo_key, tipo_key)
+        if score > best_score:
+            best_score = score
+            best = rule
+    if not best or best_score < 20:
+        return None
+    try:
+        pct = float(best.get("porcentaje"))
+    except Exception:
+        return None
+    if not math.isfinite(pct):
+        return None
+    return {"pct": pct, "source": f"{best.get('compania') or ''} · {best.get('ramo') or ''}".strip()}
+
+
 def infer_tipo_vigencia(ramo, explicit=None):
     value = normalize_lookup_text(explicit or "")
     if value in ("TEMPORAL_NO_RENOVABLE", "TEMPORAL", "UN_USO", "NO_RENOVABLE"):
@@ -3669,6 +3753,132 @@ def classify_gestoria_trabajo_category(tipo_trabajo):
     if "CONSTITUCION" in text or "SOCIEDAD" in text:
         return "sociedades"
     return "otros"
+
+
+DEFAULT_GESTORIA_TRABAJO_TIPOS = [
+    # Laboral
+    {"tipo_key": "laboral", "nombre": "Laboral (general)", "categoria": "laboral", "orden": 10, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "alta_baja_autonomo", "nombre": "Alta/Baja autónomo", "categoria": "laboral", "orden": 12, "color": "#0B1D33", "sla_dias": 2, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "nominas", "nombre": "Nóminas", "categoria": "laboral", "orden": 14, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "contratos", "nombre": "Contratos", "categoria": "laboral", "orden": 16, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "seguros_sociales", "nombre": "Seguros sociales", "categoria": "laboral", "orden": 18, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Fiscal
+    {"tipo_key": "fiscal", "nombre": "Fiscal (general)", "categoria": "fiscal", "orden": 20, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelos_hacienda", "nombre": "Modelos Hacienda", "categoria": "fiscal", "orden": 22, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelo_303_iva", "nombre": "Modelo 303 (IVA)", "categoria": "fiscal", "orden": 24, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelo_111_retenciones", "nombre": "Modelo 111 (retenciones)", "categoria": "fiscal", "orden": 26, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelo_130_irpf", "nombre": "Modelo 130 (IRPF)", "categoria": "fiscal", "orden": 28, "color": "#0B1D33", "sla_dias": 5, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelo_200_is", "nombre": "Modelo 200 (Impuesto Sociedades)", "categoria": "fiscal", "orden": 30, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modelo_390_resumen_iva", "nombre": "Modelo 390 (resumen IVA)", "categoria": "fiscal", "orden": 32, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "requerimientos_aeat", "nombre": "Requerimientos AEAT", "categoria": "fiscal", "orden": 34, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Contable
+    {"tipo_key": "contable", "nombre": "Contable (general)", "categoria": "contable", "orden": 40, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "contabilidad_mensual", "nombre": "Contabilidad mensual", "categoria": "contable", "orden": 42, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "cierre_anual", "nombre": "Cierre contable anual", "categoria": "contable", "orden": 44, "color": "#0B1D33", "sla_dias": 20, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "libros_contables", "nombre": "Libros contables", "categoria": "contable", "orden": 46, "color": "#0B1D33", "sla_dias": 20, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Registro / Sociedades
+    {"tipo_key": "registro_mercantil", "nombre": "Registro Mercantil", "categoria": "registro", "orden": 50, "color": "#0B1D33", "sla_dias": 15, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "deposito_cuentas", "nombre": "Depósito de cuentas", "categoria": "registro", "orden": 52, "color": "#0B1D33", "sla_dias": 20, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "constitucion_sociedad", "nombre": "Constitución sociedad", "categoria": "sociedades", "orden": 60, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "modificacion_sociedad", "nombre": "Modificación sociedad", "categoria": "sociedades", "orden": 62, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "disolucion_sociedad", "nombre": "Disolución sociedad", "categoria": "sociedades", "orden": 64, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Rentas
+    {"tipo_key": "renta", "nombre": "Renta (general)", "categoria": "rentas", "orden": 70, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "irpf_modelo_100", "nombre": "IRPF · Modelo 100", "categoria": "rentas", "orden": 72, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "patrimonio", "nombre": "Patrimonio", "categoria": "rentas", "orden": 74, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Tráfico
+    {"tipo_key": "trafico", "nombre": "Tráfico (general)", "categoria": "trafico", "orden": 80, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "transferencia_vehiculo", "nombre": "Transferencia vehículo", "categoria": "trafico", "orden": 82, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "matriculacion", "nombre": "Matriculación", "categoria": "trafico", "orden": 84, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "baja_vehiculo", "nombre": "Baja vehículo", "categoria": "trafico", "orden": 86, "color": "#0B1D33", "sla_dias": 7, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Expedientes / Tasaciones / Herencias
+    {"tipo_key": "expedientes_admin", "nombre": "Expedientes administrativos", "categoria": "expedientes", "orden": 90, "color": "#0B1D33", "sla_dias": 20, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "imv", "nombre": "Ingreso Mínimo Vital (IMV)", "categoria": "expedientes", "orden": 92, "color": "#0B1D33", "sla_dias": 20, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "subvenciones", "nombre": "Subvenciones", "categoria": "expedientes", "orden": 94, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "tasaciones", "nombre": "Tasaciones", "categoria": "tasaciones", "orden": 100, "color": "#0B1D33", "sla_dias": 10, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "herencias", "nombre": "Herencias", "categoria": "herencias", "orden": 110, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+    {"tipo_key": "plusvalia_municipal", "nombre": "Plusvalía municipal", "categoria": "herencias", "orden": 112, "color": "#0B1D33", "sla_dias": 30, "iva_pct": 21.0, "precio_base": 0.0},
+
+    # Genérico
+    {"tipo_key": "otros", "nombre": "Otros", "categoria": "otros", "orden": 999, "color": "#6B778A", "sla_dias": 0, "iva_pct": 21.0, "precio_base": 0.0},
+]
+
+
+def normalize_gestoria_trabajo_tipo_key(value):
+    raw = str(value or "").strip().lower()
+    raw = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    return raw[:80]
+
+
+def ensure_gestoria_trabajo_tipos(conn, empresa_id, now=None):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return
+    now_val = now or "now"
+    try:
+        row = conn.execute(
+            "SELECT COUNT(1) AS total FROM gestoria_trabajo_tipos WHERE empresa_id = ?",
+            (empresa_id,),
+        ).fetchone()
+        if int(row_value(row, "total", 0) or 0) > 0:
+            return
+    except Exception:
+        return
+    for item in DEFAULT_GESTORIA_TRABAJO_TIPOS:
+        try:
+            conn.execute(
+                """
+                INSERT INTO gestoria_trabajo_tipos (
+                  id, empresa_id, tipo_key, nombre, categoria, activo, orden, color, sla_dias, iva_pct, precio_base,
+                  plantilla_json, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    empresa_id,
+                    item.get("tipo_key"),
+                    item.get("nombre"),
+                    normalize_gestoria_trabajo_category(item.get("categoria")) or "otros",
+                    item.get("orden"),
+                    item.get("color"),
+                    item.get("sla_dias"),
+                    float(item.get("iva_pct") or 21.0),
+                    float(item.get("precio_base") or 0.0),
+                    now_val,
+                    now_val,
+                ),
+            )
+        except Exception:
+            continue
+
+
+def fetch_gestoria_trabajo_tipos(conn, empresa_id, include_inactive=False):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return []
+    where = ["empresa_id = ?"]
+    values = [empresa_id]
+    if not include_inactive:
+        where.append("COALESCE(activo, 1) = 1")
+    rows = conn.execute(
+        f"""
+        SELECT id, empresa_id, tipo_key, nombre, categoria, activo, orden, color, sla_dias, iva_pct, precio_base, plantilla_json,
+               created_at, updated_at
+        FROM gestoria_trabajo_tipos
+        WHERE {" AND ".join(where)}
+        ORDER BY COALESCE(orden, 0) ASC, LOWER(COALESCE(nombre, '')) ASC
+        """,
+        values,
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def is_active_service_state(value, fecha_fin=None):
@@ -28860,6 +29070,26 @@ def ensure_tables(db_path):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_trabajo_tipos (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          tipo_key TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          categoria TEXT,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER,
+          color TEXT,
+          sla_dias INTEGER,
+          iva_pct REAL,
+          precio_base REAL,
+          plantilla_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
     for col_name, col_sql in {
         "codigo_postal": "codigo_postal TEXT",
         "poblacion": "poblacion TEXT",
@@ -29814,6 +30044,24 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_trabajos", "responsable", "responsable TEXT")
     ensure_column(conn, "gestoria_trabajos", "sla_dias", "sla_dias INTEGER")
     ensure_column(conn, "gestoria_trabajos", "tipo_categoria", "tipo_categoria TEXT")
+    # Catálogo configurable de tipos de trabajo (KPIs, presupuestos, defaults por tipo).
+    ensure_column(conn, "gestoria_trabajo_tipos", "empresa_id", "empresa_id TEXT")
+    ensure_column(conn, "gestoria_trabajo_tipos", "tipo_key", "tipo_key TEXT")
+    ensure_column(conn, "gestoria_trabajo_tipos", "nombre", "nombre TEXT")
+    ensure_column(conn, "gestoria_trabajo_tipos", "categoria", "categoria TEXT")
+    ensure_column(conn, "gestoria_trabajo_tipos", "activo", "activo INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "gestoria_trabajo_tipos", "orden", "orden INTEGER")
+    ensure_column(conn, "gestoria_trabajo_tipos", "color", "color TEXT")
+    ensure_column(conn, "gestoria_trabajo_tipos", "sla_dias", "sla_dias INTEGER")
+    ensure_column(conn, "gestoria_trabajo_tipos", "iva_pct", "iva_pct REAL")
+    ensure_column(conn, "gestoria_trabajo_tipos", "precio_base", "precio_base REAL")
+    ensure_column(conn, "gestoria_trabajo_tipos", "plantilla_json", "plantilla_json TEXT")
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_gestoria_trabajo_tipos_empresa_key ON gestoria_trabajo_tipos (empresa_id, tipo_key)"
+        )
+    except Exception:
+        pass
     try:
         conn.execute(
             """
@@ -43458,19 +43706,21 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
-        if parsed.path not in (
-            "/api/movimientos",
-            "/api/hipotecas",
-            "/api/hipotecas/firmar",
+	        if parsed.path not in (
+	            "/api/movimientos",
+	            "/api/hipotecas",
+	            "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/gestoria",
-            "/api/gestoria_trabajos",
-            "/api/gestoria_trabajos_update",
-            "/api/gestoria_trabajos_delete",
-            "/api/gestoria_docs",
-            "/api/gestoria_docs_update",
-            "/api/gestoria_docs_delete",
+	            "/api/gestoria_trabajos",
+	            "/api/gestoria_trabajos_update",
+	            "/api/gestoria_trabajos_delete",
+	            "/api/gestoria_trabajo_tipos_update",
+	            "/api/gestoria_trabajo_tipos_delete",
+	            "/api/gestoria_docs",
+	            "/api/gestoria_docs_update",
+	            "/api/gestoria_docs_delete",
             "/api/gestoria_contabilidad",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
@@ -43743,17 +43993,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not str(payload.get("servicio") or "").strip():
                     # Deducción por endpoint: ayuda a no depender de que el frontend mande `servicio`.
-                    path_service = {
-                        # Gestoría
-                        "/api/cliente_gestoria_update": "gestoria",
-                        "/api/gestoria": "gestoria",
-                        "/api/gestoria_update": "gestoria",
-                        "/api/gestoria_trabajos": "gestoria",
-                        "/api/gestoria_trabajos_update": "gestoria",
-                        "/api/gestoria_trabajos_delete": "gestoria",
-                        "/api/gestoria_docs": "gestoria",
-                        "/api/gestoria_docs_update": "gestoria",
-                        "/api/gestoria_docs_delete": "gestoria",
+	                    path_service = {
+	                        # Gestoría
+	                        "/api/cliente_gestoria_update": "gestoria",
+	                        "/api/gestoria": "gestoria",
+	                        "/api/gestoria_update": "gestoria",
+	                        "/api/gestoria_trabajos": "gestoria",
+	                        "/api/gestoria_trabajos_update": "gestoria",
+	                        "/api/gestoria_trabajos_delete": "gestoria",
+	                        "/api/gestoria_trabajo_tipos_update": "gestoria",
+	                        "/api/gestoria_trabajo_tipos_delete": "gestoria",
+	                        "/api/gestoria_docs": "gestoria",
+	                        "/api/gestoria_docs_update": "gestoria",
+	                        "/api/gestoria_docs_delete": "gestoria",
                         "/api/gestoria_contabilidad": "gestoria",
                         "/api/gestoria_contabilidad_update": "gestoria",
                         "/api/gestoria_contabilidad_delete": "gestoria",
@@ -65204,16 +65456,67 @@ class Handler(BaseHTTPRequestHandler):
                   r.fecha_emision, r.fecha_vencimiento, r.fecha_cobro, r.estado,
                   r.prima_total, r.comision, r.comision_pct, r.importe_liquidacion,
                   r.notas, r.doc_key, r.doc_url,
-                  COALESCE(c.nombre, '') AS cliente
+                  COALESCE(c.nombre, '') AS cliente,
+                  COALESCE(s.produccion, '') AS produccion
                 FROM seguros_recibos r
                 LEFT JOIN clientes c ON c.id = r.cliente_id
+                LEFT JOIN seguros s ON s.id = r.seguro_id
                 WHERE {" AND ".join(where)}
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at) DESC
                 LIMIT 500
                 """,
                 values,
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            raw_rows = [dict(r) for r in rows]
+            reglas = conn.execute(
+                """
+                SELECT compania, ramo, porcentaje, vigencia_desde, vigencia_hasta, notas
+                FROM seguros_comisiones
+                """
+            ).fetchall()
+            reglas_rows = [dict(r) for r in reglas]
+            reglas_by_comp = defaultdict(list)
+            for rr in reglas_rows:
+                key = normalize_company_key(rr.get("compania") or "")
+                if not key:
+                    continue
+                reglas_by_comp[key].append(rr)
+            for row in raw_rows:
+                compania = row.get("compania") or ""
+                comp_key = normalize_company_key(compania)
+                candidates = reglas_by_comp.get(comp_key) or []
+                pick = pick_seguros_comision_rule(
+                    candidates,
+                    compania,
+                    row.get("ramo") or "",
+                    produccion=row.get("produccion") or "",
+                    fecha_ref=row.get("fecha_emision") or "",
+                )
+                if pick:
+                    try:
+                        prima_num = float(row.get("prima_total") or 0.0)
+                    except Exception:
+                        prima_num = 0.0
+                    expected = round((prima_num * float(pick["pct"])) / 100.0, 2) if prima_num else 0.0
+                    row["comision_esperada_pct"] = round(float(pick["pct"]), 6)
+                    row["comision_esperada"] = expected
+                    row["comision_esperada_source"] = pick.get("source") or ""
+                    actual = row.get("comision")
+                    if actual is None:
+                        row["comision_desviacion"] = None
+                    else:
+                        try:
+                            actual_num = float(actual or 0.0)
+                        except Exception:
+                            actual_num = 0.0
+                        row["comision_desviacion"] = round(actual_num - expected, 2)
+                else:
+                    row["comision_esperada_pct"] = None
+                    row["comision_esperada"] = None
+                    row["comision_esperada_source"] = ""
+                    row["comision_desviacion"] = None
+                row.pop("produccion", None)
+            json_response(self, {"rows": raw_rows})
             return
 
         if path == "/api/seguros_siniestros":
@@ -65390,6 +65693,110 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+            reglas = conn.execute(
+                """
+                SELECT compania, ramo, porcentaje, vigencia_desde, vigencia_hasta, notas
+                FROM seguros_comisiones
+                """
+            ).fetchall()
+            reglas_rows = [dict(r) for r in reglas]
+            reglas_by_comp = defaultdict(list)
+            for rr in reglas_rows:
+                key = normalize_company_key(rr.get("compania") or "")
+                if not key:
+                    continue
+                reglas_by_comp[key].append(rr)
+
+            cobrado_rows = conn.execute(
+                f"""
+                SELECT
+                  r.id, r.fecha_emision, r.fecha_cobro, r.estado, r.poliza_numero, r.compania, r.ramo,
+                  r.prima_total, r.comision,
+                  COALESCE(c.nombre, '') AS cliente,
+                  COALESCE(s.produccion, '') AS produccion
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                LEFT JOIN seguros s ON s.id = r.seguro_id
+                WHERE {where_clause}
+                  AND LOWER(COALESCE(r.estado,'')) = 'cobrado'
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_cobro,'')), ''), r.updated_at, r.created_at) DESC
+                LIMIT 800
+                """,
+                values,
+            ).fetchall()
+
+            comision_esp_total = 0.0
+            comision_real_total = 0.0
+            comision_missing = 0
+            desviaciones = []
+            faltantes = []
+            for r in cobrado_rows:
+                rr = dict(r)
+                compania = rr.get("compania") or ""
+                comp_key = normalize_company_key(compania)
+                candidates = reglas_by_comp.get(comp_key) or []
+                pick = pick_seguros_comision_rule(
+                    candidates,
+                    compania,
+                    rr.get("ramo") or "",
+                    produccion=rr.get("produccion") or "",
+                    fecha_ref=rr.get("fecha_emision") or "",
+                )
+                if not pick:
+                    continue
+                try:
+                    prima_num = float(rr.get("prima_total") or 0.0)
+                except Exception:
+                    prima_num = 0.0
+                expected = round((prima_num * float(pick["pct"])) / 100.0, 2) if prima_num else 0.0
+                comision_esp_total += float(expected or 0.0)
+                actual = rr.get("comision")
+                if actual is None:
+                    comision_missing += 1
+                    if len(faltantes) < 60:
+                        faltantes.append(
+                            {
+                                "id": rr.get("id"),
+                                "fecha_emision": rr.get("fecha_emision"),
+                                "fecha_cobro": rr.get("fecha_cobro"),
+                                "cliente": rr.get("cliente"),
+                                "poliza_numero": rr.get("poliza_numero"),
+                                "compania": rr.get("compania"),
+                                "ramo": rr.get("ramo"),
+                                "prima_total": rr.get("prima_total"),
+                                "comision_esperada": expected,
+                                "comision_esperada_pct": round(float(pick["pct"]), 6),
+                                "source": pick.get("source") or "",
+                            }
+                        )
+                    continue
+                try:
+                    actual_num = float(actual or 0.0)
+                except Exception:
+                    actual_num = 0.0
+                comision_real_total += float(actual_num or 0.0)
+                delta = round(actual_num - expected, 2)
+                abs_delta = abs(delta)
+                threshold = max(2.0, abs(expected) * 0.05) if expected else 2.0
+                if expected and abs_delta >= threshold and len(desviaciones) < 80:
+                    desviaciones.append(
+                        {
+                            "id": rr.get("id"),
+                            "fecha_emision": rr.get("fecha_emision"),
+                            "fecha_cobro": rr.get("fecha_cobro"),
+                            "cliente": rr.get("cliente"),
+                            "poliza_numero": rr.get("poliza_numero"),
+                            "compania": rr.get("compania"),
+                            "ramo": rr.get("ramo"),
+                            "prima_total": rr.get("prima_total"),
+                            "comision": rr.get("comision"),
+                            "comision_esperada": expected,
+                            "comision_desviacion": delta,
+                            "comision_esperada_pct": round(float(pick["pct"]), 6),
+                            "source": pick.get("source") or "",
+                        }
+                    )
+
             json_response(
                 self,
                 {
@@ -65397,11 +65804,17 @@ class Handler(BaseHTTPRequestHandler):
                     "by_estado": [dict(r) for r in by_estado],
                     "pendientes_liquidacion": [dict(r) for r in pendientes_liquidacion],
                     "pendientes_impago": [dict(r) for r in pendientes_impago],
+                    "desviaciones_comision": desviaciones,
+                    "comisiones_faltantes": faltantes,
                     "kpis": {
                         "pendiente_liquidacion_count": pending_liq_count,
                         "pendiente_liquidacion_comision": round(float(pending_liq_total or 0.0), 2),
                         "pendiente_impago_count": pending_impago_count,
                         "pendiente_impago_prima": round(float(pending_impago_total or 0.0), 2),
+                        "comision_esperada_total": round(float(comision_esp_total or 0.0), 2),
+                        "comision_real_total": round(float(comision_real_total or 0.0), 2),
+                        "comision_missing_count": int(comision_missing or 0),
+                        "comision_desviacion_count": int(len(desviaciones)),
                     },
                 },
             )
@@ -65462,9 +65875,11 @@ class Handler(BaseHTTPRequestHandler):
                   r.comision_pct,
                   r.importe_liquidacion,
                   r.referencia,
-                  r.notas
+                  r.notas,
+                  COALESCE(s.produccion, '') AS produccion
                 FROM seguros_recibos r
                 LEFT JOIN clientes c ON c.id = r.cliente_id
+                LEFT JOIN seguros s ON s.id = r.seguro_id
                 WHERE {where_clause}
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at) DESC
                 LIMIT 5000
@@ -65484,15 +65899,61 @@ class Handler(BaseHTTPRequestHandler):
                 "prima_total",
                 "comision",
                 "comision_pct",
+                "comision_esperada",
+                "comision_esperada_pct",
+                "comision_desviacion",
+                "comision_regla",
                 "importe_liquidacion",
                 "referencia",
                 "notas",
             ]
+            reglas = conn.execute(
+                """
+                SELECT compania, ramo, porcentaje, vigencia_desde, vigencia_hasta, notas
+                FROM seguros_comisiones
+                """
+            ).fetchall()
+            reglas_rows = [dict(r) for r in reglas]
+            reglas_by_comp = defaultdict(list)
+            for rr in reglas_rows:
+                key = normalize_company_key(rr.get("compania") or "")
+                if not key:
+                    continue
+                reglas_by_comp[key].append(rr)
             buf = StringIO(newline="")
             writer = csv.writer(buf, delimiter=";")
             writer.writerow(headers)
             for row in rows:
                 payload_row = dict(row)
+                compania = payload_row.get("compania") or ""
+                comp_key = normalize_company_key(compania)
+                candidates = reglas_by_comp.get(comp_key) or []
+                pick = pick_seguros_comision_rule(
+                    candidates,
+                    compania,
+                    payload_row.get("ramo") or "",
+                    produccion=payload_row.get("produccion") or "",
+                    fecha_ref=payload_row.get("fecha_emision") or "",
+                )
+                expected = ""
+                expected_pct = ""
+                delta = ""
+                regla = ""
+                if pick:
+                    try:
+                        prima_num = float(payload_row.get("prima_total") or 0.0)
+                    except Exception:
+                        prima_num = 0.0
+                    expected_val = round((prima_num * float(pick["pct"])) / 100.0, 2) if prima_num else 0.0
+                    expected = format_export_money(expected_val)
+                    expected_pct = str(round(float(pick["pct"]), 6))
+                    regla = str(pick.get("source") or "")
+                    if payload_row.get("comision") is not None:
+                        try:
+                            actual_num = float(payload_row.get("comision") or 0.0)
+                        except Exception:
+                            actual_num = 0.0
+                        delta = format_export_money(round(actual_num - expected_val, 2))
                 writer.writerow(
                     [
                         format_export_date(payload_row.get("fecha_emision")) or "",
@@ -65506,6 +65967,10 @@ class Handler(BaseHTTPRequestHandler):
                         format_export_money(payload_row.get("prima_total") or 0) if payload_row.get("prima_total") is not None else "",
                         format_export_money(payload_row.get("comision") or 0) if payload_row.get("comision") is not None else "",
                         str(payload_row.get("comision_pct") or ""),
+                        expected,
+                        expected_pct,
+                        delta,
+                        regla,
                         format_export_money(payload_row.get("importe_liquidacion") or 0) if payload_row.get("importe_liquidacion") is not None else "",
                         str(payload_row.get("referencia") or ""),
                         str(payload_row.get("notas") or ""),
@@ -65693,6 +66158,27 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_trabajo_tipos":
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
+            is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
+                is_superadmin_actor(None, session)
+            )
+            include_inactive = str(params.get("include_inactive", [""])[0] or "").strip().lower() in {"1", "true", "yes", "on"}
+            if include_inactive and not is_admin_actor:
+                include_inactive = False
+            try:
+                ensure_gestoria_trabajo_tipos(conn, empresa_id)
+            except Exception:
+                pass
+            rows = fetch_gestoria_trabajo_tipos(conn, empresa_id, include_inactive=include_inactive)
+            json_response(self, {"rows": rows})
             return
 
         if path == "/api/gestoria_docs":

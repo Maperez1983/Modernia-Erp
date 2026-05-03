@@ -54086,6 +54086,21 @@ const renderSegurosRecibosSummary = (summary) => {
   add("Comisión total", euroFormatter.format(Number.isFinite(comisionTotal) ? comisionTotal : 0));
   add("Liquidación total", euroFormatter.format(Number.isFinite(liquidacionTotal) ? liquidacionTotal : 0));
 
+  const comisionEsperadaTotal = Number(kpis.comision_esperada_total || 0);
+  const comisionRealTotal = Number(kpis.comision_real_total || 0);
+  const comisionMissingCount = Number(kpis.comision_missing_count || 0);
+  const comisionDevCount = Number(kpis.comision_desviacion_count || 0);
+  add(
+    "Comisión esperada (cobrados)",
+    euroFormatter.format(Number.isFinite(comisionEsperadaTotal) ? comisionEsperadaTotal : 0),
+    `Real: ${euroFormatter.format(Number.isFinite(comisionRealTotal) ? comisionRealTotal : 0)} · faltan: ${Number.isFinite(comisionMissingCount) ? comisionMissingCount : 0}`
+  );
+  add(
+    "Desviaciones comisión",
+    `${Number.isFinite(comisionDevCount) ? comisionDevCount : 0}`,
+    "Umbral: 2€ o 5% de la esperada"
+  );
+
   const pendingLiqCount = Number(kpis.pendiente_liquidacion_count || 0);
   const pendingLiqComision = Number(kpis.pendiente_liquidacion_comision || 0);
   const pendingImpagoCount = Number(kpis.pendiente_impago_count || 0);
@@ -54145,6 +54160,8 @@ const renderSegurosRecibosAlerts = (summary) => {
   if (!segurosRecibosAlerts) return;
   const pendientesLiq = Array.isArray(summary?.pendientes_liquidacion) ? summary.pendientes_liquidacion : [];
   const pendientesImpago = Array.isArray(summary?.pendientes_impago) ? summary.pendientes_impago : [];
+  const desviacionesComision = Array.isArray(summary?.desviaciones_comision) ? summary.desviaciones_comision : [];
+  const comisionesFaltantes = Array.isArray(summary?.comisiones_faltantes) ? summary.comisiones_faltantes : [];
 
   const root = document.createElement("div");
   root.className = "grid";
@@ -54239,6 +54256,53 @@ const renderSegurosRecibosAlerts = (summary) => {
 
   root.appendChild(liqCard);
   root.appendChild(impagoCard);
+  const devCard = buildList("Desviaciones de comisión (cobrados)", desviacionesComision, (row) => {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.textContent = `${row.fecha_cobro || row.fecha_emision || "-"} · ${row.cliente || "-"} · ${row.poliza_numero || "-"} · Δ ${formatSegurosRecibosMoney(row.comision_desviacion)} (esp. ${formatSegurosRecibosMoney(row.comision_esperada)})`;
+    tr.appendChild(td);
+    const actionTd = document.createElement("td");
+    const setBtn = document.createElement("button");
+    setBtn.type = "button";
+    setBtn.className = "ghost";
+    setBtn.textContent = "Ajustar comisión";
+    setBtn.addEventListener("click", async () => {
+      const defaultValue = row.comision != null ? String(row.comision) : "";
+      const value = window.prompt("Comisión real (€)", defaultValue);
+      if (value === null) return;
+      const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, comision: value }).catch((err) => ({
+        error: err?.message || "Error",
+      }));
+      if (resp?.error) return;
+      loadSegurosRecibos();
+    });
+    actionTd.appendChild(setBtn);
+    tr.appendChild(actionTd);
+    return tr;
+  });
+  const missingCard = buildList("Comisiones sin registrar (cobrados)", comisionesFaltantes, (row) => {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.textContent = `${row.fecha_cobro || row.fecha_emision || "-"} · ${row.cliente || "-"} · ${row.poliza_numero || "-"} · esp. ${formatSegurosRecibosMoney(row.comision_esperada)}`;
+    tr.appendChild(td);
+    const actionTd = document.createElement("td");
+    const fillBtn = document.createElement("button");
+    fillBtn.type = "button";
+    fillBtn.className = "secondary";
+    fillBtn.textContent = "Rellenar con esperada";
+    fillBtn.addEventListener("click", async () => {
+      const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, comision: row.comision_esperada }).catch((err) => ({
+        error: err?.message || "Error",
+      }));
+      if (resp?.error) return;
+      loadSegurosRecibos();
+    });
+    actionTd.appendChild(fillBtn);
+    tr.appendChild(actionTd);
+    return tr;
+  });
+  root.appendChild(devCard);
+  root.appendChild(missingCard);
   segurosRecibosAlerts.innerHTML = "";
   segurosRecibosAlerts.appendChild(root);
 };
@@ -54278,7 +54342,7 @@ const loadSegurosRecibos = () => {
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
-      ["Emisión", "Venc.", "Cobro", "Estado", "Prima", "Comisión", "Liquidación", "Cliente", "Póliza", "Acción"].forEach((col) => {
+      ["Emisión", "Venc.", "Cobro", "Estado", "Prima", "Comisión", "Comisión esp.", "Δ", "Liquidación", "Cliente", "Póliza", "Acción"].forEach((col) => {
         const th = document.createElement("th");
         th.textContent = col;
         trHead.appendChild(th);
@@ -54295,6 +54359,8 @@ const loadSegurosRecibos = () => {
           row.estado || "-",
           formatSegurosRecibosMoney(row.prima_total),
           formatSegurosRecibosMoney(row.comision),
+          formatSegurosRecibosMoney(row.comision_esperada),
+          formatSegurosRecibosMoney(row.comision_desviacion),
           formatSegurosRecibosMoney(row.importe_liquidacion),
           row.cliente || "-",
           row.poliza_numero || "-",
