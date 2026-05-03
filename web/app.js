@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v346";
+const APP_SW_VERSION = "v347";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -23211,8 +23211,10 @@ const renderClienteContabilidadPanel = () => {
       return;
     }
 
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["Ejercicio", "Estado", "Responsable", "Precio", "Cobro", "Forma", "Remesa", ""].forEach((col) => {
       const th = document.createElement("th");
@@ -23344,8 +23346,10 @@ const renderClienteRentaDashboardPanel = () => {
       wrap.appendChild(empty);
       return wrap;
     }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["Ejercicio", "Estado", "Responsable", "Precio", "Cobro", "Forma", "Remesa", ""].forEach((col) => {
       const th = document.createElement("th");
@@ -23411,9 +23415,11 @@ const renderClienteRentaDashboardPanel = () => {
       wrap.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Sin responsables." }));
       return wrap;
     }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
     ["Responsable", "Rentas", "Pendientes", "Importe", "Cobrado", "Pendiente"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = col;
@@ -23613,9 +23619,11 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
     container.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
     return;
   }
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const trHead = document.createElement("tr");
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
   const columns = ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"];
   if (enableDelete) {
     columns.push("Acción");
@@ -32005,13 +32013,15 @@ const loadGestoriaContaQueue = () => {
   }
   api(`/api/gestoria_conta_tasks?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
-    if (!rows.length) {
-      gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin tareas contables.</p>";
-      gestoriaContaQueueInfo.textContent = "";
-      return;
-    }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
+	    if (!rows.length) {
+	      gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin tareas contables.</p>";
+	      gestoriaContaQueueInfo.textContent = "";
+	      return;
+	    }
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["cliente", "periodo", "tarea", "estado", "fecha_limite", "responsable"].forEach((col) => {
       const th = document.createElement("th");
@@ -32091,10 +32101,12 @@ const loadGestoriaTrabajosOverview = () => {
       gestoriaTrabajosInfo.textContent = "";
       return;
     }
-    const visibleRows = rows.slice(0, Number.isFinite(limitValue) ? limitValue : 20);
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
+	    const visibleRows = rows.slice(0, Number.isFinite(limitValue) ? limitValue : 20);
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
     ["cliente", "tipo_trabajo", "estado", "fecha_inicio", "fecha_fin", "responsable", "importe"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
@@ -32142,13 +32154,15 @@ const loadGestoriaModelosOverview = () => {
   const params = new URLSearchParams({ empresa_id: empresa.id, scope: "proximos" });
   api(`/api/gestoria_modelos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
-    if (!rows.length) {
-      gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
-      gestoriaModelosOverviewInfo.textContent = "";
-      return;
-    }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
+	    if (!rows.length) {
+	      gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
+	      gestoriaModelosOverviewInfo.textContent = "";
+	      return;
+	    }
+	    const table = document.createElement("table");
+	    table.className = "data-table";
+	    table.style.width = "100%";
+	    const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     ["cliente", "modelo", "proxima_fecha", "estado", "responsable"].forEach((col) => {
       const th = document.createElement("th");
@@ -51338,10 +51352,10 @@ const loadGestoriaCrm = async () => {
     const fechaBajaIndex = columns.indexOf("fecha_baja");
     const displayCols = ["cliente", "tipo", "estado", "cuota", "precio"];
 
-    if (gestoriaCrmSummary) {
-      const summaryList = document.createElement("div");
-      summaryList.className = "crm-mini-list";
-      rows.slice(0, 10).forEach((row) => {
+	    if (gestoriaCrmSummary) {
+	      const summaryList = document.createElement("div");
+	      summaryList.className = "grid dashboard-kpis";
+	      rows.slice(0, 10).forEach((row) => {
         const getValue = (col) => {
           const idx = columns.indexOf(col);
           return idx >= 0 ? row[idx] : "";
@@ -51350,21 +51364,24 @@ const loadGestoriaCrm = async () => {
         const tipoVal = getValue("tipo") || "-";
         const perfilVal = getValue("perfil") || "";
         const estadoVal = getValue("estado") || "Alta";
-        const cuotaVal = getValue("cuota") || "-";
-        const precioVal = getValue("precio") || "";
-        const card = document.createElement("button");
-        card.type = "button";
-        card.className = "crm-mini-card";
-        card.innerHTML = `
-          <div>
-            <h4>${nombre}</h4>
-            <div class="muted">${tipoVal}${perfilVal ? " · " + perfilVal : ""}</div>
-          </div>
-          <div class="crm-mini-meta">
-            <div class="crm-badge">${estadoVal}</div>
-            <div class="muted">${cuotaVal}${precioVal ? " · " + formatCell("precio", precioVal) : ""}</div>
-          </div>
-        `;
+	        const cuotaVal = getValue("cuota") || "-";
+	        const precioVal = getValue("precio") || "";
+	        const card = document.createElement("button");
+	        card.type = "button";
+	        card.className = "card kpi-clickable crm-mini-card";
+	        const metaParts = [];
+	        if (tipoVal && tipoVal !== "-") metaParts.push(String(tipoVal));
+	        if (estadoVal && estadoVal !== "-") metaParts.push(String(estadoVal));
+	        if (cuotaVal && cuotaVal !== "-") metaParts.push(String(cuotaVal));
+	        const precioFmt = precioVal ? formatCell("precio", precioVal) : "";
+	        if (precioFmt) metaParts.push(String(precioFmt));
+	        const metaLine = metaParts.join(" · ");
+	        const valueLine = String(perfilVal || tipoVal || "Cliente").trim() || "Cliente";
+	        card.innerHTML = `
+	          <h3>${escapeHtml(String(nombre || "-"))}</h3>
+	          <div class="kpi-value">${escapeHtml(valueLine)}</div>
+	          <div class="muted">${escapeHtml(metaLine || "")}</div>
+	        `;
         card.addEventListener("click", () => {
           let id = resolveClienteIdFromName(nombre);
           if (id) {
@@ -52474,11 +52491,18 @@ const renderGestoriaRentaDashboard = (payload) => {
   const conPrecio = Number(counts.con_precio || 0);
   const ticketMedio = conPrecio > 0 ? facturacionTotal / conPrecio : 0;
   const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
+  const docsTotal = Number(counts.docs_total || 0);
+  const clientesConDoc = Number(counts.clientes_con_doc || 0);
   addKpi({
-    title: "Rentas encargadas",
+    title: "Campañas renta",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
-    note: `Ejercicio ${ejercicio || ""}`.trim(),
+    note: `Ejercicio ${ejercicio || ""} · PDFs: ${numberFormatter.format(docsTotal)}`.trim(),
     onClick: () => setView("overview"),
+  });
+  addKpi({
+    title: "PDFs subidos",
+    value: numberFormatter.format(docsTotal),
+    note: `Clientes con PDF: ${numberFormatter.format(clientesConDoc)}`,
   });
   addKpi({
     title: "Rentas presentadas",
@@ -52512,11 +52536,11 @@ const renderGestoriaRentaDashboard = (payload) => {
   addKpi({
     title: "Sin responsable",
     value: numberFormatter.format(Number(counts.sin_responsable || 0)),
-    note: "Campañas sin asignación.",
+    note: "Encargos sin asignación.",
     onClick: () => setView("unassigned"),
   });
   addKpi({
-    title: "Rentas sin campaña",
+    title: "Clientes sin campaña",
     value: numberFormatter.format(Number(counts.sin_campana || 0)),
     note: `Clientes renta: ${numberFormatter.format(Number(counts.clientes_renta || 0))}`,
     onClick: () => setView("missing"),
@@ -52739,16 +52763,16 @@ const renderGestoriaRentaDashboard = (payload) => {
                 : `Rentas · ${viewParam || "Responsable"}`;
     const hint =
       view === "unpaid"
-        ? "Campañas con precio asignado y no marcadas como cobradas."
+        ? "Encargos con precio asignado y no marcados como cobrados."
         : view === "unassigned"
-          ? "Campañas sin responsable asignado."
+          ? "Encargos sin responsable asignado."
           : view === "paid"
-            ? "Campañas marcadas como cobradas."
+            ? "Encargos marcados como cobrados."
             : view === "draft"
               ? "Pendientes de presentar."
               : view === "presented"
                 ? "Presentadas en la AEAT."
-                : "Campañas del responsable.";
+                : "Encargos del responsable.";
     root.appendChild(
       buildCampaignTable(items, {
         title,

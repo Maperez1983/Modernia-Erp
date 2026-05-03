@@ -27092,6 +27092,9 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "campanas_ejercicio": len(campaigns),
         "sin_campana": max(len(rows) - len(campaigns), 0),
         "sin_vincular_servicio": 0,
+        # Documentos subidos/importados (gestoria_docs) para el ejercicio.
+        "docs_total": 0,
+        "clientes_con_doc": 0,
         "presentadas": 0,
         "borrador": 0,
         "con_precio": 0,
@@ -27201,6 +27204,42 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         counts["sin_vincular_servicio"] = int(row_value(sin_link, "total", 0) or 0)
     except Exception:
         counts["sin_vincular_servicio"] = 0
+
+    # Documentos de Renta asociados al ejercicio (PDFs subidos). Esto se usa en el
+    # dashboard para diferenciar "campañas" (encargos) de "PDFs" (documentación).
+    try:
+        year_like = f"%{ejercicio_val}%".lower()
+        ref_like = f"renta-{ejercicio_val}-%".lower()
+        renta_filter = """
+          (
+            LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
+            OR LOWER(COALESCE(d.tipo, '')) = 'renta'
+            OR LOWER(COALESCE(d.tipo, '')) = 'declaracion de renta'
+            OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
+            OR LOWER(COALESCE(d.tipo, '')) LIKE 'modelo 100%'
+          )
+        """
+        docs_row = conn.execute(
+            f"""
+            SELECT
+              COUNT(*) AS docs_total,
+              COUNT(DISTINCT NULLIF(TRIM(COALESCE(d.cliente_id, '')), '')) AS clientes_con_doc
+            FROM gestoria_docs d
+            WHERE d.empresa_id IN ({placeholders_emp})
+              AND {renta_filter}
+              AND (
+                LOWER(COALESCE(d.referencia_id, '')) LIKE ?
+                OR LOWER(COALESCE(d.nombre, '')) LIKE ?
+                OR COALESCE(d.fecha, '') LIKE ?
+              )
+            """,
+            tuple([*empresa_ids, ref_like, year_like, f"{ejercicio_val}%"]),
+        ).fetchone()
+        counts["docs_total"] = int(row_value(docs_row, "docs_total", 0) or 0)
+        counts["clientes_con_doc"] = int(row_value(docs_row, "clientes_con_doc", 0) or 0)
+    except Exception:
+        counts["docs_total"] = 0
+        counts["clientes_con_doc"] = 0
 
     unpaid = [
         item for item in campaigns if float(item.get("precio_servicio") or 0.0) > 0.0001 and int(item.get("cobrada") or 0) != 1
