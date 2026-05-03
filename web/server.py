@@ -3770,6 +3770,71 @@ def normalize_service_key(value):
     return text.lower().strip()
 
 
+def normalize_procedencia_canal_key(value):
+    return normalize_lookup_text(value or "")
+
+
+def procedencia_is_internal_colaborador(canal):
+    key = normalize_procedencia_canal_key(canal)
+    return key in {"COLABORADOR INTERNO", "INTERNO", "USUARIO"}
+
+
+def procedencia_is_cliente_referido(canal):
+    key = normalize_procedencia_canal_key(canal)
+    return key in {"CLIENTE REFERIDO", "CLIENTE RELACIONADO", "REFERIDO"}
+
+
+def validate_procedencia_fields(conn, canal="", user_id="", cliente_id="", actor_user_id="", self_cliente_id=""):
+    """
+    Valida y normaliza procedencia/canal.
+
+    - Si canal == 'Colaborador interno' => requiere user_id (o actor_user_id).
+    - Si canal == 'Cliente referido' => requiere cliente_id (distinto de self_cliente_id y existente).
+    - Si no hay canal pero sí user_id/cliente_id => infiere canal.
+    - Para cualquier otro canal => limpia user_id/cliente_id para evitar incoherencias.
+    """
+    canal = str(canal or "").strip()
+    user_id = str(user_id or "").strip()
+    cliente_id = str(cliente_id or "").strip()
+    actor_user_id = str(actor_user_id or "").strip()
+    self_cliente_id = str(self_cliente_id or "").strip()
+
+    if not canal:
+        if user_id:
+            canal = "Colaborador interno"
+        elif cliente_id:
+            canal = "Cliente referido"
+
+    if procedencia_is_internal_colaborador(canal):
+        if not user_id:
+            user_id = actor_user_id
+        if not user_id:
+            raise ValueError("Selecciona el colaborador interno.")
+        try:
+            exists = conn.execute("SELECT 1 FROM usuarios WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+            if not exists:
+                raise ValueError("Colaborador interno no válido.")
+        except sqlite3.OperationalError:
+            # Dataset legacy sin tabla usuarios: no bloqueamos.
+            pass
+        return canal, user_id, ""
+
+    if procedencia_is_cliente_referido(canal):
+        if not cliente_id:
+            raise ValueError("Selecciona el cliente referido.")
+        if self_cliente_id and cliente_id == self_cliente_id:
+            raise ValueError("El cliente referido no puede ser el propio cliente.")
+        try:
+            exists = conn.execute("SELECT 1 FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+            if not exists:
+                raise ValueError("Cliente referido no válido.")
+        except sqlite3.OperationalError:
+            pass
+        return canal, "", cliente_id
+
+    return canal, "", ""
+
+
 def ensure_workspace_core_tables(conn):
     conn.execute(
         """
@@ -61314,20 +61379,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
-            captado_por_user_id = str(payload.get("captado_por_user_id") or "").strip() or actor_user_id
             procedencia_canal = str(payload.get("procedencia_canal") or "").strip()
             procedencia_detalle = str(payload.get("procedencia_detalle") or "").strip()
             procedencia_user_id = str(payload.get("procedencia_user_id") or "").strip()
             procedencia_cliente_id = str(payload.get("procedencia_cliente_id") or "").strip()
-            if not procedencia_canal:
-                if actor_user_id:
-                    procedencia_canal = "Colaborador interno"
-                    procedencia_user_id = procedencia_user_id or actor_user_id
-                else:
-                    procedencia_canal = ""
-            if normalize_lookup_text(procedencia_canal) in ("COLABORADOR INTERNO", "INTERNO", "USUARIO"):
-                procedencia_user_id = procedencia_user_id or actor_user_id
             cliente_id = payload.get("id") or os.urandom(16).hex()
+            try:
+                procedencia_canal, procedencia_user_id, procedencia_cliente_id = validate_procedencia_fields(
+                    conn,
+                    procedencia_canal,
+                    procedencia_user_id,
+                    procedencia_cliente_id,
+                    actor_user_id=actor_user_id,
+                    self_cliente_id=cliente_id,
+                )
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            captado_por_user_id = str(payload.get("captado_por_user_id") or "").strip()
+            if not captado_por_user_id:
+                captado_por_user_id = procedencia_user_id or actor_user_id
             conn.execute(
                 """
                 INSERT INTO clientes (
@@ -61402,9 +61473,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
+            procedencia_canal = str(payload.get("procedencia_canal") or "").strip()
+            procedencia_cliente_id = str(payload.get("procedencia_cliente_id") or "").strip()
+            procedencia_user_id = str(payload.get("procedencia_user_id") or "").strip()
+            try:
+                procedencia_canal, _, procedencia_cliente_id = validate_procedencia_fields(
+                    conn,
+                    procedencia_canal,
+                    "",
+                    procedencia_cliente_id,
+                    actor_user_id=actor_user_id,
+                    self_cliente_id=cliente_id,
+                )
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
             # Captación/recomendación: se persiste a nivel de vínculo servicio si se conoce.
             # Prioridad: payload explícito > cliente > usuario que ejecuta.
             captado_por_user_id = str(payload.get("captado_por_user_id") or "").strip()
+            if not captado_por_user_id and procedencia_user_id:
+                captado_por_user_id = procedencia_user_id
             if not captado_por_user_id:
                 try:
                     row_cliente = conn.execute(
@@ -61444,6 +61532,14 @@ class Handler(BaseHTTPRequestHandler):
                                   WHEN COALESCE(TRIM(captado_por_user_id), '') = '' THEN ?
                                   ELSE captado_por_user_id
                                 END,
+                                procedencia_canal = CASE
+                                  WHEN ? IS NOT NULL AND COALESCE(TRIM(COALESCE(procedencia_canal, '')), '') = '' THEN ?
+                                  ELSE procedencia_canal
+                                END,
+                                procedencia_cliente_id = CASE
+                                  WHEN ? IS NOT NULL AND COALESCE(TRIM(COALESCE(procedencia_cliente_id, '')), '') = '' THEN ?
+                                  ELSE procedencia_cliente_id
+                                END,
                                 updated_at = datetime(?)
                             WHERE id = ?
                             """,
@@ -61452,6 +61548,10 @@ class Handler(BaseHTTPRequestHandler):
                                 payload.get("fecha_inicio"),
                                 payload.get("fecha_fin"),
                                 captado_por_user_id,
+                                procedencia_canal if procedencia_canal else None,
+                                procedencia_canal if procedencia_canal else None,
+                                procedencia_cliente_id if procedencia_cliente_id else None,
+                                procedencia_cliente_id if procedencia_cliente_id else None,
                                 now,
                                 existing["id"],
                             ),
@@ -61460,10 +61560,10 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute(
                             """
                             INSERT INTO clientes_empresas (
-                              id, cliente_id, empresa_id, servicio, captado_por_user_id, estado,
+                              id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal, procedencia_cliente_id, estado,
                               fecha_inicio, fecha_fin, created_at, updated_at
                             ) VALUES (
-                              ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                             )
                             """,
                             (
@@ -61472,6 +61572,8 @@ class Handler(BaseHTTPRequestHandler):
                                 empresa_id,
                                 servicio,
                                 captado_por_user_id,
+                                procedencia_canal or None,
+                                procedencia_cliente_id or None,
                                 payload.get("estado"),
                                 payload.get("fecha_inicio"),
                                 payload.get("fecha_fin"),
@@ -61598,6 +61700,38 @@ class Handler(BaseHTTPRequestHandler):
                 updates["hijos_count"] = parse_optional_int(updates.get("hijos_count"))
             if "valor_maximo_piso" in updates:
                 updates["valor_maximo_piso"] = parse_optional_float(updates.get("valor_maximo_piso"))
+            if "procedencia_canal" in updates or "procedencia_user_id" in updates or "procedencia_cliente_id" in updates:
+                try:
+                    existing = conn.execute(
+                        "SELECT procedencia_canal, procedencia_user_id, procedencia_cliente_id, captado_por_user_id FROM clientes WHERE id = ? LIMIT 1",
+                        (cliente_id,),
+                    ).fetchone()
+                except Exception:
+                    existing = None
+                if existing:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
+                    next_canal = updates.get("procedencia_canal", existing["procedencia_canal"])
+                    next_user = updates.get("procedencia_user_id", existing["procedencia_user_id"])
+                    next_cliente = updates.get("procedencia_cliente_id", existing["procedencia_cliente_id"])
+                    try:
+                        canal_ok, user_ok, cliente_ok = validate_procedencia_fields(
+                            conn,
+                            next_canal,
+                            next_user,
+                            next_cliente,
+                            actor_user_id=actor_user_id,
+                            self_cliente_id=cliente_id,
+                        )
+                    except ValueError as exc:
+                        json_response(self, {"error": str(exc)}, status=400)
+                        return
+                    updates["procedencia_canal"] = canal_ok
+                    updates["procedencia_user_id"] = user_ok or None
+                    updates["procedencia_cliente_id"] = cliente_ok or None
+                    if procedencia_is_internal_colaborador(canal_ok) and user_ok and "captado_por_user_id" not in updates:
+                        if not str(existing["captado_por_user_id"] or "").strip():
+                            updates["captado_por_user_id"] = user_ok
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
             # Resync de nombre: muchas tablas guardan un snapshot `cliente_nombre`/`cliente`
@@ -61703,6 +61837,34 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            if "procedencia_canal" in updates or "procedencia_cliente_id" in updates:
+                rel_row = None
+                try:
+                    rel_row = conn.execute(
+                        "SELECT cliente_id, procedencia_canal, procedencia_cliente_id FROM clientes_empresas WHERE id = ? LIMIT 1",
+                        (rel_id,),
+                    ).fetchone()
+                except Exception:
+                    rel_row = None
+                if rel_row:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
+                    next_canal = updates.get("procedencia_canal", rel_row["procedencia_canal"])
+                    next_cliente = updates.get("procedencia_cliente_id", rel_row["procedencia_cliente_id"])
+                    try:
+                        canal_ok, _, cliente_ok = validate_procedencia_fields(
+                            conn,
+                            next_canal,
+                            "",
+                            next_cliente,
+                            actor_user_id=actor_user_id,
+                            self_cliente_id=str(rel_row["cliente_id"] or ""),
+                        )
+                    except ValueError as exc:
+                        json_response(self, {"error": str(exc)}, status=400)
+                        return
+                    updates["procedencia_canal"] = canal_ok
+                    updates["procedencia_cliente_id"] = cliente_ok or None
             sync = {"linked": 0, "docs": 0}
             updated = False
             for attempt in range(10):

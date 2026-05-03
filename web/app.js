@@ -62881,27 +62881,43 @@ const loadGestoriaFact = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
-  loadGestoriaTrabajoTipos()
-    .then((rows) => {
-      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
-      renderGestoriaTrabajoTiposAdmin(rows);
-      bindGestoriaTipoDefaults(gestoriaBudgetTipoTrabajo, () => {
-        if (!gestoriaBudgetQuickForm || !gestoriaBudgetTipoTrabajo) return;
-        const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
+	  loadGestoriaTrabajoTipos()
+	    .then((rows) => {
+	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
+	      const baseRows = Array.isArray(rows) ? rows : [];
+	      const applyFilter = () => {
+	        const source = Array.isArray(state.gestoriaTrabajoTiposCache?.rows) ? state.gestoriaTrabajoTiposCache.rows : baseRows;
+	        const filtered = filterGestoriaTrabajoTiposByCategory(source, gestoriaBudgetTipoCategoria?.value || "");
+	        hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
+	        renderGestoriaBudgetTipoTemplateFields();
+	      };
+	      if (gestoriaBudgetTipoCategoria && gestoriaBudgetTipoCategoria.dataset.bound !== "1") {
+	        gestoriaBudgetTipoCategoria.dataset.bound = "1";
+	        gestoriaBudgetTipoCategoria.addEventListener("change", () => {
+	          applyFilter();
+	          try { syncGestoriaBudgetQuickComputed(); } catch (e) {}
+	        });
+	      }
+	      applyFilter();
+	      renderGestoriaTrabajoTiposAdmin(rows);
+	      bindGestoriaTipoDefaults(gestoriaBudgetTipoTrabajo, () => {
+	        if (!gestoriaBudgetQuickForm || !gestoriaBudgetTipoTrabajo) return;
+	        const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
         const subtotalInput = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
         const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
         const currentSubtotal = parseMoneyValue(String(subtotalInput?.value || "").trim());
         if (subtotalInput && (!String(subtotalInput.value || "").trim() || currentSubtotal === 0) && meta.precio_base && meta.precio_base > 0) {
           subtotalInput.value = String(meta.precio_base);
         }
-        const currentIvaPct = parseMoneyValue(String(ivaPctInput?.value || "").trim());
-        if (ivaPctInput && (!String(ivaPctInput.value || "").trim() || currentIvaPct === 0) && meta.iva_pct !== null) {
-          ivaPctInput.value = String(meta.iva_pct);
-        }
-        syncGestoriaBudgetQuickComputed();
-      });
-    })
-    .catch(() => {});
+	        const currentIvaPct = parseMoneyValue(String(ivaPctInput?.value || "").trim());
+	        if (ivaPctInput && (!String(ivaPctInput.value || "").trim() || currentIvaPct === 0) && meta.iva_pct !== null) {
+	          ivaPctInput.value = String(meta.iva_pct);
+	        }
+	        renderGestoriaBudgetTipoTemplateFields();
+	        syncGestoriaBudgetQuickComputed();
+	      });
+	    })
+	    .catch(() => {});
   const servicio = String(gestoriaBudgetsServicioFilter?.value || "gestoria").trim().toLowerCase();
   const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
   const params = new URLSearchParams({
@@ -72234,16 +72250,51 @@ if (gestoriaBudgetsEstadoFilter) {
   });
 }
 
-if (gestoriaTrabajoTipoReloadBtn) {
-  gestoriaTrabajoTipoReloadBtn.addEventListener("click", async () => {
-    try {
-      const rows = await loadGestoriaTrabajoTipos({ force: true });
-      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
-      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
-      renderGestoriaTrabajoTiposAdmin(rows);
-    } catch (e) {}
-  });
-}
+	if (gestoriaTrabajoTipoReloadBtn) {
+	  gestoriaTrabajoTipoReloadBtn.addEventListener("click", async () => {
+	    try {
+	      const rows = await loadGestoriaTrabajoTipos({ force: true });
+	      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
+	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
+	      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
+	      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
+	      renderGestoriaBudgetTipoTemplateFields();
+	      renderGestoriaTrabajoTiposAdmin(rows);
+	    } catch (e) {}
+	  });
+	}
+
+	if (gestoriaTrabajoTipoSeedCoreBtn) {
+	  gestoriaTrabajoTipoSeedCoreBtn.addEventListener("click", async () => {
+	    const isAdmin = canAccessGestoriaAdminDashboard();
+	    if (!isAdmin) return;
+	    const ok = window.confirm("¿Instalar el catálogo core de servicios de Gestoría? Se activarán/actualizarán los servicios base y se desactivarán los no core.");
+	    if (!ok) return;
+	    try {
+	      gestoriaTrabajoTipoSeedCoreBtn.disabled = true;
+	      const res = await fetch("/api/gestoria_trabajo_tipos_seed_core", {
+	        method: "POST",
+	        headers: { "Content-Type": "application/json" },
+	        body: JSON.stringify({ deactivate_others: true }),
+	      }).then((r) => r.json());
+	      if (res?.error) throw new Error(res.error);
+	      const rows = await loadGestoriaTrabajoTipos({ force: true });
+	      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
+	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
+	      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
+	      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
+	      renderGestoriaBudgetTipoTemplateFields();
+	      renderGestoriaTrabajoTiposAdmin(rows);
+	      if (gestoriaTrabajoTiposInfo) {
+	        gestoriaTrabajoTiposInfo.textContent = `Catálogo core instalado: +${res.inserted || 0} nuevos, ${res.updated || 0} actualizados, ${res.deactivated || 0} desactivados.`;
+	      }
+	    } catch (e) {
+	      window.alert(String(e?.message || e || "No se pudo instalar el catálogo core."));
+	    } finally {
+	      gestoriaTrabajoTipoSeedCoreBtn.disabled = false;
+	    }
+	  });
+	}
 
 if (gestoriaTrabajoTipoAddBtn) {
   gestoriaTrabajoTipoAddBtn.addEventListener("click", async () => {
@@ -72289,29 +72340,31 @@ if (gestoriaBudgetQuickForm) {
       const titulo =
         String(values.titulo || "").trim()
           || `${tipoTrabajo} · ${lookup}`;
-      const subtotal = parseMoneyValue(values.subtotal || "");
-      const impuestos = parseMoneyValue(values.impuestos || "");
-      const total = parseMoneyValue(values.total || "");
-      const observaciones = String(values.carta_presentacion || "").trim();
-      const baseLineAmount = subtotal > 0 ? subtotal : (total > 0 ? Math.max(0, total - impuestos) : 0);
-      const payload = {
-        id: "",
-        workspace_id: workspaceId,
-        empresa_id: empresa.id,
-        servicio: "gestoria",
+	      const subtotal = parseMoneyValue(values.subtotal || "");
+	      const impuestos = parseMoneyValue(values.impuestos || "");
+	      const total = parseMoneyValue(values.total || "");
+	      const observaciones = String(values.carta_presentacion || "").trim();
+	      const baseLineAmount = subtotal > 0 ? subtotal : (total > 0 ? Math.max(0, total - impuestos) : 0);
+	      const calculoJson = readGestoriaBudgetTipoTemplatePayload();
+	      const payload = {
+	        id: "",
+	        workspace_id: workspaceId,
+	        empresa_id: empresa.id,
+	        servicio: "gestoria",
         titulo,
         estado: values.estado || "Borrador",
         fecha: new Date().toISOString().slice(0, 10),
         cliente_lookup: lookup,
         cliente_nif: values.cliente_nif || "",
-        subtotal: subtotal > 0 ? subtotal : "",
-        impuestos: impuestos > 0 ? impuestos : "",
-        total: total > 0 ? total : "",
-        observaciones: observaciones || "",
-        lineas: baseLineAmount > 0
-          ? [
-              {
-                categoria: tipoTrabajo,
+	        subtotal: subtotal > 0 ? subtotal : "",
+	        impuestos: impuestos > 0 ? impuestos : "",
+	        total: total > 0 ? total : "",
+	        observaciones: observaciones || "",
+	        calculo_json: calculoJson || undefined,
+	        lineas: baseLineAmount > 0
+	          ? [
+	              {
+	                categoria: tipoTrabajo,
                 concepto: titulo,
                 cantidad: 1,
                 unidad: "serv",
