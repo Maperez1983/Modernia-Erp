@@ -519,6 +519,9 @@ CREATE TABLE IF NOT EXISTS seguros (
   version_grupo TEXT,
   tipo_vigencia TEXT,
   datos_ramo_json TEXT,
+  matricula TEXT,
+  direccion_riesgo TEXT,
+  referencia_catastral TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
