@@ -1736,6 +1736,7 @@ const state = {
   segurosCrmEstadoContains: "",
   segurosBdtSort: null,
   segurosKpisCache: null,
+  segurosDataQualityCache: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
@@ -2795,6 +2796,8 @@ const segurosPolizaAccionTipo = document.getElementById("segurosPolizaAccionTipo
   const segurosPolizaAccionMotivo = document.getElementById("segurosPolizaAccionMotivo");
   const segurosPolizaAccionStatus = document.getElementById("segurosPolizaAccionStatus");
   const segurosComplianceKpis = document.getElementById("segurosComplianceKpis");
+  const segurosDataQuality = document.getElementById("segurosDataQuality");
+  const segurosQualityReload = document.getElementById("segurosQualityReload");
   const segurosComplianceForm = document.getElementById("segurosComplianceForm");
   const segurosCompliancePoliza = document.getElementById("segurosCompliancePoliza");
   const segurosComplianceReload = document.getElementById("segurosComplianceReload");
@@ -7290,6 +7293,9 @@ const setWorkspaceEngineView = (engine = "documental") => {
   if (normalized === "simuladores") {
     void ensureIivtnuSimulator();
     ensureIrpfSimulators();
+  }
+  if (normalized === "contabilidad") {
+    void refreshWorkspaceContabilidad({ force: false }).catch(() => {});
   }
   syncHoldingUrlParams();
 };
@@ -16739,6 +16745,7 @@ const renderWorkspaceContabilidadFacturas = (rows = []) => {
     return;
   }
   const table = document.createElement("table");
+  table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   ["Fecha", "Número", "Tipo", "Tercero", "Total", "PDF"].forEach((col) => {
@@ -16787,6 +16794,7 @@ const renderWorkspaceContabilidadAsientos = (rows = []) => {
     return;
   }
   const table = document.createElement("table");
+  table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura"].forEach((col) => {
@@ -16828,6 +16836,7 @@ const renderWorkspaceContabilidadEntries = (rows = []) => {
     return;
   }
   const table = document.createElement("table");
+  table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   ["Fecha", "Cliente", "Concepto", "Tipo", "Importe"].forEach((col) => {
@@ -54450,6 +54459,7 @@ const loadSegurosCrm = () => {
     loadSegurosInsights(empresa.id);
     loadSegurosAlertas();
     loadSegurosKpis();
+    loadSegurosDataQuality();
     renderSegurosRamosDashboard();
     populateSegurosOperationalSelects();
     loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
