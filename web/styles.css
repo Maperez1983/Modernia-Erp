@@ -90,8 +90,8 @@ body.crm-context-vertical main {
 body.crm-context-vertical #crmSection .crm-lightning-shell {
   /* En monitores grandes, el CRM debe aprovechar mejor el espacio. */
   max-width: none;
-  width: min(2480px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: 26px var(--layout-gutter) 64px;
   padding-bottom: calc(64px + var(--safe-bottom));
 }
