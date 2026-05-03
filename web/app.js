@@ -54634,6 +54634,125 @@ const loadSegurosKpis = () => {
     });
 };
 
+const renderSegurosDataQuality = (payload) => {
+  if (!segurosDataQuality) return;
+  const rules = Array.isArray(payload?.rules) ? payload.rules : [];
+  const issues = Array.isArray(payload?.issues) ? payload.issues : [];
+  const duplicateGroups = Array.isArray(payload?.duplicate_groups) ? payload.duplicate_groups : [];
+  const activeRules = rules.filter((rule) => Number(rule?.count || 0) > 0);
+
+  if (!activeRules.length && !issues.length && !duplicateGroups.length) {
+    segurosDataQuality.innerHTML = "<p class='muted'>Sin alertas detectadas.</p>";
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "stack";
+
+  const kpis = document.createElement("div");
+  kpis.className = "grid crm-kpis";
+  activeRules.slice(0, 10).forEach((rule) => {
+    const card = document.createElement("div");
+    card.className = "kpi-card";
+    const severity = String(rule?.severity || "").toLowerCase() === "error" ? " · Error" : "";
+    card.innerHTML = `<div class="kpi-label">${escapeHtml(rule?.label || rule?.key || "-")}${severity}</div><div class="kpi-value">${escapeHtml(
+      numberFormatter.format(Number(rule?.count || 0))
+    )}</div>`;
+    kpis.appendChild(card);
+  });
+  wrapper.appendChild(kpis);
+
+  const table = document.createElement("table");
+  table.className = "data-table";
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Regla", "Póliza", "Compañía", "Ramo", "Detalle", ""].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  issues.slice(0, 40).forEach((it) => {
+    const tr = document.createElement("tr");
+    const detailParts = [];
+    if (it?.details) detailParts.push(String(it.details));
+    if (Array.isArray(it?.missing_fields) && it.missing_fields.length) {
+      detailParts.push(`Falta: ${it.missing_fields.join(", ")}`);
+    }
+    const detail = detailParts.join(" · ");
+    const cells = [
+      `${it?.label || it?.rule_key || "-"}` + (String(it?.severity || "").toLowerCase() === "error" ? " (error)" : ""),
+      it?.poliza_numero || "-",
+      it?.compania || "-",
+      it?.ramo || "-",
+      detail || "-",
+    ];
+    cells.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    const tdBtn = document.createElement("td");
+    const seguroId = String(it?.seguro_id || "").trim();
+    const clienteId = String(it?.cliente_id || "").trim();
+    tdBtn.innerHTML = seguroId
+      ? `<button type="button" class="secondary ghost" data-open-seguro="${escapeHtml(
+          seguroId
+        )}" data-open-cliente="${escapeHtml(clienteId)}">Abrir</button>`
+      : "";
+    tr.appendChild(tdBtn);
+    tbody.appendChild(tr);
+  });
+
+  duplicateGroups.slice(0, 8).forEach((group) => {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    const company = String(group?.compania_key || "").trim();
+    const poliza = String(group?.poliza_key || "").trim();
+    const total = Number(group?.total || 0);
+    td.textContent = `Duplicado: ${company ? company + " · " : ""}${poliza || "-"} (${total} registros)`;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+
+  segurosDataQuality.innerHTML = "";
+  segurosDataQuality.appendChild(wrapper);
+};
+
+const loadSegurosDataQuality = ({ force = false } = {}) => {
+  if (!segurosDataQuality) return;
+  const empresa = resolveCrmSegurosEmpresa();
+  if (!empresa) {
+    segurosDataQuality.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  if (!force && state.segurosDataQualityCache) {
+    renderSegurosDataQuality(state.segurosDataQualityCache);
+  } else {
+    segurosDataQuality.innerHTML = "<p class='muted'>Cargando calidad del dato…</p>";
+  }
+  const params = new URLSearchParams({ empresa_id: empresa.id, uploaded_only: "0", limit: "8000" });
+  api(`/api/seguros_data_quality?${params.toString()}`)
+    .then((data) => {
+      state.segurosDataQualityCache = data || {};
+      renderSegurosDataQuality(data || {});
+    })
+    .catch(() => {
+      if (state.segurosDataQualityCache) {
+        renderSegurosDataQuality(state.segurosDataQualityCache);
+        return;
+      }
+      segurosDataQuality.innerHTML = "<p class='muted'>No se pudo cargar la calidad del dato.</p>";
+    });
+};
+
 const getSegurosRamoLabel = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "Sin ramo";
@@ -68378,6 +68497,23 @@ if (segurosCompliancePoliza) {
 if (segurosComplianceReload) {
   segurosComplianceReload.addEventListener("click", () => {
     loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
+  });
+}
+
+if (segurosQualityReload) {
+  segurosQualityReload.addEventListener("click", () => {
+    loadSegurosDataQuality({ force: true });
+  });
+}
+
+if (segurosDataQuality) {
+  segurosDataQuality.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-open-seguro]");
+    if (!btn) return;
+    const seguroId = String(btn.dataset.openSeguro || "").trim();
+    if (!seguroId) return;
+    const clienteId = String(btn.dataset.openCliente || "").trim();
+    openSeguroById(seguroId, clienteId);
   });
 }
 

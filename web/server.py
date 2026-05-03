@@ -27944,7 +27944,7 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
             )
           )
         """,
-        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
+        tuple([*empresa_ids, *empresa_ids]),
     ).fetchall()
 
     total = 0
@@ -27959,66 +27959,6 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
         except Exception:
             continue
     return {"ejercicio": ejercicio_val, "count": int(total)}
-
-
-def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
-    """
-    Conteo ligero de campañas de renta para un ejercicio (sin cargar docs ni construir dashboards).
-    Se usa en el dashboard admin de Servicios para que "Rentas" no dependa de `gestoria_trabajos`.
-    """
-    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
-    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
-    empresa_ids = [eid for eid in empresa_ids if eid]
-    if not empresa_ids:
-        return {"ejercicio": "", "count": 0}
-
-    ejercicio_raw = str(ejercicio or "").strip()
-    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
-    if not ejercicio_val:
-        try:
-            ejercicio_val = str(datetime.now().year - 1)
-        except Exception:
-            ejercicio_val = ""
-
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
-    placeholders_emp = ",".join(["?"] * len(empresa_ids))
-    rows = conn.execute(
-        f"""
-        SELECT cg.renta_detalles
-        FROM cliente_gestoria cg
-        JOIN clientes c ON c.id = cg.cliente_id
-        WHERE COALESCE(cg.mod_renta, 0) = 1
-          AND (
-            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
-            OR EXISTS (
-              SELECT 1
-              FROM clientes_empresas ce
-              WHERE ce.empresa_id IN ({placeholders_emp})
-                AND ce.cliente_id = c.id
-                AND {service_filter}
-            )
-          )
-        """,
-        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
-    ).fetchall()
-
-    total = 0
-    for row in rows:
-        try:
-            payload = parse_renta_detalles_payload(row_value(row, "renta_detalles", "") or "")
-            entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
-            for e in entries:
-                if str(e.get("ejercicio") or "").strip() == ejercicio_val:
-                    total += 1
-                    break
-        except Exception:
-            continue
-    return {"ejercicio": ejercicio_val, "count": int(total)}
-
-
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
