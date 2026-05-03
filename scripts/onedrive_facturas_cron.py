@@ -169,11 +169,17 @@ def meta_get(conn, key: str) -> str:
 
 def meta_set(conn, key: str, value: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
+    # Compat Postgres/SQLite:
+    # - SQLite soporta INSERT OR REPLACE; Postgres no.
+    # - `web.db_backend` reescribe OR REPLACE solo si existe columna `id` en la lista;
+    #   aquí la PK es `key`, así que no se reescribe.
+    # Hacemos delete + insert (mismo efecto).
+    try:
+        conn.execute("DELETE FROM crm_meta WHERE key = ?", (str(key),))
+    except Exception:
+        pass
     conn.execute(
-        """
-        INSERT OR REPLACE INTO crm_meta (key, value, updated_at)
-        VALUES (?, ?, ?)
-        """,
+        "INSERT INTO crm_meta (key, value, updated_at) VALUES (?, ?, ?)",
         (str(key), str(value), now),
     )
     conn.commit()
@@ -512,11 +518,22 @@ def build_ancestry(session: requests.Session, *, root_id: str, parent_id: str, c
     return out
 
 
-def crm_ingest_ocr(*, base_url: str, api_key: str, empresa_id: str, s3_key: str, tipo: str, filename: str, source_hint: str) -> dict:
+def crm_ingest_ocr(
+    *,
+    base_url: str,
+    api_key: str,
+    empresa_id: str = "",
+    empresa_alias: str = "",
+    s3_key: str,
+    tipo: str,
+    filename: str,
+    source_hint: str,
+) -> dict:
     url = base_url.rstrip("/") + "/api/ingest_facturas_ocr"
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
     payload = {
         "empresa_id": empresa_id,
+        "empresa_alias": empresa_alias,
         "s3_key": s3_key,
         "tipo": tipo,
         "filename": filename,
@@ -525,11 +542,21 @@ def crm_ingest_ocr(*, base_url: str, api_key: str, empresa_id: str, s3_key: str,
     }
     return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=120, attempts=6, base_delay_s=1.0)
 
-def crm_ingest_presign(*, base_url: str, api_key: str, empresa_id: str, tipo: str, year: str, filename: str) -> dict:
+def crm_ingest_presign(
+    *,
+    base_url: str,
+    api_key: str,
+    empresa_id: str = "",
+    empresa_alias: str = "",
+    tipo: str,
+    year: str,
+    filename: str,
+) -> dict:
     url = base_url.rstrip("/") + "/api/ingest_facturas_presign"
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
     payload = {
         "empresa_id": empresa_id,
+        "empresa_alias": empresa_alias,
         "tipo": tipo,
         "year": year,
         "filename": filename,
@@ -623,7 +650,8 @@ def main() -> int:
                         raise RuntimeError(f"No se pudo inferir empresa_alias desde '{root}' (usa ONEDRIVE_EMPRESA_ALIAS)")
                     empresa_id = resolve_empresa_id_from_alias(conn, empresa_alias, source=od_source)
                     if not empresa_id:
-                        raise RuntimeError(f"No se pudo resolver empresa_id para alias '{empresa_alias}' (root '{root}')")
+                        # No bloqueamos el cron: el CRM puede resolver por `empresa_alias` en el endpoint presign/OCR.
+                        print(f"[warn] no se pudo resolver empresa_id para alias '{empresa_alias}' (root '{root}'); usando empresa_alias")
 
                     print(
                         f"[rclone] remote='{rclone_remote}' root='{root}' empresa_alias='{empresa_alias}' empresa_id='{empresa_id}' limit={ingest_limit}"
@@ -659,6 +687,7 @@ def main() -> int:
                                 base_url=crm_base_url,
                                 api_key=ingest_key,
                                 empresa_id=empresa_id,
+                                empresa_alias=empresa_alias,
                                 tipo=tipo.upper(),
                                 year=year,
                                 filename=name,
@@ -673,6 +702,7 @@ def main() -> int:
                                 base_url=crm_base_url,
                                 api_key=ingest_key,
                                 empresa_id=empresa_id,
+                                empresa_alias=empresa_alias,
                                 s3_key=final_key,
                                 tipo=tipo.upper(),
                                 filename=name,
@@ -717,7 +747,7 @@ def main() -> int:
 
         empresa_id = resolve_empresa_id_from_alias(conn, od_empresa_alias, source=od_source)
         if not empresa_id:
-            raise RuntimeError(f"No se pudo resolver empresa_id para alias '{od_empresa_alias}'")
+            print(f"[warn] no se pudo resolver empresa_id para alias '{od_empresa_alias}'; usando empresa_alias")
 
         delta_key = f"onedrive_delta:{root_id}"
         delta_url = meta_get(conn, delta_key).strip() or f"{GRAPH_BASE}/me/drive/items/{urllib.parse.quote(root_id)}/delta"
@@ -774,6 +804,7 @@ def main() -> int:
                         base_url=crm_base_url,
                         api_key=ingest_key,
                         empresa_id=empresa_id,
+                        empresa_alias=od_empresa_alias,
                         tipo=tipo.upper(),
                         year=year,
                         filename=name,
@@ -788,6 +819,7 @@ def main() -> int:
                         base_url=crm_base_url,
                         api_key=ingest_key,
                         empresa_id=empresa_id,
+                        empresa_alias=od_empresa_alias,
                         s3_key=final_key,
                         tipo=tipo.upper(),
                         filename=name,
