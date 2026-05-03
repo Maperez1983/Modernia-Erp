@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v315";
+const APP_SW_VERSION = "v346";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -52446,6 +52446,12 @@ const renderGestoriaRentaDashboard = (payload) => {
   };
 
   gestoriaDashRentaKpis.innerHTML = "";
+  const facturacionTotal = Number(counts.facturacion_total || 0);
+  const cobradoTotal = Number(counts.cobrado_total || 0);
+  const pendienteTotal = Number(counts.pendiente_cobro_total || 0);
+  const conPrecio = Number(counts.con_precio || 0);
+  const ticketMedio = conPrecio > 0 ? facturacionTotal / conPrecio : 0;
+  const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
   addKpi({
     title: "Rentas encargadas",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
@@ -52461,7 +52467,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   addKpi({
     title: "Rentas cobradas",
     value: numberFormatter.format(Number(counts.cobradas || 0)),
-    note: `Cobrado: ${formatMoney(counts.cobrado_total || 0)}`,
+    note: `Cobrado: ${formatMoney(cobradoTotal)}`,
     onClick: () => setView("paid"),
   });
   addKpi({
@@ -52478,7 +52484,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   addKpi({
     title: "Sin cobrar",
     value: numberFormatter.format(Number(counts.sin_cobrar || 0)),
-    note: formatMoney(counts.pendiente_cobro_total || 0),
+    note: formatMoney(pendienteTotal),
     onClick: () => setView("unpaid"),
   });
   addKpi({
@@ -52500,9 +52506,15 @@ const renderGestoriaRentaDashboard = (payload) => {
   });
   addKpi({
     title: "Facturación renta",
-    value: formatMoney(counts.facturacion_total || 0),
-    note: `Cobrado: ${formatMoney(counts.cobrado_total || 0)}`,
+    value: formatMoney(facturacionTotal),
+    note: `Pendiente: ${formatMoney(pendienteTotal)} · % cobro: ${tasaCobro.toFixed(0)}%`,
     onClick: () => setView("responsables"),
+  });
+
+  addKpi({
+    title: "Ticket medio",
+    value: formatMoney(ticketMedio),
+    note: `${numberFormatter.format(conPrecio)} con precio`,
   });
 
   const buildCampaignTable = (items, { title, hint, emptyText, exportKind = "", exportFields = "full", exportResponsableKey = "", printMissing = false } = {}) => {
