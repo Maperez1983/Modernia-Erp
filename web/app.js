@@ -2806,6 +2806,9 @@ const seguroOcrCompania = document.getElementById("seguroOcrCompania");
 const segurosRamosList = document.getElementById("segurosRamosList");
 const seguroOcrPoliza = document.getElementById("seguroOcrPoliza");
 const seguroOcrDireccion = document.getElementById("seguroOcrDireccion");
+const seguroOcrMatricula = document.getElementById("seguroOcrMatricula");
+const seguroOcrDireccionRiesgo = document.getElementById("seguroOcrDireccionRiesgo");
+const seguroOcrRefCatastral = document.getElementById("seguroOcrRefCatastral");
 const seguroOcrNacimiento = document.getElementById("seguroOcrNacimiento");
 const seguroOcrFechaEfecto = document.getElementById("seguroOcrFechaEfecto");
 const seguroOcrFechaVencimiento = document.getElementById("seguroOcrFechaVencimiento");
@@ -38434,9 +38437,8 @@ const renderFincasDashboard = (empresaId) => {
   if (workspaceId) params.set("workspace_id", workspaceId);
   if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
   else if (!workspaceId) params.set("empresa_id", empresaId);
-  // Dashboard/KPIs deben reflejar toda la cartera (en vigor, etc.),
-  // no solo pólizas con PDF ya enlazado.
-  params.set("uploaded_only", "0");
+  // Regla de conteo: solo se considera "en vigor" si la póliza tiene PDF subido/enlazado.
+  params.set("uploaded_only", "1");
   api(`/api/fincas_seguros_dashboard?${params.toString()}`).then((data) => {
     if (!fincasDashboardKpis) {
       return;
@@ -55875,6 +55877,9 @@ const resetSegurosOcrAggregator = (options = {}) => {
   clearValue(seguroOcrRamo);
   clearValue(seguroOcrPoliza);
   clearValue(seguroOcrDireccion);
+  clearValue(seguroOcrMatricula);
+  clearValue(seguroOcrDireccionRiesgo);
+  clearValue(seguroOcrRefCatastral);
   clearValue(seguroOcrNacimiento);
   clearValue(seguroOcrFechaEfecto);
   clearValue(seguroOcrFechaVencimiento);
@@ -56304,6 +56309,9 @@ const fillSegurosOcrFields = (fields = {}) => {
   if (seguroOcrRamo) seguroOcrRamo.value = fields.ramo || "";
   if (seguroOcrPoliza) seguroOcrPoliza.value = fields.poliza_numero || "";
   if (seguroOcrDireccion) seguroOcrDireccion.value = fields.direccion || "";
+  if (seguroOcrMatricula) seguroOcrMatricula.value = fields.matricula || "";
+  if (seguroOcrDireccionRiesgo) seguroOcrDireccionRiesgo.value = fields.direccion_riesgo || "";
+  if (seguroOcrRefCatastral) seguroOcrRefCatastral.value = fields.referencia_catastral || "";
   if (seguroOcrNacimiento) {
     seguroOcrNacimiento.value = normalizeDateInput(fields.fecha_nacimiento || "");
   }
@@ -56325,6 +56333,7 @@ const fillSegurosOcrFields = (fields = {}) => {
 const SEGURO_SMART_KEYS = [
   "direccion_riesgo",
   "codigo_postal",
+  "referencia_catastral",
   "fecha_nacimiento_asegurado",
   "fecha_nacimiento_conductor",
   "fecha_carnet",
@@ -56355,13 +56364,24 @@ const buildSegurosSmartPayloadFromOcr = () => {
   const source = state.segurosOcrParsedFields && typeof state.segurosOcrParsedFields === "object"
     ? state.segurosOcrParsedFields
     : {};
-  return SEGURO_SMART_KEYS.reduce((acc, key) => {
+  const acc = SEGURO_SMART_KEYS.reduce((memo, key) => {
     const val = source[key];
-    if (val === null || val === undefined) return acc;
-    if (!String(val).trim()) return acc;
-    acc[key] = val;
-    return acc;
+    if (val === null || val === undefined) return memo;
+    if (!String(val).trim()) return memo;
+    memo[key] = val;
+    return memo;
   }, {});
+
+  const manualOverrides = {
+    matricula: seguroOcrMatricula ? seguroOcrMatricula.value.trim() : "",
+    direccion_riesgo: seguroOcrDireccionRiesgo ? seguroOcrDireccionRiesgo.value.trim() : "",
+    referencia_catastral: seguroOcrRefCatastral ? seguroOcrRefCatastral.value.trim() : "",
+  };
+  Object.entries(manualOverrides).forEach(([key, value]) => {
+    if (!value) return;
+    acc[key] = value;
+  });
+  return acc;
 };
 
 const loadGestoriaBdt = async () => {
@@ -56579,6 +56599,17 @@ const saveSegurosOcrRecord = async () => {
     estado: seguroOcrEstado ? seguroOcrEstado.value : "",
   };
   const smartPayload = buildSegurosSmartPayloadFromOcr();
+  const ramoNorm = normalizeSimple(payload.ramo || "");
+  if (ramoNorm === "hogar") {
+    const dirRiesgo = String(smartPayload.direccion_riesgo || "").trim();
+    const refCat = String(smartPayload.referencia_catastral || "").trim();
+    if (!dirRiesgo || !refCat) {
+      if (segurosOcrSaveStatus) {
+        segurosOcrSaveStatus.textContent = "En Hogar, completa Dirección riesgo y Ref. catastral antes de guardar.";
+      }
+      return;
+    }
+  }
   if (Object.keys(smartPayload).length) {
     payload.datos_ramo_json = JSON.stringify(smartPayload);
   }

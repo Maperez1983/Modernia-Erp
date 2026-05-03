@@ -9718,6 +9718,12 @@ body.crm-context-inmo .crm-resumen-compact-note {
   letter-spacing: 0.2px;
 }
 
+/* Gestoría: los KPI deben aprovechar mejor el ancho (más columnas, menos “aire” vacío). */
+body.crm-context-gestoria #gestoriaDashboardSection .dashboard-kpis.grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
 /* CRM resumen: charts más compactos para no comerse la pantalla. */
 #crmResumenYtdBoard .chart-card {
   min-height: 290px;
