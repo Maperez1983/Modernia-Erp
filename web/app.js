@@ -2384,14 +2384,13 @@ const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
-const gestoriaDashboardPaneRenta = document.getElementById("gestoriaDashboardPaneRenta");
-const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardPaneModelos");
- const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
- const gestoriaDashboardPaneContabilidad = document.getElementById("gestoriaDashboardPaneContabilidad");
- const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
- const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
- const gestoriaDashboardServiciosTabs = document.getElementById("gestoriaDashboardServiciosTabs");
- const gestoriaDashServiciosKey = document.getElementById("gestoriaDashServiciosKey");
+const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
+const gestoriaDashServiciosPaneAnalytics = document.getElementById("gestoriaDashServiciosPaneAnalytics");
+const gestoriaDashServiciosPaneRentas = document.getElementById("gestoriaDashServiciosPaneRentas");
+const gestoriaDashServiciosPaneAlertas = document.getElementById("gestoriaDashServiciosPaneAlertas");
+const gestoriaDashServicioTitle = document.getElementById("gestoriaDashServicioTitle");
+const gestoriaDashServicioSubtitle = document.getElementById("gestoriaDashServicioSubtitle");
+const gestoriaDashServiciosHead = document.getElementById("gestoriaDashServiciosHead");
  const gestoriaDashServiciosReload = document.getElementById("gestoriaDashServiciosReload");
  const gestoriaDashServiciosKpis = document.getElementById("gestoriaDashServiciosKpis");
  const gestoriaDashServiciosChart = document.getElementById("gestoriaDashServiciosChart");
@@ -51252,8 +51251,7 @@ const renderGestoriaDashServicios = (payload = {}, { key = "" } = {}) => {
       String(value ?? 0)
     )}</div><div class="muted">Abrir gestiones</div>`;
     btn.addEventListener("click", () => {
-      setGestoriaDashboardView("gestiones");
-      openGestoriaTrabajosWithFilters({ tipo: k, target: gestoriaDashboardPaneGestiones });
+      openGestoriaTrabajosWithFilters({ tipo: k });
     });
     gestoriaDashServiciosCards.appendChild(btn);
   });
@@ -51324,11 +51322,12 @@ const normalizeGestoriaDashboardView = (viewKey = "") => {
   if (raw === "resumen") return "general";
   if (raw === "general") return "general";
   if (raw === "servicios") return "servicios";
-  if (raw === "renta") return "renta";
-  if (raw === "modelos") return "modelos";
-  if (raw === "gestiones") return "gestiones";
-  if (raw === "contabilidad") return "contabilidad";
-  if (raw === "documentos") return "documentos";
+  if (raw === "renta" || raw === "rentas") return "rentas";
+  if (raw === "alertas") return "alertas";
+  if (raw === "herencias") return "herencias";
+  if (raw === "trafico") return "trafico";
+  if (raw === "expedientes") return "expedientes";
+  if (raw === "tasaciones") return "tasaciones";
   return "general";
 };
 
@@ -51343,8 +51342,6 @@ const resolveGestoriaDashboardEmpresaId = () => {
 const setGestoriaDashboardView = (viewKey = "general") => {
   const key = normalizeGestoriaDashboardView(viewKey);
   state.gestoriaDashboardView = key;
-  // Compatibilidad con estado anterior ("resumen"/"renta")
-  state.gestoriaDashboardPane = key === "general" ? "resumen" : key;
 
   if (gestoriaDashboardTabs) {
     gestoriaDashboardTabs.querySelectorAll("[data-gestoria-dashboard-view]").forEach((btn) => {
@@ -51352,20 +51349,30 @@ const setGestoriaDashboardView = (viewKey = "general") => {
     });
   }
 
-  if (gestoriaDashboardPaneGeneral) gestoriaDashboardPaneGeneral.classList.toggle("hidden", key !== "general");
-  if (gestoriaDashboardPaneServicios) gestoriaDashboardPaneServicios.classList.toggle("hidden", key !== "servicios");
-  if (gestoriaDashboardPaneRenta) gestoriaDashboardPaneRenta.classList.toggle("hidden", key !== "renta");
-  if (gestoriaDashboardPaneModelos) gestoriaDashboardPaneModelos.classList.toggle("hidden", key !== "modelos");
-  if (gestoriaDashboardPaneGestiones) gestoriaDashboardPaneGestiones.classList.toggle("hidden", key !== "gestiones");
-  if (gestoriaDashboardPaneContabilidad) gestoriaDashboardPaneContabilidad.classList.toggle("hidden", key !== "contabilidad");
-  if (gestoriaDashboardPaneDocumentos) gestoriaDashboardPaneDocumentos.classList.toggle("hidden", key !== "documentos");
+  const isGeneral = key === "general";
+  if (gestoriaDashboardPaneGeneral) gestoriaDashboardPaneGeneral.classList.toggle("hidden", !isGeneral);
+  if (gestoriaDashboardPaneServicios) gestoriaDashboardPaneServicios.classList.toggle("hidden", isGeneral);
 
-  if (key === "servicios") loadGestoriaDashboardServicios().catch(() => {});
-  if (key === "renta") loadGestoriaRentaDashboard().catch(() => {});
-  if (key === "modelos") loadGestoriaDashboardModelos().catch(() => {});
-  if (key === "gestiones") loadGestoriaDashboardGestiones().catch(() => {});
-  if (key === "contabilidad") loadGestoriaDashboardContabilidad().catch(() => {});
-  if (key === "documentos") loadGestoriaDashboardDocumentos().catch(() => {});
+  const isServicio =
+    key === "servicios" || key === "herencias" || key === "trafico" || key === "expedientes" || key === "tasaciones";
+  if (gestoriaDashServiciosHead) gestoriaDashServiciosHead.classList.toggle("hidden", !isServicio);
+  if (gestoriaDashServiciosPaneAnalytics) gestoriaDashServiciosPaneAnalytics.classList.toggle("hidden", !isServicio);
+  if (gestoriaDashServiciosPaneRentas) gestoriaDashServiciosPaneRentas.classList.toggle("hidden", key !== "rentas");
+  if (gestoriaDashServiciosPaneAlertas) gestoriaDashServiciosPaneAlertas.classList.toggle("hidden", key !== "alertas");
+
+  if (gestoriaDashServicioTitle) {
+    const label = key === "servicios" ? "Servicios" : getGestoriaTrabajoCategoryLabel(key) || key;
+    gestoriaDashServicioTitle.textContent = label ? `${label} · Dashboard` : "Servicios · Dashboard";
+  }
+  if (gestoriaDashServicioSubtitle) {
+    gestoriaDashServicioSubtitle.textContent =
+      key === "servicios"
+        ? "KPIs y evolución mensual por tipo de trabajo."
+        : "KPIs e histórico mensual del servicio.";
+  }
+
+  if (key === "rentas") loadGestoriaRentaDashboard().catch(() => {});
+  if (isServicio) loadGestoriaDashboardServicios({ key }).catch(() => {});
 };
 
 const ensureGestoriaDashRentaEjercicioOptions = (selected = "") => {
@@ -52553,8 +52560,8 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   }
 };
 
-const loadGestoriaDashboardServicios = async ({ force = false } = {}) => {
-  if (!gestoriaDashboardPaneServicios || !gestoriaDashServiciosKey || !gestoriaDashServiciosReload) return;
+const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) => {
+  if (!gestoriaDashboardPaneServicios || !gestoriaDashServiciosReload) return;
   if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
@@ -52565,29 +52572,22 @@ const loadGestoriaDashboardServicios = async ({ force = false } = {}) => {
   const workspaceId = String(state.currentWorkspaceId || "").trim();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
 
-  if (gestoriaDashServiciosKey.dataset.bound !== "1") {
-    gestoriaDashServiciosKey.dataset.bound = "1";
-    gestoriaDashServiciosKey.addEventListener("change", () => loadGestoriaDashboardServicios({ force: true }).catch(() => {}));
-  }
   if (gestoriaDashServiciosReload.dataset.bound !== "1") {
     gestoriaDashServiciosReload.dataset.bound = "1";
-    gestoriaDashServiciosReload.addEventListener("click", () => loadGestoriaDashboardServicios({ force: true }).catch(() => {}));
+    gestoriaDashServiciosReload.addEventListener("click", () =>
+      loadGestoriaDashboardServicios({ force: true, key: state.gestoriaDashboardView || "servicios" }).catch(() => {})
+    );
   }
 
-  const currentKey = normalizeGestoriaTrabajoCategory(gestoriaDashServiciosKey.value || "");
-  gestoriaDashServiciosKey.innerHTML = "";
-  gestoriaDashServiciosKey.appendChild(createOption("", "Selecciona un servicio"));
-  GESTORIA_TRABAJO_CATEGORIES.forEach((row) => {
-    gestoriaDashServiciosKey.appendChild(createOption(row.key, row.label));
-  });
-  gestoriaDashServiciosKey.value = currentKey;
+  const normalizedKey = normalizeGestoriaDashboardView(key);
+  const renderKey = normalizedKey === "servicios" ? "" : normalizeGestoriaTrabajoCategory(normalizedKey);
 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
   const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
   const expectedKey = scopeEmpresaId || String(empresa.id || "").trim();
   if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
-    renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: gestoriaDashServiciosKey.value });
+    renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: renderKey });
     return;
   }
 
@@ -52601,7 +52601,7 @@ const loadGestoriaDashboardServicios = async ({ force = false } = {}) => {
     const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
-    renderGestoriaDashServicios(data, { key: gestoriaDashServiciosKey.value });
+    renderGestoriaDashServicios(data, { key: renderKey });
   } catch (err) {
     gestoriaDashServiciosKpis.innerHTML = `<p class="muted">No se pudo cargar Servicios: ${escapeHtml(String(err?.message || err || "").trim())}</p>`;
     if (gestoriaDashServiciosInfo) gestoriaDashServiciosInfo.textContent = "";
@@ -52639,17 +52639,16 @@ const loadGestoriaDashboard = () => {
     gestoriaDashboardEmpresaScope.value = current;
   }
   initGestoriaDashboardTabs();
-  // General/Servicios: solo admin.
-  if (gestoriaDashboardTabs) {
-    gestoriaDashboardTabs
-      .querySelectorAll('[data-gestoria-dashboard-view="general"], [data-gestoria-dashboard-view="servicios"]')
-      .forEach((btn) => btn.classList.toggle("hidden", !isAdminDash));
+  if (!isAdminDash) {
+    if (gestoriaDashboardTabs) gestoriaDashboardTabs.classList.add("hidden");
+    if (gestoriaDashboardPaneGeneral) {
+      gestoriaDashboardPaneGeneral.innerHTML =
+        "<div class='form-card'><h3>Dashboard de gestoría</h3><p class='muted'>Este dashboard está disponible solo para usuarios admin.</p></div>";
+    }
+    return;
   }
-  const desiredView = normalizeGestoriaDashboardView(
-    state.gestoriaDashboardView || state.gestoriaDashboardPane || (isAdminDash ? "general" : "renta")
-  );
-  const safeView = !isAdminDash && (desiredView === "general" || desiredView === "servicios") ? "renta" : desiredView;
-  setGestoriaDashboardView(safeView);
+  const desiredView = normalizeGestoriaDashboardView(state.gestoriaDashboardView || state.gestoriaDashboardPane || "general");
+  setGestoriaDashboardView(desiredView);
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
@@ -52657,7 +52656,6 @@ const loadGestoriaDashboard = () => {
   if (workspaceId) qsBase.set("workspace_id", workspaceId);
   else qsBase.set("empresa_id", String(empresa.id || "").trim());
   if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
-  if (!isAdminDash) return;
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
     api(`/api/gestoria_trabajos?${qsBase.toString()}`),

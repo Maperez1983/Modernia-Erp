@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-						    <link rel="stylesheet" href="styles.css?v=253" />
+						    <link rel="stylesheet" href="styles.css?v=254" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -5171,7 +5171,7 @@
 	            </div>
 	          </div>
 	          <div class="form-card" id="gestoriaCrmPipelineCard">
-	              <div class="section-head">
+	              <div class="section-head" id="gestoriaDashServiciosHead">
 	                <div>
 	                  <h3>Pipeline de servicios</h3>
                   <p class="muted">Organiza las gestiones por estado y servicio.</p>
@@ -5403,16 +5403,16 @@
                   </label>
                 </div>
 		          </div>
-			          <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="gestoriaDashboardTabs" role="navigation" aria-label="Dashboard gestoría">
-	            <button class="tab tc-module active" type="button" data-gestoria-dashboard-view="general" title="General">
-	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
-	              <span class="tc-mod-label">General</span>
-	            </button>
-	            <button class="tab tc-module" type="button" data-gestoria-dashboard-view="servicios" title="Servicios">
-	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
-	              <span class="tc-mod-label">Servicios</span>
-	            </button>
-	          </div>
+			          <div class="tabs crm-lightning-subbar" id="gestoriaDashboardTabs" role="navigation" aria-label="Dashboard gestoría">
+			            <button type="button" class="tab active" data-gestoria-dashboard-view="general">General</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="servicios">Servicios</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="herencias">Herencias</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="trafico">Tráfico</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="expedientes">Expedientes</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="tasaciones">Tasaciones</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="rentas">Rentas</button>
+			            <button type="button" class="tab" data-gestoria-dashboard-view="alertas">Alertas</button>
+			          </div>
 	          <div id="gestoriaDashboardPaneGeneral">
           <div class="form-card">
             <div class="section-head">
@@ -5531,42 +5531,12 @@
 	            <div class="form-card">
 	              <div class="section-head">
 	                <div>
-	                  <h3>Servicios · Dashboard</h3>
-	                  <p class="muted">KPIs y evolución mensual por tipo de trabajo (herencias, tráfico, expedientes, tasaciones, rentas...).</p>
+	                  <h3 id="gestoriaDashServicioTitle">Servicios · Dashboard</h3>
+	                  <p class="muted" id="gestoriaDashServicioSubtitle">KPIs y evolución mensual por tipo de trabajo.</p>
 	                </div>
 	                <div class="toolbar">
 	                  <button type="button" class="secondary" id="gestoriaDashServiciosReload">Actualizar</button>
 	                </div>
-	              </div>
-	              <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="gestoriaDashboardServiciosTabs" role="navigation" aria-label="Servicios gestoría">
-	                <button class="tab tc-module active" type="button" data-gestoria-servicio-tab="resumen" title="Resumen">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
-	                  <span class="tc-mod-label">Resumen</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="herencias" title="Herencias">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
-	                  <span class="tc-mod-label">Herencias</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="trafico" title="Tráfico / Transferencias">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-car"></use></svg></span>
-	                  <span class="tc-mod-label">Tráfico</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="expedientes" title="Expedientes">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clipboard"></use></svg></span>
-	                  <span class="tc-mod-label">Expedientes</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="tasaciones" title="Tasaciones">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-chart"></use></svg></span>
-	                  <span class="tc-mod-label">Tasaciones</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="rentas" title="Rentas">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
-	                  <span class="tc-mod-label">Rentas</span>
-	                </button>
-	                <button class="tab tc-module" type="button" data-gestoria-servicio-tab="alertas" title="Alertas">
-	                  <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bell"></use></svg></span>
-	                  <span class="tc-mod-label">Alertas</span>
-	                </button>
 	              </div>
 	              <div id="gestoriaDashServiciosPaneAnalytics">
 	                <div class="grid dashboard-kpis" id="gestoriaDashServiciosKpis"></div>
@@ -10666,7 +10636,7 @@
         </script>
 		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=728"></script>
+												    <script src="app.js?v=729"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
