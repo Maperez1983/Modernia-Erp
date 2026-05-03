@@ -2712,6 +2712,12 @@ const segurosRecibosStatus = document.getElementById("segurosRecibosStatus");
 const segurosRecibosCliente = document.getElementById("segurosRecibosCliente");
 const segurosRecibosPoliza = document.getElementById("segurosRecibosPoliza");
 const segurosRecibosSearch = document.getElementById("segurosRecibosSearch");
+const segurosRecibosEstadoFilter = document.getElementById("segurosRecibosEstadoFilter");
+const segurosRecibosFrom = document.getElementById("segurosRecibosFrom");
+const segurosRecibosTo = document.getElementById("segurosRecibosTo");
+const segurosRecibosExportBtn = document.getElementById("segurosRecibosExportBtn");
+const segurosRecibosSummary = document.getElementById("segurosRecibosSummary");
+const segurosRecibosAlerts = document.getElementById("segurosRecibosAlerts");
 const segurosRecibosTable = document.getElementById("segurosRecibosTable");
 const segurosRecibosInfo = document.getElementById("segurosRecibosInfo");
 const segurosSiniestrosForm = document.getElementById("segurosSiniestrosForm");
@@ -54039,20 +54045,231 @@ const loadSegurosReclamaciones = (empresaId) => {
     });
 };
 
+const buildSegurosRecibosParams = (empresaId) => {
+  const params = new URLSearchParams({ empresa_id: empresaId });
+  const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
+  const estado = segurosRecibosEstadoFilter ? String(segurosRecibosEstadoFilter.value || "").trim() : "";
+  const dateFrom = segurosRecibosFrom ? String(segurosRecibosFrom.value || "").trim() : "";
+  const dateTo = segurosRecibosTo ? String(segurosRecibosTo.value || "").trim() : "";
+  if (q) params.set("q", q);
+  if (estado) params.set("estado", estado);
+  if (dateFrom) params.set("from", dateFrom);
+  if (dateTo) params.set("to", dateTo);
+  return params;
+};
+
+const formatSegurosRecibosMoney = (value) => {
+  const num = Number(parseMoneyValue(value));
+  if (!Number.isFinite(num) || Math.abs(num) <= 0.0001) return "-";
+  return euroFormatter.format(num);
+};
+
+const renderSegurosRecibosSummary = (summary) => {
+  if (!segurosRecibosSummary) return;
+  const totals = summary && typeof summary === "object" ? summary.totals || {} : {};
+  const kpis = summary && typeof summary === "object" ? summary.kpis || {} : {};
+  const total = Number(totals.total || 0);
+  const primaTotal = Number(totals.prima_total || 0);
+  const comisionTotal = Number(totals.comision_total || 0);
+  const liquidacionTotal = Number(totals.liquidacion_total || 0);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "grid crm-kpis";
+  const add = (title, value, note = "") => {
+    const el = document.createElement("div");
+    el.className = "card kpi-card";
+    el.innerHTML = `<h3>${escapeHtml(title)}</h3><div class="kpi-value">${escapeHtml(value)}</div>${note ? `<div class=\"muted\">${escapeHtml(note)}</div>` : ""}`;
+    wrapper.appendChild(el);
+  };
+  add("Recibos", String(Number.isFinite(total) ? total : 0));
+  add("Prima total", euroFormatter.format(Number.isFinite(primaTotal) ? primaTotal : 0));
+  add("Comisión total", euroFormatter.format(Number.isFinite(comisionTotal) ? comisionTotal : 0));
+  add("Liquidación total", euroFormatter.format(Number.isFinite(liquidacionTotal) ? liquidacionTotal : 0));
+
+  const pendingLiqCount = Number(kpis.pendiente_liquidacion_count || 0);
+  const pendingLiqComision = Number(kpis.pendiente_liquidacion_comision || 0);
+  const pendingImpagoCount = Number(kpis.pendiente_impago_count || 0);
+  const pendingImpagoPrima = Number(kpis.pendiente_impago_prima || 0);
+  add(
+    "Pendiente liquidación",
+    `${Number.isFinite(pendingLiqCount) ? pendingLiqCount : 0}`,
+    `Comisión: ${euroFormatter.format(Number.isFinite(pendingLiqComision) ? pendingLiqComision : 0)}`
+  );
+  add(
+    "Impagos vencidos",
+    `${Number.isFinite(pendingImpagoCount) ? pendingImpagoCount : 0}`,
+    `Prima: ${euroFormatter.format(Number.isFinite(pendingImpagoPrima) ? pendingImpagoPrima : 0)}`
+  );
+
+  const byEstado = Array.isArray(summary?.by_estado) ? summary.by_estado : [];
+  const table = document.createElement("table");
+  table.className = "compact";
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Estado", "Total", "Prima", "Comisión"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  byEstado.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.estado || "-",
+      String(row.total || 0),
+      formatSegurosRecibosMoney(row.prima_total),
+      formatSegurosRecibosMoney(row.comision_total),
+    ];
+    values.forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = String(v || "-");
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  const box = document.createElement("div");
+  box.className = "card";
+  box.innerHTML = "<h4>Resumen por estado</h4>";
+  box.appendChild(table);
+
+  segurosRecibosSummary.innerHTML = "";
+  segurosRecibosSummary.appendChild(wrapper);
+  if (byEstado.length) segurosRecibosSummary.appendChild(box);
+};
+
+const renderSegurosRecibosAlerts = (summary) => {
+  if (!segurosRecibosAlerts) return;
+  const pendientesLiq = Array.isArray(summary?.pendientes_liquidacion) ? summary.pendientes_liquidacion : [];
+  const pendientesImpago = Array.isArray(summary?.pendientes_impago) ? summary.pendientes_impago : [];
+
+  const root = document.createElement("div");
+  root.className = "grid";
+  root.style.gap = "12px";
+
+  const buildList = (title, rows, renderRow) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h4>${escapeHtml(title)}</h4>`;
+    if (!rows.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "Sin elementos.";
+      card.appendChild(p);
+      return card;
+    }
+    const table = document.createElement("table");
+    table.className = "compact";
+    const tbody = document.createElement("tbody");
+    rows.forEach((r) => {
+      const tr = renderRow(r);
+      if (tr) tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return card;
+  };
+
+  const liqCard = buildList("Pendiente de liquidación (últimos 80)", pendientesLiq, (row) => {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    const label = `${row.fecha_cobro || row.fecha_emision || "-"} · ${row.cliente || "-"} · ${row.poliza_numero || "-"} · Comisión ${formatSegurosRecibosMoney(row.comision)}`;
+    td.textContent = label;
+    tr.appendChild(td);
+    const actionTd = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary";
+    btn.textContent = "Marcar liquidado";
+    btn.addEventListener("click", async () => {
+      const defaultValue = String(row.comision || "").trim();
+      const value = window.prompt("Importe liquidación (€)", defaultValue);
+      if (value === null) return;
+      const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
+        id: row.id,
+        importe_liquidacion: value,
+      }).catch((err) => ({ error: err?.message || "Error" }));
+      if (resp?.error) return;
+      loadSegurosRecibos();
+    });
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
+    return tr;
+  });
+
+  const impagoCard = buildList("Alertas de impago (vencidos)", pendientesImpago, (row) => {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    const venc = row.fecha_vencimiento || "-";
+    td.textContent = `${venc} · ${row.cliente || "-"} · ${row.poliza_numero || "-"} · Prima ${formatSegurosRecibosMoney(row.prima_total)}`;
+    tr.appendChild(td);
+    const actionTd = document.createElement("td");
+    const impagoBtn = document.createElement("button");
+    impagoBtn.type = "button";
+    impagoBtn.className = "ghost";
+    impagoBtn.textContent = "Marcar impagado";
+    impagoBtn.addEventListener("click", async () => {
+      const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, estado: "impagado" }).catch((err) => ({
+        error: err?.message || "Error",
+      }));
+      if (resp?.error) return;
+      loadSegurosRecibos();
+    });
+    actionTd.appendChild(impagoBtn);
+    const cobradoBtn = document.createElement("button");
+    cobradoBtn.type = "button";
+    cobradoBtn.className = "secondary";
+    cobradoBtn.textContent = "Marcar cobrado";
+    cobradoBtn.addEventListener("click", async () => {
+      const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
+        id: row.id,
+        estado: "cobrado",
+        fecha_cobro: formatAgendaDate(new Date()),
+      }).catch((err) => ({ error: err?.message || "Error" }));
+      if (resp?.error) return;
+      loadSegurosRecibos();
+    });
+    actionTd.appendChild(cobradoBtn);
+    tr.appendChild(actionTd);
+    return tr;
+  });
+
+  root.appendChild(liqCard);
+  root.appendChild(impagoCard);
+  segurosRecibosAlerts.innerHTML = "";
+  segurosRecibosAlerts.appendChild(root);
+};
+
 const loadSegurosRecibos = () => {
   if (!segurosRecibosTable) return;
   const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosRecibosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (segurosRecibosInfo) segurosRecibosInfo.textContent = "";
+    if (segurosRecibosSummary) segurosRecibosSummary.innerHTML = "";
+    if (segurosRecibosAlerts) segurosRecibosAlerts.innerHTML = "";
     return;
   }
-  const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
-  const params = new URLSearchParams({ empresa_id: empresa.id });
-  if (q) params.set("q", q);
-  api(`/api/seguros_recibos?${params.toString()}`)
-    .then((data) => {
-      const rows = data.rows || [];
+  const params = buildSegurosRecibosParams(empresa.id);
+  Promise.allSettled([
+    api(`/api/seguros_recibos?${params.toString()}`),
+    api(`/api/seguros_recibos_summary?${params.toString()}`),
+  ])
+    .then((results) => {
+      const listRes = results[0].status === "fulfilled" ? results[0].value : null;
+      const summaryRes = results[1].status === "fulfilled" ? results[1].value : null;
+      if (summaryRes) {
+        renderSegurosRecibosSummary(summaryRes);
+        renderSegurosRecibosAlerts(summaryRes);
+      } else {
+        if (segurosRecibosSummary) segurosRecibosSummary.innerHTML = "";
+        if (segurosRecibosAlerts) segurosRecibosAlerts.innerHTML = "";
+      }
+
+      const rows = listRes && Array.isArray(listRes.rows) ? listRes.rows : [];
       if (!rows.length) {
         segurosRecibosTable.innerHTML = "<p class='muted'>Sin recibos registrados.</p>";
         if (segurosRecibosInfo) segurosRecibosInfo.textContent = "";
@@ -54061,7 +54278,7 @@ const loadSegurosRecibos = () => {
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
-      ["Emisión", "Estado", "Prima", "Comisión", "Cliente", "Póliza", "Acción"].forEach((col) => {
+      ["Emisión", "Venc.", "Cobro", "Estado", "Prima", "Comisión", "Liquidación", "Cliente", "Póliza", "Acción"].forEach((col) => {
         const th = document.createElement("th");
         th.textContent = col;
         trHead.appendChild(th);
@@ -54071,13 +54288,14 @@ const loadSegurosRecibos = () => {
       const tbody = document.createElement("tbody");
       rows.forEach((row) => {
         const tr = document.createElement("tr");
-        const prima = Number(parseMoneyValue(row.prima_total));
-        const comision = Number(parseMoneyValue(row.comision));
         const values = [
           row.fecha_emision || "-",
+          row.fecha_vencimiento || "-",
+          row.fecha_cobro || "-",
           row.estado || "-",
-          Number.isFinite(prima) && prima ? euroFormatter.format(prima) : "-",
-          Number.isFinite(comision) && comision ? euroFormatter.format(comision) : "-",
+          formatSegurosRecibosMoney(row.prima_total),
+          formatSegurosRecibosMoney(row.comision),
+          formatSegurosRecibosMoney(row.importe_liquidacion),
           row.cliente || "-",
           row.poliza_numero || "-",
         ];
@@ -54088,11 +54306,13 @@ const loadSegurosRecibos = () => {
         });
         const actionTd = document.createElement("td");
         const estado = normalizeSimple(row.estado || "");
-        if (estado !== "cobrado") {
+        const isCobrado = estado === "cobrado";
+        const isImpagado = estado === "impagado";
+        if (!isCobrado) {
           const cobradoBtn = document.createElement("button");
           cobradoBtn.type = "button";
           cobradoBtn.className = "secondary";
-          cobradoBtn.textContent = "Marcar cobrado";
+          cobradoBtn.textContent = "Cobrado";
           cobradoBtn.addEventListener("click", async () => {
             const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
               id: row.id,
@@ -54103,6 +54323,39 @@ const loadSegurosRecibos = () => {
             loadSegurosRecibos();
           });
           actionTd.appendChild(cobradoBtn);
+        }
+        if (!isImpagado && estado !== "anulado") {
+          const impagoBtn = document.createElement("button");
+          impagoBtn.type = "button";
+          impagoBtn.className = "ghost";
+          impagoBtn.textContent = "Impagado";
+          impagoBtn.addEventListener("click", async () => {
+            const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
+              id: row.id,
+              estado: "impagado",
+            }).catch((err) => ({ error: err?.message || "Error" }));
+            if (resp?.error) return;
+            loadSegurosRecibos();
+          });
+          actionTd.appendChild(impagoBtn);
+        }
+        if (isCobrado && Number(parseMoneyValue(row.comision)) > 0 && Number(parseMoneyValue(row.importe_liquidacion)) <= 0) {
+          const liqBtn = document.createElement("button");
+          liqBtn.type = "button";
+          liqBtn.className = "ghost";
+          liqBtn.textContent = "Liquidar";
+          liqBtn.addEventListener("click", async () => {
+            const defaultValue = String(row.comision || "").trim();
+            const value = window.prompt("Importe liquidación (€)", defaultValue);
+            if (value === null) return;
+            const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
+              id: row.id,
+              importe_liquidacion: value,
+            }).catch((err) => ({ error: err?.message || "Error" }));
+            if (resp?.error) return;
+            loadSegurosRecibos();
+          });
+          actionTd.appendChild(liqBtn);
         }
         const delBtn = document.createElement("button");
         delBtn.type = "button";
@@ -60854,21 +61107,18 @@ const ensureGestoriaBudgetsWorkspaceId = async () => {
 
 const syncGestoriaBudgetQuickComputed = () => {
   if (!gestoriaBudgetQuickForm) return;
-  const values = {
-    num_vecinos: gestoriaBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value ?? 0,
-    num_locales: gestoriaBudgetQuickForm.querySelector('[name="num_locales"]')?.value ?? 0,
-    num_trasteros: gestoriaBudgetQuickForm.querySelector('[name="num_trasteros"]')?.value ?? 0,
-    num_aparcamientos: gestoriaBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value ?? 0,
-  };
-  const totals = computeFincasBudgetTotalsClient(values);
-  const suggested = gestoriaBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
-  const subtotal = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
-  const iva = gestoriaBudgetQuickForm.querySelector('[name="impuestos"]');
-  const total = gestoriaBudgetQuickForm.querySelector('[name="total"]');
-  if (suggested) suggested.value = Number(totals.subtotal || 0).toFixed(2);
-  if (subtotal) subtotal.value = Number(totals.subtotal || 0).toFixed(2);
-  if (iva) iva.value = Number(totals.impuestos || 0).toFixed(2);
-  if (total) total.value = Number(totals.total || 0).toFixed(2);
+  const subtotalInput = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
+  const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
+  const ivaInput = gestoriaBudgetQuickForm.querySelector('[name="impuestos"]');
+  const totalInput = gestoriaBudgetQuickForm.querySelector('[name="total"]');
+  const subtotal = parseMoneyValue(subtotalInput?.value || "");
+  const ivaPct = Math.max(0, Math.min(100, parseMoneyValue(ivaPctInput?.value || "")));
+  const ivaManual = parseMoneyValue(ivaInput?.value || "");
+  const iva = subtotal > 0 ? (subtotal * ivaPct) / 100 : ivaManual;
+  const total = subtotal + iva;
+  if (ivaPctInput) ivaPctInput.value = ivaPct ? String(ivaPct) : "";
+  if (ivaInput) ivaInput.value = iva > 0 ? iva.toFixed(2) : "";
+  if (totalInput) totalInput.value = total > 0 ? total.toFixed(2) : "";
 };
 
 const renderGestoriaBudgetsList = (rows = []) => {
@@ -60929,7 +61179,7 @@ const loadGestoriaFact = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
-  const servicio = String(gestoriaBudgetsServicioFilter?.value || "fincas").trim().toLowerCase();
+  const servicio = String(gestoriaBudgetsServicioFilter?.value || "gestoria").trim().toLowerCase();
   const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
   const params = new URLSearchParams({
     empresa_id: empresa.id,
@@ -70157,7 +70407,7 @@ if (gestoriaBudgetsEstadoFilter) {
 }
 
 if (gestoriaBudgetQuickForm) {
-  ["num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos"].forEach((name) => {
+  ["subtotal", "iva_pct", "impuestos"].forEach((name) => {
     const input = gestoriaBudgetQuickForm.querySelector(`[name="${name}"]`);
     input?.addEventListener("input", () => syncGestoriaBudgetQuickComputed());
   });
@@ -70173,29 +70423,43 @@ if (gestoriaBudgetQuickForm) {
       const values = Object.fromEntries(formData.entries());
       const workspaceId = await ensureGestoriaBudgetsWorkspaceId();
       const lookup = String(values.cliente_lookup || "").trim();
-      if (!lookup) throw new Error("Indica la comunidad / cliente.");
+      if (!lookup) throw new Error("Indica el cliente.");
+      const tipoTrabajo = String(values.tipo_trabajo || "Gestoría").trim() || "Gestoría";
       const titulo =
         String(values.titulo || "").trim()
-          || `Administración de comunidad · ${lookup}`;
+          || `${tipoTrabajo} · ${lookup}`;
+      const subtotal = parseMoneyValue(values.subtotal || "");
+      const impuestos = parseMoneyValue(values.impuestos || "");
+      const total = parseMoneyValue(values.total || "");
+      const observaciones = String(values.carta_presentacion || "").trim();
+      const baseLineAmount = subtotal > 0 ? subtotal : (total > 0 ? Math.max(0, total - impuestos) : 0);
       const payload = {
         id: "",
         workspace_id: workspaceId,
         empresa_id: empresa.id,
-        servicio: "fincas",
+        servicio: "gestoria",
         titulo,
         estado: values.estado || "Borrador",
         fecha: new Date().toISOString().slice(0, 10),
         cliente_lookup: lookup,
         cliente_nif: values.cliente_nif || "",
-        cliente_telefono: "",
-        cliente_email: "",
-        num_vecinos: values.num_vecinos || 0,
-        num_locales: values.num_locales || 0,
-        num_trasteros: values.num_trasteros || 0,
-        num_aparcamientos: values.num_aparcamientos || 0,
-        impuestos: 0,
-        observaciones: "",
-        lineas: [],
+        subtotal: subtotal > 0 ? subtotal : "",
+        impuestos: impuestos > 0 ? impuestos : "",
+        total: total > 0 ? total : "",
+        observaciones: observaciones || "",
+        lineas: baseLineAmount > 0
+          ? [
+              {
+                categoria: tipoTrabajo,
+                concepto: titulo,
+                cantidad: 1,
+                unidad: "serv",
+                precio_unitario: baseLineAmount,
+                descuento_pct: 0,
+                total_linea: baseLineAmount,
+              },
+            ]
+          : [],
       };
       const data = await fetch("/api/workspace_presupuestos", {
         method: "POST",
