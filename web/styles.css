@@ -125,7 +125,7 @@ body.crm-context-vertical #explorerSection .app-lightning-topbar {
 /* Seguros (CRM vertical): centrar el shell Lightning completo dentro del layout estándar. */
 body.crm-context-seguros.crm-context-vertical #crmSection .crm-lightning-shell {
   width: 100%;
-  margin: 0;
+  margin: 0 auto;
 }
 
 body.crm-context-vertical #explorerSection > .section-head {
@@ -146,6 +146,18 @@ body.crm-context-vertical #bdtSection {
 body.crm-context-vertical #explorerSection #explorerLightningSidebar,
 body.crm-shell #explorerSection #explorerLightningSidebar {
   display: none !important;
+}
+
+/* CRM vertical: al ocultar el rail del Explorador, colapsa su columna del grid
+   para que el contenido no quede “cortado” a la izquierda. */
+body.crm-context-vertical #explorerSection .app-lightning-shell--sidebar,
+body.crm-shell #explorerSection .app-lightning-shell--sidebar {
+  grid-template-columns: 1fr !important;
+}
+
+body.crm-context-vertical #explorerSection .app-lightning-main,
+body.crm-shell #explorerSection .app-lightning-main {
+  grid-column: 1 / -1;
 }
 
 body.crm-context-vertical {
