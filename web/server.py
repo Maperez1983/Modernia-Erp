@@ -3217,13 +3217,61 @@ def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit
         strict=False,
     )
 
+    # Determina columnas disponibles para evitar romper en DBs antiguas.
+    available_cols = set()
+    try:
+        if db_is_postgres_enabled():
+            col_rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'seguros'
+                """
+            ).fetchall()
+            for r in col_rows or []:
+                name = str(row_value(r, "column_name") or row_value(r, 0) or "").strip()
+                if name:
+                    available_cols.add(name)
+        else:
+            col_rows = conn.execute("PRAGMA table_info(seguros)").fetchall()
+            for r in col_rows or []:
+                # PRAGMA: (cid, name, type, notnull, dflt_value, pk)
+                name = str(row_value(r, "name") or row_value(r, 1) or "").strip()
+                if name:
+                    available_cols.add(name)
+    except Exception:
+        available_cols = set()
+
+    base_select_cols = [
+        "id",
+        "empresa_id",
+        "cliente_id",
+        "tomador",
+        "compania",
+        "ramo",
+        "poliza_numero",
+        "fecha_efecto",
+        "fecha_vencimiento",
+        "estado",
+        "estado_poliza",
+        "created_at",
+        "updated_at",
+    ]
+    optional_select_cols = [
+        "matricula",
+        "direccion_riesgo",
+        "referencia_catastral",
+    ]
+    if available_cols:
+        select_cols = [c for c in base_select_cols if c in available_cols] + [c for c in optional_select_cols if c in available_cols]
+    else:
+        # Fallback best-effort (para backends sin introspección).
+        select_cols = base_select_cols + optional_select_cols
+
     rows = conn.execute(
         f"""
         SELECT
-          id, empresa_id, cliente_id, tomador, compania, ramo, poliza_numero,
-          fecha_efecto, fecha_vencimiento, estado, estado_poliza,
-          matricula, direccion_riesgo, referencia_catastral,
-          created_at, updated_at
+          {', '.join(select_cols)}
         FROM seguros
         WHERE empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
@@ -3305,7 +3353,10 @@ def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit
         if fields:
             return fields
         # 3) Fallback defaults en código
-        return default_ramo_required.get(ramo_label) or []
+        fields = default_ramo_required.get(ramo_label) or []
+        if available_cols:
+            fields = [(f, lbl) for (f, lbl) in fields if f in available_cols]
+        return fields
 
     duplicates = {}
     for row in rows_dict:
@@ -3353,6 +3404,8 @@ def compute_seguros_data_quality(conn, empresa_id, *, uploaded_only=False, limit
             )
 
         required = resolve_required_fields(compania_key, ramo_label)
+        if available_cols:
+            required = [(f, lbl) for (f, lbl) in required if f in available_cols]
         missing = []
         for field, label in required:
             if not str(row.get(field) or "").strip():
