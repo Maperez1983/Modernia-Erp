@@ -60,6 +60,54 @@ from web.db_backend import open_db_conn
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 DEFAULT_RCLONE_REMOTE = "onedrive_modernia"
+RETRY_HTTP_STATUS = {429, 500, 502, 503, 504}
+
+
+def _sleep_with_jitter(seconds: float) -> None:
+    try:
+        import random
+
+        seconds = float(seconds or 0)
+        seconds = max(0.0, seconds)
+        jitter = seconds * 0.25 * random.random()
+        time.sleep(seconds + jitter)
+    except Exception:
+        time.sleep(max(0.0, float(seconds or 0)))
+
+
+def request_json_with_retries(
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    json_body: dict | None = None,
+    data: bytes | None = None,
+    timeout_s: int = 60,
+    attempts: int = 5,
+    base_delay_s: float = 1.0,
+) -> dict:
+    last_text = ""
+    last_status = None
+    for attempt in range(1, max(1, int(attempts)) + 1):
+        try:
+            resp = requests.request(method, url, headers=headers, json=json_body, data=data, timeout=timeout_s)
+            last_status = resp.status_code
+            last_text = (resp.text or "")[:800]
+            if resp.status_code in RETRY_HTTP_STATUS and attempt < attempts:
+                _sleep_with_jitter(base_delay_s * (2 ** (attempt - 1)))
+                continue
+            if resp.status_code >= 400:
+                raise RuntimeError(f"HTTP {resp.status_code}: {last_text}")
+            try:
+                return resp.json()
+            except Exception:
+                # For non-JSON success (unlikely), return an empty dict with raw.
+                return {"ok": True, "raw": resp.text}
+        except requests.exceptions.RequestException as exc:
+            if attempt >= attempts:
+                raise RuntimeError(f"Request error: {exc}") from exc
+            _sleep_with_jitter(base_delay_s * (2 ** (attempt - 1)))
+    raise RuntimeError(f"HTTP {last_status}: {last_text}")
 
 
 def _split_csv(value: str) -> list[str]:
@@ -475,10 +523,7 @@ def crm_ingest_ocr(*, base_url: str, api_key: str, empresa_id: str, s3_key: str,
         "source": "onedrive",
         "source_hint": source_hint,
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=120)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"OCR error HTTP {resp.status_code}: {resp.text[:500]}")
-    return resp.json()
+    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=120, attempts=6, base_delay_s=1.0)
 
 def crm_ingest_presign(*, base_url: str, api_key: str, empresa_id: str, tipo: str, year: str, filename: str) -> dict:
     url = base_url.rstrip("/") + "/api/ingest_facturas_presign"
@@ -491,16 +536,13 @@ def crm_ingest_presign(*, base_url: str, api_key: str, empresa_id: str, tipo: st
         "content_type": "application/pdf",
         "source": "onedrive",
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"Presign error HTTP {resp.status_code}: {resp.text[:500]}")
-    return resp.json()
+    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=60, attempts=6, base_delay_s=1.0)
 
 
 def upload_via_presign(*, presign_url: str, data: bytes, content_type: str = "application/pdf") -> None:
-    resp = requests.put(presign_url, data=data, headers={"Content-Type": content_type}, timeout=180)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"PUT S3 presign error HTTP {resp.status_code}: {resp.text[:300]}")
+    headers = {"Content-Type": content_type}
+    # PUT to S3 is safe to retry (same key overwrite).
+    request_json_with_retries("PUT", presign_url, headers=headers, data=data, timeout_s=180, attempts=4, base_delay_s=1.0)
 
 
 def main() -> int:
