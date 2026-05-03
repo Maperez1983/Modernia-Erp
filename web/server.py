@@ -2775,6 +2775,13 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
 
     estado_bucket_expr = seguro_estado_bucket_expr("s")
     in_vigor_expr = in_vigor_policy_filter("s")
+    # En este CRM, durante la fase inicial queremos que la base de cálculo del dashboard
+    # sea "pólizas subidas" (PDF asociado). Si se pide `uploaded_only=1`, tratamos todas
+    # esas pólizas como "en vigor" aunque el campo `estado` histórico viniera como
+    # presupuesto/contratada/rechazada, porque aún no se está trabajando ese flujo.
+    if uploaded_only:
+        estado_bucket_expr = "'en_vigor'"
+        in_vigor_expr = "1=1"
     fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
     year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
     month_expr = f"COALESCE(STRFTIME('%Y-%m', {fecha_efecto_date}), STRFTIME('%Y-%m', s.created_at))"
