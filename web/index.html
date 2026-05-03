@@ -7013,14 +7013,27 @@
                   <button type="submit">Añadir recibo</button>
                   <span id="segurosRecibosStatus" class="muted"></span>
                 </div>
-              </form>
-              <div class="table-tools">
-                <input id="segurosRecibosSearch" placeholder="Filtrar recibos..." />
-              </div>
-              <div id="segurosRecibosTable"></div>
-              <div class="footer" id="segurosRecibosInfo"></div>
-            </div>
-          </div>
+	              </form>
+	              <div class="table-tools">
+	                <input id="segurosRecibosSearch" placeholder="Filtrar recibos..." />
+	                <select id="segurosRecibosEstadoFilter" title="Estado">
+	                  <option value="">Estado (todos)</option>
+	                  <option value="emitido">Emitido</option>
+	                  <option value="cobrado">Cobrado</option>
+	                  <option value="pendiente">Pendiente</option>
+	                  <option value="impagado">Impagado</option>
+	                  <option value="anulado">Anulado</option>
+	                </select>
+	                <input id="segurosRecibosFrom" type="date" title="Desde" />
+	                <input id="segurosRecibosTo" type="date" title="Hasta" />
+	                <button type="button" id="segurosRecibosExportBtn" class="secondary">Exportar CSV</button>
+	              </div>
+	              <div id="segurosRecibosSummary"></div>
+	              <div id="segurosRecibosAlerts"></div>
+	              <div id="segurosRecibosTable"></div>
+	              <div class="footer" id="segurosRecibosInfo"></div>
+	            </div>
+	          </div>
           <div class="seguros-tab" data-seguros-tab="siniestros">
             <div class="form-card">
               <h3>Siniestros · Seguros</h3>
