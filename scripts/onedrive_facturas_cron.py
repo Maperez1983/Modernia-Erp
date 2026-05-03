@@ -319,16 +319,27 @@ def crm_ingest_ocr(*, base_url: str, api_key: str, empresa_id: str, s3_key: str,
         raise RuntimeError(f"OCR error HTTP {resp.status_code}: {resp.text[:500]}")
     return resp.json()
 
+def crm_ingest_presign(*, base_url: str, api_key: str, empresa_id: str, tipo: str, year: str, filename: str) -> dict:
+    url = base_url.rstrip("/") + "/api/ingest_facturas_presign"
+    headers = {"Content-Type": "application/json", "X-API-Key": api_key}
+    payload = {
+        "empresa_id": empresa_id,
+        "tipo": tipo,
+        "year": year,
+        "filename": filename,
+        "content_type": "application/pdf",
+        "source": "onedrive",
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Presign error HTTP {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
 
-def s3_put_bytes(key: str, data: bytes, *, content_type: str = "application/pdf") -> None:
-    import boto3
 
-    bucket = (os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET") or "").strip()
-    region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "").strip()
-    if not bucket or not region:
-        raise RuntimeError("S3 no configurado: falta AWS_S3_BUCKET/AWS_REGION")
-    client = boto3.client("s3", region_name=region)
-    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+def upload_via_presign(*, presign_url: str, data: bytes, content_type: str = "application/pdf") -> None:
+    resp = requests.put(presign_url, data=data, headers={"Content-Type": content_type}, timeout=180)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"PUT S3 presign error HTTP {resp.status_code}: {resp.text[:300]}")
 
 
 def main() -> int:
@@ -443,13 +454,25 @@ def main() -> int:
                     )
                     # Descargar bytes -> subir a S3 -> OCR
                     data = graph_download_file_bytes(graph, item_id)
-                    s3_put_bytes(s3_key, data, content_type="application/pdf")
+                    signed = crm_ingest_presign(
+                        base_url=crm_base_url,
+                        api_key=ingest_key,
+                        empresa_id=empresa_id,
+                        tipo=tipo.upper(),
+                        year=year,
+                        filename=name,
+                    )
+                    presign_url = str(signed.get("url") or "").strip()
+                    final_key = str(signed.get("key") or "").strip()
+                    if not presign_url or not final_key:
+                        raise RuntimeError("Respuesta presign inválida (faltan url/key)")
+                    upload_via_presign(presign_url=presign_url, data=data, content_type="application/pdf")
                     source_hint = f"onedrive item={item_id} lastModified={last_mod}"
                     crm_ingest_ocr(
                         base_url=crm_base_url,
                         api_key=ingest_key,
                         empresa_id=empresa_id,
-                        s3_key=s3_key,
+                        s3_key=final_key,
                         tipo=tipo.upper(),
                         filename=name,
                         source_hint=source_hint,
