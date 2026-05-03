@@ -169,11 +169,17 @@ def meta_get(conn, key: str) -> str:
 
 def meta_set(conn, key: str, value: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
+    # Compat Postgres/SQLite:
+    # - SQLite soporta INSERT OR REPLACE; Postgres no.
+    # - `web.db_backend` reescribe OR REPLACE solo si existe columna `id` en la lista;
+    #   aquí la PK es `key`, así que no se reescribe.
+    # Hacemos delete + insert (mismo efecto).
+    try:
+        conn.execute("DELETE FROM crm_meta WHERE key = ?", (str(key),))
+    except Exception:
+        pass
     conn.execute(
-        """
-        INSERT OR REPLACE INTO crm_meta (key, value, updated_at)
-        VALUES (?, ?, ?)
-        """,
+        "INSERT INTO crm_meta (key, value, updated_at) VALUES (?, ?, ?)",
         (str(key), str(value), now),
     )
     conn.commit()
