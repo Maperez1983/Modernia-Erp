@@ -20564,7 +20564,7 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
         INSERT INTO inmuebles (
           id, empresa_id, referencia, direccion, referencia_catastral, tipo_operacion, tipo_inmueble, precio_objetivo, estado, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
