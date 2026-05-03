@@ -109,6 +109,34 @@ def request_json_with_retries(
             _sleep_with_jitter(base_delay_s * (2 ** (attempt - 1)))
     raise RuntimeError(f"HTTP {last_status}: {last_text}")
 
+def warmup_crm(*, base_url: str, attempts: int = 12) -> None:
+    """
+    Evita fallos 502 por cold start / despliegues en Render.
+    Espera a que `/api/health` devuelva 200 antes de empezar a ingerir.
+    """
+    url = base_url.rstrip("/") + "/api/health"
+    last_err = ""
+    attempts = max(1, int(attempts or 1))
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = requests.get(url, timeout=20)
+            text = (resp.text or "")[:200].replace("\n", " ").strip()
+            if resp.status_code == 200:
+                return
+            last_err = f"HTTP {resp.status_code}: {text}"
+            if resp.status_code in RETRY_HTTP_STATUS or resp.status_code >= 500:
+                if attempt < attempts:
+                    _sleep_with_jitter(min(30.0, 2.0 ** (attempt - 1)))
+                    continue
+        except requests.exceptions.RequestException as exc:
+            last_err = f"{type(exc).__name__}: {exc}"
+            if attempt < attempts:
+                _sleep_with_jitter(min(30.0, 2.0 ** (attempt - 1)))
+                continue
+        break
+    raise RuntimeError(f"CRM no disponible ({url}) tras {attempts} intentos: {last_err}")
+
+
 
 def _split_csv(value: str) -> list[str]:
     raw = str(value or "").strip()
@@ -540,7 +568,8 @@ def crm_ingest_ocr(
         "source": "onedrive",
         "source_hint": source_hint,
     }
-    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=120, attempts=6, base_delay_s=1.0)
+    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=120, attempts=10, base_delay_s=2.0)
+
 
 def crm_ingest_presign(
     *,
@@ -563,7 +592,7 @@ def crm_ingest_presign(
         "content_type": "application/pdf",
         "source": "onedrive",
     }
-    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=60, attempts=6, base_delay_s=1.0)
+    return request_json_with_retries("POST", url, headers=headers, json_body=payload, timeout_s=60, attempts=10, base_delay_s=2.0)
 
 
 def upload_via_presign(*, presign_url: str, data: bytes, content_type: str = "application/pdf") -> None:
@@ -630,6 +659,14 @@ def main() -> int:
     try:
         ensure_crm_meta(conn)
 
+        # Warm-up antes de empezar a subir PDFs (evita 502 por cold start/despliegues).
+        try:
+            warmup_crm(base_url=crm_base_url, attempts=12)
+        except Exception as exc:
+            msg = str(exc).replace('\n', ' ').strip()
+            print(f"[ERROR] warmup CRM: {type(exc).__name__}: {msg[:300]}", file=sys.stderr)
+            return 1
+
         if onedrive_mode == "rclone":
             processed_total = 0
             skipped_total = 0
@@ -656,7 +693,16 @@ def main() -> int:
                     print(
                         f"[rclone] remote='{rclone_remote}' root='{root}' empresa_alias='{empresa_alias}' empresa_id='{empresa_id}' limit={ingest_limit}"
                     )
-                    items = rclone_lsjson(remote=rclone_remote, path=root)
+                    try:
+                        items = rclone_lsjson(remote=rclone_remote, path=root)
+                    except Exception as exc:
+                        errors_total += 1
+                        try:
+                            msg = str(exc).replace('\n', ' ').strip()
+                            print(f"[ERROR] rclone lsjson: {type(exc).__name__}: {msg[:400]}", file=sys.stderr)
+                        except Exception:
+                            pass
+                        continue
                     processed = 0
                     skipped = 0
                     errors = 0
@@ -716,7 +762,8 @@ def main() -> int:
                             errors += 1
                             errors_total += 1
                             try:
-                                print(f"[ERROR] rclone item: {type(exc).__name__}: {exc}", file=sys.stderr)
+                                msg = str(exc).replace('\n', ' ').strip()
+                                print(f"[ERROR] rclone item: {type(exc).__name__}: {msg[:500]}", file=sys.stderr)
                             except Exception:
                                 pass
 
@@ -724,7 +771,11 @@ def main() -> int:
                     print(f"[rclone done] root='{root}' processed={processed} skipped={skipped} errors={errors}")
 
             print(f"[done] mode=rclone processed={processed_total} skipped={skipped_total} errors={errors_total}")
-            return 0 if errors_total == 0 else 1
+            fail_on_errors = str(os.environ.get("ONEDRIVE_FAIL_ON_ERRORS") or "").strip().lower() in {"1", "true", "yes", "on"}
+            if fail_on_errors:
+                return 0 if errors_total == 0 else 1
+            # Evita que Render marque el cron como "failed" por errores puntuales (502/transitorios).
+            return 0 if (processed_total > 0 or skipped_total > 0) else (0 if errors_total == 0 else 1)
 
         access_token, _refresh_used = graph_refresh_access_token(
             conn,
@@ -831,7 +882,8 @@ def main() -> int:
                 except Exception as exc:
                     errors += 1
                     try:
-                        print(f"[ERROR] item: {type(exc).__name__}: {exc}", file=sys.stderr)
+                        msg = str(exc).replace('\n', ' ').strip()
+                        print(f"[ERROR] item: {type(exc).__name__}: {msg[:500]}", file=sys.stderr)
                     except Exception:
                         pass
 
@@ -844,7 +896,10 @@ def main() -> int:
         if errors == 0 and new_delta_link:
             meta_set(conn, delta_key, new_delta_link)
         print(f"[done] processed={processed} skipped={skipped} errors={errors}")
-        return 0 if errors == 0 else 1
+        fail_on_errors = str(os.environ.get("ONEDRIVE_FAIL_ON_ERRORS") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if fail_on_errors:
+            return 0 if errors == 0 else 1
+        return 0 if (processed > 0 or skipped > 0) else (0 if errors == 0 else 1)
     finally:
         try:
             conn.close()
