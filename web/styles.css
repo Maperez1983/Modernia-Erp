@@ -3644,6 +3644,10 @@ body.theme-operativa .workspace-home-count {
   align-items: start;
 }
 
+.app-lightning-shell--sidebar.no-side {
+  grid-template-columns: 1fr;
+}
+
 .app-lightning-sidebar {
   position: sticky;
   top: calc(14px + var(--safe-top));
@@ -3657,6 +3661,15 @@ body.theme-operativa .workspace-home-count {
     radial-gradient(circle at 30% -20%, rgba(255, 255, 255, 0.18), transparent 58%),
     linear-gradient(180deg, rgba(var(--sage-rgb), 0.92), rgba(19, 122, 72, 0.92));
   color: rgba(255, 255, 255, 0.98);
+}
+
+/* Explorer: evita duplicar navegación (sidebar verde + barra canónica). */
+#explorerSection .app-lightning-shell--sidebar {
+  grid-template-columns: 1fr;
+}
+
+#explorerSection #explorerLightningSidebar {
+  display: none;
 }
 
 .app-sidehead {
