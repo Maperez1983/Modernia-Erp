@@ -33202,6 +33202,10 @@ const updateTableVisibility = () => {
   if (viewTabs) {
     // Dentro del shell "Lightning" el tab-bar general es duplicado (confunde).
     viewTabs.classList.toggle("hidden", isTecnocloudShellContext);
+    // Mantener sidebar "Explorer" sincronizada con el tab-bar (si se oculta el tab-bar, también se oculta el sidebar).
+    try {
+      syncExplorerLightningSidebar();
+    } catch (e) {}
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
