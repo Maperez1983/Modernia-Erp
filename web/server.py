@@ -11772,6 +11772,59 @@ def ensure_factura_doc_link(
     return doc_id
 
 
+def _extract_matricula_from_campos_ocr(campos_ocr):
+    raw = str(campos_ocr or "").strip()
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            val = payload.get("matricula") or payload.get("MATRICULA") or payload.get("Matrícula") or ""
+            return str(val or "").strip()
+    except Exception:
+        pass
+    m = re.search(r"([0-9]{4}\s*[A-Z]{3})", raw.upper())
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _normalize_plate_for_db(value):
+    raw = re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+    if not raw:
+        return ""
+    if re.match(r"^\d{4}[A-Z]{3}$", raw):
+        return f"{raw[:4]} {raw[4:]}"
+    if 5 <= len(raw) <= 10 and re.search(r"[A-Z]", raw) and re.search(r"\d", raw):
+        return raw
+    return ""
+
+
+def _maybe_update_seguro_matricula(conn, seguro_row, campos_ocr, now):
+    if not seguro_row:
+        return
+    try:
+        seguro_id = seguro_row["id"]
+        ramo = (seguro_row.get("ramo") or "") if hasattr(seguro_row, 'get') else (seguro_row["ramo"] or "")
+        ramo_key = normalize_lookup_text(ramo)
+        is_auto = any(token in ramo_key for token in ("AUTO", "MOTO", "VEHICULO", "AUTOMOVIL"))
+        if not is_auto:
+            return
+        current = (seguro_row.get("matricula") or "") if hasattr(seguro_row, 'get') else ""
+        if str(current).strip():
+            return
+        val = _extract_matricula_from_campos_ocr(campos_ocr)
+        plate = _normalize_plate_for_db(val)
+        if not plate:
+            return
+        conn.execute(
+            "UPDATE seguros SET matricula = ?, updated_at = datetime(?) WHERE id = ? AND (matricula IS NULL OR TRIM(matricula) = '')",
+            (plate, now, seguro_id),
+        )
+    except Exception:
+        return
+
+
 def apply_gestoria_import_document(conn, document_row, now):
     if not isinstance(document_row, dict):
         document_row = dict(document_row)
@@ -24383,6 +24436,11 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
                 exists["id"],
             ),
         )
+
+        try:
+            _maybe_update_seguro_matricula(conn, seguro_row, campos_ocr, now)
+        except Exception:
+            pass
         return exists["id"]
     # Fallback: si ya existe doc por referencia de la póliza, actualizarlo.
     by_ref = conn.execute(
@@ -24421,6 +24479,11 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
                 by_ref["id"],
             ),
         )
+
+        try:
+            _maybe_update_seguro_matricula(conn, seguro_row, campos_ocr, now)
+        except Exception:
+            pass
         return by_ref["id"]
     nombre_doc = seguro_row["poliza_numero"] or seguro_row["tomador"] or "Póliza seguro"
     notas_doc = " · ".join([value for value in (seguro_row["compania"], seguro_row["ramo"]) if value])
@@ -29177,6 +29240,7 @@ def ensure_tables(db_path):
         ensure_column(conn, "seguros", "version_grupo", "version_grupo TEXT")
         ensure_column(conn, "seguros", "tipo_vigencia", "tipo_vigencia TEXT")
         ensure_column(conn, "seguros", "datos_ramo_json", "datos_ramo_json TEXT")
+        ensure_column(conn, "seguros", "matricula", "matricula TEXT")
     except Exception:
         pass
     try:
@@ -69728,6 +69792,27 @@ class Handler(BaseHTTPRequestHandler):
             uploaded_clause = uploaded_policy_filter("s")
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
+
+            pdf_assoc_expr = (
+                "(NULLIF(TRIM(s.poliza_url), '') IS NOT NULL OR NULLIF(TRIM(s.poliza_key), '') IS NOT NULL)"
+                " OR EXISTS ("
+                "   SELECT 1 FROM gestoria_docs gd"
+                "   WHERE gd.empresa_id = s.empresa_id"
+                "     AND gd.cliente_id = s.cliente_id"
+                "     AND gd.referencia_id = s.id"
+                "     AND (LOWER(COALESCE(gd.referencia_tipo,'')) = 'seguros' OR LOWER(COALESCE(gd.tipo,'')) = 'seguros')"
+                "     AND (NULLIF(TRIM(COALESCE(gd.doc_url,'')), '') IS NOT NULL OR NULLIF(TRIM(COALESCE(gd.doc_key,'')), '') IS NOT NULL)"
+                " )"
+                " OR EXISTS ("
+                "   SELECT 1 FROM workspace_documentos_inbox wi"
+                "   WHERE wi.empresa_id = s.empresa_id"
+                "     AND wi.cliente_id = s.cliente_id"
+                "     AND LOWER(COALESCE(wi.servicio,'')) = 'seguros'"
+                "     AND ((LOWER(COALESCE(wi.origen_tipo,'')) = 'seguros' AND wi.origen_id = s.id) OR (LOWER(COALESCE(wi.origen_tipo,'')) = 'poliza' AND wi.origen_id = s.id))"
+                "     AND (NULLIF(TRIM(COALESCE(wi.doc_url,'')), '') IS NOT NULL OR NULLIF(TRIM(COALESCE(wi.doc_key,'')), '') IS NOT NULL)"
+                " )"
+                ")"
+            )
             uploaded_param = resolve_uploaded_only_param(
                 conn,
                 uploaded_only,
@@ -69817,7 +69902,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
@@ -69828,7 +69913,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
@@ -69840,7 +69925,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                   AND {poliza_strict_expr} IS NOT NULL
                 """,
@@ -69852,7 +69937,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                   AND {poliza_strict_expr} IS NULL
                 """,
@@ -69865,7 +69950,7 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {fecha_venc_expr} IS NOT NULL
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                   AND DATE({fecha_venc_expr}) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
@@ -69911,7 +69996,7 @@ class Handler(BaseHTTPRequestHandler):
                     compania IS NULL OR TRIM(compania) = '' OR
                     fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
                   )
-                  AND {in_vigor_expr}
+                  AND {pdf_assoc_expr}
                   AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
@@ -69936,7 +70021,7 @@ class Handler(BaseHTTPRequestHandler):
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
-                    AND {in_vigor_expr}
+                    AND {pdf_assoc_expr}
                     AND {exclude_sin_seguro}
                   GROUP BY 1
                 ) t
@@ -69953,7 +70038,7 @@ class Handler(BaseHTTPRequestHandler):
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
-                    AND {in_vigor_expr}
+                    AND {pdf_assoc_expr}
                     AND {exclude_sin_seguro}
                   GROUP BY 1
                 ) t

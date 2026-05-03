@@ -37065,7 +37065,6 @@ const createClienteForHipoteca = async (nombre, sourceRow, columns) => {
     id: randomId(),
     tipo_persona: "Física",
     nombre: String(nombre || "").trim(),
-    procedencia_canal: "Importación",
     procedencia_detalle: "Financiaciones (BDT)",
   };
   const nif = getHipotecaFieldValue(sourceRow, columns, ["nif", "dni", "documento"]);
@@ -55313,13 +55312,30 @@ const createClienteFromOcr = async (type, fields) => {
     nombre,
     tipo_persona: "Física",
     nif,
-    procedencia_canal: "Importación",
     procedencia_detalle: "Seguros (OCR)",
     telefono: fields.telefono || "",
     email: fields.email || "",
     direccion: fields.direccion || "",
     fecha_nacimiento: fields.fecha_nacimiento || "",
   };
+  const procedenciaControls =
+    type === "bdt"
+      ? {
+          canalEl: segurosBdtOcrCanal,
+          userEl: segurosBdtOcrCanalUser,
+          clienteEl: segurosBdtOcrCanalCliente,
+        }
+      : {
+          canalEl: segurosOcrCanal,
+          userEl: segurosOcrCanalUser,
+          clienteEl: segurosOcrCanalCliente,
+        };
+  const { procedencia, error } = readProcedenciaFromControls(procedenciaControls);
+  if (error) {
+    if (ctx.statusEl) ctx.statusEl.textContent = error;
+    return;
+  }
+  Object.assign(payload, procedencia || {});
   try {
     const res = await fetch("/api/clientes", {
       method: "POST",
@@ -66892,6 +66908,14 @@ if (segurosBdtOcrLink) {
 }
 
 if (segurosOcrClienteCreate) {
+  bindCanalProcedenciaControls({
+    canalEl: segurosOcrCanal,
+    userWrap: segurosOcrCanalUserWrap,
+    userEl: segurosOcrCanalUser,
+    clienteWrap: segurosOcrCanalClienteWrap,
+    clienteEl: segurosOcrCanalCliente,
+    defaultCanal: "Oficina",
+  });
   segurosOcrClienteCreate.addEventListener("click", () => {
     createClienteFromOcr("alta", getSegurosOcrClienteFields());
   });
@@ -66917,6 +66941,14 @@ if (segurosOcrClienteOpen) {
 }
 
 if (segurosBdtOcrClienteCreate) {
+  bindCanalProcedenciaControls({
+    canalEl: segurosBdtOcrCanal,
+    userWrap: segurosBdtOcrCanalUserWrap,
+    userEl: segurosBdtOcrCanalUser,
+    clienteWrap: segurosBdtOcrCanalClienteWrap,
+    clienteEl: segurosBdtOcrCanalCliente,
+    defaultCanal: "Oficina",
+  });
   segurosBdtOcrClienteCreate.addEventListener("click", () => {
     createClienteFromOcr("bdt", getSegurosBdtOcrClienteFields());
   });
@@ -74015,6 +74047,14 @@ if (fincasSegurosForm) {
 
 if (clientesForm) {
   bindPostalLookup(clientesForm);
+  bindCanalProcedenciaControls({
+    canalEl: clientesAltaCanal,
+    userWrap: clientesAltaCanalUserWrap,
+    userEl: clientesAltaCanalUser,
+    clienteWrap: clientesAltaCanalClienteWrap,
+    clienteEl: clientesAltaCanalCliente,
+    defaultCanal: "Oficina",
+  });
   clientesForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (clientesFormStatus) {
@@ -74022,6 +74062,16 @@ if (clientesForm) {
     }
     const formData = new FormData(clientesForm);
     const payload = Object.fromEntries(formData.entries());
+    const { procedencia, error } = readProcedenciaFromControls({
+      canalEl: clientesAltaCanal,
+      userEl: clientesAltaCanalUser,
+      clienteEl: clientesAltaCanalCliente,
+    });
+    if (error) {
+      if (clientesFormStatus) clientesFormStatus.textContent = error;
+      return;
+    }
+    Object.assign(payload, procedencia || {});
     const tipoPersona = payload.tipo_persona || "Física";
     const nombreBase = String(payload.nombre || "").trim();
     const apellido1 = String(payload.apellido1 || "").trim();
@@ -74077,7 +74127,7 @@ if (clientesForm) {
           return;
         }
         state.lastCreatedClientId = data.id || newClienteId;
-        await autoLinkCurrentUserServices(state.lastCreatedClientId);
+        await autoLinkCurrentUserServices(state.lastCreatedClientId, procedencia || null);
         if (clientesFormStatus) {
           const user = getUserByValue(getCurrentUser());
           const services = user && !isPrivilegedService(user.servicio)
