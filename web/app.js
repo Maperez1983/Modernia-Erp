@@ -66406,6 +66406,37 @@ if (segurosRecibosSearch) {
     }, 200);
   });
 }
+if (segurosRecibosEstadoFilter) {
+  segurosRecibosEstadoFilter.addEventListener("change", () => {
+    loadSegurosRecibos();
+  });
+}
+if (segurosRecibosFrom) {
+  segurosRecibosFrom.addEventListener("change", () => {
+    loadSegurosRecibos();
+  });
+}
+if (segurosRecibosTo) {
+  segurosRecibosTo.addEventListener("change", () => {
+    loadSegurosRecibos();
+  });
+}
+if (segurosRecibosExportBtn) {
+  segurosRecibosExportBtn.addEventListener("click", () => {
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa?.id) return;
+    const params = new URLSearchParams({ empresa_id: empresa.id });
+    const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
+    const estado = segurosRecibosEstadoFilter ? String(segurosRecibosEstadoFilter.value || "").trim() : "";
+    const dateFrom = segurosRecibosFrom ? String(segurosRecibosFrom.value || "").trim() : "";
+    const dateTo = segurosRecibosTo ? String(segurosRecibosTo.value || "").trim() : "";
+    if (q) params.set("q", q);
+    if (estado) params.set("estado", estado);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+    window.open(`/api/seguros_recibos_export?${params.toString()}`, "_blank", "noopener,noreferrer");
+  });
+}
 
 if (segurosSiniestrosSearch) {
   segurosSiniestrosSearch.addEventListener("input", () => {
