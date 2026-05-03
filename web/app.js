@@ -2153,6 +2153,11 @@ const captacionFormStatus = document.getElementById("captacionFormStatus");
 const clientesAltaSection = document.getElementById("clientesAltaSection");
 const clientesForm = document.getElementById("clientesForm");
 const clientesFormStatus = document.getElementById("clientesFormStatus");
+const clientesAltaCanal = document.getElementById("clientesAltaCanal");
+const clientesAltaCanalClienteWrap = document.getElementById("clientesAltaCanalClienteWrap");
+const clientesAltaCanalCliente = document.getElementById("clientesAltaCanalCliente");
+const clientesAltaCanalUserWrap = document.getElementById("clientesAltaCanalUserWrap");
+const clientesAltaCanalUser = document.getElementById("clientesAltaCanalUser");
 const clienteTipoPersona = document.getElementById("clienteTipoPersona");
 const clienteAltaPersonaFields = clientesForm
   ? clientesForm.querySelectorAll('[data-cliente-persona="fisica"]')
@@ -2365,12 +2370,17 @@ const gestoriaCrmOpsSplit = document.getElementById("gestoriaCrmOpsSplit");
 const gestoriaCrmPipelineCard = document.getElementById("gestoriaCrmPipelineCard");
 const gestoriaBdtTable = document.getElementById("gestoriaBdtTable");
 const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
-const gestoriaAltaForm = document.getElementById("gestoriaAltaForm");
-const gestoriaAltaStatus = document.getElementById("gestoriaAltaStatus");
-const gestoriaAltaTipoPersona = document.getElementById("gestoriaAltaTipoPersona");
-const gestoriaAltaPersonaFields = gestoriaAltaForm
-  ? gestoriaAltaForm.querySelectorAll('[data-gestoria-persona="fisica"]')
-  : [];
+	const gestoriaAltaForm = document.getElementById("gestoriaAltaForm");
+	const gestoriaAltaStatus = document.getElementById("gestoriaAltaStatus");
+	const gestoriaAltaTipoPersona = document.getElementById("gestoriaAltaTipoPersona");
+	const gestoriaAltaCanal = document.getElementById("gestoriaAltaCanal");
+	const gestoriaAltaCanalClienteWrap = document.getElementById("gestoriaAltaCanalClienteWrap");
+	const gestoriaAltaCanalCliente = document.getElementById("gestoriaAltaCanalCliente");
+	const gestoriaAltaCanalUserWrap = document.getElementById("gestoriaAltaCanalUserWrap");
+	const gestoriaAltaCanalUser = document.getElementById("gestoriaAltaCanalUser");
+	const gestoriaAltaPersonaFields = gestoriaAltaForm
+	  ? gestoriaAltaForm.querySelectorAll('[data-gestoria-persona="fisica"]')
+	  : [];
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
@@ -2782,17 +2792,27 @@ const seguroOcrFechaEfecto = document.getElementById("seguroOcrFechaEfecto");
 const seguroOcrFechaVencimiento = document.getElementById("seguroOcrFechaVencimiento");
 const seguroOcrPrimaNeta = document.getElementById("seguroOcrPrimaNeta");
 const seguroOcrPrimaTotal = document.getElementById("seguroOcrPrimaTotal");
-const seguroOcrComisionPct = document.getElementById("seguroOcrComisionPct");
-const seguroOcrComisionEst = document.getElementById("seguroOcrComisionEst");
-const seguroOcrComisionSource = document.getElementById("seguroOcrComisionSource");
-const segurosBdtOcrFile = document.getElementById("segurosBdtOcrFile");
-const segurosBdtOcrButton = document.getElementById("segurosBdtOcrButton");
-const segurosBdtOcrStatus = document.getElementById("segurosBdtOcrStatus");
-const segurosBdtOcrClienteStatus = document.getElementById("segurosBdtOcrClienteStatus");
-const segurosBdtOcrClienteCreate = document.getElementById("segurosBdtOcrClienteCreate");
-const segurosBdtOcrClienteAddService = document.getElementById("segurosBdtOcrClienteAddService");
-const segurosBdtOcrClienteOpen = document.getElementById("segurosBdtOcrClienteOpen");
-const segurosBdtOcrTomador = document.getElementById("segurosBdtOcrTomador");
+	const seguroOcrComisionPct = document.getElementById("seguroOcrComisionPct");
+	const seguroOcrComisionEst = document.getElementById("seguroOcrComisionEst");
+	const seguroOcrComisionSource = document.getElementById("seguroOcrComisionSource");
+	const segurosOcrCanal = document.getElementById("segurosOcrCanal");
+	const segurosOcrCanalClienteWrap = document.getElementById("segurosOcrCanalClienteWrap");
+	const segurosOcrCanalCliente = document.getElementById("segurosOcrCanalCliente");
+	const segurosOcrCanalUserWrap = document.getElementById("segurosOcrCanalUserWrap");
+	const segurosOcrCanalUser = document.getElementById("segurosOcrCanalUser");
+	const segurosBdtOcrFile = document.getElementById("segurosBdtOcrFile");
+	const segurosBdtOcrButton = document.getElementById("segurosBdtOcrButton");
+	const segurosBdtOcrStatus = document.getElementById("segurosBdtOcrStatus");
+	const segurosBdtOcrClienteStatus = document.getElementById("segurosBdtOcrClienteStatus");
+	const segurosBdtOcrClienteCreate = document.getElementById("segurosBdtOcrClienteCreate");
+	const segurosBdtOcrClienteAddService = document.getElementById("segurosBdtOcrClienteAddService");
+	const segurosBdtOcrClienteOpen = document.getElementById("segurosBdtOcrClienteOpen");
+	const segurosBdtOcrCanal = document.getElementById("segurosBdtOcrCanal");
+	const segurosBdtOcrCanalClienteWrap = document.getElementById("segurosBdtOcrCanalClienteWrap");
+	const segurosBdtOcrCanalCliente = document.getElementById("segurosBdtOcrCanalCliente");
+	const segurosBdtOcrCanalUserWrap = document.getElementById("segurosBdtOcrCanalUserWrap");
+	const segurosBdtOcrCanalUser = document.getElementById("segurosBdtOcrCanalUser");
+	const segurosBdtOcrTomador = document.getElementById("segurosBdtOcrTomador");
 const segurosBdtOcrDni = document.getElementById("segurosBdtOcrDni");
 const segurosBdtOcrCompania = document.getElementById("segurosBdtOcrCompania");
 const segurosBdtOcrPoliza = document.getElementById("segurosBdtOcrPoliza");
@@ -2924,9 +2944,14 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 					  }
 					} catch (e) {}
 					const crmClienteModal = document.getElementById("crmClienteModal");
-				const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
-				const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
-			const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
+					const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
+					const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
+					const crmClienteCanal = document.getElementById("crmClienteCanal");
+					const crmClienteCanalClienteWrap = document.getElementById("crmClienteCanalClienteWrap");
+					const crmClienteCanalCliente = document.getElementById("crmClienteCanalCliente");
+					const crmClienteCanalUserWrap = document.getElementById("crmClienteCanalUserWrap");
+					const crmClienteCanalUser = document.getElementById("crmClienteCanalUser");
+				const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
 			const crmClienteCreateDuplicates = document.getElementById("crmClienteCreateDuplicates");
 			const crmCaptacionModal = document.getElementById("crmCaptacionModal");
 			const crmCaptacionCloseBtn = document.getElementById("crmCaptacionCloseBtn");
@@ -21588,14 +21613,23 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
     tipo_persona: "Física",
     nombre,
   };
-  const nif = String(payload?.nif || payload?.dni || "").trim();
-  const telefono = String(payload?.telefono || "").trim();
-  const email = String(payload?.email || "").trim();
-  const direccion = String(payload?.direccion || "").trim();
-  if (nif) clientePayload.nif = nif;
-  if (telefono) clientePayload.telefono = telefono;
-  if (email) clientePayload.email = email;
-  if (direccion) clientePayload.direccion = direccion;
+	const nif = String(payload?.nif || payload?.dni || "").trim();
+	const telefono = String(payload?.telefono || "").trim();
+	const email = String(payload?.email || "").trim();
+	const direccion = String(payload?.direccion || "").trim();
+	const procedencia_canal = String(payload?.procedencia_canal || "").trim();
+	const procedencia_user_id = String(payload?.procedencia_user_id || "").trim();
+	const procedencia_cliente_id = String(payload?.procedencia_cliente_id || "").trim();
+	const captado_por_user_id =
+	  String(payload?.captado_por_user_id || "").trim() || procedencia_user_id;
+	if (nif) clientePayload.nif = nif;
+	if (telefono) clientePayload.telefono = telefono;
+	if (email) clientePayload.email = email;
+	if (direccion) clientePayload.direccion = direccion;
+	if (procedencia_canal) clientePayload.procedencia_canal = procedencia_canal;
+	if (procedencia_user_id) clientePayload.procedencia_user_id = procedencia_user_id;
+	if (procedencia_cliente_id) clientePayload.procedencia_cliente_id = procedencia_cliente_id;
+	if (captado_por_user_id) clientePayload.captado_por_user_id = captado_por_user_id;
 
   const response = await fetch("/api/clientes", {
     method: "POST",
@@ -21625,17 +21659,20 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
     throw new Error("No se pudo crear el cliente.");
   }
 
-  await postJsonWithDbRetry(
-    "/api/clientes_link",
-    {
-      cliente_id: clienteId,
-      empresa_id: empresa.id,
-      servicio: "Inmobiliaria",
-      estado: "Activo",
-      fecha_inicio: new Date().toISOString().slice(0, 10),
-    },
-    { retries: 2, delayMs: 140 }
-  );
+	await postJsonWithDbRetry(
+	  "/api/clientes_link",
+	  {
+	    cliente_id: clienteId,
+	    empresa_id: empresa.id,
+	    servicio: "Inmobiliaria",
+	    captado_por_user_id: captado_por_user_id || undefined,
+	    procedencia_canal: procedencia_canal || undefined,
+	    procedencia_cliente_id: procedencia_cliente_id || undefined,
+	    estado: "Activo",
+	    fecha_inicio: new Date().toISOString().slice(0, 10),
+	  },
+	  { retries: 2, delayMs: 140 }
+	);
 
   return clienteId;
 };
@@ -38988,6 +39025,116 @@ const ensureClientesAllList = async () => {
   const loaded = Array.isArray(state.clientesAllList) ? state.clientesAllList : [];
   if (loaded.length) return loaded;
   return loadClientesAllList();
+};
+
+const normalizeCanalProcedenciaKey = (value) => normalizeSimple(String(value || "").trim());
+
+const canalIsInternalColaborador = (value) => {
+  const key = normalizeCanalProcedenciaKey(value);
+  return key === "colaborador interno" || key === "interno" || key === "usuario";
+};
+
+const canalIsClienteReferido = (value) => {
+  const key = normalizeCanalProcedenciaKey(value);
+  return key === "cliente referido" || key === "cliente relacionado" || key === "referido";
+};
+
+const populateProcedenciaUserSelect = async (selectEl) => {
+  if (!selectEl) return;
+  try {
+    if (!Array.isArray(state.usersList) || !state.usersList.length) {
+      await loadUsuarios();
+    }
+  } catch (_) {}
+  const current = String(selectEl.value || "").trim();
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Selecciona colaborador"));
+  (state.usersList || []).forEach((user) => {
+    const id = String(user?.id || "").trim();
+    if (!id) return;
+    const nombre = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || id;
+    const servicio = String(user?.servicio || "").trim();
+    const label = servicio ? `${nombre} · ${servicio}` : nombre;
+    selectEl.appendChild(createOption(id, label));
+  });
+  if (current) selectEl.value = current;
+};
+
+const populateProcedenciaClienteSelect = async (selectEl, opts = {}) => {
+  if (!selectEl) return;
+  const excludeId = String(opts.excludeClienteId || "").trim();
+  let list = [];
+  try {
+    list = await ensureClientesAllList();
+  } catch (_) {
+    list = Array.isArray(state.clientesAllList) ? state.clientesAllList : [];
+  }
+  const current = String(selectEl.value || "").trim();
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Selecciona cliente"));
+  (Array.isArray(list) ? list : []).forEach((cliente) => {
+    const id = String(cliente?.id || "").trim();
+    if (!id || (excludeId && id === excludeId)) return;
+    const nombre = formatNombreCliente(cliente?.nombre || "") || id;
+    const nif = String(cliente?.nif || "").trim();
+    const label = [nombre, nif].filter(Boolean).join(" · ");
+    selectEl.appendChild(createOption(id, label));
+  });
+  if (current) selectEl.value = current;
+};
+
+const bindCanalProcedenciaControls = (config = {}) => {
+  const canalEl = config.canalEl;
+  const userWrap = config.userWrap;
+  const userEl = config.userEl;
+  const clienteWrap = config.clienteWrap;
+  const clienteEl = config.clienteEl;
+  const defaultCanal = String(config.defaultCanal || "").trim();
+  const excludeClienteId = String(config.excludeClienteId || "").trim();
+  if (!canalEl) return;
+
+  const apply = async () => {
+    const canal = String(canalEl.value || "").trim();
+    const showUser = canalIsInternalColaborador(canal);
+    const showCliente = canalIsClienteReferido(canal);
+    if (userWrap) userWrap.classList.toggle("hidden", !showUser);
+    if (clienteWrap) clienteWrap.classList.toggle("hidden", !showCliente);
+    if (showUser && userEl) {
+      await populateProcedenciaUserSelect(userEl);
+    }
+    if (showCliente && clienteEl) {
+      await populateProcedenciaClienteSelect(clienteEl, { excludeClienteId });
+    }
+  };
+
+  if (defaultCanal && !String(canalEl.value || "").trim()) {
+    canalEl.value = defaultCanal;
+  }
+  canalEl.addEventListener("change", () => {
+    apply().catch(() => {});
+  });
+  apply().catch(() => {});
+};
+
+const readProcedenciaFromControls = (controls = {}) => {
+  const canal = String(controls.canalEl?.value || "").trim();
+  const procedencia = {
+    procedencia_canal: canal,
+  };
+  if (canalIsInternalColaborador(canal)) {
+    const userId = String(controls.userEl?.value || "").trim();
+    if (!userId) return { error: "Selecciona el colaborador interno." };
+    procedencia.procedencia_user_id = userId;
+    procedencia.captado_por_user_id = userId;
+    return { procedencia };
+  }
+  if (canalIsClienteReferido(canal)) {
+    const clienteId = String(controls.clienteEl?.value || "").trim();
+    if (!clienteId) return { error: "Selecciona el cliente referido." };
+    procedencia.procedencia_cliente_id = clienteId;
+    return { procedencia };
+  }
+  return { procedencia };
 };
 
 const refreshClientesSummary = async () => {
@@ -58847,6 +58994,42 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
     nameInput.style.width = "100%";
     left.appendChild(nameLabel);
     left.appendChild(nameInput);
+    const canalWrap = document.createElement("label");
+    canalWrap.className = "muted";
+    canalWrap.textContent = "Canal";
+    const canalSelect = document.createElement("select");
+    canalSelect.style.maxWidth = "520px";
+    canalSelect.style.width = "100%";
+    canalSelect.appendChild(createOption("", ""));
+    ["Oficina", "Internet", "Cliente referido", "Colaborador interno"].forEach((label) => {
+      canalSelect.appendChild(createOption(label, label));
+    });
+    canalWrap.appendChild(canalSelect);
+    left.appendChild(canalWrap);
+    const clienteRefWrap = document.createElement("label");
+    clienteRefWrap.className = "muted hidden";
+    clienteRefWrap.textContent = "Cliente referido";
+    const clienteRefSelect = document.createElement("select");
+    clienteRefSelect.style.maxWidth = "520px";
+    clienteRefSelect.style.width = "100%";
+    clienteRefWrap.appendChild(clienteRefSelect);
+    left.appendChild(clienteRefWrap);
+    const userRefWrap = document.createElement("label");
+    userRefWrap.className = "muted hidden";
+    userRefWrap.textContent = "Colaborador interno";
+    const userRefSelect = document.createElement("select");
+    userRefSelect.style.maxWidth = "520px";
+    userRefSelect.style.width = "100%";
+    userRefWrap.appendChild(userRefSelect);
+    left.appendChild(userRefWrap);
+    bindCanalProcedenciaControls({
+      canalEl: canalSelect,
+      userWrap: userRefWrap,
+      userEl: userRefSelect,
+      clienteWrap: clienteRefWrap,
+      clienteEl: clienteRefSelect,
+      defaultCanal: "Oficina",
+    });
     const right = document.createElement("div");
     right.className = "inline-actions";
     const createBtn = document.createElement("button");
@@ -58869,18 +59052,27 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
         if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Introduce el nombre para crear el cliente.";
         return;
       }
+      const { procedencia, error } = readProcedenciaFromControls({
+        canalEl: canalSelect,
+        userEl: userRefSelect,
+        clienteEl: clienteRefSelect,
+      });
+      if (error) {
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = error;
+        return;
+      }
       createBtn.disabled = true;
       if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Creando cliente...";
       try {
         const newId = randomId();
-	        const payload = {
-	          id: newId,
-	          nombre,
-	          tipo_persona: "Física",
-	          nif,
-	          procedencia_canal: "Importación",
-	          procedencia_detalle: "Rentas",
-	        };
+        const payload = {
+          id: newId,
+          nombre,
+          tipo_persona: "Física",
+          nif,
+          procedencia_detalle: "Rentas",
+          ...(procedencia || {}),
+        };
         const res = await fetch("/api/clientes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -58902,6 +59094,9 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
             cliente_id: clienteId,
             empresa_id: empresa.id,
             servicio: "Gestoría",
+            captado_por_user_id: procedencia?.captado_por_user_id || undefined,
+            procedencia_canal: procedencia?.procedencia_canal || undefined,
+            procedencia_cliente_id: procedencia?.procedencia_cliente_id || undefined,
             estado: "Activo",
             fecha_inicio: new Date().toISOString().slice(0, 10),
           });
@@ -64075,6 +64270,14 @@ if (crmCaptacionModal) {
 }
 
 if (crmClienteCreateForm) {
+  bindCanalProcedenciaControls({
+    canalEl: crmClienteCanal,
+    userWrap: crmClienteCanalUserWrap,
+    userEl: crmClienteCanalUser,
+    clienteWrap: crmClienteCanalClienteWrap,
+    clienteEl: crmClienteCanalCliente,
+    defaultCanal: "Oficina",
+  });
   crmClienteCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Creando cliente...";
@@ -64090,6 +64293,16 @@ if (crmClienteCreateForm) {
       email: form.get("email"),
       direccion: form.get("direccion"),
     };
+    const { procedencia, error } = readProcedenciaFromControls({
+      canalEl: crmClienteCanal,
+      userEl: crmClienteCanalUser,
+      clienteEl: crmClienteCanalCliente,
+    });
+    if (error) {
+      if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = error;
+      return;
+    }
+    Object.assign(payload, procedencia || {});
     try {
       const clienteId = await createCrmClienteQuick(payload, { preferExisting: false });
       if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Cliente creado.";
@@ -73897,6 +74110,14 @@ if (fincasBdtForm) {
 
 if (gestoriaAltaForm) {
   bindPostalLookup(gestoriaAltaForm);
+  bindCanalProcedenciaControls({
+    canalEl: gestoriaAltaCanal,
+    userWrap: gestoriaAltaCanalUserWrap,
+    userEl: gestoriaAltaCanalUser,
+    clienteWrap: gestoriaAltaCanalClienteWrap,
+    clienteEl: gestoriaAltaCanalCliente,
+    defaultCanal: "Oficina",
+  });
   const updateGestoriaAltaPersona = () => {
     if (!gestoriaAltaTipoPersona || !gestoriaAltaPersonaFields.length) {
       return;
@@ -73940,6 +74161,16 @@ if (gestoriaAltaForm) {
       poblacion: payload.poblacion || "",
       provincia: payload.provincia || "",
     };
+    const { procedencia, error } = readProcedenciaFromControls({
+      canalEl: gestoriaAltaCanal,
+      userEl: gestoriaAltaCanalUser,
+      clienteEl: gestoriaAltaCanalCliente,
+    });
+    if (error) {
+      if (gestoriaAltaStatus) gestoriaAltaStatus.textContent = error;
+      return;
+    }
+    Object.assign(clientePayload, procedencia || {});
     if (!String(clientePayload.nombre).trim()) {
       if (gestoriaAltaStatus) {
         gestoriaAltaStatus.textContent = "Indica el nombre o razón social.";
@@ -73965,6 +74196,9 @@ if (gestoriaAltaForm) {
           cliente_id: clienteId,
           empresa_id: gestoriaEmpresa?.id || fincas.id,
           servicio: "Gestoría",
+          captado_por_user_id: procedencia?.captado_por_user_id || undefined,
+          procedencia_canal: procedencia?.procedencia_canal || undefined,
+          procedencia_cliente_id: procedencia?.procedencia_cliente_id || undefined,
           estado: payload.estado || "Alta",
           fecha_inicio: payload.fecha || "",
           fecha_fin: payload.fecha_baja || "",
