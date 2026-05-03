@@ -18,6 +18,19 @@ CREATE TABLE IF NOT EXISTS empresas (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS empresa_aliases (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  alias_norm TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source, alias_norm),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+CREATE INDEX IF NOT EXISTS idx_empresa_aliases_empresa_id ON empresa_aliases (empresa_id);
+
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY,
   nombre TEXT NOT NULL UNIQUE,

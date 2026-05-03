@@ -827,6 +827,7 @@ APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS",
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
+INGEST_API_KEY = str(os.environ.get("APP_INGEST_API_KEY") or "").strip()
 AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
     "/api/build_info",
@@ -844,11 +845,39 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
+    "/api/ingest_facturas_presign",
+    "/api/ingest_facturas_ocr",
 }
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 AUTH_SESSION_DB_REFRESH_AT = {}
 AUTH_SESSION_DB_REFRESH_SECONDS = max(15, int(os.environ.get("APP_SESSION_DB_REFRESH_SECONDS", "90") or "90"))
+
+
+def _ct_eq(a: str, b: str) -> bool:
+    try:
+        return hmac.compare_digest(str(a or ""), str(b or ""))
+    except Exception:
+        return False
+
+
+def require_ingest_api_key(handler) -> bool:
+    """
+    Autorización machine-to-machine para ingestas (Power Automate, etc.).
+    Usa `APP_INGEST_API_KEY` y header `X-API-Key` o `Authorization: Bearer ...`.
+    """
+    if not INGEST_API_KEY:
+        json_response(handler, {"error": "Ingest no configurado", "detail": "Configura APP_INGEST_API_KEY"}, status=400)
+        return False
+    raw = str(handler.headers.get("X-API-Key") or "").strip()
+    if not raw:
+        raw = str(handler.headers.get("Authorization") or "").strip()
+        if raw.lower().startswith("bearer "):
+            raw = raw.split(" ", 1)[1].strip()
+    if not raw or not _ct_eq(raw, INGEST_API_KEY):
+        json_response(handler, {"error": "No autorizado"}, status=401)
+        return False
+    return True
 
 
 class DbUnavailableError(RuntimeError):
@@ -913,6 +942,88 @@ def ensure_crm_stage_events_schema(conn):
         )
     except Exception:
         pass
+
+
+def ensure_empresa_aliases_schema(conn):
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS empresa_aliases (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          alias TEXT NOT NULL,
+          alias_norm TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (source, alias_norm),
+          FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_empresa_aliases_empresa_id ON empresa_aliases (empresa_id)")
+    except Exception:
+        pass
+
+
+def resolve_empresa_id_from_alias(conn, alias: str, *, source: str = "onedrive") -> str:
+    """
+    Resuelve `empresa_id` a partir de un alias externo (p.ej. nombre de carpeta OneDrive).
+    - Primero: tabla `empresa_aliases` (match exacto por alias_norm).
+    - Fallback conservador: si hay 1 match único por nombre de empresa (contains), se devuelve y se auto-registra el alias.
+    """
+    if not conn:
+        return ""
+    raw = str(alias or "").strip()
+    if not raw:
+        return ""
+    ensure_empresa_aliases_schema(conn)
+    source_key = (source or "onedrive").strip().lower() or "onedrive"
+    alias_norm = normalize_lookup_text(raw)
+    if not alias_norm:
+        return ""
+    row = conn.execute(
+        """
+        SELECT empresa_id
+        FROM empresa_aliases
+        WHERE source = ? AND alias_norm = ?
+        LIMIT 1
+        """,
+        (source_key, alias_norm),
+    ).fetchone()
+    if row and row.get("empresa_id"):
+        return str(row["empresa_id"]).strip()
+
+    empresas = conn.execute("SELECT id, nombre FROM empresas WHERE COALESCE(activo, 1) = 1").fetchall()
+    candidates = []
+    for e in empresas or []:
+        try:
+            nombre_norm = normalize_lookup_text(e["nombre"] or "")
+        except Exception:
+            continue
+        if not nombre_norm:
+            continue
+        if alias_norm == nombre_norm or alias_norm in nombre_norm:
+            candidates.append(str(e["id"]).strip())
+    if len(candidates) != 1:
+        return ""
+    empresa_id = candidates[0]
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO empresa_aliases (
+              id, empresa_id, source, alias, alias_norm, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, datetime('now'), datetime('now')
+            )
+            """,
+            (os.urandom(16).hex(), empresa_id, source_key, raw, alias_norm),
+        )
+    except Exception:
+        pass
+    return empresa_id
 
 
 def _session_user_label(session):
@@ -43137,6 +43248,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fiscal_scenario_delete",
             "/api/fiscal_venta_pdf",
             "/api/s3_presign",
+            "/api/ingest_facturas_presign",
+            "/api/ingest_facturas_ocr",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
@@ -43742,6 +43855,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/copilot_web_fetch",
             "/api/copilot_web_ask",
             "/api/s3_presign",
+            "/api/ingest_facturas_presign",
+            "/api/ingest_facturas_ocr",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
@@ -43871,6 +43986,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/s3_presign",
+            "/api/ingest_facturas_presign",
+            "/api/ingest_facturas_ocr",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
@@ -45169,6 +45286,163 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+            return
+
+        if parsed.path == "/api/ingest_facturas_presign":
+            if not require_ingest_api_key(self):
+                return
+            filename = str(payload.get("filename") or "factura.pdf").strip() or "factura.pdf"
+            content_type = str(payload.get("content_type") or "application/pdf").strip() or "application/pdf"
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                alias = (
+                    payload.get("empresa_alias")
+                    or payload.get("empresa_folder")
+                    or payload.get("empresa")
+                    or payload.get("empresa_nombre")
+                    or ""
+                )
+                empresa_id = resolve_empresa_id_from_alias(
+                    conn,
+                    alias,
+                    source=str(payload.get("source") or "onedrive"),
+                )
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido", "detail": "Incluye empresa_id o empresa_alias"}, status=400)
+                return
+            empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            if not empresa:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
+            tipo_raw = str(payload.get("tipo") or payload.get("carpeta") or "").strip().lower()
+            tipo_key = ""
+            if "emit" in tipo_raw or tipo_raw in {"ventas", "venta", "salidas"}:
+                tipo_key = "emitidas"
+            elif "recib" in tipo_raw or tipo_raw in {"compras", "compra", "entradas"}:
+                tipo_key = "recibidas"
+            if not tipo_key:
+                json_response(self, {"error": "tipo requerido", "detail": "Usa tipo=EMITIDAS o tipo=RECIBIDAS"}, status=400)
+                return
+            year = payload.get("year") or payload.get("anio") or payload.get("año") or ""
+            year_s = ""
+            try:
+                year_i = int(str(year or "").strip() or 0)
+                if 2000 <= year_i <= 2100:
+                    year_s = str(year_i)
+            except Exception:
+                year_s = ""
+            prefix_parts = ["facturas_inbox", empresa_id, tipo_key]
+            if year_s:
+                prefix_parts.append(year_s)
+            prefix = "/".join(prefix_parts)
+            if not s3_has_credentials():
+                json_response(
+                    self,
+                    {"error": "S3 sin credenciales (configura AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY o AWS_PROFILE)"},
+                    status=400,
+                )
+                return
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, region = s3_config()
+            key = s3_safe_key(prefix, filename)
+            try:
+                url = client.generate_presigned_url(
+                    "put_object",
+                    Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
+                    ExpiresIn=900,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
+                return
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            tipo_factura = "venta" if tipo_key == "emitidas" else "compra"
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "url": url,
+                    "key": key,
+                    "public_url": public_url,
+                    "empresa_id": empresa_id,
+                    "tipo": tipo_key,
+                    "tipo_factura": tipo_factura,
+                },
+            )
+            return
+
+        if parsed.path == "/api/ingest_facturas_ocr":
+            if not require_ingest_api_key(self):
+                return
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                alias = (
+                    payload.get("empresa_alias")
+                    or payload.get("empresa_folder")
+                    or payload.get("empresa")
+                    or payload.get("empresa_nombre")
+                    or ""
+                )
+                empresa_id = resolve_empresa_id_from_alias(
+                    conn,
+                    alias,
+                    source=str(payload.get("source") or "onedrive"),
+                )
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido", "detail": "Incluye empresa_id o empresa_alias"}, status=400)
+                return
+            empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            if not empresa:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
+            s3_key = str(payload.get("s3_key") or payload.get("key") or "").strip()
+            if not s3_key:
+                json_response(self, {"error": "s3_key requerido"}, status=400)
+                return
+            safe_key = _normalize_s3_key(s3_key)
+            expected_prefix = f"facturas_inbox/{empresa_id}/"
+            if not safe_key.startswith(expected_prefix):
+                json_response(
+                    self,
+                    {"error": "s3_key no permitido", "detail": f"Debe empezar por {expected_prefix}"},
+                    status=403,
+                )
+                return
+            lower_key = safe_key.lower()
+            tipo_factura = "compra"
+            if "/emitidas/" in lower_key:
+                tipo_factura = "venta"
+            elif "/recibidas/" in lower_key:
+                tipo_factura = "compra"
+            else:
+                tipo_raw = str(payload.get("tipo") or "").strip().lower()
+                if "emit" in tipo_raw or tipo_raw in {"ventas", "venta", "salidas"}:
+                    tipo_factura = "venta"
+                elif "recib" in tipo_raw or tipo_raw in {"compras", "compra", "entradas"}:
+                    tipo_factura = "compra"
+            ocr_payload = {
+                "s3_key": safe_key,
+                "filename": str(payload.get("filename") or os.path.basename(safe_key) or "factura.pdf").strip(),
+                "tipo_factura": tipo_factura,
+                "source_hint": str(payload.get("source_hint") or payload.get("source") or "ingest").strip(),
+            }
+            try:
+                result = process_gestoria_factura_ocr(ocr_payload, conn, empresa_id=empresa_id, now=now, session=None)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(self, {"ok": True, **(result or {})})
             return
 
         if parsed.path == "/api/s3_presign":
