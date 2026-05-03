@@ -25042,11 +25042,15 @@ def parse_renta_detalles_payload(raw):
 
 def normalize_renta_presentacion_status(value):
     text = normalize_lookup_text(value or "")
+    if not text:
+        # Si no hay estado explícito, lo tratamos como pendiente de presentación.
+        return "Borrador"
     if "BORR" in text:
         return "Borrador"
     if "PRESEN" in text:
         return "Presentada"
-    return "Presentada"
+    # Fallback conservador: si no se reconoce, lo consideramos pendiente.
+    return "Borrador"
 
 
 def renta_dni_label(entry):
