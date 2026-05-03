@@ -10364,12 +10364,12 @@
 			      </div>
 			    </div>
 
-		    <div id="gestoriaRentaQuickModal" class="modal hidden" aria-hidden="true">
-		      <div class="modal-content">
-		        <div class="modal-header">
-		          <h3>Cargar renta (OCR por DNI/NIF)</h3>
-		          <button type="button" id="gestoriaRentaQuickModalClose" class="ghost" aria-label="Cerrar">✕</button>
-		        </div>
+			    <div id="gestoriaRentaQuickModal" class="modal hidden" aria-hidden="true">
+			      <div class="modal-content">
+			        <div class="modal-header">
+			          <h3>Cargar renta (OCR por DNI/NIF)</h3>
+			          <button type="button" id="gestoriaRentaQuickModalClose" class="ghost" aria-label="Cerrar">✕</button>
+			        </div>
 		        <div class="modal-body">
 		          <p class="muted">Selecciona el archivo y el sistema iniciará la lectura del PDF para detectar el DNI/NIF y localizar al cliente.</p>
 		          <form id="gestoriaRentaQuickForm" class="form-grid">
@@ -10431,13 +10431,39 @@
 		          <div id="gestoriaRentaQuickMatches"></div>
 		          <div id="gestoriaRentaQuickPending"></div>
 		        </div>
-		      </div>
-		    </div>
+			      </div>
+			    </div>
 
-			    <div id="inmuebleGuidedModal" class="modal hidden">
+			    <div id="gestoriaTrabajoTipoTemplateModal" class="modal hidden" aria-hidden="true">
 			      <div class="modal-content">
 			        <div class="modal-header">
-		          <h3>Proceso guiado</h3>
+			          <h3>Plantilla · Tipo de trabajo</h3>
+			          <button type="button" id="gestoriaTrabajoTipoTemplateModalClose" class="ghost" aria-label="Cerrar">✕</button>
+			        </div>
+			        <div class="modal-body form-grid">
+			          <p class="muted span-2">Define checklist y entregables del tipo de trabajo en JSON. Esto se usará para estandarizar los expedientes y los presupuestos.</p>
+			          <label class="span-2">
+			            Tipo
+			            <input id="gestoriaTrabajoTipoTemplateNombre" disabled />
+			          </label>
+			          <label class="span-2">
+			            Plantilla (JSON)
+			            <textarea id="gestoriaTrabajoTipoTemplateJson" rows="12" placeholder='{"checklist":[{"key":"dni","label":"DNI","required":true}]}'></textarea>
+			          </label>
+			          <div class="modal-actions span-2">
+			            <button type="button" class="secondary" id="gestoriaTrabajoTipoTemplateSeedBtn">Plantilla base</button>
+			            <button type="button" class="secondary ghost" id="gestoriaTrabajoTipoTemplateCancelBtn">Cancelar</button>
+			            <button type="button" id="gestoriaTrabajoTipoTemplateSaveBtn">Guardar</button>
+			            <span id="gestoriaTrabajoTipoTemplateStatus" class="muted"></span>
+			          </div>
+			        </div>
+			      </div>
+			    </div>
+
+				    <div id="inmuebleGuidedModal" class="modal hidden">
+				      <div class="modal-content">
+				        <div class="modal-header">
+			          <h3>Proceso guiado</h3>
 		          <button type="button" id="inmuebleGuidedClose" class="ghost">✕</button>
 		        </div>
 	        <div class="modal-body">

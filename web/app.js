@@ -1654,6 +1654,8 @@ const state = {
   gestoriaCrmFull: false,
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
+  gestoriaTrabajoTipoTemplateEditingId: "",
+  gestoriaTrabajoTipoTemplateEditingRow: null,
   segurosTab: "dashboard",
   hipotecaAltaView: "dashboard",
   pendingHipotecaDraft: null,
@@ -2439,6 +2441,14 @@ const gestoriaTrabajoTiposTable = document.getElementById("gestoriaTrabajoTiposT
 const gestoriaTrabajoTiposInfo = document.getElementById("gestoriaTrabajoTiposInfo");
 const gestoriaTrabajoTipoAddBtn = document.getElementById("gestoriaTrabajoTipoAddBtn");
 const gestoriaTrabajoTipoReloadBtn = document.getElementById("gestoriaTrabajoTipoReloadBtn");
+const gestoriaTrabajoTipoTemplateModal = document.getElementById("gestoriaTrabajoTipoTemplateModal");
+const gestoriaTrabajoTipoTemplateModalClose = document.getElementById("gestoriaTrabajoTipoTemplateModalClose");
+const gestoriaTrabajoTipoTemplateNombre = document.getElementById("gestoriaTrabajoTipoTemplateNombre");
+const gestoriaTrabajoTipoTemplateJson = document.getElementById("gestoriaTrabajoTipoTemplateJson");
+const gestoriaTrabajoTipoTemplateSeedBtn = document.getElementById("gestoriaTrabajoTipoTemplateSeedBtn");
+const gestoriaTrabajoTipoTemplateCancelBtn = document.getElementById("gestoriaTrabajoTipoTemplateCancelBtn");
+const gestoriaTrabajoTipoTemplateSaveBtn = document.getElementById("gestoriaTrabajoTipoTemplateSaveBtn");
+const gestoriaTrabajoTipoTemplateStatus = document.getElementById("gestoriaTrabajoTipoTemplateStatus");
 const gestoriaBudgetsServicioFilter = document.getElementById("gestoriaBudgetsServicioFilter");
 const gestoriaBudgetsEstadoFilter = document.getElementById("gestoriaBudgetsEstadoFilter");
 const gestoriaBudgetsRefreshBtn = document.getElementById("gestoriaBudgetsRefreshBtn");
@@ -27367,6 +27377,159 @@ const bindGestoriaTipoDefaults = (selectEl, handler) => {
   apply();
 };
 
+const persistGestoriaTrabajoTipo = async (payload = {}) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa?.id) throw new Error("Sin empresa.");
+  const usuario = getCurrentUser();
+  const res = await fetch("/api/gestoria_trabajo_tipos_update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, empresa_id: empresa.id, empresa_nombre: empresa.nombre || "", usuario }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+};
+
+const deleteGestoriaTrabajoTipo = async (id) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa?.id) throw new Error("Sin empresa.");
+  const usuario = getCurrentUser();
+  const res = await fetch("/api/gestoria_trabajo_tipos_delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, empresa_id: empresa.id, empresa_nombre: empresa.nombre || "", usuario }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+};
+
+const seedGestoriaTrabajoTipoTemplate = ({ tipo_key = "", categoria = "" } = {}) =>
+  JSON.stringify(
+    {
+      version: 1,
+      tipo_key: String(tipo_key || "").trim() || undefined,
+      categoria: String(categoria || "").trim() || undefined,
+      checklist: [
+        { key: "identificacion", label: "DNI/NIE/CIF", required: true },
+        { key: "autorizacion", label: "Autorización/encargo", required: false },
+      ],
+      entregables: [{ key: "resolucion", label: "Justificante/Documento final", required: true }],
+      notas_default: "",
+    },
+    null,
+    2
+  );
+
+const openGestoriaTrabajoTipoTemplateModal = (row = {}) => {
+  if (!gestoriaTrabajoTipoTemplateModal || !gestoriaTrabajoTipoTemplateJson) return false;
+  const id = String(row.id || "").trim();
+  if (!id) {
+    window.alert("Guarda el tipo antes de editar la plantilla.");
+    return false;
+  }
+  state.gestoriaTrabajoTipoTemplateEditingId = id;
+  state.gestoriaTrabajoTipoTemplateEditingRow = { ...row };
+  if (gestoriaTrabajoTipoTemplateNombre) {
+    gestoriaTrabajoTipoTemplateNombre.value = String(row.nombre || "").trim() || "(sin nombre)";
+  }
+  let text = String(row.plantilla_json || "").trim();
+  if (text) {
+    try {
+      text = JSON.stringify(JSON.parse(text), null, 2);
+    } catch (e) {}
+  }
+  gestoriaTrabajoTipoTemplateJson.value = text;
+  if (gestoriaTrabajoTipoTemplateStatus) gestoriaTrabajoTipoTemplateStatus.textContent = "";
+  gestoriaTrabajoTipoTemplateModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  try {
+    gestoriaTrabajoTipoTemplateJson.focus();
+  } catch (e) {}
+  return true;
+};
+
+const closeGestoriaTrabajoTipoTemplateModal = () => {
+  if (!gestoriaTrabajoTipoTemplateModal) return;
+  gestoriaTrabajoTipoTemplateModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  state.gestoriaTrabajoTipoTemplateEditingId = "";
+  state.gestoriaTrabajoTipoTemplateEditingRow = null;
+  if (gestoriaTrabajoTipoTemplateStatus) gestoriaTrabajoTipoTemplateStatus.textContent = "";
+};
+
+if (gestoriaTrabajoTipoTemplateModalClose) {
+  gestoriaTrabajoTipoTemplateModalClose.addEventListener("click", closeGestoriaTrabajoTipoTemplateModal);
+}
+if (gestoriaTrabajoTipoTemplateCancelBtn) {
+  gestoriaTrabajoTipoTemplateCancelBtn.addEventListener("click", closeGestoriaTrabajoTipoTemplateModal);
+}
+if (gestoriaTrabajoTipoTemplateModal) {
+  gestoriaTrabajoTipoTemplateModal.addEventListener("click", (event) => {
+    if (event.target === gestoriaTrabajoTipoTemplateModal) closeGestoriaTrabajoTipoTemplateModal();
+  });
+}
+if (gestoriaTrabajoTipoTemplateSeedBtn && gestoriaTrabajoTipoTemplateJson) {
+  gestoriaTrabajoTipoTemplateSeedBtn.addEventListener("click", () => {
+    const current = String(gestoriaTrabajoTipoTemplateJson.value || "").trim();
+    if (current) {
+      const ok = window.confirm("Ya hay contenido. ¿Reemplazar por una plantilla base?");
+      if (!ok) return;
+    }
+    const row = state.gestoriaTrabajoTipoTemplateEditingRow || {};
+    gestoriaTrabajoTipoTemplateJson.value = seedGestoriaTrabajoTipoTemplate({
+      tipo_key: row?.tipo_key || "",
+      categoria: row?.categoria || "",
+    });
+  });
+}
+if (gestoriaTrabajoTipoTemplateSaveBtn) {
+  gestoriaTrabajoTipoTemplateSaveBtn.addEventListener("click", async () => {
+    const id = String(state.gestoriaTrabajoTipoTemplateEditingId || "").trim();
+    const base = state.gestoriaTrabajoTipoTemplateEditingRow || null;
+    if (!id || !base) return;
+    const raw = String(gestoriaTrabajoTipoTemplateJson?.value || "").trim();
+    let normalized = "";
+    if (raw) {
+      try {
+        normalized = JSON.stringify(JSON.parse(raw), null, 0);
+      } catch (e) {
+        if (gestoriaTrabajoTipoTemplateStatus) {
+          gestoriaTrabajoTipoTemplateStatus.textContent = "JSON inválido: revisa comillas y llaves.";
+        }
+        return;
+      }
+    }
+    gestoriaTrabajoTipoTemplateSaveBtn.disabled = true;
+    if (gestoriaTrabajoTipoTemplateStatus) gestoriaTrabajoTipoTemplateStatus.textContent = "Guardando...";
+    try {
+      await persistGestoriaTrabajoTipo({
+        id,
+        nombre: base.nombre,
+        tipo_key: base.tipo_key,
+        categoria: base.categoria,
+        orden: base.orden,
+        color: base.color,
+        sla_dias: base.sla_dias,
+        iva_pct: base.iva_pct,
+        precio_base: base.precio_base,
+        activo: base.activo,
+        plantilla_json: normalized,
+      });
+      const refreshed = await loadGestoriaTrabajoTipos({ force: true });
+      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
+      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+      renderGestoriaTrabajoTiposAdmin(refreshed);
+      closeGestoriaTrabajoTipoTemplateModal();
+    } catch (e) {
+      if (gestoriaTrabajoTipoTemplateStatus) gestoriaTrabajoTipoTemplateStatus.textContent = String(e?.message || e || "No se pudo guardar.");
+    } finally {
+      gestoriaTrabajoTipoTemplateSaveBtn.disabled = false;
+    }
+  });
+}
+
 const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
   if (!gestoriaTrabajoTiposCard || !gestoriaTrabajoTiposTable || !gestoriaTrabajoTiposInfo) return;
   const isAdmin = canAccessGestoriaAdminDashboard();
@@ -27377,7 +27540,7 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["orden", "nombre", "key", "categoria", "sla", "iva%", "precio", "activo", "acciones"].forEach((col) => {
+  ["orden", "nombre", "key", "categoria", "color", "sla", "iva%", "precio", "plantilla", "activo", "acciones"].forEach((col) => {
     const th = document.createElement("th");
     th.textContent = formatHeader(col);
     trHead.appendChild(th);
@@ -27386,39 +27549,11 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
 
-  const empresa = resolveCrmGestoriaEmpresa();
-  const empresaNombre = empresa?.nombre || "";
-  const usuario = getCurrentUser();
-
   const buildCategorySelect = (current) => {
     const sel = document.createElement("select");
     GESTORIA_TRABAJO_CATEGORIES.forEach((cat) => sel.appendChild(createOption(cat.key, cat.label)));
     sel.value = normalizeGestoriaTrabajoCategory(current) || classifyGestoriaTrabajoCategory(current) || "otros";
     return sel;
-  };
-
-  const persistRow = async (payload) => {
-    if (!empresaNombre) throw new Error("Sin empresa.");
-    const res = await fetch("/api/gestoria_trabajo_tipos_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, empresa_nombre: empresaNombre, usuario }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
-    return data;
-  };
-
-  const deleteRow = async (id) => {
-    if (!empresaNombre) throw new Error("Sin empresa.");
-    const res = await fetch("/api/gestoria_trabajo_tipos_delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, empresa_nombre: empresaNombre, usuario }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
-    return data;
   };
 
   items.forEach((row) => {
@@ -27437,6 +27572,11 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
 
     const catSel = buildCategorySelect(row.categoria);
 
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = String(row.color || "").trim() || "#0B1D33";
+    colorInput.style.maxWidth = "64px";
+
     const slaInput = document.createElement("input");
     slaInput.type = "number";
     slaInput.value = row.sla_dias ?? "";
@@ -27453,6 +27593,13 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
     precioInput.step = "0.01";
     precioInput.value = row.precio_base ?? "";
     precioInput.style.maxWidth = "110px";
+
+    const plantillaBtn = document.createElement("button");
+    plantillaBtn.type = "button";
+    plantillaBtn.className = "secondary ghost";
+    plantillaBtn.textContent = String(row.plantilla_json || "").trim() ? "Editar" : "Añadir";
+    plantillaBtn.disabled = !String(row.id || "").trim();
+    plantillaBtn.addEventListener("click", () => openGestoriaTrabajoTipoTemplateModal(row));
 
     const activoInput = document.createElement("input");
     activoInput.type = "checkbox";
@@ -27480,12 +27627,14 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
           tipo_key: String(keyInput.value || "").trim(),
           categoria: String(catSel.value || "").trim(),
           orden: String(ordenInput.value || "").trim(),
+          color: String(colorInput.value || "").trim(),
           sla_dias: String(slaInput.value || "").trim(),
           iva_pct: String(ivaInput.value || "").trim(),
           precio_base: String(precioInput.value || "").trim(),
           activo: activoInput.checked ? 1 : 0,
+          plantilla_json: row.plantilla_json ?? "",
         };
-        await persistRow(payload);
+        await persistGestoriaTrabajoTipo(payload);
         const refreshed = await loadGestoriaTrabajoTipos({ force: true });
         hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
         hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
@@ -27502,7 +27651,7 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
       if (!window.confirm("¿Borrar este tipo de trabajo?")) return;
       delBtn.disabled = true;
       try {
-        await deleteRow(String(row.id || "").trim());
+        await deleteGestoriaTrabajoTipo(String(row.id || "").trim());
         const refreshed = await loadGestoriaTrabajoTipos({ force: true });
         hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
         hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
@@ -27517,7 +27666,7 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
     actions.appendChild(saveBtn);
     actions.appendChild(delBtn);
 
-    const cells = [ordenInput, nombreInput, keyInput, catSel, slaInput, ivaInput, precioInput, activoInput, actions];
+    const cells = [ordenInput, nombreInput, keyInput, catSel, colorInput, slaInput, ivaInput, precioInput, plantillaBtn, activoInput, actions];
     cells.forEach((node) => {
       const td = document.createElement("td");
       td.appendChild(node);
