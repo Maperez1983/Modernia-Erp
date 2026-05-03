@@ -48,6 +48,12 @@ from tempfile import TemporaryDirectory
 
 import requests
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    # When executed as `python scripts/...py`, Python puts `scripts/` on sys.path, not repo root.
+    # Add repo root so `import web.*` works in Render cron jobs.
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from web.db_backend import open_db_conn
 
 
