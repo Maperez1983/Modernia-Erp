@@ -2430,11 +2430,15 @@ const segurosCrmSection = document.getElementById("segurosCrmSection");
 const finCrmSection = document.getElementById("finCrmSection");
 const finSimSection = document.getElementById("finSimSection");
 const gestoriaFactSection = document.getElementById("gestoriaFactSection");
-const gestoriaBudgetCompanyLogo = document.getElementById("gestoriaBudgetCompanyLogo");
-const gestoriaBudgetColegioLogo = document.getElementById("gestoriaBudgetColegioLogo");
-const gestoriaBudgetServiciosIncluidos = document.getElementById("gestoriaBudgetServiciosIncluidos");
 const gestoriaBudgetQuickForm = document.getElementById("gestoriaBudgetQuickForm");
 const gestoriaBudgetQuickStatus = document.getElementById("gestoriaBudgetQuickStatus");
+const gestoriaBudgetTipoTrabajo = document.getElementById("gestoriaBudgetTipoTrabajo");
+const gestoriaTrabajoTipoSelect = document.getElementById("gestoriaTrabajoTipoSelect");
+const gestoriaTrabajoTiposCard = document.getElementById("gestoriaTrabajoTiposCard");
+const gestoriaTrabajoTiposTable = document.getElementById("gestoriaTrabajoTiposTable");
+const gestoriaTrabajoTiposInfo = document.getElementById("gestoriaTrabajoTiposInfo");
+const gestoriaTrabajoTipoAddBtn = document.getElementById("gestoriaTrabajoTipoAddBtn");
+const gestoriaTrabajoTipoReloadBtn = document.getElementById("gestoriaTrabajoTipoReloadBtn");
 const gestoriaBudgetsServicioFilter = document.getElementById("gestoriaBudgetsServicioFilter");
 const gestoriaBudgetsEstadoFilter = document.getElementById("gestoriaBudgetsEstadoFilter");
 const gestoriaBudgetsRefreshBtn = document.getElementById("gestoriaBudgetsRefreshBtn");
@@ -19195,20 +19199,6 @@ const syncWorkspaceFincasBudgetBranding = () => {
   }
 };
 
-const syncGestoriaBudgetBranding = () => {
-  if (!gestoriaBudgetCompanyLogo && !gestoriaBudgetColegioLogo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  const src = buildPhotoSrc(empresa?.logo_url || "") || "/assets/logos/fincas-velazquez.png";
-  if (gestoriaBudgetCompanyLogo) {
-    gestoriaBudgetCompanyLogo.src = src;
-    gestoriaBudgetCompanyLogo.classList.toggle("hidden", !src);
-  }
-  if (gestoriaBudgetColegioLogo) {
-    gestoriaBudgetColegioLogo.src = "/assets/logos/colegio-administradores-v2.png";
-    gestoriaBudgetColegioLogo.classList.remove("hidden");
-  }
-};
-
 const hydrateWorkspaceFincasBudgetQuickSelect = ({ communities = [], budgets = [] } = {}) => {
   if (!workspaceFincasBudgetQuickForm) return;
   const select = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id_lookup"]');
@@ -27205,6 +27195,21 @@ const normalizeGestoriaTrabajoCategory = (value) => {
 
 const classifyGestoriaTrabajoCategory = (tipoTrabajo) => {
   const text = normalizeLookupText(tipoTrabajo || "");
+  // Si existe catálogo configurable de tipos, lo usamos como fuente de verdad.
+  try {
+    const catalog = Array.isArray(state.gestoriaTrabajoTiposCache?.rows) ? state.gestoriaTrabajoTiposCache.rows : [];
+    if (catalog.length && text) {
+      const match = catalog.find((row) => {
+        const nameNorm = normalizeLookupText(row?.nombre || "");
+        const keyNorm = normalizeLookupText(String(row?.tipo_key || "").replace(/_/g, " "));
+        return nameNorm === text || keyNorm === text;
+      });
+      if (match) {
+        const cat = normalizeGestoriaTrabajoCategory(match.categoria);
+        if (cat) return cat;
+      }
+    }
+  } catch (e) {}
   if (!text) return "otros";
   if (text.includes("HERENC")) return "herencias";
   if (text.includes("TRAFIC") || text.includes("TRANSFER") || text.includes("MATRICUL")) return "trafico";
@@ -27284,6 +27289,247 @@ const ensureGestoriaTrabajoCategorySelects = () => {
       }
     }
   });
+};
+
+const loadGestoriaTrabajoTipos = async ({ force = false } = {}) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return [];
+  const cacheAge = Date.now() - Number(state.gestoriaTrabajoTiposCache?.ts || 0);
+  if (
+    !force
+    && state.gestoriaTrabajoTiposCache
+    && String(state.gestoriaTrabajoTiposCache.empresaId || "") === String(empresa.id || "")
+    && cacheAge >= 0
+    && cacheAge < 60000
+  ) {
+    return state.gestoriaTrabajoTiposCache.rows || [];
+  }
+  const data = await api(`/api/gestoria_trabajo_tipos?empresa_id=${encodeURIComponent(empresa.id)}`).catch(() => ({ rows: [] }));
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  state.gestoriaTrabajoTiposCache = { empresaId: empresa.id, rows, ts: Date.now() };
+  return rows;
+};
+
+const hydrateGestoriaTrabajoTipoSelect = (selectEl, rows = [], { placeholder = "" } = {}) => {
+  if (!selectEl) return;
+  const current = String(selectEl.value || "").trim();
+  const active = (Array.isArray(rows) ? rows : [])
+    .filter((row) => String(row?.nombre || "").trim())
+    .filter((row) => Number(row?.activo ?? 1) !== 0)
+    .sort((a, b) => {
+      const ao = Number(a?.orden ?? 0) || 0;
+      const bo = Number(b?.orden ?? 0) || 0;
+      if (ao !== bo) return ao - bo;
+      return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" });
+    });
+  selectEl.innerHTML = "";
+  if (placeholder) selectEl.appendChild(createOption("", placeholder));
+  active.forEach((row) => {
+    const label = String(row.nombre || "").trim();
+    const opt = createOption(label, label);
+    opt.dataset.key = String(row.tipo_key || "");
+    opt.dataset.categoria = String(row.categoria || "");
+    opt.dataset.sla = String(row.sla_dias ?? "");
+    opt.dataset.ivaPct = String(row.iva_pct ?? "");
+    opt.dataset.precioBase = String(row.precio_base ?? "");
+    selectEl.appendChild(opt);
+  });
+  const match = active.find((row) => String(row.nombre || "").trim() === current);
+  if (match) selectEl.value = current;
+  else if (!String(selectEl.value || "").trim() && active.length) selectEl.value = String(active[0].nombre || "").trim();
+};
+
+const getGestoriaTipoMeta = (selectEl) => {
+  const opt = selectEl?.selectedOptions?.[0];
+  if (!opt) return {};
+  const sla = parseInt(String(opt.dataset.sla || "").trim(), 10);
+  const ivaPct = parseFloat(String(opt.dataset.ivaPct || "").trim());
+  const precioBase = parseFloat(String(opt.dataset.precioBase || "").trim());
+  return {
+    nombre: String(opt.value || "").trim(),
+    tipo_key: String(opt.dataset.key || "").trim(),
+    categoria: String(opt.dataset.categoria || "").trim(),
+    sla_dias: Number.isFinite(sla) ? sla : null,
+    iva_pct: Number.isFinite(ivaPct) ? ivaPct : null,
+    precio_base: Number.isFinite(precioBase) ? precioBase : null,
+  };
+};
+
+const bindGestoriaTipoDefaults = (selectEl, handler) => {
+  if (!selectEl) return;
+  if (selectEl.dataset.boundDefaults === "1") {
+    handler(selectEl);
+    return;
+  }
+  selectEl.dataset.boundDefaults = "1";
+  const apply = () => handler(selectEl);
+  selectEl.addEventListener("change", apply);
+  apply();
+};
+
+const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
+  if (!gestoriaTrabajoTiposCard || !gestoriaTrabajoTiposTable || !gestoriaTrabajoTiposInfo) return;
+  const isAdmin = canAccessGestoriaAdminDashboard();
+  gestoriaTrabajoTiposCard.classList.toggle("hidden", !isAdmin);
+  if (!isAdmin) return;
+
+  const items = Array.isArray(rows) ? rows : [];
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["orden", "nombre", "key", "categoria", "sla", "iva%", "precio", "activo", "acciones"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+
+  const empresa = resolveCrmGestoriaEmpresa();
+  const empresaNombre = empresa?.nombre || "";
+  const usuario = getCurrentUser();
+
+  const buildCategorySelect = (current) => {
+    const sel = document.createElement("select");
+    GESTORIA_TRABAJO_CATEGORIES.forEach((cat) => sel.appendChild(createOption(cat.key, cat.label)));
+    sel.value = normalizeGestoriaTrabajoCategory(current) || classifyGestoriaTrabajoCategory(current) || "otros";
+    return sel;
+  };
+
+  const persistRow = async (payload) => {
+    if (!empresaNombre) throw new Error("Sin empresa.");
+    const res = await fetch("/api/gestoria_trabajo_tipos_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, empresa_nombre: empresaNombre, usuario }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
+    return data;
+  };
+
+  const deleteRow = async (id) => {
+    if (!empresaNombre) throw new Error("Sin empresa.");
+    const res = await fetch("/api/gestoria_trabajo_tipos_delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, empresa_nombre: empresaNombre, usuario }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
+    return data;
+  };
+
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const ordenInput = document.createElement("input");
+    ordenInput.type = "number";
+    ordenInput.value = row.orden ?? "";
+    ordenInput.style.maxWidth = "84px";
+
+    const nombreInput = document.createElement("input");
+    nombreInput.value = row.nombre || "";
+
+    const keyInput = document.createElement("input");
+    keyInput.value = row.tipo_key || "";
+    keyInput.placeholder = "auto";
+
+    const catSel = buildCategorySelect(row.categoria);
+
+    const slaInput = document.createElement("input");
+    slaInput.type = "number";
+    slaInput.value = row.sla_dias ?? "";
+    slaInput.style.maxWidth = "86px";
+
+    const ivaInput = document.createElement("input");
+    ivaInput.type = "number";
+    ivaInput.step = "0.01";
+    ivaInput.value = row.iva_pct ?? "";
+    ivaInput.style.maxWidth = "86px";
+
+    const precioInput = document.createElement("input");
+    precioInput.type = "number";
+    precioInput.step = "0.01";
+    precioInput.value = row.precio_base ?? "";
+    precioInput.style.maxWidth = "110px";
+
+    const activoInput = document.createElement("input");
+    activoInput.type = "checkbox";
+    activoInput.checked = Number(row.activo ?? 1) !== 0;
+
+    const actions = document.createElement("div");
+    actions.className = "toolbar";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "secondary";
+    saveBtn.textContent = "Guardar";
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "secondary ghost";
+    delBtn.textContent = "Borrar";
+    delBtn.disabled = !String(row.id || "").trim();
+
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      try {
+        const payload = {
+          id: String(row.id || "").trim(),
+          nombre: String(nombreInput.value || "").trim(),
+          tipo_key: String(keyInput.value || "").trim(),
+          categoria: String(catSel.value || "").trim(),
+          orden: String(ordenInput.value || "").trim(),
+          sla_dias: String(slaInput.value || "").trim(),
+          iva_pct: String(ivaInput.value || "").trim(),
+          precio_base: String(precioInput.value || "").trim(),
+          activo: activoInput.checked ? 1 : 0,
+        };
+        await persistRow(payload);
+        const refreshed = await loadGestoriaTrabajoTipos({ force: true });
+        hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
+        hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+        renderGestoriaTrabajoTiposAdmin(refreshed);
+      } catch (e) {
+        window.alert(String(e?.message || e || "No se pudo guardar."));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    delBtn.addEventListener("click", async () => {
+      if (!String(row.id || "").trim()) return;
+      if (!window.confirm("¿Borrar este tipo de trabajo?")) return;
+      delBtn.disabled = true;
+      try {
+        await deleteRow(String(row.id || "").trim());
+        const refreshed = await loadGestoriaTrabajoTipos({ force: true });
+        hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
+        hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+        renderGestoriaTrabajoTiposAdmin(refreshed);
+      } catch (e) {
+        window.alert(String(e?.message || e || "No se pudo borrar."));
+      } finally {
+        delBtn.disabled = false;
+      }
+    });
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(delBtn);
+
+    const cells = [ordenInput, nombreInput, keyInput, catSel, slaInput, ivaInput, precioInput, activoInput, actions];
+    cells.forEach((node) => {
+      const td = document.createElement("td");
+      td.appendChild(node);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  gestoriaTrabajoTiposTable.innerHTML = "";
+  gestoriaTrabajoTiposTable.appendChild(table);
+  gestoriaTrabajoTiposInfo.textContent = `${items.length} tipos`;
 };
 
 const sumTotals = (items) =>
@@ -31648,6 +31894,26 @@ const loadGestoriaTrabajosOverview = () => {
     return;
   }
   ensureGestoriaTrabajoCategorySelects();
+  loadGestoriaTrabajoTipos()
+    .then((rows) => {
+      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
+      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
+      bindGestoriaTipoDefaults(gestoriaTrabajoTipoSelect, () => {
+        if (!gestoriaTrabajoForm || !gestoriaTrabajoTipoSelect) return;
+        const meta = getGestoriaTipoMeta(gestoriaTrabajoTipoSelect);
+        const slaInput = gestoriaTrabajoForm.querySelector('[name="sla_dias"]');
+        const importeInput = gestoriaTrabajoForm.querySelector('[name="importe"]');
+        const currentSla = parseInt(String(slaInput?.value || "").trim(), 10);
+        if (slaInput && (!String(slaInput.value || "").trim() || !Number.isFinite(currentSla)) && meta.sla_dias !== null) {
+          slaInput.value = String(meta.sla_dias);
+        }
+        const currentImporte = parseMoneyValue(String(importeInput?.value || "").trim());
+        if (importeInput && (!String(importeInput.value || "").trim() || currentImporte === 0) && meta.precio_base && meta.precio_base > 0) {
+          importeInput.value = String(meta.precio_base);
+        }
+      });
+    })
+    .catch(() => {});
   api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`).then((data) => {
     let rows = data.rows || [];
     const tipoFilterRaw = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
@@ -61429,6 +61695,27 @@ const loadGestoriaFact = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
+  loadGestoriaTrabajoTipos()
+    .then((rows) => {
+      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
+      renderGestoriaTrabajoTiposAdmin(rows);
+      bindGestoriaTipoDefaults(gestoriaBudgetTipoTrabajo, () => {
+        if (!gestoriaBudgetQuickForm || !gestoriaBudgetTipoTrabajo) return;
+        const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
+        const subtotalInput = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
+        const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
+        const currentSubtotal = parseMoneyValue(String(subtotalInput?.value || "").trim());
+        if (subtotalInput && (!String(subtotalInput.value || "").trim() || currentSubtotal === 0) && meta.precio_base && meta.precio_base > 0) {
+          subtotalInput.value = String(meta.precio_base);
+        }
+        const currentIvaPct = parseMoneyValue(String(ivaPctInput?.value || "").trim());
+        if (ivaPctInput && (!String(ivaPctInput.value || "").trim() || currentIvaPct === 0) && meta.iva_pct !== null) {
+          ivaPctInput.value = String(meta.iva_pct);
+        }
+        syncGestoriaBudgetQuickComputed();
+      });
+    })
+    .catch(() => {});
   const servicio = String(gestoriaBudgetsServicioFilter?.value || "gestoria").trim().toLowerCase();
   const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
   const params = new URLSearchParams({
@@ -70706,6 +70993,39 @@ if (gestoriaBudgetsServicioFilter) {
 if (gestoriaBudgetsEstadoFilter) {
   gestoriaBudgetsEstadoFilter.addEventListener("change", () => {
     if (currentTab === "gestoria-fact") loadGestoriaFact();
+  });
+}
+
+if (gestoriaTrabajoTipoReloadBtn) {
+  gestoriaTrabajoTipoReloadBtn.addEventListener("click", async () => {
+    try {
+      const rows = await loadGestoriaTrabajoTipos({ force: true });
+      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
+      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
+      renderGestoriaTrabajoTiposAdmin(rows);
+    } catch (e) {}
+  });
+}
+
+if (gestoriaTrabajoTipoAddBtn) {
+  gestoriaTrabajoTipoAddBtn.addEventListener("click", async () => {
+    const isAdmin = canAccessGestoriaAdminDashboard();
+    if (!isAdmin) return;
+    const rows = Array.isArray(state.gestoriaTrabajoTiposCache?.rows) ? [...state.gestoriaTrabajoTiposCache.rows] : [];
+    rows.unshift({
+      id: "",
+      tipo_key: "",
+      nombre: "",
+      categoria: "otros",
+      activo: 1,
+      orden: 0,
+      color: "",
+      sla_dias: "",
+      iva_pct: 21,
+      precio_base: "",
+      plantilla_json: "",
+    });
+    renderGestoriaTrabajoTiposAdmin(rows);
   });
 }
 

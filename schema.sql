@@ -609,6 +609,27 @@ CREATE TABLE IF NOT EXISTS gestoria_trabajos (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
+CREATE TABLE IF NOT EXISTS gestoria_trabajo_tipos (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  tipo_key TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  categoria TEXT,
+  activo INTEGER NOT NULL DEFAULT 1,
+  orden INTEGER,
+  color TEXT,
+  sla_dias INTEGER,
+  iva_pct REAL,
+  precio_base REAL,
+  plantilla_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gestoria_trabajo_tipos_empresa_key
+  ON gestoria_trabajo_tipos (empresa_id, tipo_key);
+
 CREATE TABLE IF NOT EXISTS gestoria_docs (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,

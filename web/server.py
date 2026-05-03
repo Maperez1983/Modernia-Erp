@@ -2135,6 +2135,7 @@ LEGAL_RAMOS_CANONICAL = (
 
 SEGURO_SMART_FIELDS = (
     "direccion_riesgo",
+    "referencia_catastral",
     "codigo_postal",
     "fecha_nacimiento_asegurado",
     "fecha_nacimiento_conductor",
@@ -2388,10 +2389,19 @@ def merge_seguro_smart_data(conn, seguro_id, incoming_smart, now):
         existing_smart = {}
     merged = dict(existing_smart)
     merged.update(incoming_smart)
-    conn.execute(
-        "UPDATE seguros SET datos_ramo_json = ?, updated_at = datetime(?) WHERE id = ?",
-        (json.dumps(merged, ensure_ascii=False), now, seguro_id),
-    )
+    updates = {"datos_ramo_json": json.dumps(merged, ensure_ascii=False)}
+    # Campos "rápidos" (filtrado/búsqueda) fuera del JSON, sin romper compat.
+    for key in ("matricula", "direccion_riesgo", "referencia_catastral"):
+        val = incoming_smart.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text:
+            continue
+        updates[key] = text
+    set_clause = ", ".join([f"{key} = ?" for key in updates])
+    values = list(updates.values()) + [now, seguro_id]
+    conn.execute(f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?", values)
 
 
 def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None):
@@ -2423,6 +2433,123 @@ def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None)
             now,
         ),
     )
+
+def _seguro_row_to_dict(row):
+    if not row:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    try:
+        if hasattr(row, "keys"):
+            return {k: row[k] for k in row.keys()}
+    except Exception:
+        pass
+    return {}
+
+
+def _next_seguro_version_no(conn, seguro_id):
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version_no), 0) AS max_no FROM seguros_versiones WHERE seguro_id = ?",
+            (seguro_id,),
+        ).fetchone()
+        return int(row_value(row, "max_no", 0) or 0) + 1
+    except Exception:
+        return 1
+
+
+def save_seguro_version(conn, seguro_row, now, *, motivo="", created_by=""):
+    if not seguro_row:
+        return None
+    seguro_id = (seguro_row.get("id") if isinstance(seguro_row, dict) else seguro_row["id"]) or ""
+    if not str(seguro_id).strip():
+        return None
+    payload = _seguro_row_to_dict(seguro_row)
+    version_no = _next_seguro_version_no(conn, seguro_id)
+    version_id = os.urandom(16).hex()
+    try:
+        snapshot_json = json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        snapshot_json = "{}"
+    conn.execute(
+        """
+        INSERT INTO seguros_versiones (
+          id, seguro_id, version_no, motivo, snapshot_json, created_by, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, datetime(?)
+        )
+        """,
+        (
+            version_id,
+            seguro_id,
+            version_no,
+            (motivo or "").strip() or None,
+            snapshot_json,
+            (created_by or "").strip() or None,
+            now,
+        ),
+    )
+    return {"id": version_id, "seguro_id": seguro_id, "version_no": version_no}
+
+
+def create_seguro_movimiento(conn, seguro_row, now, *, tipo, subtipo="", fecha_movimiento="", fecha_efecto="", fecha_vencimiento="", prima_neta=None, prima_total=None, comision=None, doc_key="", doc_url="", notas="", payload=None, created_by=""):
+    if not seguro_row:
+        return None
+    seguro_id = (seguro_row.get("id") if isinstance(seguro_row, dict) else seguro_row["id"]) or ""
+    if not str(seguro_id).strip():
+        return None
+    movimiento_id = os.urandom(16).hex()
+    payload_json = None
+    if payload not in (None, "", {}):
+        try:
+            payload_json = json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            payload_json = str(payload)
+    prima_neta_val = parse_money_value(prima_neta)
+    prima_total_val = parse_money_value(prima_total)
+    comision_val = parse_money_value(comision)
+    comision_pct = None
+    try:
+        if abs(prima_total_val) > 0.0001 and abs(comision_val) > 0.0001:
+            comision_pct = round((float(comision_val) / float(prima_total_val)) * 100.0, 6)
+    except Exception:
+        comision_pct = None
+    conn.execute(
+        """
+        INSERT INTO seguros_movimientos (
+          id, seguro_id, empresa_id, cliente_id, tipo, subtipo,
+          fecha_movimiento, fecha_efecto, fecha_vencimiento,
+          prima_neta, prima_total, comision, comision_pct,
+          doc_key, doc_url, notas, payload_json,
+          created_by, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            movimiento_id,
+            seguro_id,
+            (seguro_row.get("empresa_id") if isinstance(seguro_row, dict) else seguro_row["empresa_id"]),
+            (seguro_row.get("cliente_id") if isinstance(seguro_row, dict) else seguro_row["cliente_id"]),
+            (tipo or "").strip(),
+            (subtipo or "").strip() or None,
+            (fecha_movimiento or "").strip() or None,
+            (fecha_efecto or "").strip() or None,
+            (fecha_vencimiento or "").strip() or None,
+            prima_neta_val if abs(prima_neta_val) > 0.0001 else None,
+            prima_total_val if abs(prima_total_val) > 0.0001 else None,
+            comision_val if abs(comision_val) > 0.0001 else None,
+            comision_pct,
+            (doc_key or "").strip() or None,
+            (doc_url or "").strip() or None,
+            (notas or "").strip() or None,
+            payload_json,
+            (created_by or "").strip() or None,
+            now,
+            now,
+        ),
+    )
+    return {"id": movimiento_id, "seguro_id": seguro_id}
 
 
 def normalize_seguro_estado_value(value):
@@ -29874,6 +30001,58 @@ def ensure_tables(db_path):
         ensure_column(conn, "seguros", "tipo_vigencia", "tipo_vigencia TEXT")
         ensure_column(conn, "seguros", "datos_ramo_json", "datos_ramo_json TEXT")
         ensure_column(conn, "seguros", "matricula", "matricula TEXT")
+        ensure_column(conn, "seguros", "direccion_riesgo", "direccion_riesgo TEXT")
+        ensure_column(conn, "seguros", "referencia_catastral", "referencia_catastral TEXT")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_versiones (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT NOT NULL,
+          version_no INTEGER NOT NULL,
+          motivo TEXT,
+          snapshot_json TEXT NOT NULL,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (seguro_id) REFERENCES seguros(id)
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_seguros_versiones_poliza ON seguros_versiones (seguro_id, version_no)")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_movimientos (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT NOT NULL,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          tipo TEXT NOT NULL,
+          subtipo TEXT,
+          fecha_movimiento TEXT,
+          fecha_efecto TEXT,
+          fecha_vencimiento TEXT,
+          prima_neta REAL,
+          prima_total REAL,
+          comision REAL,
+          comision_pct REAL,
+          doc_key TEXT,
+          doc_url TEXT,
+          notas TEXT,
+          payload_json TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (seguro_id) REFERENCES seguros(id)
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_seguros_movimientos_poliza ON seguros_movimientos (seguro_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_seguros_movimientos_empresa ON seguros_movimientos (empresa_id, created_at)")
     except Exception:
         pass
     try:
@@ -43706,7 +43885,7 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
-	        if parsed.path not in (
+        if parsed.path not in (
 	            "/api/movimientos",
 	            "/api/hipotecas",
 	            "/api/hipotecas/firmar",
@@ -43995,19 +44174,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not str(payload.get("servicio") or "").strip():
                     # Deducción por endpoint: ayuda a no depender de que el frontend mande `servicio`.
-	                    path_service = {
-	                        # Gestoría
-	                        "/api/cliente_gestoria_update": "gestoria",
-	                        "/api/gestoria": "gestoria",
-	                        "/api/gestoria_update": "gestoria",
-	                        "/api/gestoria_trabajos": "gestoria",
-	                        "/api/gestoria_trabajos_update": "gestoria",
-	                        "/api/gestoria_trabajos_delete": "gestoria",
-	                        "/api/gestoria_trabajo_tipos_update": "gestoria",
-	                        "/api/gestoria_trabajo_tipos_delete": "gestoria",
-	                        "/api/gestoria_docs": "gestoria",
-	                        "/api/gestoria_docs_update": "gestoria",
-	                        "/api/gestoria_docs_delete": "gestoria",
+                    path_service = {
+                        # Gestoría
+                        "/api/cliente_gestoria_update": "gestoria",
+                        "/api/gestoria": "gestoria",
+                        "/api/gestoria_update": "gestoria",
+                        "/api/gestoria_trabajos": "gestoria",
+                        "/api/gestoria_trabajos_update": "gestoria",
+                        "/api/gestoria_trabajos_delete": "gestoria",
+                        "/api/gestoria_trabajo_tipos_update": "gestoria",
+                        "/api/gestoria_trabajo_tipos_delete": "gestoria",
+                        "/api/gestoria_docs": "gestoria",
+                        "/api/gestoria_docs_update": "gestoria",
+                        "/api/gestoria_docs_delete": "gestoria",
                         "/api/gestoria_contabilidad": "gestoria",
                         "/api/gestoria_contabilidad_update": "gestoria",
                         "/api/gestoria_contabilidad_delete": "gestoria",
@@ -46373,6 +46552,134 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             conn.execute("DELETE FROM gestoria_trabajos WHERE id = ?", (trabajo_id,))
             audit("gestoria_trabajo", trabajo_id, "eliminar", None, payload.get("usuario"))
+        elif parsed.path == "/api/gestoria_trabajo_tipos_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
+            is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
+                is_superadmin_actor(None, session)
+            )
+            if not is_admin_actor:
+                json_response(self, {"error": "Solo disponible para usuarios admin."}, status=403)
+                return
+            tipo_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not nombre:
+                json_response(self, {"error": "nombre requerido"}, status=400)
+                return
+            tipo_key = normalize_gestoria_trabajo_tipo_key(payload.get("tipo_key") or payload.get("key") or "") or normalize_gestoria_trabajo_tipo_key(nombre)
+            if not tipo_key:
+                json_response(self, {"error": "tipo_key inválido"}, status=400)
+                return
+            categoria = normalize_gestoria_trabajo_category(payload.get("categoria") or "") or classify_gestoria_trabajo_category(nombre)
+            try:
+                activo = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
+            except Exception:
+                activo = 1
+            orden = payload.get("orden")
+            try:
+                orden = int(orden) if str(orden or "").strip() != "" else None
+            except Exception:
+                orden = None
+            color = str(payload.get("color") or "").strip() or None
+            sla_dias = payload.get("sla_dias")
+            try:
+                sla_dias = int(sla_dias) if str(sla_dias or "").strip() != "" else None
+            except Exception:
+                sla_dias = None
+            iva_pct = payload.get("iva_pct")
+            try:
+                iva_pct = float(iva_pct) if str(iva_pct or "").strip() != "" else None
+            except Exception:
+                iva_pct = None
+            precio_base = payload.get("precio_base")
+            try:
+                precio_base = float(precio_base) if str(precio_base or "").strip() != "" else None
+            except Exception:
+                precio_base = None
+            plantilla_json = payload.get("plantilla_json")
+            if isinstance(plantilla_json, (dict, list)):
+                plantilla_json = json.dumps(plantilla_json, ensure_ascii=False)
+            plantilla_json = str(plantilla_json or "").strip() or None
+            try:
+                ensure_gestoria_trabajo_tipos(conn, empresa["id"], now=now)
+            except Exception:
+                pass
+            if not tipo_id:
+                tipo_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_trabajo_tipos (
+                      id, empresa_id, tipo_key, nombre, categoria, activo, orden, color, sla_dias, iva_pct, precio_base,
+                      plantilla_json, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        tipo_id,
+                        empresa["id"],
+                        tipo_key,
+                        nombre,
+                        categoria,
+                        activo,
+                        orden,
+                        color,
+                        sla_dias,
+                        iva_pct,
+                        precio_base,
+                        plantilla_json,
+                        now,
+                        now,
+                    ),
+                )
+                audit("gestoria_trabajo_tipo", tipo_id, "crear", json.dumps(payload), payload.get("usuario"))
+            else:
+                conn.execute(
+                    """
+                    UPDATE gestoria_trabajo_tipos
+                    SET tipo_key = ?, nombre = ?, categoria = ?, activo = ?, orden = ?, color = ?, sla_dias = ?, iva_pct = ?, precio_base = ?,
+                        plantilla_json = ?, updated_at = datetime(?)
+                    WHERE id = ? AND empresa_id = ?
+                    """,
+                    (
+                        tipo_key,
+                        nombre,
+                        categoria,
+                        activo,
+                        orden,
+                        color,
+                        sla_dias,
+                        iva_pct,
+                        precio_base,
+                        plantilla_json,
+                        now,
+                        tipo_id,
+                        empresa["id"],
+                    ),
+                )
+                audit("gestoria_trabajo_tipo", tipo_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            json_response(self, {"ok": True, "id": tipo_id})
+            return
+        elif parsed.path == "/api/gestoria_trabajo_tipos_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
+            is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
+                is_superadmin_actor(None, session)
+            )
+            if not is_admin_actor:
+                json_response(self, {"error": "Solo disponible para usuarios admin."}, status=403)
+                return
+            tipo_id = str(payload.get("id") or "").strip()
+            if not tipo_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            conn.execute(
+                "DELETE FROM gestoria_trabajo_tipos WHERE id = ? AND empresa_id = ?",
+                (tipo_id, empresa["id"]),
+            )
+            audit("gestoria_trabajo_tipo", tipo_id, "eliminar", None, payload.get("usuario"))
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/gestoria_docs":
             estado_doc = payload.get("estado")
             if payload.get("doc_key") or payload.get("doc_url"):
@@ -54594,6 +54901,7 @@ class Handler(BaseHTTPRequestHandler):
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             updates = {}
             for key in (
                 "cliente_id",
@@ -54623,6 +54931,9 @@ class Handler(BaseHTTPRequestHandler):
                 "poliza_url",
                 "tipo_vigencia",
                 "datos_ramo_json",
+                "matricula",
+                "direccion_riesgo",
+                "referencia_catastral",
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
@@ -54658,6 +54969,37 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            # Snapshot versión antes de cambios relevantes (para recuperar si se rompe algo).
+            try:
+                significant = {
+                    "estado",
+                    "compania",
+                    "ramo",
+                    "poliza_numero",
+                    "fecha_efecto",
+                    "fecha_vencimiento",
+                    "fecha_baja",
+                    "prima_neta",
+                    "prima_total",
+                    "comision",
+                    "estado_poliza",
+                    "estado_renovacion",
+                    "renovacion_fecha",
+                }
+                changed = []
+                for key, incoming in updates.items():
+                    if key not in significant:
+                        continue
+                    try:
+                        current = current_row[key]
+                    except Exception:
+                        current = row_value(current_row, key)
+                    if str(current or "").strip() != str(incoming or "").strip():
+                        changed.append(key)
+                if changed:
+                    save_seguro_version(conn, current_row, now, motivo=f"seguros_update: {', '.join(changed)}", created_by=actor or "")
+            except Exception:
+                pass
             incoming_cliente_id = updates.get("cliente_id")
             if incoming_cliente_id:
                 cliente_exists = conn.execute(
@@ -54692,6 +55034,23 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Mantener JSON técnico al día cuando vienen campos "smart" explícitos.
+            try:
+                incoming_smart = {}
+                for key in SEGURO_SMART_FIELDS:
+                    if key not in payload:
+                        continue
+                    val = payload.get(key)
+                    if val is None:
+                        continue
+                    text = str(val).strip()
+                    if not text:
+                        continue
+                    incoming_smart[key] = val
+                if incoming_smart:
+                    merge_seguro_smart_data(conn, record_id, incoming_smart, now)
+            except Exception:
+                pass
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row and row["cliente_id"]:
                 ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)

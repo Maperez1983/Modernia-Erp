@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0B1D33" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Verifika²" />
-    <title>Verifika² · CRM & Portal</title>
-						    <link rel="stylesheet" href="styles.css?v=260" />
-    <link rel="manifest" href="manifest.webmanifest?v=17" />
-    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
+	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
+	    <title>Verifika² · CRM & Portal</title>
+						    <link rel="stylesheet" href="styles.css?v=261" />
+	    <link rel="manifest" href="manifest.webmanifest?v=17" />
+	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
+	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
     <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v27/apple-touch-icon-167.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/v27/apple-touch-icon-152.png" />
     <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/v27/apple-touch-icon-120.png" />
@@ -5884,28 +5884,21 @@
             <div class="footer" id="gestoriaAgendaInfo"></div>
           </div>
         </div>
-        <div id="gestoriaFactSection" class="hidden">
-          <div class="crm-header">
-            <div>
-              <h3>Gestoría · Presupuestos</h3>
-              <p class="muted">Presupuestos de administración de fincas y gestoría (con PDF y nota de encargo).</p>
-            </div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Presupuesto rápido (Fincas)</h3>
-                <p class="muted">5 € por vivienda + 1 € por local, trastero o aparcamiento (mín. 60 €/mes).</p>
-              </div>
-            </div>
-            <div class="budget-brand-strip">
-              <div class="budget-brand-logos">
-                <img id="gestoriaBudgetCompanyLogo" src="/assets/logos/fincas-velazquez.png" alt="Logo empresa" />
-                <img id="gestoriaBudgetColegioLogo" src="/assets/logos/colegio-administradores-v2.png" alt="Colegio de Administradores" />
-              </div>
-              <div class="muted">Colegiado nº 3079</div>
-            </div>
-            <form id="gestoriaBudgetQuickForm" class="form-grid">
+	        <div id="gestoriaFactSection" class="hidden">
+	          <div class="crm-header">
+	            <div>
+	              <h3>Gestoría · Presupuestos</h3>
+	              <p class="muted">Presupuestos y notas de encargo de Gestoría.</p>
+	            </div>
+	          </div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Presupuesto rápido (Gestoría)</h3>
+	                <p class="muted">Selecciona tipo de trabajo e introduce importes (subtotal + IVA).</p>
+	              </div>
+	            </div>
+	            <form id="gestoriaBudgetQuickForm" class="form-grid">
               <label>
                 Estado
                 <select name="estado">
@@ -5915,85 +5908,62 @@
                   <option>Rechazado</option>
                 </select>
               </label>
-              <label class="span-2">
-                Denominación social
-                <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
-              </label>
-              <label class="span-2">
-                Dirección
-                <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
-              </label>
-              <label>
-                CIF
-                <input name="comunidad_cif" placeholder="Ej. H12345678" />
-              </label>
-              <label class="span-2">
-                Nombre presidente/solicitante
-                <input name="solicitante_nombre" />
-              </label>
-              <label>
-                DNI solicitante
-                <input name="solicitante_dni" />
-              </label>
-              <label>
-                Teléfono solicitante
-                <input name="solicitante_telefono" />
-              </label>
-              <label class="span-2">
-                Dirección solicitante
-                <input name="solicitante_direccion" />
-              </label>
-              <label class="span-2">
-                Email solicitante
-                <input name="solicitante_email" type="email" />
-              </label>
-              <label>
-                Viviendas
-                <input name="num_vecinos" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Locales
-                <input name="num_locales" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Trasteros
-                <input name="num_trasteros" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Aparcamientos
-                <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Base mensual sugerida
-                <input name="subtotal_sugerido" type="number" step="0.01" readonly />
-              </label>
-              <label>
-                Subtotal (sin IVA)
-                <input name="subtotal" type="number" step="0.01" readonly />
-              </label>
-              <label>
-                IVA (21%)
-                <input name="impuestos" type="number" step="0.01" readonly />
-              </label>
-              <label>
-                Total (con IVA)
-                <input name="total" type="number" step="0.01" readonly />
-              </label>
-              <label class="span-2">
-                Título (opcional)
-                <input name="titulo" placeholder="Se autogenera si lo dejas en blanco" />
-              </label>
-              <label class="span-2">
-                Carta de presentación (opcional)
-                <textarea name="carta_presentacion" rows="4" placeholder="Texto adicional para la carta del PDF."></textarea>
-              </label>
-              <div class="span-2" id="gestoriaBudgetServiciosIncluidos"></div>
-              <div class="form-actions span-2">
-                <button type="submit">Crear presupuesto + PDF</button>
-                <span id="gestoriaBudgetQuickStatus" class="muted"></span>
-              </div>
-            </form>
-          </div>
+	              <label class="span-2">
+	                Cliente
+	                <input name="cliente_lookup" required placeholder="Ej. Juan Pérez / Empresa SL" />
+	              </label>
+	              <label>
+	                NIF (opcional)
+	                <input name="cliente_nif" placeholder="DNI/CIF" />
+	              </label>
+	              <label class="span-2">
+	                Título (opcional)
+	                <input name="titulo" placeholder="Si lo dejas vacío se autogenera" />
+	              </label>
+	              <label>
+	                Tipo de trabajo
+	                <select name="tipo_trabajo" id="gestoriaBudgetTipoTrabajo"></select>
+	              </label>
+	              <label>
+	                Subtotal (€)
+	                <input name="subtotal" inputmode="decimal" placeholder="0,00" />
+	              </label>
+	              <label>
+	                IVA (%)
+	                <input name="iva_pct" inputmode="decimal" value="21" />
+	              </label>
+	              <label>
+	                IVA (€)
+	                <input name="impuestos" inputmode="decimal" placeholder="0,00" />
+	              </label>
+	              <label>
+	                Total (€)
+	                <input name="total" inputmode="decimal" placeholder="0,00" />
+	              </label>
+	              <label class="span-2">
+	                Carta de presentación (opcional)
+	                <textarea name="carta_presentacion" rows="4" placeholder="Texto adicional para la carta del PDF."></textarea>
+	              </label>
+	              <div class="form-actions span-2">
+	                <button type="submit">Crear presupuesto + PDF</button>
+	                <span id="gestoriaBudgetQuickStatus" class="muted"></span>
+	              </div>
+	            </form>
+	          </div>
+	          <div class="form-card hidden" id="gestoriaTrabajoTiposCard">
+	            <div class="section-head">
+	              <div>
+	                <h3>Configuración · Tipos de trabajo</h3>
+	                <p class="muted">Solo admin. Define tipos, categorías, SLA y valores por defecto.</p>
+	              </div>
+	              <div class="toolbar">
+	                <button type="button" class="secondary" id="gestoriaTrabajoTipoAddBtn">Añadir tipo</button>
+	                <button type="button" class="secondary ghost" id="gestoriaTrabajoTipoReloadBtn">Recargar</button>
+	              </div>
+	            </div>
+	            <div id="gestoriaTrabajoTiposTable"></div>
+	            <div class="footer" id="gestoriaTrabajoTiposInfo"></div>
+	          </div>
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -6001,11 +5971,11 @@
                 <p class="muted">Filtra por servicio y abre el PDF o la nota de encargo.</p>
               </div>
               <div class="toolbar">
-                <select id="gestoriaBudgetsServicioFilter">
-                  <option value="fincas" selected>Fincas</option>
-                  <option value="gestoria">Gestoría</option>
-                  <option value="all">Todos</option>
-                </select>
+	                <select id="gestoriaBudgetsServicioFilter">
+	                  <option value="gestoria" selected>Gestoría</option>
+	                  <option value="fincas">Fincas</option>
+	                  <option value="all">Todos</option>
+	                </select>
                 <select id="gestoriaBudgetsEstadoFilter">
                   <option value="all" selected>Todos</option>
                   <option value="Borrador">Borrador</option>

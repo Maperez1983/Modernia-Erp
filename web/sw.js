@@ -13,7 +13,7 @@ const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=260",
+  "/styles.css?v=261",
   "/ui-foundation.js?v=4",
   "/app-auth.js?v=14",
   "/app-routing.js?v=11",
