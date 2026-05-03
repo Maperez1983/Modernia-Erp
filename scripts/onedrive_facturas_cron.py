@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
 """
-Ingesta de facturas desde OneDrive Personal (Microsoft Graph) -> S3 -> OCR (CRM MODERNIA).
+Ingesta de facturas desde OneDrive -> S3 -> OCR (CRM MODERNIA).
 
 Pensado para ejecutarse como Cron Job en Render (no depende de OneDrive sync en Mac).
 
 Requisitos (env):
   - APP_INGEST_API_KEY: API key para endpoints ingest del CRM
   - CRM_BASE_URL: URL pública del CRM (p.ej. https://modernia-erp-2.onrender.com)
+
+Modo recomendado (OneDrive Personal): `rclone`
+  - ONEDRIVE_MODE=rclone
+  - RCLONE_REMOTE (default: onedrive_modernia)
+  - RCLONE_CONFIG_B64: rclone.conf en base64 (contiene token OAuth)
+  - ONEDRIVE_FACTURAS_ROOT_PATH o ONEDRIVE_FACTURAS_ROOT_PATHS (separado por coma)
+    Ej: "ESTUDIO VELAZQUEZ/FACTURAS"
+
+Modo alternativo (Graph OAuth; normalmente OneDrive Empresa/Azure app):
+  - ONEDRIVE_MODE=graph
   - ONEDRIVE_CLIENT_ID / ONEDRIVE_CLIENT_SECRET / ONEDRIVE_REFRESH_TOKEN
   - ONEDRIVE_FACTURAS_ROOT_PATH: ruta a la carpeta FACTURAS dentro de OneDrive (p.ej. "ESTUDIO VELAZQUEZ/FACTURAS")
 Opcional:
   - ONEDRIVE_SCOPES (default: "offline_access User.Read Files.Read.All")
   - ONEDRIVE_SOURCE (default: "onedrive")
   - ONEDRIVE_EMPRESA_ALIAS (default: se infiere del root path antes de "/FACTURAS")
+  - ONEDRIVE_INGEST_LIMIT (default: 50): máximo PDFs por ejecución (para evitar timeouts)
 
 Persistencia:
   - Guarda deltaLink y refresh_token (si rota) en crm_meta para evitar reprocesos.
@@ -21,13 +32,17 @@ Persistencia:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.parse
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import requests
 
@@ -36,6 +51,19 @@ from web.db_backend import open_db_conn
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+DEFAULT_RCLONE_REMOTE = "onedrive_modernia"
+
+
+def _split_csv(value: str) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    out = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part:
+            out.append(part)
+    return out
 
 
 def normalize_lookup_text(value: str) -> str:
@@ -93,6 +121,55 @@ def meta_set(conn, key: str, value: str) -> None:
         (str(key), str(value), now),
     )
     conn.commit()
+
+
+def maybe_write_rclone_config(tmp_dir: Path) -> None:
+    """
+    Render no tiene HOME persistente; inyectamos el rclone.conf vía env y lo escribimos a disco temporal.
+    """
+    cfg_b64 = str(os.environ.get("RCLONE_CONFIG_B64") or "").strip()
+    cfg_raw = str(os.environ.get("RCLONE_CONFIG_CONTENT") or "").strip()
+    if not cfg_b64 and not cfg_raw:
+        return
+    try:
+        if cfg_b64:
+            data = base64.b64decode(cfg_b64.encode("utf-8"))
+        else:
+            data = cfg_raw.encode("utf-8")
+    except Exception as exc:
+        raise RuntimeError(f"RCLONE_CONFIG_B64 inválido: {exc}") from exc
+    conf_path = tmp_dir / "rclone.conf"
+    conf_path.write_bytes(data)
+    os.environ["RCLONE_CONFIG"] = str(conf_path)
+
+
+def rclone_lsjson(*, remote: str, path: str) -> list[dict]:
+    target = f"{remote}:{str(path or '').strip().strip('/')}"
+    cmd = ["rclone", "lsjson", target, "--recursive", "--files-only", "--no-mimetype"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(f"rclone lsjson falló: {msg[:500]}")
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except Exception as exc:
+        raise RuntimeError(f"rclone lsjson devolvió JSON inválido: {exc}") from exc
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for item in data:
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def rclone_cat_bytes(*, remote: str, path: str) -> bytes:
+    target = f"{remote}:{str(path or '').strip().strip('/')}"
+    proc = subprocess.run(["rclone", "cat", target], capture_output=True, timeout=600)
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"rclone cat falló: {msg[:500]}")
+    return proc.stdout or b""
 
 
 def graph_refresh_access_token(conn, *, client_id: str, client_secret: str, scopes: str, refresh_token_env: str) -> tuple[str, str]:
@@ -283,6 +360,27 @@ def infer_tipo_year_from_ancestry(ancestry: list[str]) -> tuple[str, str]:
     return ("emitidas" if first == "EMITIDAS" else "recibidas"), year
 
 
+def infer_tipo_year_from_relpath(rel_path: str) -> tuple[str, str]:
+    """
+    Espera rutas tipo:
+      - RECIBIDAS/2024/01 ENERO/Factura.pdf
+      - EMITIDAS/2025/Factura.pdf
+    """
+    safe = str(rel_path or "").strip().strip("/")
+    if not safe:
+        return "", ""
+    parts = [p for p in safe.split("/") if p]
+    if not parts:
+        return "", ""
+    first = normalize_lookup_text(parts[0])
+    if first not in {"EMITIDAS", "RECIBIDAS"}:
+        return "", ""
+    year = ""
+    if len(parts) >= 2 and re.fullmatch(r"\d{4}", str(parts[1] or "").strip()):
+        year = str(parts[1]).strip()
+    return ("emitidas" if first == "EMITIDAS" else "recibidas"), year
+
+
 def build_ancestry(session: requests.Session, *, root_id: str, parent_id: str, cache: dict[str, dict]) -> list[str]:
     out = []
     current = str(parent_id or "").strip()
@@ -349,6 +447,13 @@ def main() -> int:
 
     crm_base_url = str(os.environ.get("CRM_BASE_URL") or "").strip()
     ingest_key = str(os.environ.get("APP_INGEST_API_KEY") or "").strip()
+    onedrive_mode = str(os.environ.get("ONEDRIVE_MODE") or "rclone").strip().lower() or "rclone"
+    ingest_limit = 50
+    try:
+        ingest_limit = int(str(os.environ.get("ONEDRIVE_INGEST_LIMIT") or "50").strip() or 50)
+    except Exception:
+        ingest_limit = 50
+    ingest_limit = max(1, min(1000, ingest_limit))
     if not crm_base_url:
         print("ERROR: CRM_BASE_URL requerido", file=sys.stderr)
         return 2
@@ -361,24 +466,129 @@ def main() -> int:
     od_refresh = str(os.environ.get("ONEDRIVE_REFRESH_TOKEN") or "").strip()
     od_scopes = str(os.environ.get("ONEDRIVE_SCOPES") or "offline_access User.Read Files.Read.All").strip()
     od_root_path = str(os.environ.get("ONEDRIVE_FACTURAS_ROOT_PATH") or "").strip().strip("/")
+    od_root_paths = _split_csv(os.environ.get("ONEDRIVE_FACTURAS_ROOT_PATHS") or "")
     od_source = str(os.environ.get("ONEDRIVE_SOURCE") or "onedrive").strip()
     od_empresa_alias = str(os.environ.get("ONEDRIVE_EMPRESA_ALIAS") or "").strip()
+    rclone_remote = str(os.environ.get("RCLONE_REMOTE") or DEFAULT_RCLONE_REMOTE).strip() or DEFAULT_RCLONE_REMOTE
+
+    if not od_root_path:
+        if od_root_paths:
+            od_root_path = od_root_paths[0].strip().strip("/")
+        else:
+            print("ERROR: ONEDRIVE_FACTURAS_ROOT_PATH requerido (p.ej. 'ESTUDIO VELAZQUEZ/FACTURAS')", file=sys.stderr)
+            return 2
+
     if not od_empresa_alias:
         od_empresa_alias = infer_empresa_alias_from_root(od_root_path)
 
-    if not od_client_id or not od_client_secret:
-        print("ERROR: ONEDRIVE_CLIENT_ID/ONEDRIVE_CLIENT_SECRET requeridos", file=sys.stderr)
+    roots = [od_root_path] + [p for p in od_root_paths if p.strip().strip("/") and p.strip().strip("/") != od_root_path]
+
+    if onedrive_mode not in {"rclone", "graph"}:
+        print("ERROR: ONEDRIVE_MODE debe ser rclone o graph", file=sys.stderr)
         return 2
-    if not od_root_path:
-        print("ERROR: ONEDRIVE_FACTURAS_ROOT_PATH requerido (p.ej. 'ESTUDIO VELAZQUEZ/FACTURAS')", file=sys.stderr)
-        return 2
-    if not od_empresa_alias:
-        print("ERROR: ONEDRIVE_EMPRESA_ALIAS no se pudo inferir; configúralo explícitamente", file=sys.stderr)
-        return 2
+    if onedrive_mode == "graph":
+        if not od_client_id or not od_client_secret:
+            print("ERROR: ONEDRIVE_CLIENT_ID/ONEDRIVE_CLIENT_SECRET requeridos (modo graph)", file=sys.stderr)
+            return 2
+        if not od_empresa_alias:
+            print("ERROR: ONEDRIVE_EMPRESA_ALIAS no se pudo inferir; configúralo explícitamente", file=sys.stderr)
+            return 2
 
     conn = open_db_conn(args.db, with_row_factory=True)
     try:
         ensure_crm_meta(conn)
+
+        if onedrive_mode == "rclone":
+            processed_total = 0
+            skipped_total = 0
+            errors_total = 0
+
+            with TemporaryDirectory(prefix="rclone_cfg_") as tmp:
+                tmp_dir = Path(tmp)
+                maybe_write_rclone_config(tmp_dir)
+
+                for root in roots:
+                    root = str(root or "").strip().strip("/")
+                    if not root:
+                        continue
+                    root_norm = normalize_lookup_text(root)
+                    empresa_alias = od_empresa_alias or infer_empresa_alias_from_root(root)
+                    if not empresa_alias:
+                        raise RuntimeError(f"No se pudo inferir empresa_alias desde '{root}' (usa ONEDRIVE_EMPRESA_ALIAS)")
+                    empresa_id = resolve_empresa_id_from_alias(conn, empresa_alias, source=od_source)
+                    if not empresa_id:
+                        raise RuntimeError(f"No se pudo resolver empresa_id para alias '{empresa_alias}' (root '{root}')")
+
+                    print(
+                        f"[rclone] remote='{rclone_remote}' root='{root}' empresa_alias='{empresa_alias}' empresa_id='{empresa_id}' limit={ingest_limit}"
+                    )
+                    items = rclone_lsjson(remote=rclone_remote, path=root)
+                    processed = 0
+                    skipped = 0
+                    errors = 0
+
+                    for it in items:
+                        if processed_total >= ingest_limit:
+                            break
+                        rel_path = str(it.get("Path") or it.get("Name") or "").strip()
+                        if not rel_path:
+                            continue
+                        name = os.path.basename(rel_path)
+                        if not name.lower().endswith(".pdf"):
+                            continue
+                        tipo, year = infer_tipo_year_from_relpath(rel_path)
+                        if not tipo:
+                            skipped += 1
+                            continue
+                        item_id = str(it.get("ID") or rel_path).strip()
+                        last_mod = str(it.get("ModTime") or "").strip()
+                        done_key = f"onedrive_rclone_done:{root_norm}:{item_id}"
+                        if last_mod and meta_get(conn, done_key).strip() == last_mod:
+                            skipped += 1
+                            continue
+                        try:
+                            full_path = f"{root}/{rel_path}".strip().strip("/")
+                            data = rclone_cat_bytes(remote=rclone_remote, path=full_path)
+                            signed = crm_ingest_presign(
+                                base_url=crm_base_url,
+                                api_key=ingest_key,
+                                empresa_id=empresa_id,
+                                tipo=tipo.upper(),
+                                year=year,
+                                filename=name,
+                            )
+                            presign_url = str(signed.get("url") or "").strip()
+                            final_key = str(signed.get("key") or "").strip()
+                            if not presign_url or not final_key:
+                                raise RuntimeError("Respuesta presign inválida (faltan url/key)")
+                            upload_via_presign(presign_url=presign_url, data=data, content_type="application/pdf")
+                            source_hint = f"onedrive rclone id={item_id} mtime={last_mod} path={rel_path}"
+                            crm_ingest_ocr(
+                                base_url=crm_base_url,
+                                api_key=ingest_key,
+                                empresa_id=empresa_id,
+                                s3_key=final_key,
+                                tipo=tipo.upper(),
+                                filename=name,
+                                source_hint=source_hint,
+                            )
+                            if last_mod:
+                                meta_set(conn, done_key, last_mod)
+                            processed += 1
+                            processed_total += 1
+                        except Exception as exc:
+                            errors += 1
+                            errors_total += 1
+                            try:
+                                print(f"[ERROR] rclone item: {type(exc).__name__}: {exc}", file=sys.stderr)
+                            except Exception:
+                                pass
+
+                    skipped_total += skipped
+                    print(f"[rclone done] root='{root}' processed={processed} skipped={skipped} errors={errors}")
+
+            print(f"[done] mode=rclone processed={processed_total} skipped={skipped_total} errors={errors_total}")
+            return 0 if errors_total == 0 else 1
 
         access_token, _refresh_used = graph_refresh_access_token(
             conn,
