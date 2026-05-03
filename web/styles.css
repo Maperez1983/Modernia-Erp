@@ -11965,6 +11965,28 @@ body.crm-context-gestoria #crmViewGestoria {
   display: block;
 }
 
+/* Unificación visual: cuando montamos verticales (Seguros/Fin/Gestoría) dentro del shell CRM Lightning,
+   evitamos duplicar cabeceras internas (ya existe topbar en `#crmSection`). */
+body.crm-context-vertical #crmSection #crmViewSeguros #segurosCrmSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaCrmSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDocsSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaContaSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaAgendaSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaFactSection > .crm-header,
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDashboardSection > .dashboard-head {
+  display: none;
+}
+
+/* Gestoría montada: compacta el margen superior que antes dependía de `.dashboard-head`. */
+body.crm-context-vertical #crmSection #crmViewGestoria #gestoriaDashboardSection {
+  padding-top: 0;
+}
+
+/* Financiaciones: cuando el topbar ya pinta los módulos (`#crmTopFinModules`), ocultamos la micro-barra interna. */
+body.crm-context-fin #crmSection #crmViewFin #hipotecaTabs {
+  display: none;
+}
+
 /* === Verifika²: Sistema visual unificado de cards (todo el sistema) === */
 body.theme-operativa {
   --v2-card-radius: 20px;
