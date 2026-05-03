@@ -844,6 +844,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/auth_set_password",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
+    "/api/workspace_portal_public_request",
     "/api/workspace_kiosk_toggle",
     "/api/ingest_facturas_presign",
     "/api/ingest_facturas_ocr",
@@ -37435,6 +37436,85 @@ def fetch_workspace_portal_public(conn, token):
         """,
         (row["workspace_id"], row["cliente_id"]),
     ).fetchall()
+    empresa_ids = fetch_workspace_company_ids(conn, row["workspace_id"])
+    seguros_polizas = []
+    seguros_recibos = []
+    seguros_siniestros = []
+    seguros_renovaciones = []
+    if empresa_ids:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        try:
+            seguros_polizas = conn.execute(
+                f"""
+                SELECT id, empresa_id, compania, ramo, poliza_numero, fecha_efecto, fecha_vencimiento, estado,
+                       poliza_key, poliza_url
+                FROM seguros
+                WHERE cliente_id = ?
+                  AND empresa_id IN ({placeholders})
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha_vencimiento,'')),''), NULLIF(TRIM(COALESCE(fecha_efecto,'')),''), updated_at, created_at) DESC
+                LIMIT 20
+                """,
+                [row["cliente_id"], *empresa_ids],
+            ).fetchall()
+        except Exception:
+            seguros_polizas = []
+        try:
+            seguros_recibos = conn.execute(
+                f"""
+                SELECT id, seguro_id, referencia, poliza_numero, compania, ramo,
+                       fecha_emision, fecha_vencimiento, fecha_cobro, estado, prima_total,
+                       doc_key, doc_url
+                FROM seguros_recibos
+                WHERE cliente_id = ?
+                  AND empresa_id IN ({placeholders})
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha_vencimiento,'')),''), NULLIF(TRIM(COALESCE(fecha_emision,'')),''), updated_at, created_at) DESC
+                LIMIT 12
+                """,
+                [row["cliente_id"], *empresa_ids],
+            ).fetchall()
+        except Exception:
+            seguros_recibos = []
+        try:
+            seguros_siniestros = conn.execute(
+                f"""
+                SELECT id, seguro_id, numero_expediente, compania, ramo,
+                       fecha_siniestro, fecha_apertura, fecha_cierre, estado, tipo, descripcion
+                FROM seguros_siniestros
+                WHERE cliente_id = ?
+                  AND empresa_id IN ({placeholders})
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha_apertura,'')),''), created_at) DESC
+                LIMIT 12
+                """,
+                [row["cliente_id"], *empresa_ids],
+            ).fetchall()
+        except Exception:
+            seguros_siniestros = []
+        try:
+            seguros_renovaciones = conn.execute(
+                f"""
+                SELECT
+                  r.id,
+                  r.estado,
+                  r.fecha_vencimiento,
+                  r.proxima_accion_fecha,
+                  r.ultimo_contacto_fecha,
+                  r.notas,
+                  COALESCE(s.id, '') AS seguro_id,
+                  COALESCE(s.poliza_numero, r.poliza_key) AS poliza_numero,
+                  COALESCE(s.compania, '') AS compania,
+                  COALESCE(s.ramo, '') AS ramo
+                FROM seguros_renovaciones r
+                LEFT JOIN seguros s
+                  ON (s.id = r.poliza_id OR (r.poliza_id IS NULL AND TRIM(COALESCE(r.poliza_key,'')) != '' AND s.poliza_key = r.poliza_key))
+                WHERE r.empresa_id IN ({placeholders})
+                  AND s.cliente_id = ?
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_vencimiento,'')),''), r.updated_at, r.created_at) DESC
+                LIMIT 12
+                """,
+                [*empresa_ids, row["cliente_id"]],
+            ).fetchall()
+        except Exception:
+            seguros_renovaciones = []
     return {
         "workspace": row["workspace_nombre"],
         "cliente": row["cliente_nombre"],
@@ -37444,6 +37524,10 @@ def fetch_workspace_portal_public(conn, token):
         "docs": [dict(item) for item in docs],
         "facturas": [dict(item) for item in bills],
         "requerimientos": [dict(item) for item in requests],
+        "seguros_polizas": [dict(item) for item in seguros_polizas],
+        "seguros_recibos": [dict(item) for item in seguros_recibos],
+        "seguros_siniestros": [dict(item) for item in seguros_siniestros],
+        "seguros_renovaciones": [dict(item) for item in seguros_renovaciones],
     }
 
 
@@ -44268,11 +44352,12 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/workspace_inbox_review",
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
-            "/api/workspace_registro_notifications",
-            "/api/workspace_document_assign",
-            "/api/workspace_portal_upload",
-            "/api/workspace_company_logo_upload",
-            "/api/workspace_cobros",
+	            "/api/workspace_registro_notifications",
+	            "/api/workspace_document_assign",
+	            "/api/workspace_portal_upload",
+	            "/api/workspace_portal_public_request",
+	            "/api/workspace_company_logo_upload",
+	            "/api/workspace_cobros",
             "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_personal",
@@ -49966,6 +50051,102 @@ class Handler(BaseHTTPRequestHandler):
                 return
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             json_response(self, {"url": url, "key": key, "public_url": public_url})
+            return
+        elif parsed.path == "/api/workspace_portal_public_request":
+            token = str(payload.get("token") or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            portal = conn.execute(
+                """
+                SELECT id, workspace_id, cliente_id, estado
+                FROM workspace_portal_clientes
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            if str(portal.get("estado") or "").strip().lower() == "pausado":
+                json_response(self, {"error": "portal pausado"}, status=403)
+                return
+            raw_tipo = str(payload.get("tipo") or "").strip()
+            tipo = normalize_action_key(raw_tipo) if raw_tipo else ""
+            seguro_id = str(payload.get("seguro_id") or "").strip()
+            poliza_ref = str(payload.get("poliza_ref") or "").strip()
+            descripcion = str(payload.get("descripcion") or payload.get("detalle") or "").strip()
+            if not descripcion and str(payload.get("texto") or "").strip():
+                descripcion = str(payload.get("texto") or "").strip()
+            if not descripcion:
+                json_response(self, {"error": "descripcion requerida"}, status=400)
+                return
+            if len(descripcion) > 6000:
+                descripcion = descripcion[:6000]
+            servicio = str(payload.get("servicio") or "seguros").strip() or "seguros"
+            prioridad = str(payload.get("prioridad") or "Normal").strip() or "Normal"
+            clasificacion = str(payload.get("clasificacion") or "").strip()
+            if not clasificacion:
+                clasificacion = "seguros_cambio" if servicio.lower().startswith("seguro") else "portal_cliente"
+
+            tipo_labels = {
+                "cambio_cuenta": "Cambio de cuenta bancaria",
+                "cambio_conductores": "Cambio de conductores",
+                "cambio_coberturas": "Cambio de coberturas",
+                "cambio_datos": "Actualización de datos",
+                "duplicado_documentacion": "Duplicado / documentación",
+                "baja_poliza": "Baja de póliza",
+                "alta_poliza": "Nueva póliza / alta",
+                "otro": "Solicitud",
+            }
+            subject = tipo_labels.get(tipo, "") or (raw_tipo.strip() if raw_tipo else "") or "Solicitud"
+            extra = " · ".join(part for part in [poliza_ref, seguro_id] if part)
+            titulo = f"{subject}{(' · ' + extra) if extra else ''}".strip()
+
+            record_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_portal_requerimientos (
+                  id, workspace_id, portal_cliente_id, cliente_id, servicio, titulo, descripcion,
+                  clasificacion, prioridad, estado, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    portal["workspace_id"],
+                    portal["id"],
+                    portal["cliente_id"],
+                    servicio,
+                    titulo,
+                    descripcion,
+                    clasificacion,
+                    prioridad,
+                    now,
+                    now,
+                ),
+            )
+            try:
+                audit_event(
+                    conn,
+                    None,
+                    "workspace_portal_requerimientos",
+                    record_id,
+                    "crear_public",
+                    usuario="Portal",
+                    detalles={
+                        "workspace_id": portal["workspace_id"],
+                        "cliente_id": portal["cliente_id"],
+                        "servicio": servicio,
+                        "tipo": tipo or raw_tipo,
+                        "seguro_id": seguro_id,
+                    },
+                    now=now,
+                )
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_portal_upload":
             token = str(payload.get("token") or "").strip()

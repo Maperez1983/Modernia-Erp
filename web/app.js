@@ -24329,25 +24329,37 @@ const openWorkspacePortalPublic = async (token) => {
         <div class="form-card">
           <h3>${getWorkspaceDisplayName(data.workspace || "Workspace")}</h3>
           <p class="muted">${data.cliente || "Cliente"}</p>
-          <div class="workspace-mini-kpis">
-            <div class="workspace-mini-kpi">
-              <span>Estado acceso</span>
-              <strong>${data.estado || "-"}</strong>
-            </div>
-            <div class="workspace-mini-kpi">
-              <span>Documentos</span>
-              <strong>${numberFormatter.format((data.docs || []).length)}</strong>
-            </div>
-            <div class="workspace-mini-kpi">
-              <span>Facturas</span>
-              <strong>${numberFormatter.format((data.facturas || []).length)}</strong>
-            </div>
-            <div class="workspace-mini-kpi">
-              <span>Requerimientos</span>
-              <strong>${numberFormatter.format((data.requerimientos || []).length)}</strong>
-            </div>
-          </div>
-        </div>
+	          <div class="workspace-mini-kpis">
+	            <div class="workspace-mini-kpi">
+	              <span>Estado acceso</span>
+	              <strong>${data.estado || "-"}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Pólizas</span>
+	              <strong>${numberFormatter.format((data.seguros_polizas || []).length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Documentos</span>
+	              <strong>${numberFormatter.format((data.docs || []).length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Recibos</span>
+	              <strong>${numberFormatter.format((data.seguros_recibos || []).length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Facturas</span>
+	              <strong>${numberFormatter.format((data.facturas || []).length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Requerimientos</span>
+	              <strong>${numberFormatter.format((data.requerimientos || []).length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
+	              <span>Siniestros</span>
+	              <strong>${numberFormatter.format((data.seguros_siniestros || []).length)}</strong>
+	            </div>
+	          </div>
+	        </div>
         <div class="form-card">
           <h3>Subir documentación</h3>
           <p class="muted">Puedes aportar documentos directamente al expediente. Quedarán en revisión interna.</p>
@@ -24396,11 +24408,175 @@ const openWorkspacePortalPublic = async (token) => {
 	            </div>
 	          </form>
         </div>
-        <div class="workspace-central-layout">
-          <div class="form-card">
-            <h3>Documentación</h3>
-            ${
-              (data.docs || []).length
+	        <div class="workspace-central-layout">
+	          <div class="form-card">
+	            <h3>Seguros</h3>
+	            <p class="muted">Consulta tu cartera, recibos, siniestros y renovaciones. Puedes solicitar cambios desde aquí.</p>
+	            ${
+	              (data.seguros_polizas || []).length
+	                ? `
+	                    <div class="workspace-billing-list">
+	                      ${(data.seguros_polizas || [])
+	                        .map((row) => {
+	                          const poliza = row.poliza_numero || "-";
+	                          const label = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
+	                          const doc = row.poliza_url || "";
+	                          const link = doc ? `<a class="secondary ghost button-inline" href="${doc}" target="_blank" rel="noreferrer">PDF</a>` : "";
+	                          const vence = row.fecha_vencimiento || "";
+	                          const estado = row.estado || "";
+	                          return `
+	                            <div class="workspace-billing-row">
+	                              <div>
+	                                <strong>${poliza}</strong>
+	                                <div class="muted">${label}${vence ? ` · Vence ${vence}` : ""}</div>
+	                              </div>
+	                              <div class="workspace-billing-meta">
+	                                <span>${estado || "-"}</span>
+	                                ${link}
+	                              </div>
+	                            </div>
+	                          `;
+	                        })
+	                        .join("")}
+	                    </div>
+	                  `
+	                : "<p class='muted'>No hay pólizas asociadas en este portal.</p>"
+	            }
+	            <details style="margin-top:10px;">
+	              <summary>Recibos</summary>
+	              ${
+	                (data.seguros_recibos || []).length
+	                  ? `
+	                      <div class="workspace-billing-list" style="margin-top:10px;">
+	                        ${(data.seguros_recibos || [])
+	                          .map((row) => {
+	                            const poliza = row.poliza_numero || "-";
+	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
+	                            const vence = row.fecha_vencimiento || "";
+	                            const estado = row.estado || "";
+	                            const amount = row.prima_total ? euroFormatter.format(Number(row.prima_total || 0)) : "";
+	                            const doc = row.doc_url || "";
+	                            const link = doc ? `<a class="secondary ghost button-inline" href="${doc}" target="_blank" rel="noreferrer">PDF</a>` : "";
+	                            return `
+	                              <div class="workspace-billing-row">
+	                                <div>
+	                                  <strong>${poliza}</strong>
+	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
+	                                </div>
+	                                <div class="workspace-billing-meta">
+	                                  <span>${amount || "-"}</span>
+	                                  <span>${estado || "-"}</span>
+	                                  ${link}
+	                                </div>
+	                              </div>
+	                            `;
+	                          })
+	                          .join("")}
+	                      </div>
+	                    `
+	                  : "<p class='muted'>No hay recibos disponibles.</p>"
+	              }
+	            </details>
+	            <details style="margin-top:10px;">
+	              <summary>Siniestros</summary>
+	              ${
+	                (data.seguros_siniestros || []).length
+	                  ? `
+	                      <div class="workspace-billing-list" style="margin-top:10px;">
+	                        ${(data.seguros_siniestros || [])
+	                          .map((row) => {
+	                            const exp = row.numero_expediente || "Siniestro";
+	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
+	                            const fecha = row.fecha_siniestro || row.fecha_apertura || "";
+	                            const estado = row.estado || "";
+	                            const tipo = row.tipo || "";
+	                            return `
+	                              <div class="workspace-billing-row">
+	                                <div>
+	                                  <strong>${exp}</strong>
+	                                  <div class="muted">${meta}${tipo ? ` · ${tipo}` : ""}${fecha ? ` · ${fecha}` : ""}</div>
+	                                </div>
+	                                <div class="workspace-billing-meta">
+	                                  <span>${estado || "-"}</span>
+	                                </div>
+	                              </div>
+	                            `;
+	                          })
+	                          .join("")}
+	                      </div>
+	                    `
+	                  : "<p class='muted'>No hay siniestros disponibles.</p>"
+	              }
+	            </details>
+	            <details style="margin-top:10px;">
+	              <summary>Renovaciones</summary>
+	              ${
+	                (data.seguros_renovaciones || []).length
+	                  ? `
+	                      <div class="workspace-billing-list" style="margin-top:10px;">
+	                        ${(data.seguros_renovaciones || [])
+	                          .map((row) => {
+	                            const poliza = row.poliza_numero || "-";
+	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
+	                            const vence = row.fecha_vencimiento || "";
+	                            const estado = row.estado || "";
+	                            return `
+	                              <div class="workspace-billing-row">
+	                                <div>
+	                                  <strong>${poliza}</strong>
+	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
+	                                </div>
+	                                <div class="workspace-billing-meta">
+	                                  <span>${estado || "-"}</span>
+	                                </div>
+	                              </div>
+	                            `;
+	                          })
+	                          .join("")}
+	                      </div>
+	                    `
+	                  : "<p class='muted'>No hay renovaciones disponibles.</p>"
+	              }
+	            </details>
+	            <div style="margin-top:14px;">
+	              <h4 style="margin:0 0 8px 0;">Solicitar cambios</h4>
+	              <form id="workspacePortalPublicSegurosRequestForm" class="form-grid">
+	                <label class="span-2">
+	                  Tipo de solicitud
+	                  <select name="tipo" required>
+	                    <option value="cambio_cuenta">Cambio de cuenta bancaria</option>
+	                    <option value="cambio_conductores">Cambio de conductores</option>
+	                    <option value="cambio_coberturas">Cambio de coberturas</option>
+	                    <option value="cambio_datos">Actualización de datos</option>
+	                    <option value="duplicado_documentacion">Duplicado / documentación</option>
+	                    <option value="baja_poliza">Baja de póliza</option>
+	                    <option value="otro">Otra solicitud</option>
+	                  </select>
+	                </label>
+	                <label class="span-2">
+	                  Póliza (opcional)
+	                  <select name="seguro_id">
+	                    <option value="">Sin póliza</option>
+	                    ${(data.seguros_polizas || [])
+	                      .map((row) => `<option value="${row.id}">${row.poliza_numero || "-"} · ${row.compania || "-"} · ${row.ramo || "-"}</option>`)
+	                      .join("")}
+	                  </select>
+	                </label>
+	                <label class="span-2">
+	                  Detalle
+	                  <textarea name="descripcion" rows="3" required placeholder="Describe el cambio que necesitas (IBAN, matrícula, conductor, coberturas, fecha efecto...)."></textarea>
+	                </label>
+	                <div class="form-actions span-2">
+	                  <button type="submit">Enviar solicitud</button>
+	                  <span id="workspacePortalPublicSegurosRequestStatus" class="muted"></span>
+	                </div>
+	              </form>
+	            </div>
+	          </div>
+	          <div class="form-card">
+	            <h3>Documentación</h3>
+	            ${
+	              (data.docs || []).length
                 ? `
                     <div class="workspace-document-list">
                       ${(data.docs || [])
@@ -24550,6 +24726,51 @@ const openWorkspacePortalPublic = async (token) => {
           if (classificationInput && !classificationInput.value.trim()) classificationInput.value = classification;
           uploadForm?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
+      });
+
+      const segurosReqForm = document.getElementById("workspacePortalPublicSegurosRequestForm");
+      const segurosReqStatus = document.getElementById("workspacePortalPublicSegurosRequestStatus");
+      segurosReqForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(segurosReqForm);
+        const tipo = String(formData.get("tipo") || "").trim();
+        const seguroId = String(formData.get("seguro_id") || "").trim();
+        const descripcion = String(formData.get("descripcion") || "").trim();
+        if (!tipo || !descripcion) {
+          if (segurosReqStatus) segurosReqStatus.textContent = "Completa tipo y detalle.";
+          return;
+        }
+        if (segurosReqStatus) segurosReqStatus.textContent = "Enviando...";
+        try {
+          let polizaRef = "";
+          try {
+            const select = segurosReqForm.querySelector('select[name="seguro_id"]');
+            if (select && select.options && select.selectedIndex >= 0) {
+              polizaRef = String(select.options[select.selectedIndex]?.textContent || "").trim();
+            }
+          } catch (_e) {}
+          const resp = await fetch("/api/workspace_portal_public_request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token,
+              servicio: "seguros",
+              clasificacion: "seguros_cambio",
+              tipo,
+              seguro_id: seguroId,
+              poliza_ref: polizaRef,
+              descripcion,
+            }),
+          }).then((res) => res.json());
+          if (resp?.error) throw new Error(resp.error);
+          if (segurosReqStatus) segurosReqStatus.textContent = "Solicitud enviada.";
+          segurosReqForm.reset();
+          await openWorkspacePortalPublic(token);
+        } catch (err) {
+          if (segurosReqStatus) {
+            segurosReqStatus.textContent = err?.message ? String(err.message) : "No se pudo enviar la solicitud.";
+          }
+        }
       });
     }
     window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
