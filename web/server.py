@@ -26689,6 +26689,9 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "cobradas": 0,
         "sin_cobrar": 0,
         "sin_responsable": 0,
+        "remesadas": 0,
+        "no_remesadas": 0,
+        "remesadas_total": 0.0,
         "facturacion_total": 0.0,
         "cobrado_total": 0.0,
         "pendiente_cobro_total": 0.0,
@@ -26720,6 +26723,12 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             else:
                 counts["sin_cobrar"] += 1
                 counts["pendiente_cobro_total"] += precio
+        if int(item.get("remesada") or 0) == 1:
+            counts["remesadas"] += 1
+            if precio > 0.0001:
+                counts["remesadas_total"] += precio
+        else:
+            counts["no_remesadas"] += 1
         if not str(item.get("responsable") or "").strip():
             counts["sin_responsable"] += 1
         key = str(item.get("responsable_key") or "sin-responsable")
@@ -26806,6 +26815,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             "facturacion_total": round(float(counts["facturacion_total"]), 2),
             "cobrado_total": round(float(counts["cobrado_total"]), 2),
             "pendiente_cobro_total": round(float(counts["pendiente_cobro_total"]), 2),
+            "remesadas_total": round(float(counts["remesadas_total"]), 2),
         },
         "responsables": [
             {

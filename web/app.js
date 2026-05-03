@@ -20627,7 +20627,11 @@ const syncExplorerLightningSidebar = () => {
     btn.classList.toggle("hidden", unavailable);
     btn.classList.toggle("active", key === current);
   });
-  explorerLightningSidebar.classList.toggle("hidden", viewTabs.classList.contains("hidden"));
+  // La sidebar "Explorer" (verde) es solo para el Explorador (página empresa).
+  // En contexto CRM vertical (Lightning shell), se oculta para evitar duplicidad de navegación y ganar espacio.
+  const shouldHideExplorerSidebar =
+    viewTabs.classList.contains("hidden") || document.body.classList.contains("crm-context-vertical");
+  explorerLightningSidebar.classList.toggle("hidden", shouldHideExplorerSidebar);
 };
 
 const slugify = (value) =>
@@ -52016,6 +52020,11 @@ const renderGestoriaRentaDashboard = (payload) => {
     onClick: () => setView("paid"),
   });
   addKpi({
+    title: "Remesadas",
+    value: numberFormatter.format(Number(counts.remesadas || 0)),
+    note: counts.remesadas_total != null ? `Total: ${formatMoney(counts.remesadas_total || 0)}` : "Marcadas como remesadas.",
+  });
+  addKpi({
     title: "Borradores",
     value: numberFormatter.format(Number(counts.borrador || 0)),
     note: "Pendientes de presentar.",
@@ -52038,6 +52047,11 @@ const renderGestoriaRentaDashboard = (payload) => {
     value: numberFormatter.format(Number(counts.sin_campana || 0)),
     note: `Clientes renta: ${numberFormatter.format(Number(counts.clientes_renta || 0))}`,
     onClick: () => setView("missing"),
+  });
+  addKpi({
+    title: "Sin vincular servicio",
+    value: numberFormatter.format(Number(counts.sin_vincular_servicio || 0)),
+    note: "Clientes renta sin vínculo explícito a Gestoría.",
   });
   addKpi({
     title: "Facturación renta",
