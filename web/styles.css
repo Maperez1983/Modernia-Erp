@@ -12013,12 +12013,28 @@ body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module {
   color: rgba(255, 255, 255, 0.98);
 }
 
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab {
+  border-color: rgba(var(--gold-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.96), rgba(15, 39, 66, 0.92));
+  color: rgba(255, 255, 255, 0.98);
+  box-shadow: none;
+}
+
 body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module:hover {
+  border-color: rgba(var(--gold-rgb), 0.38);
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab:hover {
   border-color: rgba(var(--gold-rgb), 0.38);
 }
 
 body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module.active {
   outline: 3px solid rgba(var(--gold-rgb), 0.28);
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.active {
+  outline: 3px solid rgba(var(--gold-rgb), 0.28);
+  box-shadow: none;
 }
 
 /* Variante general (fuera de `#crmSection`): mantiene el look & feel de Lightning en micro-tabs (Cliente, Portal, etc.). */
@@ -12036,7 +12052,15 @@ body.theme-operativa .crm-lightning-subbar .tab.tc-module {
   border-color: rgba(var(--gold-rgb), 0.22);
 }
 
+body.theme-operativa .crm-lightning-subbar .tab {
+  border-color: rgba(var(--gold-rgb), 0.22);
+}
+
 body.theme-operativa .crm-lightning-subbar .tab.tc-module.active {
+  outline: 3px solid rgba(var(--gold-rgb), 0.22);
+}
+
+body.theme-operativa .crm-lightning-subbar .tab.active {
   outline: 3px solid rgba(var(--gold-rgb), 0.22);
 }
 
