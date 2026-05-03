@@ -3192,19 +3192,27 @@
 		                  <div class="crm-insert-search">
 		                    <input id="crmInsertSearch" placeholder="Filtra..." autocomplete="off" />
 		                  </div>
-					                  <div class="crm-insert-list" id="crmInsertList" role="list">
-					                    <button type="button" class="crm-insert-item" data-crm-insert="actividad">
-					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
-					                      <span class="crm-insert-label">Cita / Actividad</span>
-					                    </button>
-					                    <button type="button" class="crm-insert-item" data-crm-insert="cliente">
-					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
-					                      <span class="crm-insert-label">Cliente</span>
-					                    </button>
-					                    <button type="button" class="crm-insert-item" data-crm-insert="hipoteca">
-					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
-					                      <span class="crm-insert-label">Hipoteca / Financiación</span>
-					                    </button>
+						                  <div class="crm-insert-list" id="crmInsertList" role="list">
+						                    <button type="button" class="crm-insert-item" data-crm-insert="actividad">
+						                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+						                      <span class="crm-insert-label">Cita / Actividad</span>
+						                    </button>
+						                    <button type="button" class="crm-insert-item" data-crm-insert="cliente">
+						                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+						                      <span class="crm-insert-label">Cliente</span>
+						                    </button>
+						                    <button type="button" class="crm-insert-item" data-crm-insert="presupuesto">
+						                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-receipt"></use></svg></span>
+						                      <span class="crm-insert-label">Presupuesto</span>
+						                    </button>
+						                    <button type="button" class="crm-insert-item" data-crm-insert="renta">
+						                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file-check"></use></svg></span>
+						                      <span class="crm-insert-label">Renta</span>
+						                    </button>
+						                    <button type="button" class="crm-insert-item" data-crm-insert="hipoteca">
+						                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
+						                      <span class="crm-insert-label">Hipoteca / Financiación</span>
+						                    </button>
 					                    <button type="button" class="crm-insert-item" data-crm-insert="captacion">
 					                      <span class="crm-insert-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
 					                      <span class="crm-insert-label">Inmueble</span>
@@ -5596,14 +5604,28 @@
 	                    <p class="muted">Comparativa del año en curso vs anterior.</p>
 	                    <canvas id="gestoriaDashServiciosChart" style="width:100%;height:320px;"></canvas>
 	                  </div>
-	                  <div class="form-card">
-	                    <h3>Distribución por servicio</h3>
-	                    <p class="muted">Accesos rápidos al pipeline filtrado por tipo.</p>
-	                    <div id="gestoriaDashServiciosCards" class="grid dashboard-kpis"></div>
-	                  </div>
-	                </div>
-	                <div class="footer muted" id="gestoriaDashServiciosInfo"></div>
-	              </div>
+		                  <div class="form-card">
+		                    <h3>Distribución por servicio</h3>
+		                    <p class="muted">Accesos rápidos al pipeline filtrado por tipo.</p>
+		                    <div id="gestoriaDashServiciosCards" class="grid dashboard-kpis"></div>
+		                  </div>
+		                </div>
+		                <div class="footer muted" id="gestoriaDashServiciosInfo"></div>
+		                <div class="form-card hidden" id="gestoriaTrabajoTiposCard">
+		                  <div class="section-head">
+		                    <div>
+		                      <h3>Configuración · Tipos de trabajo</h3>
+		                      <p class="muted">Solo admin. Define tipos, categorías, SLA y valores por defecto.</p>
+		                    </div>
+		                    <div class="toolbar">
+		                      <button type="button" class="secondary" id="gestoriaTrabajoTipoAddBtn">Añadir tipo</button>
+		                      <button type="button" class="secondary ghost" id="gestoriaTrabajoTipoReloadBtn">Recargar</button>
+		                    </div>
+		                  </div>
+		                  <div id="gestoriaTrabajoTiposTable"></div>
+		                  <div class="footer" id="gestoriaTrabajoTiposInfo"></div>
+		                </div>
+		              </div>
 	              <div id="gestoriaDashServiciosPaneRentas" class="hidden">
 	                <button type="button" class="gestoria-renta-banner" id="gestoriaRentaCampaignBanner">
 	                  <div class="gestoria-renta-banner-mark" aria-hidden="true">
@@ -5998,25 +6020,11 @@
 	                <button type="submit">Crear presupuesto + PDF</button>
 	                <span id="gestoriaBudgetQuickStatus" class="muted"></span>
 	              </div>
-	            </form>
-	          </div>
-	          <div class="form-card hidden" id="gestoriaTrabajoTiposCard">
+		            </form>
+		          </div>
+	          <div class="form-card">
 	            <div class="section-head">
 	              <div>
-	                <h3>Configuración · Tipos de trabajo</h3>
-	                <p class="muted">Solo admin. Define tipos, categorías, SLA y valores por defecto.</p>
-	              </div>
-	              <div class="toolbar">
-	                <button type="button" class="secondary" id="gestoriaTrabajoTipoAddBtn">Añadir tipo</button>
-	                <button type="button" class="secondary ghost" id="gestoriaTrabajoTipoReloadBtn">Recargar</button>
-	              </div>
-	            </div>
-	            <div id="gestoriaTrabajoTiposTable"></div>
-	            <div class="footer" id="gestoriaTrabajoTiposInfo"></div>
-	          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
                 <h3>Listado de presupuestos</h3>
                 <p class="muted">Filtra por servicio y abre el PDF o la nota de encargo.</p>
               </div>

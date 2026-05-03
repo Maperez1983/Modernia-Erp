@@ -66519,14 +66519,30 @@ if (crmInsertList) {
     if (!btn) return;
     const key = String(btn.dataset.crmInsert || "").trim();
     setCrmQuickNewOpen(false);
-    if (key === "captacion") {
-      setCrmCaptacionModalOpen(true);
-    } else if (key === "demanda") {
-      goToEstudioAlta("demanda");
-    } else if (key === "actividad") {
-      const vertical = resolveCrmTecnocloudVertical();
-      const servicio =
-        vertical === "fin"
+	    if (key === "captacion") {
+	      setCrmCaptacionModalOpen(true);
+	    } else if (key === "demanda") {
+	      goToEstudioAlta("demanda");
+	    } else if (key === "presupuesto") {
+	      openGestoriaServiceTab("gestoria-fact");
+	      window.setTimeout(() => {
+	        try {
+	          focusElementInView(gestoriaBudgetQuickForm);
+	          const input = gestoriaBudgetQuickForm?.querySelector('input[name="cliente_lookup"]');
+	          input?.focus();
+	        } catch (e) {}
+	      }, 0);
+	    } else if (key === "renta") {
+	      openGestoriaRentaCampaign();
+	      window.setTimeout(() => {
+	        try {
+	          gestoriaCrmSearch?.focus();
+	        } catch (e) {}
+	      }, 0);
+	    } else if (key === "actividad") {
+	      const vertical = resolveCrmTecnocloudVertical();
+	      const servicio =
+	        vertical === "fin"
           ? "financiaciones"
           : (vertical === "seguros"
             ? "seguros"
