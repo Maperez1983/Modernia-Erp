@@ -143,7 +143,8 @@ body.crm-context-vertical #bdtSection {
 }
 
 /* CRM vertical: ocultar el rail lateral del Explorador (verde). */
-body.crm-context-vertical #explorerSection #explorerLightningSidebar {
+body.crm-context-vertical #explorerSection #explorerLightningSidebar,
+body.crm-shell #explorerSection #explorerLightningSidebar {
   display: none !important;
 }
 

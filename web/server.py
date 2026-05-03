@@ -65163,6 +65163,9 @@ class Handler(BaseHTTPRequestHandler):
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             q = (params.get("q", [""])[0] or "").strip().lower()
+            estado = (params.get("estado", [""])[0] or "").strip().lower()
+            date_from = (params.get("from", [""])[0] or "").strip()
+            date_to = (params.get("to", [""])[0] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -65184,6 +65187,15 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 like = f"%{q}%"
                 values.extend([like, like, like, like, like])
+            if estado:
+                where.append("LOWER(COALESCE(r.estado,'')) = ?")
+                values.append(estado)
+            if date_from:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) >= DATE(?)")
+                values.append(date_from)
+            if date_to:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) <= DATE(?)")
+                values.append(date_to)
             rows = conn.execute(
                 f"""
                 SELECT
@@ -65252,6 +65264,259 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_recibos_summary":
+            empresa_id = params.get("empresa_id", [""])[0]
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            estado = (params.get("estado", [""])[0] or "").strip().lower()
+            date_from = (params.get("from", [""])[0] or "").strip()
+            date_to = (params.get("to", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            where = ["r.empresa_id = ?"]
+            values = [empresa_id]
+            if seguro_id:
+                where.append("r.seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("r.cliente_id = ?")
+                values.append(cliente_id)
+            if q:
+                where.append(
+                    "("
+                    "LOWER(COALESCE(r.referencia,'')) LIKE ? OR LOWER(COALESCE(r.poliza_numero,'')) LIKE ? "
+                    "OR LOWER(COALESCE(r.compania,'')) LIKE ? OR LOWER(COALESCE(r.ramo,'')) LIKE ? "
+                    "OR LOWER(COALESCE(c.nombre,'')) LIKE ?"
+                    ")"
+                )
+                like = f"%{q}%"
+                values.extend([like, like, like, like, like])
+            if estado:
+                where.append("LOWER(COALESCE(r.estado,'')) = ?")
+                values.append(estado)
+            if date_from:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) >= DATE(?)")
+                values.append(date_from)
+            if date_to:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) <= DATE(?)")
+                values.append(date_to)
+            where_clause = " AND ".join(where)
+
+            totals = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS total,
+                  SUM(COALESCE(r.prima_total, 0)) AS prima_total,
+                  SUM(COALESCE(r.comision, 0)) AS comision_total,
+                  SUM(COALESCE(r.importe_liquidacion, 0)) AS liquidacion_total
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                """,
+                values,
+            ).fetchone()
+            by_estado = conn.execute(
+                f"""
+                SELECT
+                  LOWER(COALESCE(r.estado, '')) AS estado,
+                  COUNT(*) AS total,
+                  SUM(COALESCE(r.prima_total, 0)) AS prima_total,
+                  SUM(COALESCE(r.comision, 0)) AS comision_total
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                GROUP BY 1
+                ORDER BY total DESC
+                """,
+                values,
+            ).fetchall()
+
+            pendientes_liquidacion = conn.execute(
+                f"""
+                SELECT
+                  r.id, r.fecha_emision, r.fecha_cobro, r.estado, r.poliza_numero, r.compania, r.ramo,
+                  r.prima_total, r.comision, r.importe_liquidacion,
+                  COALESCE(c.nombre, '') AS cliente
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                  AND LOWER(COALESCE(r.estado,'')) = 'cobrado'
+                  AND COALESCE(r.comision, 0) > 0
+                  AND COALESCE(r.importe_liquidacion, 0) <= 0
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_cobro,'')), ''), r.updated_at, r.created_at) DESC
+                LIMIT 80
+                """,
+                values,
+            ).fetchall()
+
+            today = datetime.now(timezone.utc).date().isoformat()
+            pendientes_impago = conn.execute(
+                f"""
+                SELECT
+                  r.id, r.fecha_emision, r.fecha_vencimiento, r.estado, r.poliza_numero, r.compania, r.ramo,
+                  r.prima_total, r.comision,
+                  COALESCE(c.nombre, '') AS cliente
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                  AND LOWER(COALESCE(r.estado,'')) IN ('emitido', 'pendiente')
+                  AND NULLIF(TRIM(COALESCE(r.fecha_vencimiento,'')), '') IS NOT NULL
+                  AND DATE(r.fecha_vencimiento) < DATE(?)
+                  AND (r.fecha_cobro IS NULL OR TRIM(COALESCE(r.fecha_cobro,'')) = '')
+                ORDER BY DATE(r.fecha_vencimiento) ASC
+                LIMIT 120
+                """,
+                (*values, today),
+            ).fetchall()
+
+            pending_liq_total = 0.0
+            pending_liq_count = 0
+            for r in pendientes_liquidacion:
+                try:
+                    pending_liq_total += float(r["comision"] or 0.0)
+                    pending_liq_count += 1
+                except Exception:
+                    pass
+            pending_impago_total = 0.0
+            pending_impago_count = 0
+            for r in pendientes_impago:
+                try:
+                    pending_impago_total += float(r["prima_total"] or 0.0)
+                    pending_impago_count += 1
+                except Exception:
+                    pass
+
+            json_response(
+                self,
+                {
+                    "totals": dict(totals) if totals else {},
+                    "by_estado": [dict(r) for r in by_estado],
+                    "pendientes_liquidacion": [dict(r) for r in pendientes_liquidacion],
+                    "pendientes_impago": [dict(r) for r in pendientes_impago],
+                    "kpis": {
+                        "pendiente_liquidacion_count": pending_liq_count,
+                        "pendiente_liquidacion_comision": round(float(pending_liq_total or 0.0), 2),
+                        "pendiente_impago_count": pending_impago_count,
+                        "pendiente_impago_prima": round(float(pending_impago_total or 0.0), 2),
+                    },
+                },
+            )
+            return
+
+        if path == "/api/seguros_recibos_export":
+            empresa_id = params.get("empresa_id", [""])[0]
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            estado = (params.get("estado", [""])[0] or "").strip().lower()
+            date_from = (params.get("from", [""])[0] or "").strip()
+            date_to = (params.get("to", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            where = ["r.empresa_id = ?"]
+            values = [empresa_id]
+            if seguro_id:
+                where.append("r.seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("r.cliente_id = ?")
+                values.append(cliente_id)
+            if q:
+                where.append(
+                    "("
+                    "LOWER(COALESCE(r.referencia,'')) LIKE ? OR LOWER(COALESCE(r.poliza_numero,'')) LIKE ? "
+                    "OR LOWER(COALESCE(r.compania,'')) LIKE ? OR LOWER(COALESCE(r.ramo,'')) LIKE ? "
+                    "OR LOWER(COALESCE(c.nombre,'')) LIKE ?"
+                    ")"
+                )
+                like = f"%{q}%"
+                values.extend([like, like, like, like, like])
+            if estado:
+                where.append("LOWER(COALESCE(r.estado,'')) = ?")
+                values.append(estado)
+            if date_from:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) >= DATE(?)")
+                values.append(date_from)
+            if date_to:
+                where.append("DATE(COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at)) <= DATE(?)")
+                values.append(date_to)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT
+                  r.fecha_emision,
+                  r.fecha_vencimiento,
+                  r.fecha_cobro,
+                  r.estado,
+                  COALESCE(c.nombre, '') AS cliente,
+                  r.poliza_numero,
+                  r.compania,
+                  r.ramo,
+                  r.prima_total,
+                  r.comision,
+                  r.comision_pct,
+                  r.importe_liquidacion,
+                  r.referencia,
+                  r.notas
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(r.fecha_emision,'')), ''), r.created_at) DESC
+                LIMIT 5000
+                """,
+                values,
+            ).fetchall()
+
+            headers = [
+                "fecha_emision",
+                "fecha_vencimiento",
+                "fecha_cobro",
+                "estado",
+                "cliente",
+                "poliza_numero",
+                "compania",
+                "ramo",
+                "prima_total",
+                "comision",
+                "comision_pct",
+                "importe_liquidacion",
+                "referencia",
+                "notas",
+            ]
+            buf = StringIO(newline="")
+            writer = csv.writer(buf, delimiter=";")
+            writer.writerow(headers)
+            for row in rows:
+                payload_row = dict(row)
+                writer.writerow(
+                    [
+                        format_export_date(payload_row.get("fecha_emision")) or "",
+                        format_export_date(payload_row.get("fecha_vencimiento")) or "",
+                        format_export_date(payload_row.get("fecha_cobro")) or "",
+                        str(payload_row.get("estado") or ""),
+                        str(payload_row.get("cliente") or ""),
+                        str(payload_row.get("poliza_numero") or ""),
+                        str(payload_row.get("compania") or ""),
+                        str(payload_row.get("ramo") or ""),
+                        format_export_money(payload_row.get("prima_total") or 0) if payload_row.get("prima_total") is not None else "",
+                        format_export_money(payload_row.get("comision") or 0) if payload_row.get("comision") is not None else "",
+                        str(payload_row.get("comision_pct") or ""),
+                        format_export_money(payload_row.get("importe_liquidacion") or 0) if payload_row.get("importe_liquidacion") is not None else "",
+                        str(payload_row.get("referencia") or ""),
+                        str(payload_row.get("notas") or ""),
+                    ]
+                )
+            csv_text = buf.getvalue()
+            payload = ("\ufeff" + csv_text).encode("utf-8", "ignore")
+            date_token = datetime.now().strftime("%Y%m%d")
+            safe_empresa = re.sub(r"[^0-9a-zA-Z_-]+", "_", str(empresa_id or ""))[:24] or "empresa"
+            filename = f"seguros_recibos_{safe_empresa}_{date_token}.csv"
+            binary_response(self, payload, content_type="text/csv; charset=utf-8", filename=filename)
             return
 
         if path == "/api/seguros_reclamaciones":

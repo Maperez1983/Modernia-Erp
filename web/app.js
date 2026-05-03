@@ -52428,9 +52428,23 @@ const renderGestoriaRentaDashboard = (payload) => {
     };
     chartGrid.appendChild(
       buildChartCard({
-        title: "Estado de rentas",
-        hint: "Resumen por estado del ejercicio seleccionado.",
+        title: "Embudo del ejercicio",
+        hint: "De clientes renta a campañas y presentaciones del ejercicio.",
         canvasAttr: 'data-renta-chart="estado"',
+      })
+    );
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Presentadas por mes",
+        hint: "Distribución según fecha de presentación.",
+        canvasAttr: 'data-renta-chart="presentadas"',
+      })
+    );
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Evolución económica",
+        hint: `Facturación, cobro y pendiente por mes${prevEjercicio ? ` · Comparativa ${prevEjercicio}` : ""}.`.trim(),
+        canvasAttr: 'data-renta-chart="economia"',
       })
     );
     chartGrid.appendChild(
@@ -52440,15 +52454,6 @@ const renderGestoriaRentaDashboard = (payload) => {
         canvasAttr: 'data-renta-chart="responsables"',
       })
     );
-    if (cobrosMonths.length) {
-      chartGrid.appendChild(
-        buildChartCard({
-          title: "Cobrado por mes",
-          hint: "Importe cobrado por mes (según fecha de cobro).",
-          canvasAttr: 'data-renta-chart="cobros"',
-        })
-      );
-    }
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
 
@@ -52470,78 +52475,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     split.appendChild(topUnpaid);
     split.appendChild(topUnassigned);
     root.appendChild(split);
-    if (months.length) {
-      const monthCard = document.createElement("div");
-      monthCard.className = "form-card";
-      monthCard.innerHTML = `<h3>Presentadas por mes</h3><p class="muted">Distribución según fecha de presentación.</p>`;
-      const table = document.createElement("table");
-      const thead = document.createElement("thead");
-      const trHead = document.createElement("tr");
-      ["Mes", "Campañas", "Presentadas", "Borrador"].forEach((col) => {
-        const th = document.createElement("th");
-        th.textContent = col;
-        trHead.appendChild(th);
-      });
-      thead.appendChild(trHead);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      months.forEach((row) => {
-        const tr = document.createElement("tr");
-        [
-          row.mes || "-",
-          numberFormatter.format(Number(row.campanas || 0)),
-          numberFormatter.format(Number(row.presentadas || 0)),
-          numberFormatter.format(Number(row.borrador || 0)),
-        ].forEach((value) => {
-          const td = document.createElement("td");
-          td.textContent = value;
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      monthCard.appendChild(table);
-      root.appendChild(monthCard);
-    }
-
-    if (cobrosMonths.length || cobrosSinFechaTotal > 0.0001) {
-      const cobroCard = document.createElement("div");
-      cobroCard.className = "form-card";
-      const extra = cobrosSinFechaTotal > 0.0001 ? ` · Sin fecha: ${formatMoney(cobrosSinFechaTotal)}` : "";
-      cobroCard.innerHTML = `<h3>Cobrado por mes</h3><p class="muted">Según fecha de cobro registrada${extra}.</p>`;
-      if (!cobrosMonths.length) {
-        cobroCard.appendChild(
-          Object.assign(document.createElement("p"), {
-            className: "muted",
-            textContent: "No hay cobros con fecha para distribuir por mes.",
-          })
-        );
-      } else {
-        const table = document.createElement("table");
-        const thead = document.createElement("thead");
-        const trHead = document.createElement("tr");
-        ["Mes", "Cobradas", "Cobrado"].forEach((col) => {
-          const th = document.createElement("th");
-          th.textContent = col;
-          trHead.appendChild(th);
-        });
-        thead.appendChild(trHead);
-        table.appendChild(thead);
-        const tbody = document.createElement("tbody");
-        cobrosMonths.forEach((row) => {
-          const tr = document.createElement("tr");
-          [row.mes || "-", numberFormatter.format(Number(row.cobradas || 0)), formatMoney(row.cobrado || 0)].forEach((value) => {
-            const td = document.createElement("td");
-            td.textContent = String(value);
-            tr.appendChild(td);
-          });
-          tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-        cobroCard.appendChild(table);
-      }
-      root.appendChild(cobroCard);
-    }
+    // Tablas mensuales se obtienen desde el informe CSV y la vista "Cobros sin fecha".
     const respPreview = buildResponsablesTable(responsables.slice(0, 12));
     respPreview.querySelector("#gestoriaRentaDashBackBtn2")?.remove();
     root.appendChild(respPreview);
@@ -52549,21 +52483,21 @@ const renderGestoriaRentaDashboard = (payload) => {
     // Pintar charts cuando ya están montados y con tamaño.
     requestAnimationFrame(() => {
       const estadoCanvas = root.querySelector('canvas[data-renta-chart="estado"]');
+      const presentedCanvas = root.querySelector('canvas[data-renta-chart="presentadas"]');
+      const economyCanvas = root.querySelector('canvas[data-renta-chart="economia"]');
       const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
-      const cobroCanvas = root.querySelector('canvas[data-renta-chart="cobros"]');
       if (estadoCanvas) {
         drawBarChart(
           estadoCanvas,
-          ["Presentadas", "Borrador", "Cobradas", "Sin cobrar", "Sin responsable"],
+          ["Clientes", "Campañas", "Presentadas", "Cobradas"],
           [
             {
-              label: `Renta ${ejercicio || ""}`.trim(),
+              label: `${ejercicio || "Ejercicio"}`.trim(),
               values: [
+                Number(counts.clientes_renta || 0),
+                Number(counts.campanas_ejercicio || 0),
                 Number(counts.presentadas || 0),
-                Number(counts.borrador || 0),
                 Number(counts.cobradas || 0),
-                Number(counts.sin_cobrar || 0),
-                Number(counts.sin_responsable || 0),
               ],
               color: "#0B1D33",
               format: (value) => numberFormatter.format(value),
@@ -52575,14 +52509,77 @@ const renderGestoriaRentaDashboard = (payload) => {
             tooltip: true,
             onBarClick: (hit) => {
               const idx = Number(hit?.labelIndex ?? -1);
-              if (idx === 0) setView("presented");
-              else if (idx === 1) setView("draft");
-              else if (idx === 2) setView("paid");
-              else if (idx === 3) setView("unpaid");
-              else if (idx === 4) setView("unassigned");
+              if (idx === 1) setView("overview");
+              else if (idx === 2) setView("presented");
+              else if (idx === 3) setView("paid");
             },
           }
         );
+      }
+      if (presentedCanvas) {
+        const monthLabels = months.length
+          ? months.map((r) => String(r.mes || "").slice(5, 7) || String(r.mes || ""))
+          : ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+        const presented = months.length ? months.map((r) => Number(r.presentadas || 0)) : monthLabels.map(() => 0);
+        const draft = months.length ? months.map((r) => Number(r.borrador || 0)) : monthLabels.map(() => 0);
+        drawBarChart(
+          presentedCanvas,
+          monthLabels,
+          [
+            { label: "Presentadas", values: presented, color: "#0B1D33", format: (v) => numberFormatter.format(Number(v || 0)) },
+            { label: "Borrador", values: draft, color: "#F2C14E", format: (v) => numberFormatter.format(Number(v || 0)) },
+          ],
+          { legend: true, showValues: false, tooltip: true, axisLabelMaxChars: 2 }
+        );
+      }
+      if (economyCanvas) {
+        const labels = Array.isArray(cobroSeries?.labels) && cobroSeries.labels.length
+          ? cobroSeries.labels
+          : ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+        const fact = Array.isArray(cobroSeries?.facturacion) ? cobroSeries.facturacion : labels.map(() => 0);
+        const cob = Array.isArray(cobroSeries?.cobrado) ? cobroSeries.cobrado : labels.map(() => 0);
+        const pen = Array.isArray(cobroSeries?.pendiente) ? cobroSeries.pendiente : labels.map(() => 0);
+        const prevCob = Array.isArray(prevCobroSeries?.cobrado) ? prevCobroSeries.cobrado : [];
+        const ratio = labels.map((_, i) => {
+          const f = Number(fact[i] || 0);
+          const c = Number(cob[i] || 0);
+          if (f <= 0) return 0;
+          return Math.max(0, Math.min(100, (c / f) * 100));
+        });
+        const datasets = [
+          { label: "Facturación", values: fact, color: "#0B1D33", format: (v) => euroFormatter.format(Number(v || 0)) },
+          { label: "Cobrado", values: cob, color: "#F2C14E", format: (v) => euroFormatter.format(Number(v || 0)) },
+          { label: "Pendiente", values: pen, color: "#6B778A", format: (v) => euroFormatter.format(Number(v || 0)) },
+          {
+            type: "line",
+            label: "% cobro",
+            values: ratio,
+            color: "#0B1D33",
+            yAxis: "right",
+            pointRadius: 3,
+            lineWidth: 2,
+            format: (v) => `${Number(v || 0).toFixed(0)}%`,
+          },
+        ];
+        if (prevCob && prevCob.length) {
+          datasets.push({
+            type: "line",
+            label: `Cobrado ${prevEjercicio || "prev"}`.trim(),
+            values: labels.map((_, i) => Number(prevCob[i] || 0)),
+            color: "#324F74",
+            pointRadius: 3,
+            lineWidth: 2,
+            format: (v) => euroFormatter.format(Number(v || 0)),
+          });
+        }
+        drawBarChart(economyCanvas, labels, datasets, {
+          legend: true,
+          legendPosition: "right",
+          showValues: false,
+          tooltip: true,
+          axisLabelMaxChars: 2,
+          secondaryAxisFormat: (v) => `${Number(v || 0).toFixed(0)}%`,
+        });
       }
       if (respCanvas) {
         const top = [...responsables]
@@ -52618,23 +52615,6 @@ const renderGestoriaRentaDashboard = (payload) => {
               setViewWithParam("responsable", keys[idx] || "");
             },
           }
-        );
-      }
-      if (cobroCanvas) {
-        const labels = cobrosMonths.map((r) => String(r.mes || "").slice(5, 7) || String(r.mes || ""));
-        const values = cobrosMonths.map((r) => Number(r.cobrado || 0));
-        drawBarChart(
-          cobroCanvas,
-          labels.length ? labels : [""],
-          [
-            {
-              label: `Cobrado ${ejercicio || ""}`.trim(),
-              values: values.length ? values : [0],
-              color: "#0B1D33",
-              format: (value) => euroFormatter.format(Number(value || 0)),
-            },
-          ],
-          { legend: false, showValues: true, tooltip: true, axisMaxChars: 2 }
         );
       }
     });
