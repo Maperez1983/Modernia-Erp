@@ -44197,6 +44197,72 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             return
 
+    def do_PUT(self):
+        try:
+            self._do_PUT()
+        except Exception as exc:
+            try:
+                print(f"[ERROR] PUT {self.path}: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            try:
+                Handler._record_api_error(self.path, exc)
+            except Exception:
+                pass
+            try:
+                json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
+            except Exception:
+                try:
+                    self.send_error(500, "API error")
+                except Exception:
+                    pass
+            return
+
+    def _do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path or ""
+        params = urllib.parse.parse_qs(parsed.query or "")
+
+        if path == "/api/s3_local_put":
+            if not self._require_api_auth():
+                return
+            key = (params.get("key", [""])[0] or "").strip()
+            if not key:
+                json_response(self, {"error": "key requerido"}, status=400)
+                return
+            key = _normalize_s3_key(key)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            ok, err = _s3_key_visible_for_user(conn, session, key)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except Exception:
+                length = 0
+            if length <= 0:
+                json_response(self, {"error": "Content-Length requerido"}, status=400)
+                return
+            content = self.rfile.read(length)
+            # Guardamos una copia local bajo UPLOADS para permitir UX sin S3 (dev/test).
+            folder = UPLOADS / "s3_local"
+            folder.mkdir(parents=True, exist_ok=True)
+            safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", key).lstrip("/").replace("..", "_")
+            target = safe_resolve_under(folder, safe_name)
+            if not target:
+                json_response(self, {"error": "key inválido"}, status=400)
+                return
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as handle:
+                handle.write(content)
+            json_response(self, {"ok": True, "key": key, "url": f"/uploads/s3_local/{safe_name}"})
+            return
+
+        json_response(self, {"error": "endpoint no válido"}, status=404)
+        return
+
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
@@ -46509,6 +46575,33 @@ class Handler(BaseHTTPRequestHandler):
             content_type = payload.get("content_type") or "application/pdf"
             prefix = payload.get("prefix") or "seguros"
             if not s3_has_credentials():
+                # Fallback local (dev/test): permite subir a /uploads/s3_local/<key> vía PUT.
+                allow_local = (os.environ.get("APP_S3_LOCAL_FALLBACK") or "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "si",
+                    "sí",
+                    "on",
+                )
+                if allow_local or (not os.environ.get("RENDER")):
+                    key = s3_safe_key(prefix, filename)
+                    try:
+                        session = getattr(self, "auth_session", None) or self._current_session()
+                        _s3_grant_key(session, key, conn=conn)
+                    except Exception:
+                        pass
+                    safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", str(key)).lstrip("/").replace("..", "_")
+                    json_response(
+                        self,
+                        {
+                            "url": f"/api/s3_local_put?key={urllib.parse.quote(str(key))}",
+                            "key": key,
+                            "public_url": f"/uploads/s3_local/{safe_name}",
+                            "local": True,
+                        },
+                    )
+                    return
                 json_response(
                     self,
                     {"error": "S3 sin credenciales (configura AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY o AWS_PROFILE)"},
@@ -65178,6 +65271,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             client = s3_client()
             if not client:
+                # Dev/test fallback: si no hay S3 configurado, intentamos servir desde UPLOADS/s3_local.
+                try:
+                    safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", str(key)).lstrip("/").replace("..", "_")
+                    target = safe_resolve_under(UPLOADS / "s3_local", safe_name)
+                    if target and target.exists():
+                        json_response(self, {"url": f"/uploads/s3_local/{safe_name}", "key": key})
+                        return
+                except Exception:
+                    pass
                 bucket, region = s3_config()
                 missing = []
                 if not bucket:

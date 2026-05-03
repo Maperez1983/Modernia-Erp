@@ -264,6 +264,210 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             context.close()
             browser.close()
 
+    def test_inmobiliaria_comprador_demanda_visita_y_hoja_visita_pdf(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            self._login(page)
+            self._open_crm_inmo(page)
+
+            # 1) Crear inmueble y pasar a Encargo.
+            inmueble_id, captacion_id = self._create_inmueble(page)
+            self._open_inmueble(page, inmueble_id)
+            stage = page.evaluate(
+                """
+                async ({ id, etapa, empresa_nombre }) => {
+                  const res = await fetch("/api/captaciones_update", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ id, etapa, empresa_nombre }),
+                  });
+                  let data = {};
+                  try { data = await res.json(); } catch (e) { data = {}; }
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """,
+                {"id": captacion_id, "etapa": "Encargo", "empresa_nombre": "EMPRESA E2E"},
+            )
+            self.assertTrue(bool(stage.get("ok")), msg=f"Stage HTTP {stage.get('status')} · {stage.get('data')}")
+
+            # 2) Crear cliente comprador (modal CRM).
+            page.click("#crmTopNewBtn")
+            page.wait_for_selector("#crmInsertModal:not(.hidden)", timeout=5000)
+            page.click('button[data-crm-insert="cliente"]')
+            page.wait_for_selector("#crmClienteModal:not(.hidden)", timeout=5000)
+            page.fill('#crmClienteCreateForm input[name="nombre"]', "COMPRADOR E2E")
+            page.fill('#crmClienteCreateForm input[name="nif"]', "12345678Z")
+            with page.expect_response(lambda r: r.url.endswith("/api/clientes") and r.request.method == "POST") as cli_info:
+                page.click('#crmClienteCreateForm button[type="submit"]')
+            cli_resp = cli_info.value
+            cli_data = {}
+            try:
+                cli_data = cli_resp.json()
+            except Exception:
+                cli_data = {}
+            self.assertTrue(cli_resp.ok, msg=f"Cliente HTTP {cli_resp.status} · {cli_data}")
+            buyer_id = str(cli_data.get("id") or "").strip()
+            self.assertTrue(buyer_id, msg=f"Cliente sin id · {cli_data}")
+
+            # 3) Crear demanda del comprador.
+            demanda = page.evaluate(
+                """
+                async ({ cliente_id }) => {
+                  const res = await fetch("/api/demandas", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({
+                      empresa_nombre: "EMPRESA E2E",
+                      cliente_id,
+                      pedido: "Pedido E2E",
+                      tipo: "Compra",
+                      estado: "Activa",
+                      fase: "Captación",
+                      prioridad: "Media",
+                      responsable: "admin",
+                      fecha_insercion: new Date().toISOString().slice(0, 10),
+                      notas: "E2E demanda",
+                    }),
+                  });
+                  let data = {};
+                  try { data = await res.json(); } catch (e) { data = {}; }
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """,
+                {"cliente_id": buyer_id},
+            )
+            self.assertTrue(bool(demanda.get("ok")), msg=f"Demanda HTTP {demanda.get('status')} · {demanda.get('data')}")
+
+            # Sacar demanda_id mirando últimas demandas (no hay id en response).
+            demanda_row = page.evaluate(
+                """
+                async () => {
+                  const res = await fetch("/api/demandas?empresa_id=emp-e2e&limit=5", { credentials: "same-origin" });
+                  const data = await res.json().catch(() => ({}));
+                  const rows = Array.isArray(data?.rows) ? data.rows : [];
+                  return rows[0] || null;
+                }
+                """
+            )
+            self.assertTrue(demanda_row and demanda_row.get("id"), msg=f"No se pudo resolver demanda: {demanda_row}")
+            demanda_id = demanda_row["id"]
+
+            # 4) Crear visita (inmueble <-> demanda).
+            visita = page.evaluate(
+                """
+                async ({ inmueble_id, demanda_id }) => {
+                  const res = await fetch("/api/visitas", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({
+                      empresa_nombre: "EMPRESA E2E",
+                      inmueble_id,
+                      demanda_id,
+                      fecha: new Date().toISOString().slice(0,10),
+                      hora: "12:00",
+                      estado: "pendiente",
+                      asesor: "admin",
+                      notas: "E2E visita",
+                    }),
+                  });
+                  let data = {};
+                  try { data = await res.json(); } catch (e) { data = {}; }
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """,
+                {"inmueble_id": inmueble_id, "demanda_id": demanda_id},
+            )
+            self.assertTrue(bool(visita.get("ok")), msg=f"Visita HTTP {visita.get('status')} · {visita.get('data')}")
+
+            # 5) Generar hoja de visita PDF (ahora debería existir comprador por demanda/visita).
+            pdf_url = f"{self.base_url}/api/inmueble_visita_pdf?id={inmueble_id}&demanda_id={demanda_id}"
+            with page.expect_download(timeout=20000) as dl_info:
+                try:
+                    page.goto(pdf_url, wait_until="domcontentloaded")
+                except Exception as exc:
+                    if "Download is starting" not in str(exc):
+                        raise
+            download = dl_info.value
+            path = download.path()
+            self.assertTrue(path)
+            with open(path, "rb") as handle:
+                body = handle.read(16)
+            self.assertTrue(body.startswith(b"%PDF"))
+
+            context.close()
+            browser.close()
+
+    def test_inmobiliaria_docs_upload_local_s3_fallback(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            self._login(page)
+
+            # Pedir "presign" sin credenciales: debe devolver URL local.
+            presign = page.evaluate(
+                """
+                async () => {
+                  const res = await fetch("/api/s3_presign", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ filename: "e2e_test.pdf", content_type: "application/pdf", prefix: "inmuebles" }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """
+            )
+            self.assertTrue(bool(presign.get("ok")), msg=f"Presign HTTP {presign.get('status')} · {presign.get('data')}")
+            url = presign["data"].get("url")
+            key = presign["data"].get("key")
+            self.assertTrue(url and key, msg=f"Presign inválido: {presign}")
+
+            # Subir por PUT al endpoint local.
+            put = page.evaluate(
+                """
+                async ({ url }) => {
+                  const bytes = new TextEncoder().encode("%PDF-1.4\\n% E2E\\n1 0 obj<<>>endobj\\ntrailer<<>>\\n%%EOF\\n");
+                  const res = await fetch(url, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/pdf" },
+                    body: bytes,
+                    credentials: "same-origin",
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """,
+                {"url": url},
+            )
+            self.assertTrue(bool(put.get("ok")), msg=f"PUT HTTP {put.get('status')} · {put.get('data')}")
+
+            # Resolver URL por /api/s3_url (debe devolver /uploads/...).
+            resolved = page.evaluate(
+                """
+                async ({ key }) => {
+                  const res = await fetch(`/api/s3_url?key=${encodeURIComponent(key)}`, { credentials: "same-origin" });
+                  const data = await res.json().catch(() => ({}));
+                  return { ok: res.ok, status: res.status, data };
+                }
+                """,
+                {"key": key},
+            )
+            self.assertTrue(bool(resolved.get("ok")), msg=f"s3_url HTTP {resolved.get('status')} · {resolved.get('data')}")
+            final_url = str(resolved["data"].get("url") or "")
+            self.assertTrue(final_url.startswith("/uploads/s3_local/"), msg=f"URL inesperada: {final_url}")
+
+            context.close()
+            browser.close()
+
 
 if __name__ == "__main__":
     unittest.main()
