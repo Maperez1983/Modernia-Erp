@@ -89,9 +89,9 @@ body.crm-context-vertical main {
 /* CRM vertical: modo app consistente (mismo canvas en todos los servicios). */
 body.crm-context-vertical #crmSection .crm-lightning-shell {
   /* En monitores grandes, el CRM debe aprovechar mejor el espacio. */
-  max-width: none;
+  max-width: var(--layout-max);
   width: 100%;
-  margin: 0;
+  margin: 0 auto;
   padding: 26px var(--layout-gutter) 64px;
   padding-bottom: calc(64px + var(--safe-bottom));
 }
@@ -3999,6 +3999,8 @@ body.theme-operativa .workspace-home-count {
   min-width: 0;
   display: grid;
   gap: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #crmSection .crm-lightning-topbar {
