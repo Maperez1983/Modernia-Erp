@@ -43192,12 +43192,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
-            "/api/seguros_update",
-            "/api/seguros_cambio_compania",
-            "/api/seguros_delete",
-            "/api/seguros_poliza_accion",
-            "/api/seguros_enrich",
-            "/api/seguros_backfill_s3",
+	            "/api/seguros_update",
+	            "/api/seguros_cambio_compania",
+	            "/api/seguros_delete",
+	            "/api/seguros_poliza_accion",
+	            "/api/seguros_renovaciones_update",
+	            "/api/seguros_enrich",
+	            "/api/seguros_backfill_s3",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",
@@ -43818,11 +43819,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
-            "/api/seguros_delete",
-            "/api/seguros_cambio_compania",
-            "/api/seguros_update",
-            "/api/seguros_poliza_accion",
-            "/api/seguros_ofertas",
+	            "/api/seguros_delete",
+	            "/api/seguros_cambio_compania",
+	            "/api/seguros_update",
+	            "/api/seguros_poliza_accion",
+	            "/api/seguros_renovaciones_update",
+	            "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -43972,11 +43974,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_trabajos_delete",
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
-            "/api/seguros_delete",
-            "/api/seguros_cambio_compania",
-            "/api/seguros_update",
-            "/api/seguros_poliza_accion",
-            "/api/gestoria_contabilidad_update",
+	            "/api/seguros_delete",
+	            "/api/seguros_cambio_compania",
+	            "/api/seguros_update",
+	            "/api/seguros_poliza_accion",
+	            "/api/seguros_renovaciones_update",
+	            "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/auditoria",
             "/api/acciones",
@@ -55199,6 +55202,48 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            return
+        elif parsed.path == "/api/seguros_renovaciones_update":
+            record_id = (payload.get("id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            updates = {}
+            for key in (
+                "estado",
+                "responsable",
+                "proxima_accion_fecha",
+                "ultimo_contacto_fecha",
+                "notas",
+                "motivo_perdida",
+                "poliza_id",
+            ):
+                if key not in payload:
+                    continue
+                updates[key] = payload.get(key)
+            if not updates:
+                json_response(self, {"error": "sin cambios"}, status=400)
+                return
+            if "estado" in updates:
+                estado_key = normalize_lookup_text(updates.get("estado") or "")
+                estado_map = {
+                    "PENDIENTE": "pendiente",
+                    "EN GESTION": "en_gestion",
+                    "CONTACTADO": "contactado",
+                    "COTIZADO": "cotizado",
+                    "RENOVADO": "renovado",
+                    "PERDIDO": "perdido",
+                    "DESCARTADO": "descartado",
+                }
+                if estado_key in estado_map:
+                    updates["estado"] = estado_map[estado_key]
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, record_id]
+            conn.execute(
+                f"UPDATE seguros_renovaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/fin_checklist_generate":
             asesoramiento_id = payload.get("asesoramiento_id")
