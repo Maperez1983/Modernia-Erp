@@ -11987,6 +11987,59 @@ body.crm-context-fin #crmSection #crmViewFin #hipotecaTabs {
   display: none;
 }
 
+/* Sub-bars dentro de verticales (Gestoría dashboard, Seguros tabs, etc.). */
+body.crm-context-vertical #crmSection .crm-lightning-subbar {
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 12px;
+  margin: 0 0 16px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar::-webkit-scrollbar {
+  height: 8px;
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar::-webkit-scrollbar-thumb {
+  background: rgba(var(--ink-rgb), 0.20);
+  border-radius: 999px;
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module {
+  border-color: rgba(var(--gold-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.96), rgba(15, 39, 66, 0.92));
+  color: rgba(255, 255, 255, 0.98);
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module:hover {
+  border-color: rgba(var(--gold-rgb), 0.38);
+}
+
+body.crm-context-vertical #crmSection .crm-lightning-subbar .tab.tc-module.active {
+  outline: 3px solid rgba(var(--gold-rgb), 0.28);
+}
+
+/* Variante general (fuera de `#crmSection`): mantiene el look & feel de Lightning en micro-tabs (Cliente, Portal, etc.). */
+body.theme-operativa .crm-lightning-subbar {
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 12px;
+  margin: 0 0 16px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.theme-operativa .crm-lightning-subbar .tab.tc-module {
+  border-color: rgba(var(--gold-rgb), 0.22);
+}
+
+body.theme-operativa .crm-lightning-subbar .tab.tc-module.active {
+  outline: 3px solid rgba(var(--gold-rgb), 0.22);
+}
+
 /* === Verifika²: Sistema visual unificado de cards (todo el sistema) === */
 body.theme-operativa {
   --v2-card-radius: 20px;

@@ -102,7 +102,7 @@
               <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
             </div>
             <div class="crm-workspace-shell">
-				          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceViewTabs">
+				          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceViewTabs">
 				            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
 				              <span class="tc-mod-ico" aria-hidden="true">
 			                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
@@ -117,7 +117,7 @@
 		            </button>
 		          </div>
 	          <div class="crm-workspace-view" data-workspace-view="tenant">
-		            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro" id="workspaceTenantTabs">
+		            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceTenantTabs">
 		              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
 		                <span class="tc-mod-ico" aria-hidden="true">
 		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
@@ -5398,7 +5398,7 @@
 		            </div>
 		            <div class="status"><span></span>Operativa</div>
 		          </div>
-		          <div class="tc-modulebar tc-modulebar--micro" id="gestoriaDashboardTabs" role="navigation" aria-label="Dashboard gestoría">
+			          <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="gestoriaDashboardTabs" role="navigation" aria-label="Dashboard gestoría">
 	            <button class="tab tc-module active" type="button" data-gestoria-dashboard-view="general" title="General">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
 	              <span class="tc-mod-label">General</span>
@@ -6039,7 +6039,7 @@
               <p class="muted">Pólizas, seguimiento y oportunidades.</p>
             </div>
           </div>
-	          <div class="tc-modulebar tc-modulebar--micro" id="segurosTabs" role="navigation" aria-label="Seguros">
+		          <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="segurosTabs" role="navigation" aria-label="Seguros">
 	            <button class="tab tc-module active" type="button" data-seguros-tab="dashboard" title="Dashboard">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
 	              <span class="tc-mod-label">Dashboard</span>
@@ -8132,7 +8132,7 @@
           </div>
         </div>
 	          <div id="hipotecaSection" class="hidden">
-	          <div id="hipotecaTabs" class="tc-modulebar tc-modulebar--micro" role="navigation" aria-label="Financiaciones">
+		          <div id="hipotecaTabs" class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" role="navigation" aria-label="Financiaciones">
 	            <button class="tab tc-module active" type="button" data-hipoteca-section="dashboard" title="Dashboard">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
 	              <span class="tc-mod-label">Dashboard</span>
@@ -8931,7 +8931,7 @@
             </div>
             <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
           </div>
-          <div id="clienteTabs" class="tc-modulebar tc-modulebar--micro" role="navigation" aria-label="Cliente">
+          <div id="clienteTabs" class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" role="navigation" aria-label="Cliente">
             <button class="tab tc-module active" type="button" data-tab="datos" title="Expediente">
               <span class="tc-mod-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h9l3 3v17H6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M15 2v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 11h6M9 15h6M9 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -9279,7 +9279,7 @@
             <div class="form-card hidden" id="clienteProfesionalOperativaBlock">
               <h3>Áreas de gestoría</h3>
               <p class="muted">Cada pestaña corresponde a una línea de trabajo activa para este cliente.</p>
-              <div class="tc-modulebar tc-modulebar--micro" id="gestoriaModuleTabs" role="navigation" aria-label="Áreas de gestoría">
+              <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="gestoriaModuleTabs" role="navigation" aria-label="Áreas de gestoría">
                 <button class="tab tc-module" type="button" data-gestoria-module="contabilidad" title="Contabilidad">
                   <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
                   <span class="tc-mod-label">Conta</span>
@@ -9975,7 +9975,7 @@
             <div class="form-card">
               <h3>Áreas de servicio</h3>
               <p class="muted">Trabajo operativo agrupado por servicio para no mezclar configuración, documentos y contabilidad.</p>
-              <div class="tc-modulebar tc-modulebar--micro" id="clienteOperativaTabs" role="navigation" aria-label="Áreas de servicio">
+              <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="clienteOperativaTabs" role="navigation" aria-label="Áreas de servicio">
                 <button class="tab tc-module" type="button" data-operativa-tab="gestoria" title="Gestoría">
                   <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
                   <span class="tc-mod-label">Gestoría</span>
@@ -10078,7 +10078,7 @@
                   <span id="clienteDocsUploadStatus" class="muted"></span>
                 </div>
               </form>
-              <div class="tc-modulebar tc-modulebar--micro" id="clienteDocsTabs" role="navigation" aria-label="Docs por servicio">
+              <div class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="clienteDocsTabs" role="navigation" aria-label="Docs por servicio">
                 <button class="tab tc-module active" type="button" data-docs-tab="seguros" title="Seguros">
                   <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
                   <span class="tc-mod-label">Seguros</span>
