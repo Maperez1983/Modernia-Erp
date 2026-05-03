@@ -5852,6 +5852,12 @@ def seguros_sync_activation_action(conn, seguro_row, now):
         (f"%{seguro_id}%",),
     ).fetchone()
     today = datetime.now(timezone.utc).date()
+    if now:
+        try:
+            now_dt = datetime.fromisoformat(str(now).replace("Z", "+00:00"))
+            today = now_dt.date()
+        except Exception:
+            pass
     should_be_pending = (
         bool(efecto_dt)
         and efecto_dt > today
@@ -8794,10 +8800,10 @@ def _irpf_ganancia_simulate(payload: dict) -> dict:
 
     exento = 0.0
     exencion_motivo = ""
+    edad = None
     if regimen == "irpf":
         # Exención >65 / dependencia (siempre ligada a vivienda habitual).
         fecha_nacimiento = parse_iso_date(payload.get("fecha_nacimiento") or "")
-        edad = None
         if fecha_nacimiento:
             try:
                 edad = int((devengo - fecha_nacimiento).days // 365.2425)
@@ -9187,7 +9193,7 @@ def build_irpf_ganancia_report_pdf(payload: dict, simulate_out: dict) -> bytes:
         ],
     }
 
-    def _money_num(raw: object) -> float | None:
+    def _money_num(raw: object):
         try:
             parsed = parse_money_value(raw)
         except Exception:
@@ -25162,6 +25168,103 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 continue
         return items
 
+    # include_docs=True: adjunta documentos de gestoria_docs (renta) y un preview para la última entrada.
+    try:
+        placeholders_emp_docs = ",".join(["?"] * len(empresa_ids))
+        placeholders_cli = ",".join(["?"] * len(selected_cliente_ids))
+        docs_rows = conn.execute(
+            f"""
+            SELECT
+              id,
+              empresa_id,
+              cliente_id,
+              referencia_tipo,
+              referencia_id,
+              nombre,
+              tipo,
+              fecha,
+              estado,
+              notas,
+              doc_url,
+              created_at,
+              updated_at
+            FROM gestoria_docs
+            WHERE empresa_id IN ({placeholders_emp_docs})
+              AND cliente_id IN ({placeholders_cli})
+              AND LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+            ORDER BY COALESCE(fecha, '') DESC, COALESCE(updated_at, created_at) DESC
+            """,
+            tuple([*empresa_ids, *selected_cliente_ids]),
+        ).fetchall()
+    except Exception:
+        docs_rows = []
+
+    docs_by_cliente: dict[str, list[dict]] = {}
+    for row in docs_rows or []:
+        try:
+            cliente_id = str(row["cliente_id"] or "").strip()
+        except Exception:
+            cliente_id = ""
+        if not cliente_id:
+            continue
+        try:
+            docs_by_cliente.setdefault(cliente_id, []).append(dict(row))
+        except Exception:
+            try:
+                docs_by_cliente.setdefault(cliente_id, []).append(
+                    {
+                        "id": row_value(row, "id", ""),
+                        "empresa_id": row_value(row, "empresa_id", ""),
+                        "cliente_id": cliente_id,
+                        "referencia_tipo": row_value(row, "referencia_tipo", ""),
+                        "referencia_id": row_value(row, "referencia_id", ""),
+                        "nombre": row_value(row, "nombre", ""),
+                        "tipo": row_value(row, "tipo", ""),
+                        "fecha": row_value(row, "fecha", ""),
+                        "estado": row_value(row, "estado", ""),
+                        "notas": row_value(row, "notas", ""),
+                        "doc_url": row_value(row, "doc_url", ""),
+                        "created_at": row_value(row, "created_at", ""),
+                        "updated_at": row_value(row, "updated_at", ""),
+                    }
+                )
+            except Exception:
+                continue
+
+    for item in items:
+        try:
+            cliente_id = str(item.get("cliente_id") or "").strip()
+        except Exception:
+            cliente_id = ""
+        docs = docs_by_cliente.get(cliente_id, []) if cliente_id else []
+        item["docs"] = docs
+        item["doc_count"] = int(len(docs))
+
+        preview = {}
+        latest = item.get("renta_latest") or {}
+        try:
+            entry_id = str(latest.get("id") or "").strip()
+            year = str(latest.get("ejercicio") or "").strip()
+        except Exception:
+            entry_id = ""
+            year = ""
+        candidates = set()
+        if entry_id:
+            candidates.add(entry_id.lower())
+        ref_id = renta_ref_id_for_entry(year, entry_id)
+        if ref_id:
+            candidates.add(ref_id.lower())
+        for doc in docs:
+            rid = str(doc.get("referencia_id") or "").strip().lower()
+            if rid and (rid in candidates):
+                preview = doc
+                break
+        if not preview and docs:
+            preview = docs[0]
+        item["preview_doc"] = preview or {}
+
+    return items
+
 
 def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, persona_id, ejercicio=""):
     ejercicio_val = str(ejercicio or "").strip()
@@ -27207,7 +27310,32 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         empresas_query += f" AND LOWER(ce.servicio) IN ({placeholders})"
         values.extend(services_filter)
     empresas_query += " ORDER BY e.nombre"
-    empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
+    try:
+        empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
+    except Exception as exc:
+        msg = str(exc).lower()
+        if ("no such column" not in msg) and ("undefined column" not in msg):
+            raise
+        empresas_query = """
+            SELECT
+              ce.id AS rel_id,
+              ce.empresa_id,
+              e.nombre AS empresa,
+              ce.servicio,
+              ce.estado,
+              ce.fecha_inicio,
+              ce.fecha_fin
+            FROM clientes_empresas ce
+            LEFT JOIN empresas e ON e.id = ce.empresa_id
+            WHERE ce.cliente_id = ?
+        """
+        values = [cliente_id]
+        if services_filter:
+            placeholders = ",".join(["?"] * len(services_filter))
+            empresas_query += f" AND LOWER(ce.servicio) IN ({placeholders})"
+            values.extend(services_filter)
+        empresas_query += " ORDER BY e.nombre"
+        empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
 
     service_keys = []
     inmobiliaria_empresa_ids = []
@@ -28002,7 +28130,17 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 
 
 def ensure_tables(db_path):
-    if db_is_postgres_enabled():
+    force_sqlite = False
+    try:
+        # En tests y herramientas offline se pasa normalmente un `Path` a un sqlite local,
+        # aunque exista DATABASE_URL en el entorno. En ese caso forzamos sqlite.
+        from pathlib import Path as _Path
+
+        if isinstance(db_path, _Path):
+            force_sqlite = True
+    except Exception:
+        force_sqlite = False
+    if (not force_sqlite) and db_is_postgres_enabled():
         conn = open_postgres_conn(with_row_factory=False)
         # En Postgres, muchos "best-effort" (índices, backfills) están envueltos en try/except.
         # En Postgres un error deja la transacción en estado abortado hasta rollback, así que usamos autocommit
