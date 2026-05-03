@@ -27183,6 +27183,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
           c.nif,
           c.estado AS cliente_estado,
           cg.renta_detalles,
+          cg.updated_at AS cg_updated_at,
           c.empresa_id AS cliente_empresa_id,
           CASE
             WHEN EXISTS (
@@ -27238,6 +27239,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         nombre = str(row_dict.get("nombre") or "").strip()
         nif = str(row_dict.get("nif") or "").strip()
         servicio_estado = str(row_dict.get("servicio_estado") or row_dict.get("cliente_estado") or "").strip()
+        cg_updated_at = str(row_dict.get("cg_updated_at") or "").strip()
         has_link = int(row_dict.get("has_servicio_link") or 0) == 1
         payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
         entries = sanitize_renta_entries(sort_renta_entries(payload.get("entries") or []))
@@ -27263,9 +27265,14 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 forma_cobro_p = str(entry_prev.get("forma_cobro") or "").strip()
                 remesada_p = 1 if parse_boolish(entry_prev.get("remesada")) else 0
                 presentacion_fecha_p = str(entry_prev.get("presentacion_fecha") or "").strip()
-                month_p = presentacion_fecha_p[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha_p) else ""
+                parsed_pres_p = parse_iso_date(presentacion_fecha_p)
+                month_p = parsed_pres_p.strftime("%Y-%m") if parsed_pres_p else ""
+                if not month_p:
+                    parsed_fallback_p = parse_iso_date(cg_updated_at)
+                    month_p = parsed_fallback_p.strftime("%Y-%m") if parsed_fallback_p else ""
                 fecha_cobro_p = str(entry_prev.get("fecha_cobro") or "").strip()
-                month_cobro_p = fecha_cobro_p[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", fecha_cobro_p) else ""
+                parsed_cobro_p = parse_iso_date(fecha_cobro_p)
+                month_cobro_p = parsed_cobro_p.strftime("%Y-%m") if parsed_cobro_p else ""
                 campaigns_prev.append(
                     {
                         "cliente_id": cliente_id,
@@ -27303,9 +27310,14 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         forma_cobro = str(entry.get("forma_cobro") or "").strip()
         remesada = 1 if parse_boolish(entry.get("remesada")) else 0
         presentacion_fecha = str(entry.get("presentacion_fecha") or "").strip()
-        month = presentacion_fecha[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha) else ""
+        parsed_pres = parse_iso_date(presentacion_fecha)
+        month = parsed_pres.strftime("%Y-%m") if parsed_pres else ""
+        if not month:
+            parsed_fallback = parse_iso_date(cg_updated_at)
+            month = parsed_fallback.strftime("%Y-%m") if parsed_fallback else ""
         fecha_cobro = str(entry.get("fecha_cobro") or "").strip()
-        month_cobro = fecha_cobro[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", fecha_cobro) else ""
+        parsed_cobro = parse_iso_date(fecha_cobro)
+        month_cobro = parsed_cobro.strftime("%Y-%m") if parsed_cobro else ""
         campaigns.append(
             {
                 "cliente_id": cliente_id,

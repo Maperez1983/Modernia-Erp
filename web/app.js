@@ -52313,9 +52313,11 @@ const renderGestoriaDashServicios = (payload = {}, { key = "" } = {}) => {
   const quickKeys = ["herencias", "trafico", "expedientes", "tasaciones", "rentas"];
   gestoriaDashServiciosCards.innerHTML = "";
   quickKeys.forEach((k) => {
-    const value =
-      (totals[k] && (totals[k].total ?? 0)) ??
-      Number(payload?.segmentacion_trabajos?.[`${k}_total`] || 0);
+    const segValue = Number(payload?.segmentacion_trabajos?.[`${k}_total`] || 0);
+    const totalsValue = totals?.[k]?.total;
+    // Para "Rentas", la fuente canónica es `segmentacion_trabajos` (renta_detalles),
+    // porque `servicios.totals` viene de `gestoria_trabajos` y suele quedar a 0.
+    const value = k === "rentas" ? segValue : Number(totalsValue ?? segValue ?? 0);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `card kpi-card${selected === k ? " active" : ""}`;
@@ -53022,7 +53024,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   const addKpi = ({ title, value, note, onClick }) => {
     const el = document.createElement(onClick ? "button" : "div");
     if (onClick) el.type = "button";
-    el.className = "card kpi-card";
+    el.className = `card kpi-card${onClick ? " kpi-clickable" : ""}`;
     el.innerHTML = `
       <h3>${title}</h3>
       <div class="kpi-value">${value}</div>
@@ -53040,7 +53042,6 @@ const renderGestoriaRentaDashboard = (payload) => {
   const ticketMedio = conPrecio > 0 ? facturacionTotal / conPrecio : 0;
   const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
   const docsTotal = Number(counts.docs_total || 0);
-  const clientesConDoc = Number(counts.clientes_con_doc || 0);
   const sinPrecio = Number(counts.sin_precio || 0);
   const cobradasConPrecio = Number(counts.cobradas_con_precio || 0);
   const sinCobrarConPrecio = Number(counts.sin_cobrar_con_precio || 0);
@@ -53048,12 +53049,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     title: "Campañas renta",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
     note: `Ejercicio ${ejercicio || ""} · PDFs: ${numberFormatter.format(docsTotal)}`.trim(),
-    onClick: () => setView("overview"),
-  });
-  addKpi({
-    title: "PDFs subidos",
-    value: numberFormatter.format(docsTotal),
-    note: `Clientes con PDF: ${numberFormatter.format(clientesConDoc)}`,
+    onClick: () => setView("all"),
   });
   addKpi({
     title: "Rentas presentadas",
@@ -53071,6 +53067,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     title: "Remesadas",
     value: numberFormatter.format(Number(counts.remesadas || 0)),
     note: counts.remesadas_total != null ? `Total: ${formatMoney(counts.remesadas_total || 0)}` : "Marcadas como remesadas.",
+    onClick: () => setView("remesadas"),
   });
   addKpi({
     title: "Borradores",
@@ -53088,6 +53085,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     title: "Sin precio",
     value: numberFormatter.format(sinPrecio),
     note: "Campañas sin importe asignado.",
+    onClick: () => setView("sin_precio"),
   });
   addKpi({
     title: "Sin responsable",
@@ -53105,6 +53103,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     title: "Sin vincular servicio",
     value: numberFormatter.format(Number(counts.sin_vincular_servicio || 0)),
     note: "Clientes renta sin vínculo explícito a Gestoría.",
+    onClick: () => setView("sin_vincular"),
   });
   addKpi({
     title: "Facturación renta",
@@ -53258,6 +53257,7 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const resolveCampaignsForView = () => {
     const base = campaigns.length ? campaigns : [];
+    if (view === "all") return base;
     if (view === "presented") {
       return base.filter((item) => String(item.estado_presentacion || "").trim() !== "Borrador");
     }
@@ -53266,6 +53266,12 @@ const renderGestoriaRentaDashboard = (payload) => {
     }
     if (view === "paid") {
       return base.filter((item) => Number(item.cobrada || 0) === 1);
+    }
+    if (view === "remesadas") {
+      return base.filter((item) => Number(item.remesada || 0) === 1);
+    }
+    if (view === "sin_precio") {
+      return base.filter((item) => Number(item.precio_servicio || 0) <= 0.0001);
     }
     if (view === "unpaid") return unpaid;
     if (view === "unassigned") return unassigned;
@@ -53332,10 +53338,22 @@ const renderGestoriaRentaDashboard = (payload) => {
   };
 
   const root = document.createElement("div");
-  if (view === "unpaid" || view === "unassigned" || view === "presented" || view === "draft" || view === "paid" || view === "responsable") {
+  if (
+    view === "all" ||
+    view === "unpaid" ||
+    view === "unassigned" ||
+    view === "presented" ||
+    view === "draft" ||
+    view === "paid" ||
+    view === "remesadas" ||
+    view === "sin_precio" ||
+    view === "responsable"
+  ) {
     const items = resolveCampaignsForView();
     const title =
-      view === "unpaid"
+      view === "all"
+        ? "Todas las campañas"
+        : view === "unpaid"
         ? "Rentas sin cobrar"
         : view === "unassigned"
           ? "Rentas sin responsable"
@@ -53345,9 +53363,15 @@ const renderGestoriaRentaDashboard = (payload) => {
               ? "Rentas borrador"
               : view === "paid"
                 ? "Rentas cobradas"
+                : view === "remesadas"
+                  ? "Rentas remesadas"
+                  : view === "sin_precio"
+                    ? "Rentas sin precio"
                 : `Rentas · ${viewParam || "Responsable"}`;
     const hint =
-      view === "unpaid"
+      view === "all"
+        ? "Listado completo del ejercicio."
+        : view === "unpaid"
         ? "Encargos con precio asignado y no marcados como cobrados."
         : view === "unassigned"
           ? "Encargos sin responsable asignado."
@@ -53357,6 +53381,10 @@ const renderGestoriaRentaDashboard = (payload) => {
               ? "Pendientes de presentar."
               : view === "presented"
                 ? "Presentadas en la AEAT."
+                : view === "remesadas"
+                  ? "Marcadas como remesadas."
+                  : view === "sin_precio"
+                    ? "Campañas sin importe asignado."
                 : "Encargos del responsable.";
     root.appendChild(
       buildCampaignTable(items, {
@@ -53377,6 +53405,20 @@ const renderGestoriaRentaDashboard = (payload) => {
           hint: "Cliente con módulo renta activo pero sin campaña creada para el ejercicio.",
           emptyText: "No hay clientes sin campaña.",
           exportKind: "missing",
+          exportFields: "basic",
+          printMissing: true,
+        }
+      )
+    );
+  } else if (view === "sin_vincular") {
+    root.appendChild(
+      buildCampaignTable(
+        sinVincular.map((m) => ({ ...m, estado_presentacion: "-", presentacion_fecha: "", responsable_label: "-", precio_servicio: 0, cobrada: 0 })),
+        {
+          title: "Clientes renta sin vincular servicio",
+          hint: "Tienen módulo renta activo pero no están vinculados explícitamente a Gestoría (clientes_empresas).",
+          emptyText: "No hay clientes sin vínculo.",
+          exportKind: "",
           exportFields: "basic",
           printMissing: true,
         }
