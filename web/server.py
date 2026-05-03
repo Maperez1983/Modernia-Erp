@@ -62161,6 +62161,12 @@ class Handler(BaseHTTPRequestHandler):
             if validation_error:
                 json_response(self, {"error": validation_error}, status=400)
                 return
+            # Normaliza FKs: en SQLite/Postgres, "" no equivale a NULL y rompe la FK.
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            inmueble_id_fk = str(payload.get("inmueble_id") or "").strip() or None
+            asesoramiento_id_fk = str(payload.get("asesoramiento_id") or "").strip() or None
+            related_id_fk = str(payload.get("related_id") or "").strip() or None
+            related_tipo_fk = str(payload.get("related_tipo") or "").strip() or None
             action_id = os.urandom(16).hex()
             conn.execute(
                 """
@@ -62178,9 +62184,9 @@ class Handler(BaseHTTPRequestHandler):
                     action_id,
                     empresa["id"],
                     servicio_store,
-                    payload.get("cliente_id"),
-                    payload.get("inmueble_id"),
-                    payload.get("asesoramiento_id"),
+                    cliente_id,
+                    inmueble_id_fk,
+                    asesoramiento_id_fk,
                     payload.get("cliente_nombre"),
                     payload.get("fecha"),
                     payload.get("hora"),
@@ -62196,8 +62202,8 @@ class Handler(BaseHTTPRequestHandler):
                     parse_money_value(payload.get("importe_propuesta")) or None,
                     payload.get("notas"),
                     parse_optional_int(payload.get("recordatorio_min")),
-                    payload.get("related_id"),
-                    payload.get("related_tipo"),
+                    related_id_fk,
+                    related_tipo_fk,
                     now,
                     now,
                 ),

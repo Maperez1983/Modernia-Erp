@@ -83,59 +83,77 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
         except Exception:
             pass
 
+    def _login(self, page):
+        page.goto(f"{self.base_url}/?nosw=1&swcleared=1", wait_until="domcontentloaded")
+        page.fill("#authLoginUser", "admin")
+        page.fill("#authLoginPass", "adminadmin")
+        with page.expect_response(lambda r: r.url.endswith("/api/login")) as login_info:
+            page.click('#authLoginForm button[type="submit"]')
+        login_resp = login_info.value
+        login_data = {}
+        try:
+            login_data = login_resp.json()
+        except Exception:
+            login_data = {}
+        self.assertTrue(login_resp.ok, msg=f"Login HTTP {login_resp.status} · {login_data}")
+        self.assertTrue(bool(login_data.get("ok")), msg=f"Login no OK · {login_data}")
+
+    def _open_crm_inmo(self, page):
+        page.goto(f"{self.base_url}/?crm=inmo&nosw=1&swcleared=1", wait_until="domcontentloaded")
+        page.wait_for_selector("#crmSection:not(.hidden)", timeout=20000)
+
+    def _create_inmueble(self, page):
+        page.wait_for_selector("#crmTopNewBtn", timeout=20000)
+        page.click("#crmTopNewBtn")
+        page.wait_for_selector("#crmInsertModal:not(.hidden)", timeout=5000)
+        page.click('button[data-crm-insert="captacion"]')
+        page.wait_for_selector("#crmCaptacionModal:not(.hidden)", timeout=5000)
+
+        page.fill('#crmCaptacionCreateForm input[name="direccion"]', "CALLE E2E 123")
+        page.select_option('#crmCaptacionCreateForm select[name="tipo_inmueble"]', "Piso")
+        page.fill('#crmCaptacionCreateForm input[name="referencia_catastral"]', "1234567UF7613S0001AB")
+
+        with page.expect_response(lambda r: "/api/captaciones" in r.url and r.request.method == "POST") as create_info:
+            page.click('#crmCaptacionCreateForm button[type="submit"]')
+        create_resp = create_info.value
+        create_data = {}
+        try:
+            create_data = create_resp.json()
+        except Exception:
+            create_data = {}
+        self.assertTrue(create_resp.ok, msg=f"Alta inmueble HTTP {create_resp.status} · {create_data}")
+        inmueble_id = str(create_data.get("inmueble_id") or "").strip()
+        captacion_id = str(create_data.get("id") or "").strip()
+        self.assertTrue(inmueble_id, msg=f"Alta inmueble sin inmueble_id · {create_data}")
+        self.assertTrue(captacion_id, msg=f"Alta inmueble sin captacion id · {create_data}")
+        return inmueble_id, captacion_id
+
+    def _open_inmueble(self, page, inmueble_id):
+        page.goto(
+            f"{self.base_url}/?crm=inmo&inmueble={inmueble_id}&nosw=1&swcleared=1",
+            wait_until="domcontentloaded",
+        )
+        page.wait_for_selector("#inmuebleGoEstadoBtn", timeout=20000)
+        # Asegura que el contexto de empresa esté disponible antes de guardar acciones (evita FK por empresa_id vacío).
+        page.wait_for_function(
+            "(() => { try { return (state && Array.isArray(state.empresas) && state.empresas.length > 0 && String(resolveCrmInmoEmpresaId()||'').trim()); } catch(e){ return false; } })()",
+            timeout=20000,
+        )
+        page.wait_for_function(
+            "(() => { try { return !!(state && String(state.currentInmuebleId||'').trim()); } catch(e){ return false; } })()",
+            timeout=20000,
+        )
+
     def test_inmobiliaria_crea_inmueble_y_pdf(self):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
 
-            page.goto(f"{self.base_url}/?nosw=1&swcleared=1", wait_until="domcontentloaded")
-
-            page.fill("#authLoginUser", "admin")
-            page.fill("#authLoginPass", "adminadmin")
-            with page.expect_response(lambda r: r.url.endswith("/api/login")) as login_info:
-                page.click('#authLoginForm button[type="submit"]')
-            login_resp = login_info.value
-            login_data = {}
-            try:
-                login_data = login_resp.json()
-            except Exception:
-                login_data = {}
-            self.assertTrue(login_resp.ok, msg=f"Login HTTP {login_resp.status} · {login_data}")
-            self.assertTrue(bool(login_data.get("ok")), msg=f"Login no OK · {login_data}")
-
-            page.goto(f"{self.base_url}/?crm=inmo&nosw=1&swcleared=1", wait_until="domcontentloaded")
-            page.wait_for_selector("#crmSection:not(.hidden)", timeout=20000)
-
-            page.wait_for_selector("#crmTopNewBtn", timeout=20000)
-            page.click("#crmTopNewBtn")
-            page.wait_for_selector("#crmInsertModal:not(.hidden)", timeout=5000)
-            page.click('button[data-crm-insert="captacion"]')
-            page.wait_for_selector("#crmCaptacionModal:not(.hidden)", timeout=5000)
-
-            page.fill('#crmCaptacionCreateForm input[name="direccion"]', "CALLE E2E 123")
-            page.select_option('#crmCaptacionCreateForm select[name="tipo_inmueble"]', "Piso")
-            page.fill('#crmCaptacionCreateForm input[name="referencia_catastral"]', "1234567UF7613S0001AB")
-
-            with page.expect_response(lambda r: "/api/captaciones" in r.url and r.request.method == "POST") as create_info:
-                page.click('#crmCaptacionCreateForm button[type="submit"]')
-            create_resp = create_info.value
-            create_data = {}
-            try:
-                create_data = create_resp.json()
-            except Exception:
-                create_data = {}
-            self.assertTrue(create_resp.ok, msg=f"Alta inmueble HTTP {create_resp.status} · {create_data}")
-            inmueble_id = str(create_data.get("inmueble_id") or "").strip()
-            captacion_id = str(create_data.get("id") or "").strip()
-            self.assertTrue(inmueble_id, msg=f"Alta inmueble sin inmueble_id · {create_data}")
-            self.assertTrue(captacion_id, msg=f"Alta inmueble sin captacion id · {create_data}")
-
-            page.goto(
-                f"{self.base_url}/?crm=inmo&inmueble={inmueble_id}&nosw=1&swcleared=1",
-                wait_until="domcontentloaded",
-            )
-            page.wait_for_selector("#inmuebleGoEstadoBtn", timeout=20000)
+            self._login(page)
+            self._open_crm_inmo(page)
+            inmueble_id, captacion_id = self._create_inmueble(page)
+            self._open_inmueble(page, inmueble_id)
 
             # Los PDFs de consumo requieren que el inmueble esté en Encargo.
             stage = page.evaluate(
@@ -170,6 +188,78 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             with open(path, "rb") as handle:
                 body = handle.read(16)
             self.assertTrue(body.startswith(b"%PDF"), msg=f"Download no-PDF (primeros 16 bytes): {body!r}")
+
+            context.close()
+            browser.close()
+
+    def test_inmobiliaria_cambiar_estado_crea_cita_y_avanza(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            self._login(page)
+            self._open_crm_inmo(page)
+            inmueble_id, _captacion_id = self._create_inmueble(page)
+            self._open_inmueble(page, inmueble_id)
+
+            # "Cambiar estado" pre-rellena la cita de adquisición en la pestaña Actividad.
+            page.click("#inmuebleGoEstadoBtn")
+            page.wait_for_selector("#inmuebleTabActividad:not(.hidden)", timeout=15000)
+            page.wait_for_selector("#inmuebleActividadForm", timeout=15000)
+
+            # Cerramos la cita como Realizada/Positivo para forzar avance de etapa.
+            page.select_option('#inmuebleActividadForm select[name="estado"]', "Completada")
+            page.select_option('#inmuebleActividadForm select[name="resultado_cierre"]', "Positivo")
+
+            with page.expect_response(lambda r: "/api/acciones" in r.url and r.request.method == "POST") as act_info:
+                page.click('#inmuebleActividadForm button[type="submit"]')
+            act_resp = act_info.value
+            act_data = {}
+            try:
+                act_data = act_resp.json()
+            except Exception:
+                act_data = {}
+            self.assertTrue(act_resp.ok, msg=f"Acción HTTP {act_resp.status} · {act_data}")
+            # El workflow debería mover de Inmueble -> Noticia (o Encargo en algunos escenarios).
+            next_stage = str(act_data.get("inmueble_estado") or act_data.get("captacion_etapa") or "").strip()
+            self.assertIn(next_stage, {"Noticia", "Encargo"}, msg=f"Etapa inesperada: {next_stage} · {act_data}")
+
+            context.close()
+            browser.close()
+
+    def test_inmobiliaria_crear_actividad_desde_quick_new(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            self._login(page)
+            self._open_crm_inmo(page)
+
+            page.click("#crmTopNewBtn")
+            page.wait_for_selector("#crmInsertModal:not(.hidden)", timeout=5000)
+            page.click('button[data-crm-insert="actividad"]')
+            page.wait_for_selector("#actionModal:not(.hidden)", timeout=10000)
+
+            # En este flujo el servicio viene bloqueado por la UI (lock_service=true).
+            service_value = page.input_value("#actionModalServicioSelect")
+            self.assertEqual(service_value, "inmobiliaria")
+
+            today = datetime.now().date().isoformat()
+            page.fill("#actionModalFecha", today)
+            page.fill("#actionModalTipo", "Llamada")
+            page.fill("#actionModalNotas", "E2E: llamada de prueba")
+
+            with page.expect_response(lambda r: r.url.endswith("/api/acciones") and r.request.method == "POST") as resp_info:
+                page.click("#actionModalSave")
+            resp = resp_info.value
+            data = {}
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+            self.assertTrue(resp.ok, msg=f"Acción (modal) HTTP {resp.status} · {data}")
 
             context.close()
             browser.close()
