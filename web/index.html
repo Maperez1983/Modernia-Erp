@@ -7013,24 +7013,32 @@
             <div class="form-card">
               <h3>Siniestros · Seguros</h3>
               <p class="muted">Registro y seguimiento básico de siniestros por póliza.</p>
-              <form id="segurosSiniestrosForm" class="form-grid">
-                <label>
-                  Fecha siniestro
-                  <input name="fecha_siniestro" type="date" required />
-                </label>
-                <label>
-                  Estado
-                  <select name="estado">
-                    <option value="abierto">Abierto</option>
-                    <option value="en tramitacion">En tramitación</option>
-                    <option value="cerrado">Cerrado</option>
-                    <option value="rechazado">Rechazado</option>
-                  </select>
-                </label>
-                <label>
-                  Tipo
-                  <input name="tipo" placeholder="Ej. Daños, RC, Auto..." />
-                </label>
+	              <form id="segurosSiniestrosForm" class="form-grid">
+	                <label>
+	                  Fecha siniestro
+	                  <input name="fecha_siniestro" type="date" required />
+	                </label>
+	                <label>
+	                  Estado
+	                  <select name="estado">
+	                    <option value="abierto">Apertura</option>
+	                    <option value="documentacion">Documentación</option>
+	                    <option value="peritaje">Peritaje</option>
+	                    <option value="oferta">Oferta</option>
+	                    <option value="pago">Pago</option>
+	                    <option value="en tramitacion">En tramitación (legacy)</option>
+	                    <option value="cerrado">Cerrado</option>
+	                    <option value="rechazado">Rechazado</option>
+	                  </select>
+	                </label>
+	                <label>
+	                  Gestor
+	                  <input name="gestor" placeholder="Persona responsable" />
+	                </label>
+	                <label>
+	                  Tipo
+	                  <input name="tipo" placeholder="Ej. Daños, RC, Auto..." />
+	                </label>
                 <label>
                   Nº expediente
                   <input name="numero_expediente" placeholder="Opcional" />
@@ -10636,7 +10644,7 @@
         </script>
 		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=731"></script>
+												    <script src="app.js?v=732"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;

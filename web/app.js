@@ -2707,6 +2707,20 @@ const segurosContabilidadPoliza = document.getElementById("segurosContabilidadPo
 const segurosContabilidadSearch = document.getElementById("segurosContabilidadSearch");
 const segurosContabilidadTable = document.getElementById("segurosContabilidadTable");
 const segurosContabilidadInfo = document.getElementById("segurosContabilidadInfo");
+const segurosRecibosForm = document.getElementById("segurosRecibosForm");
+const segurosRecibosStatus = document.getElementById("segurosRecibosStatus");
+const segurosRecibosCliente = document.getElementById("segurosRecibosCliente");
+const segurosRecibosPoliza = document.getElementById("segurosRecibosPoliza");
+const segurosRecibosSearch = document.getElementById("segurosRecibosSearch");
+const segurosRecibosTable = document.getElementById("segurosRecibosTable");
+const segurosRecibosInfo = document.getElementById("segurosRecibosInfo");
+const segurosSiniestrosForm = document.getElementById("segurosSiniestrosForm");
+const segurosSiniestrosStatus = document.getElementById("segurosSiniestrosStatus");
+const segurosSiniestrosCliente = document.getElementById("segurosSiniestrosCliente");
+const segurosSiniestrosPoliza = document.getElementById("segurosSiniestrosPoliza");
+const segurosSiniestrosSearch = document.getElementById("segurosSiniestrosSearch");
+const segurosSiniestrosTable = document.getElementById("segurosSiniestrosTable");
+const segurosSiniestrosInfo = document.getElementById("segurosSiniestrosInfo");
 const segurosInsights = document.getElementById("segurosInsights");
 const segurosAlertasList = document.getElementById("segurosAlertasList");
 const segurosRenovacionesDaysAhead = document.getElementById("segurosRenovacionesDaysAhead");
@@ -30982,6 +30996,28 @@ const hydrateSegurosContabilidadFormSelects = async () => {
   }
 };
 
+const hydrateSegurosRecibosFormSelects = async () => {
+  if (!segurosRecibosCliente || !segurosRecibosPoliza) return;
+  segurosContabilidadAllCache = null;
+  await populateSegurosContabilidadClientesSelect(segurosRecibosCliente, segurosRecibosCliente.value || "");
+  await fillGestoriaContabilidadPolizaSelect(
+    segurosRecibosPoliza,
+    segurosRecibosCliente.value || "",
+    segurosRecibosPoliza.value || ""
+  );
+};
+
+const hydrateSegurosSiniestrosFormSelects = async () => {
+  if (!segurosSiniestrosCliente || !segurosSiniestrosPoliza) return;
+  segurosContabilidadAllCache = null;
+  await populateSegurosContabilidadClientesSelect(segurosSiniestrosCliente, segurosSiniestrosCliente.value || "");
+  await fillGestoriaContabilidadPolizaSelect(
+    segurosSiniestrosPoliza,
+    segurosSiniestrosCliente.value || "",
+    segurosSiniestrosPoliza.value || ""
+  );
+};
+
 const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
   if (!selectEl) return;
   const wanted = String(seguroId || "").trim();
@@ -51871,6 +51907,8 @@ const renderGestoriaRentaDashboard = (payload) => {
   const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
   const missing = Array.isArray(payload?.missing) ? payload.missing : [];
   const months = Array.isArray(payload?.months) ? payload.months : [];
+  const cobrosMonths = Array.isArray(payload?.cobros?.months) ? payload.cobros.months : [];
+  const cobrosSinFechaTotal = Number(payload?.cobros?.sin_fecha_total || 0);
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
@@ -52382,6 +52420,15 @@ const renderGestoriaRentaDashboard = (payload) => {
         canvasAttr: 'data-renta-chart="responsables"',
       })
     );
+    if (cobrosMonths.length) {
+      chartGrid.appendChild(
+        buildChartCard({
+          title: "Cobrado por mes",
+          hint: "Importe cobrado por mes (según fecha de cobro).",
+          canvasAttr: 'data-renta-chart="cobros"',
+        })
+      );
+    }
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
 
@@ -52436,6 +52483,45 @@ const renderGestoriaRentaDashboard = (payload) => {
       monthCard.appendChild(table);
       root.appendChild(monthCard);
     }
+
+    if (cobrosMonths.length || cobrosSinFechaTotal > 0.0001) {
+      const cobroCard = document.createElement("div");
+      cobroCard.className = "form-card";
+      const extra = cobrosSinFechaTotal > 0.0001 ? ` · Sin fecha: ${formatMoney(cobrosSinFechaTotal)}` : "";
+      cobroCard.innerHTML = `<h3>Cobrado por mes</h3><p class="muted">Según fecha de cobro registrada${extra}.</p>`;
+      if (!cobrosMonths.length) {
+        cobroCard.appendChild(
+          Object.assign(document.createElement("p"), {
+            className: "muted",
+            textContent: "No hay cobros con fecha para distribuir por mes.",
+          })
+        );
+      } else {
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        ["Mes", "Cobradas", "Cobrado"].forEach((col) => {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        });
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        cobrosMonths.forEach((row) => {
+          const tr = document.createElement("tr");
+          [row.mes || "-", numberFormatter.format(Number(row.cobradas || 0)), formatMoney(row.cobrado || 0)].forEach((value) => {
+            const td = document.createElement("td");
+            td.textContent = String(value);
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        cobroCard.appendChild(table);
+      }
+      root.appendChild(cobroCard);
+    }
     const respPreview = buildResponsablesTable(responsables.slice(0, 12));
     respPreview.querySelector("#gestoriaRentaDashBackBtn2")?.remove();
     root.appendChild(respPreview);
@@ -52444,6 +52530,7 @@ const renderGestoriaRentaDashboard = (payload) => {
     requestAnimationFrame(() => {
       const estadoCanvas = root.querySelector('canvas[data-renta-chart="estado"]');
       const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
+      const cobroCanvas = root.querySelector('canvas[data-renta-chart="cobros"]');
       if (estadoCanvas) {
         drawBarChart(
           estadoCanvas,
@@ -52511,6 +52598,23 @@ const renderGestoriaRentaDashboard = (payload) => {
               setViewWithParam("responsable", keys[idx] || "");
             },
           }
+        );
+      }
+      if (cobroCanvas) {
+        const labels = cobrosMonths.map((r) => String(r.mes || "").slice(5, 7) || String(r.mes || ""));
+        const values = cobrosMonths.map((r) => Number(r.cobrado || 0));
+        drawBarChart(
+          cobroCanvas,
+          labels.length ? labels : [""],
+          [
+            {
+              label: `Cobrado ${ejercicio || ""}`.trim(),
+              values: values.length ? values : [0],
+              color: "#0B1D33",
+              format: (value) => euroFormatter.format(Number(value || 0)),
+            },
+          ],
+          { legend: false, showValues: true, tooltip: true, axisMaxChars: 2 }
         );
       }
     });
@@ -53296,6 +53400,10 @@ const loadSegurosCrm = () => {
     loadSegurosComplianceKpis(empresa.id);
     loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
     loadSegurosReclamaciones(empresa.id);
+    loadSegurosRecibos();
+    loadSegurosSiniestros();
+    hydrateSegurosRecibosFormSelects().catch(() => {});
+    hydrateSegurosSiniestrosFormSelects().catch(() => {});
     if (state.segurosTab === "contabilidad") {
       loadSegurosContabilidad();
     }
@@ -53928,6 +54036,219 @@ const loadSegurosReclamaciones = (empresaId) => {
     .catch(() => {
       segurosReclamacionesTable.innerHTML = "<p class='muted'>No se pudieron cargar reclamaciones.</p>";
       if (segurosReclamacionesInfo) segurosReclamacionesInfo.textContent = "";
+    });
+};
+
+const loadSegurosRecibos = () => {
+  if (!segurosRecibosTable) return;
+  const empresa = resolveCrmSegurosEmpresa();
+  if (!empresa) {
+    segurosRecibosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (segurosRecibosInfo) segurosRecibosInfo.textContent = "";
+    return;
+  }
+  const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  if (q) params.set("q", q);
+  api(`/api/seguros_recibos?${params.toString()}`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        segurosRecibosTable.innerHTML = "<p class='muted'>Sin recibos registrados.</p>";
+        if (segurosRecibosInfo) segurosRecibosInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Emisión", "Estado", "Prima", "Comisión", "Cliente", "Póliza", "Acción"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const prima = Number(parseMoneyValue(row.prima_total));
+        const comision = Number(parseMoneyValue(row.comision));
+        const values = [
+          row.fecha_emision || "-",
+          row.estado || "-",
+          Number.isFinite(prima) && prima ? euroFormatter.format(prima) : "-",
+          Number.isFinite(comision) && comision ? euroFormatter.format(comision) : "-",
+          row.cliente || "-",
+          row.poliza_numero || "-",
+        ];
+        values.forEach((v) => {
+          const td = document.createElement("td");
+          td.textContent = String(v || "-");
+          tr.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        const estado = normalizeSimple(row.estado || "");
+        if (estado !== "cobrado") {
+          const cobradoBtn = document.createElement("button");
+          cobradoBtn.type = "button";
+          cobradoBtn.className = "secondary";
+          cobradoBtn.textContent = "Marcar cobrado";
+          cobradoBtn.addEventListener("click", async () => {
+            const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", {
+              id: row.id,
+              estado: "cobrado",
+              fecha_cobro: formatAgendaDate(new Date()),
+            }).catch((err) => ({ error: err?.message || "Error" }));
+            if (resp?.error) return;
+            loadSegurosRecibos();
+          });
+          actionTd.appendChild(cobradoBtn);
+        }
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "ghost";
+        delBtn.textContent = "Eliminar";
+        delBtn.addEventListener("click", async () => {
+          const ok = window.confirm("¿Eliminar este recibo?");
+          if (!ok) return;
+          const resp = await postJsonWithDbRetry("/api/seguros_recibos_delete", { id: row.id }).catch((err) => ({
+            error: err?.message || "Error",
+          }));
+          if (resp?.error) return;
+          loadSegurosRecibos();
+        });
+        actionTd.appendChild(delBtn);
+        tr.appendChild(actionTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      segurosRecibosTable.innerHTML = "";
+      segurosRecibosTable.appendChild(table);
+      if (segurosRecibosInfo) segurosRecibosInfo.textContent = `Mostrando ${rows.length} recibos.`;
+    })
+    .catch(() => {
+      segurosRecibosTable.innerHTML = "<p class='muted'>No se pudieron cargar recibos.</p>";
+      if (segurosRecibosInfo) segurosRecibosInfo.textContent = "";
+    });
+};
+
+const SEGUROS_SINIESTROS_WORKFLOW = [
+  "abierto",
+  "documentacion",
+  "peritaje",
+  "oferta",
+  "pago",
+  "cerrado",
+];
+
+const loadSegurosSiniestros = () => {
+  if (!segurosSiniestrosTable) return;
+  const empresa = resolveCrmSegurosEmpresa();
+  if (!empresa) {
+    segurosSiniestrosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (segurosSiniestrosInfo) segurosSiniestrosInfo.textContent = "";
+    return;
+  }
+  const q = segurosSiniestrosSearch ? segurosSiniestrosSearch.value.trim() : "";
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  if (q) params.set("q", q);
+  api(`/api/seguros_siniestros?${params.toString()}`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        segurosSiniestrosTable.innerHTML = "<p class='muted'>Sin siniestros registrados.</p>";
+        if (segurosSiniestrosInfo) segurosSiniestrosInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Fecha", "Estado", "Tipo", "Expediente", "Reserva", "Pagado", "Póliza", "Gestor", "Acción"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const reserva = Number(parseMoneyValue(row.importe_reserva));
+        const pagado = Number(parseMoneyValue(row.importe_pagado));
+        const estadoRaw = String(row.estado || "").trim();
+        const estado = normalizeSimple(estadoRaw);
+        const values = [
+          row.fecha_siniestro || row.fecha_apertura || "-",
+          estadoRaw || "-",
+          row.tipo || "-",
+          row.numero_expediente || "-",
+          Number.isFinite(reserva) && reserva ? euroFormatter.format(reserva) : "-",
+          Number.isFinite(pagado) && pagado ? euroFormatter.format(pagado) : "-",
+          row.poliza_numero || "-",
+          row.gestor || "-",
+        ];
+        values.forEach((v) => {
+          const td = document.createElement("td");
+          td.textContent = String(v || "-");
+          tr.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        const isClosed = estado === "cerrado" || estado === "rechazado";
+        if (!isClosed) {
+          const nextBtn = document.createElement("button");
+          nextBtn.type = "button";
+          nextBtn.className = "secondary";
+          nextBtn.textContent = "Siguiente fase";
+          nextBtn.addEventListener("click", async () => {
+            const currentIdx = SEGUROS_SINIESTROS_WORKFLOW.indexOf(estado);
+            const next = currentIdx >= 0 ? SEGUROS_SINIESTROS_WORKFLOW[Math.min(currentIdx + 1, SEGUROS_SINIESTROS_WORKFLOW.length - 1)] : "documentacion";
+            const resp = await postJsonWithDbRetry("/api/seguros_siniestros_update", { id: row.id, estado: next }).catch((err) => ({
+              error: err?.message || "Error",
+            }));
+            if (resp?.error) return;
+            loadSegurosSiniestros();
+          });
+          actionTd.appendChild(nextBtn);
+          const closeBtn = document.createElement("button");
+          closeBtn.type = "button";
+          closeBtn.className = "ghost";
+          closeBtn.textContent = "Cerrar";
+          closeBtn.addEventListener("click", async () => {
+            const resp = await postJsonWithDbRetry("/api/seguros_siniestros_update", {
+              id: row.id,
+              estado: "cerrado",
+              fecha_cierre: formatAgendaDate(new Date()),
+            }).catch((err) => ({ error: err?.message || "Error" }));
+            if (resp?.error) return;
+            loadSegurosSiniestros();
+          });
+          actionTd.appendChild(closeBtn);
+        }
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "ghost";
+        delBtn.textContent = "Eliminar";
+        delBtn.addEventListener("click", async () => {
+          const ok = window.confirm("¿Eliminar este siniestro?");
+          if (!ok) return;
+          const resp = await postJsonWithDbRetry("/api/seguros_siniestros_delete", { id: row.id }).catch((err) => ({
+            error: err?.message || "Error",
+          }));
+          if (resp?.error) return;
+          loadSegurosSiniestros();
+        });
+        actionTd.appendChild(delBtn);
+        tr.appendChild(actionTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      segurosSiniestrosTable.innerHTML = "";
+      segurosSiniestrosTable.appendChild(table);
+      if (segurosSiniestrosInfo) segurosSiniestrosInfo.textContent = `Mostrando ${rows.length} siniestros.`;
+    })
+    .catch(() => {
+      segurosSiniestrosTable.innerHTML = "<p class='muted'>No se pudieron cargar siniestros.</p>";
+      if (segurosSiniestrosInfo) segurosSiniestrosInfo.textContent = "";
     });
 };
 
@@ -66078,6 +66399,22 @@ if (segurosCampanasSearch) {
   });
 }
 
+if (segurosRecibosSearch) {
+  segurosRecibosSearch.addEventListener("input", () => {
+    scheduleSave("seguros-recibos-search", () => {
+      loadSegurosRecibos();
+    }, 200);
+  });
+}
+
+if (segurosSiniestrosSearch) {
+  segurosSiniestrosSearch.addEventListener("input", () => {
+    scheduleSave("seguros-siniestros-search", () => {
+      loadSegurosSiniestros();
+    }, 200);
+  });
+}
+
 if (segurosRecRun) {
   segurosRecRun.addEventListener("click", () => {
     loadSegurosRecomendacion();
@@ -66588,6 +66925,74 @@ if (segurosComisionesForm) {
           segurosComisionesStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (segurosRecibosForm) {
+  if (segurosRecibosCliente && segurosRecibosPoliza) {
+    segurosRecibosCliente.addEventListener("change", () => {
+      segurosContabilidadAllCache = null;
+      fillGestoriaContabilidadPolizaSelect(segurosRecibosPoliza, segurosRecibosCliente.value, "");
+    });
+  }
+  segurosRecibosForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (segurosRecibosStatus) segurosRecibosStatus.textContent = "Guardando...";
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (segurosRecibosStatus) segurosRecibosStatus.textContent = "Sin empresa.";
+      return;
+    }
+    const formData = new FormData(segurosRecibosForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_id = empresa.id;
+    payload.cliente_id = segurosRecibosCliente ? segurosRecibosCliente.value : payload.cliente_id;
+    payload.seguro_id = segurosRecibosPoliza ? segurosRecibosPoliza.value : payload.seguro_id;
+    const resp = await postJsonWithDbRetry("/api/seguros_recibos", payload).catch((err) => ({
+      error: err?.message || "Error",
+    }));
+    if (resp?.error) {
+      if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosRecibosStatus) segurosRecibosStatus.textContent = "Recibo creado.";
+    segurosRecibosForm.reset();
+    hydrateSegurosRecibosFormSelects().catch(() => {});
+    loadSegurosRecibos();
+  });
+}
+
+if (segurosSiniestrosForm) {
+  if (segurosSiniestrosCliente && segurosSiniestrosPoliza) {
+    segurosSiniestrosCliente.addEventListener("change", () => {
+      segurosContabilidadAllCache = null;
+      fillGestoriaContabilidadPolizaSelect(segurosSiniestrosPoliza, segurosSiniestrosCliente.value, "");
+    });
+  }
+  segurosSiniestrosForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = "Guardando...";
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = "Sin empresa.";
+      return;
+    }
+    const formData = new FormData(segurosSiniestrosForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_id = empresa.id;
+    payload.cliente_id = segurosSiniestrosCliente ? segurosSiniestrosCliente.value : payload.cliente_id;
+    payload.seguro_id = segurosSiniestrosPoliza ? segurosSiniestrosPoliza.value : payload.seguro_id;
+    const resp = await postJsonWithDbRetry("/api/seguros_siniestros", payload).catch((err) => ({
+      error: err?.message || "Error",
+    }));
+    if (resp?.error) {
+      if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = "Siniestro creado.";
+    segurosSiniestrosForm.reset();
+    hydrateSegurosSiniestrosFormSelects().catch(() => {});
+    loadSegurosSiniestros();
   });
 }
 

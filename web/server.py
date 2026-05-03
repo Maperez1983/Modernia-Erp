@@ -26654,6 +26654,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         remesada = 1 if parse_boolish(entry.get("remesada")) else 0
         presentacion_fecha = str(entry.get("presentacion_fecha") or "").strip()
         month = presentacion_fecha[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", presentacion_fecha) else ""
+        fecha_cobro = str(entry.get("fecha_cobro") or "").strip()
+        month_cobro = fecha_cobro[:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", fecha_cobro) else ""
         campaigns.append(
             {
                 "cliente_id": cliente_id,
@@ -26664,6 +26666,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 "estado_presentacion": estado,
                 "presentacion_fecha": presentacion_fecha,
                 "mes": month,
+                "fecha_cobro": fecha_cobro,
+                "mes_cobro": month_cobro,
                 "responsable": responsable_raw,
                 "responsable_label": responsable_label,
                 "responsable_key": responsable_key,
@@ -26691,6 +26695,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     }
     responsables = {}
     months = {}
+    cobros_months = {}
+    cobros_sin_fecha_total = 0.0
     for item in campaigns:
         estado = item.get("estado_presentacion") or ""
         if estado == "Borrador":
@@ -26704,6 +26710,13 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             if int(item.get("cobrada") or 0) == 1:
                 counts["cobradas"] += 1
                 counts["cobrado_total"] += precio
+                cobro_month = str(item.get("mes_cobro") or "").strip()
+                if cobro_month:
+                    cobros_months.setdefault(cobro_month, {"mes": cobro_month, "cobradas": 0, "cobrado": 0.0})
+                    cobros_months[cobro_month]["cobradas"] += 1
+                    cobros_months[cobro_month]["cobrado"] += precio
+                else:
+                    cobros_sin_fecha_total += precio
             else:
                 counts["sin_cobrar"] += 1
                 counts["pendiente_cobro_total"] += precio
@@ -26778,6 +26791,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     responsables_list.sort(key=lambda x: (-float(x.get("pendiente") or 0.0), -int(x.get("campanas") or 0)))
     months_list = list(months.values())
     months_list.sort(key=lambda x: str(x.get("mes") or ""))
+    cobros_months_list = list(cobros_months.values())
+    cobros_months_list.sort(key=lambda x: str(x.get("mes") or ""))
 
     # `campaigns` puede ser grande, pero es un payload de dashboard (no se usa en cards).
     # Limitamos a un máximo razonable para habilitar vistas filtradas en frontend sin otra llamada.
@@ -26806,6 +26821,13 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         "unassigned": unassigned[:400],
         "missing": missing[:400],
         "months": months_list,
+        "cobros": {
+            "months": [
+                {**row, "cobrado": round(float(row.get("cobrado") or 0.0), 2)}
+                for row in cobros_months_list
+            ],
+            "sin_fecha_total": round(float(cobros_sin_fecha_total or 0.0), 2),
+        },
     }
 
 
