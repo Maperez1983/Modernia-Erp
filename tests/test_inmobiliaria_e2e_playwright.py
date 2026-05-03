@@ -3,7 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
@@ -12,6 +12,9 @@ from playwright.sync_api import sync_playwright
 
 def _now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+def _iso_date(dt):
+    return dt.date().isoformat()
 
 
 @unittest.skipUnless(
@@ -102,6 +105,11 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
         page.goto(f"{self.base_url}/?crm=inmo&nosw=1&swcleared=1", wait_until="domcontentloaded")
         page.wait_for_selector("#crmSection:not(.hidden)", timeout=20000)
 
+    def _open_crm_view(self, page, view_key):
+        page.click(f'button[data-crm-view="{view_key}"]')
+        if view_key == "agenda":
+            page.wait_for_selector("#crmViewAgenda:not(.hidden)", timeout=20000)
+
     def _create_inmueble(self, page):
         page.wait_for_selector("#crmTopNewBtn", timeout=20000)
         page.click("#crmTopNewBtn")
@@ -142,6 +150,39 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
         page.wait_for_function(
             "(() => { try { return !!(state && String(state.currentInmuebleId||'').trim()); } catch(e){ return false; } })()",
             timeout=20000,
+        )
+
+    def _create_action_api(self, page, payload):
+        # Crea acciones vía fetch en el navegador (cookies incluidas).
+        return page.evaluate(
+            """
+            async (payload) => {
+              const res = await fetch("/api/acciones", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify(payload),
+              });
+              let data = {};
+              try { data = await res.json(); } catch (e) { data = {}; }
+              return { ok: res.ok, status: res.status, data };
+            }
+            """,
+            payload,
+        )
+
+    def _wait_agenda_contains(self, page, text, timeout_ms=20000):
+        page.wait_for_function(
+            """
+            ({text}) => {
+              const el = document.getElementById("crmAgendaTable");
+              if (!el) return false;
+              const t = (el.innerText || el.textContent || "");
+              return t.includes(text);
+            }
+            """,
+            arg={"text": str(text or "")},
+            timeout=timeout_ms,
         )
 
     def test_inmobiliaria_crea_inmueble_y_pdf(self):
@@ -464,6 +505,118 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             self.assertTrue(bool(resolved.get("ok")), msg=f"s3_url HTTP {resolved.get('status')} · {resolved.get('data')}")
             final_url = str(resolved["data"].get("url") or "")
             self.assertTrue(final_url.startswith("/uploads/s3_local/"), msg=f"URL inesperada: {final_url}")
+
+            context.close()
+            browser.close()
+
+    def test_inmobiliaria_agenda_matrix(self):
+        """
+        Cobertura amplia de agenda: presets, filtros, búsqueda, vistas (lista/día/semana/mes),
+        navegación y edición desde modal.
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            self._login(page)
+            self._open_crm_inmo(page)
+
+            # Prepara dataset: varias acciones con combinaciones de tipo/estado.
+            today = datetime.now()
+            yesterday = today - timedelta(days=1)
+            tomorrow = today + timedelta(days=1)
+
+            base = {
+                "servicio": "inmobiliaria",
+                "empresa_id": "emp-e2e",
+                "empresa_nombre": "EMPRESA E2E",
+                "responsable": "admin",
+            }
+            actions = [
+                {**base, "fecha": _iso_date(today), "hora": "10:00", "asunto": "E2E AGENDA PEND", "tipo": "Llamada", "estado": "Pendiente"},
+                {**base, "fecha": _iso_date(today), "hora": "11:00", "asunto": "E2E AGENDA DONE", "tipo": "Email", "estado": "Completada"},
+                {**base, "fecha": _iso_date(tomorrow), "hora": "12:00", "asunto": "E2E AGENDA CITA", "tipo": "Cita de adquisición", "estado": "Pendiente"},
+                {**base, "fecha": _iso_date(yesterday), "hora": "09:00", "asunto": "E2E AGENDA CAD", "tipo": "Seguimiento", "estado": "Pendiente"},
+                {**base, "fecha": _iso_date(today), "hora": "13:00", "asunto": "E2E AGENDA CANCEL", "tipo": "Visita", "estado": "Cancelada"},
+            ]
+            for payload in actions:
+                created = self._create_action_api(page, payload)
+                self.assertTrue(bool(created.get("ok")), msg=f"Crear acción {payload.get('asunto')}: HTTP {created.get('status')} · {created.get('data')}")
+
+            # Abrir agenda.
+            self._open_crm_view(page, "agenda")
+            page.wait_for_selector("#crmAgendaTable", timeout=20000)
+
+            # 1) Preset: citas 7 días (debería incluir la cita pendiente).
+            page.select_option("#crmAgendaPreset", "citas_7dias")
+            page.wait_for_timeout(300)  # debounce/render
+            self._wait_agenda_contains(page, "E2E AGENDA CITA", timeout_ms=20000)
+
+            # 2) Preset: actividades caducadas (debería incluir la de ayer).
+            page.select_option("#crmAgendaPreset", "actividades_caducadas")
+            page.wait_for_timeout(300)
+            self._wait_agenda_contains(page, "E2E AGENDA CAD", timeout_ms=20000)
+
+            # 3) Filtro estado: Cancelada (debería mostrar cancel).
+            page.select_option("#crmAgendaEstadoFilter", "Cancelada")
+            page.wait_for_timeout(250)
+            self._wait_agenda_contains(page, "E2E AGENDA CANCEL", timeout_ms=20000)
+
+            # 4) Búsqueda: filtra por texto (pendiente).
+            page.select_option("#crmAgendaEstadoFilter", "")
+            page.fill("#crmAgendaSearch", "E2E AGENDA PEND")
+            page.wait_for_timeout(350)
+            self._wait_agenda_contains(page, "E2E AGENDA PEND", timeout_ms=20000)
+
+            # Limpia filtros para continuar.
+            page.fill("#crmAgendaSearch", "")
+            page.select_option("#crmAgendaEstadoFilter", "")
+            page.select_option("#crmAgendaPreset", "citas_7dias")
+            page.wait_for_timeout(350)
+
+            # 5) Vistas: lista/día/semana/mes + navegación.
+            page.click('#crmAgendaViewSeg button[data-crm-agenda-view="list"]')
+            page.wait_for_timeout(250)
+
+            page.click('#crmAgendaViewSeg button[data-crm-agenda-view="day"]')
+            page.wait_for_selector("#crmAgendaCalendar:not(.hidden)", timeout=20000)
+            page.click("#crmAgendaToday")
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaPrev")
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaNext")
+            page.wait_for_timeout(250)
+
+            page.click('#crmAgendaViewSeg button[data-crm-agenda-view="week"]')
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaPrev")
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaNext")
+            page.wait_for_timeout(250)
+
+            page.click('#crmAgendaViewSeg button[data-crm-agenda-view="month"]')
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaPrev")
+            page.wait_for_timeout(250)
+            page.click("#crmAgendaNext")
+            page.wait_for_timeout(250)
+
+            # 6) Abrir/editar una cita desde la tabla (modal).
+            page.click('#crmAgendaViewSeg button[data-crm-agenda-view="list"]')
+            page.wait_for_selector("#crmAgendaTable", timeout=20000)
+            self._wait_agenda_contains(page, "E2E AGENDA CITA", timeout_ms=20000)
+            page.locator("#crmAgendaTable").get_by_text("E2E AGENDA CITA", exact=True).first.click()
+            page.wait_for_selector("#crmAgendaEditModal:not(.hidden)", timeout=20000)
+            page.fill('#crmAgendaEditModal input[name="asunto"]', "E2E AGENDA CITA (EDIT)")
+            with page.expect_response(lambda r: r.url.endswith("/api/acciones_update") and r.request.method == "POST") as upd_info:
+                page.click('#crmAgendaEditModal button[type="submit"]')
+            upd = upd_info.value
+            self.assertTrue(upd.ok, msg=f"Update acción HTTP {upd.status}")
+
+            # Volver a agenda y comprobar que aparece el asunto editado.
+            page.wait_for_timeout(500)
+            self._wait_agenda_contains(page, "E2E AGENDA CITA (EDIT)", timeout_ms=20000)
 
             context.close()
             browser.close()

@@ -5687,6 +5687,14 @@ body.tc-resizing {
   min-width: 0;
 }
 
+#crmSection #crmViewAgenda .tc-listleft {
+  flex-wrap: wrap;
+}
+
+#crmSection #crmViewAgenda #crmAgendaNav {
+  flex: 1 1 100%;
+}
+
 #crmSection .tc-titleblock {
   display: grid;
   gap: 2px;

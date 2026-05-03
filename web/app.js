@@ -47380,6 +47380,7 @@ const initCrmAgendaPrefsIfNeeded = () => {
     let view = "list";
     let day = formatAgendaDate(new Date());
     let ambito = "";
+    let preset = DEFAULT_PRESET;
     try {
       view = normalizeCrmAgendaView(localStorage.getItem("crm.agenda.view") || view);
     } catch (e) {}
@@ -47390,9 +47391,14 @@ const initCrmAgendaPrefsIfNeeded = () => {
     try {
       ambito = String(localStorage.getItem("crm.agenda.ambito") || "").trim();
     } catch (e) {}
+    try {
+      const storedPreset = String(localStorage.getItem("crm.agenda.preset") || "").trim();
+      if (storedPreset) preset = storedPreset;
+    } catch (e) {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
     state.crmAgendaAmbito = ambito;
+    state.crmAgendaPreset = preset;
   }
   if (!state.crmAgendaAnchorDay) {
     state.crmAgendaAnchorDay = formatAgendaDate(new Date());
@@ -47401,14 +47407,14 @@ const initCrmAgendaPrefsIfNeeded = () => {
     state.crmAgendaAmbito = "";
   }
   if (crmAgendaPreset) {
-    let preset = DEFAULT_PRESET;
-    try {
-      const stored = String(localStorage.getItem("crm.agenda.preset") || "").trim();
-      if (stored) preset = stored;
-    } catch (e) {}
+    const domPreset = String(crmAgendaPreset.value || "").trim();
+    if (domPreset) {
+      state.crmAgendaPreset = domPreset;
+    }
+    let preset = String(state.crmAgendaPreset || "").trim() || DEFAULT_PRESET;
     const allowed = new Set(Array.from(crmAgendaPreset.options || []).map((opt) => String(opt.value || "").trim()));
     if (!allowed.has(preset)) preset = DEFAULT_PRESET;
-    if (!crmAgendaPreset.value || crmAgendaPreset.value !== preset) {
+    if (!domPreset || domPreset !== preset) {
       crmAgendaPreset.value = preset;
     }
   }
@@ -48319,15 +48325,16 @@ const loadCrmAgenda = () => {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     state.crmAgendaRowsAll = rows;
     renderCrmHomeAgendaPreview();
-    const qRaw = String(crmAgendaSearch?.value || "").trim();
-    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
-    const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-		  const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
-		  const presetEquipo = presetRaw.endsWith("_equipo");
-		  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
-		  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
-		  state.crmAgendaAmbito = ambitoFilter;
-		  persistCrmAgendaPrefs();
+		  const qRaw = String(crmAgendaSearch?.value || "").trim();
+		  const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
+		  const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
+			  const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
+			  const presetEquipo = presetRaw.endsWith("_equipo");
+			  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
+			  state.crmAgendaPreset = presetRaw;
+			  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
+			  state.crmAgendaAmbito = ambitoFilter;
+			  persistCrmAgendaPrefs();
 	  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
 	  const buildCurrentUserKeys = () => {
 	    const keys = new Set();
@@ -48394,19 +48401,19 @@ const loadCrmAgenda = () => {
 	    const ts = parseRowTs(row);
 	    return ts > 0 && ts < Date.now();
 	  };
-			  const matchPreset = (row) => {
-			    if (!presetEquipo && !isMine(row)) return false;
-			    const tipoKey = normalizeTipoKey(row);
-			    const fechaKey = String(row?.fecha || "").trim();
-			    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
-			    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === anchorDayKey;
-			    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
-			    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
-			    if (preset === "citas") return tipoKey === "cita";
-			    if (preset === "actividades_caducadas") return tipoKey !== "cita" && isCaducada(row);
-			    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
-			    return true;
-			  };
+				  const matchPreset = (row) => {
+				    if (!presetEquipo && !isMine(row)) return false;
+				    const tipoKey = normalizeTipoKey(row);
+				    const fechaKey = String(row?.fecha || "").trim();
+				    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
+				    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === anchorDayKey;
+				    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
+				    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
+				    if (preset === "citas") return tipoKey === "cita";
+				    if (preset === "actividades_caducadas") return tipoKey !== "cita" && (estadoFilter ? true : isCaducada(row));
+				    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
+				    return true;
+				  };
 				  const matchPresetCalendar = (row) => {
 				    const tipoKey = normalizeTipoKey(row);
 				    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
