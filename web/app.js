@@ -2129,6 +2129,7 @@ const alquileresVarChart = document.getElementById("alquileresVarChart");
 const facturadoVarChart = document.getElementById("facturadoVarChart");
 const facturadoProgress = document.getElementById("facturadoProgress");
 const viewTabs = document.getElementById("viewTabs");
+const explorerLightningSidebar = document.getElementById("explorerLightningSidebar");
 const altaSection = document.getElementById("altaSection");
 const bdtForm = document.getElementById("bdtForm");
 const bdtFormStatus = document.getElementById("bdtFormStatus");
@@ -2380,9 +2381,12 @@ const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardP
  const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
  const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
  const gestoriaDashboardServiciosTabs = document.getElementById("gestoriaDashboardServiciosTabs");
+ const gestoriaDashServiciosKey = document.getElementById("gestoriaDashServiciosKey");
+ const gestoriaDashServiciosReload = document.getElementById("gestoriaDashServiciosReload");
  const gestoriaDashServiciosKpis = document.getElementById("gestoriaDashServiciosKpis");
  const gestoriaDashServiciosChart = document.getElementById("gestoriaDashServiciosChart");
  const gestoriaDashServiciosTable = document.getElementById("gestoriaDashServiciosTable");
+ const gestoriaDashServiciosCards = document.getElementById("gestoriaDashServiciosCards");
  const gestoriaDashServiciosInfo = document.getElementById("gestoriaDashServiciosInfo");
  const gestoriaDashboardEmpresaScope = document.getElementById("gestoriaDashboardEmpresaScope");
 const gestoriaDashRentaEjercicio = document.getElementById("gestoriaDashRentaEjercicio");
@@ -2696,6 +2700,14 @@ const segurosContabilidadTable = document.getElementById("segurosContabilidadTab
 const segurosContabilidadInfo = document.getElementById("segurosContabilidadInfo");
 const segurosInsights = document.getElementById("segurosInsights");
 const segurosAlertasList = document.getElementById("segurosAlertasList");
+const segurosRenovacionesDaysAhead = document.getElementById("segurosRenovacionesDaysAhead");
+const segurosRenovacionesDaysPast = document.getElementById("segurosRenovacionesDaysPast");
+const segurosRenovacionesEstado = document.getElementById("segurosRenovacionesEstado");
+const segurosRenovacionesResponsable = document.getElementById("segurosRenovacionesResponsable");
+const segurosRenovacionesSearch = document.getElementById("segurosRenovacionesSearch");
+const segurosRenovacionesRefreshBtn = document.getElementById("segurosRenovacionesRefreshBtn");
+const segurosRenovacionesTable = document.getElementById("segurosRenovacionesTable");
+const segurosRenovacionesInfo = document.getElementById("segurosRenovacionesInfo");
 const segurosChecklistPoliza = document.getElementById("segurosChecklistPoliza");
 const segurosChecklistGenerate = document.getElementById("segurosChecklistGenerate");
 const segurosChecklistTable = document.getElementById("segurosChecklistTable");
@@ -20560,6 +20572,24 @@ const updateExplorerHeader = (empresaName) => {
     finSimTab.classList.toggle("hidden", !canFin);
     if (!canFin && currentTab === "fin-sim") setTab("operativa");
   }
+  try {
+    syncExplorerLightningSidebar();
+  } catch (e) {}
+};
+
+const syncExplorerLightningSidebar = () => {
+  if (!explorerLightningSidebar || !viewTabs) return;
+  const current = String(currentTab || "").trim();
+  explorerLightningSidebar.querySelectorAll("[data-explorer-tab]").forEach((btn) => {
+    const key = String(btn.dataset.explorerTab || "").trim();
+    if (!key) return;
+    const tabBtn = viewTabs.querySelector(`.tab[data-tab=\"${key}\"]`);
+    const unavailable =
+      !tabBtn || tabBtn.classList.contains("hidden") || tabBtn.classList.contains("hidden-context");
+    btn.classList.toggle("hidden", unavailable);
+    btn.classList.toggle("active", key === current);
+  });
+  explorerLightningSidebar.classList.toggle("hidden", viewTabs.classList.contains("hidden"));
 };
 
 const slugify = (value) =>
@@ -24497,6 +24527,9 @@ const setTab = (tabName) => {
   viewTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === normalized);
   });
+  try {
+    syncExplorerLightningSidebar();
+  } catch (e) {}
   updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
   if (normalized === "fin-sim") {
     initFinSimulator();
@@ -27147,6 +27180,33 @@ const ensureGestoriaTrabajoCategorySelects = () => {
   };
   configure(gestoriaTrabajosTipoFilter, { placeholder: "Tipo (todos)" });
   configure(gestoriaPipelineServicio, { placeholder: "Todos los servicios" });
+
+  // Selects en formularios (alta de trabajo) para fijar `tipo_categoria`.
+  document.querySelectorAll('select[data-gestoria-categoria-select="1"]').forEach((selectEl) => {
+    const current = String(selectEl.value || "").trim();
+    const defaultKey = normalizeGestoriaTrabajoCategory(selectEl.dataset.default || "");
+    const currentKey = normalizeGestoriaTrabajoCategory(current) || defaultKey || "";
+    selectEl.innerHTML = "";
+    GESTORIA_TRABAJO_CATEGORIES.forEach((item) => {
+      selectEl.appendChild(createOption(item.key, item.label));
+    });
+    selectEl.value = currentKey || "otros";
+    if (selectEl.dataset.bound !== "1") {
+      selectEl.dataset.bound = "1";
+      selectEl.addEventListener("change", () => {
+        selectEl.dataset.override = "1";
+      });
+      const form = selectEl.closest("form");
+      const tipoSel = form ? form.querySelector('select[name="tipo_trabajo"]') : null;
+      if (tipoSel) {
+        tipoSel.addEventListener("change", () => {
+          if (selectEl.dataset.override === "1") return;
+          const inferred = classifyGestoriaTrabajoCategory(String(tipoSel.value || ""));
+          selectEl.value = defaultKey || inferred || "otros";
+        });
+      }
+    }
+  });
 };
 
 const sumTotals = (items) =>
@@ -32592,6 +32652,9 @@ const setSegurosTab = (name) => {
       renderFincasDashboard(state.currentEmpresaId);
     });
   }
+  if (name === "renovaciones") {
+    loadSegurosRenovacionesQueue();
+  }
   if (name === "contabilidad") {
     hydrateSegurosContabilidadFormSelects().catch(() => {});
     loadSegurosContabilidad();
@@ -33188,6 +33251,9 @@ const updateTableVisibility = () => {
         isFinCrmVisible
     );
   }
+  try {
+    syncExplorerLightningSidebar();
+  } catch (e) {}
   if (altaTab || bdtTab) {
     const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
     const hideCrmUtilityTabs = !isClientesModule && company === FINCAS_COMPANY;
@@ -50967,6 +51033,110 @@ const renderGestoriaDashGeneralProductividad = (productividad = {}) => {
   gestoriaDashGeneralProdInfo.textContent = `Mostrando ${rows.length} personas.`;
 };
 
+const renderGestoriaDashServicios = (payload = {}, { key = "" } = {}) => {
+  if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
+  const servicios = payload?.servicios || {};
+  const totals = servicios?.totals || {};
+  const hist = servicios?.hist || {};
+  const years = Array.isArray(hist.years) ? hist.years.map((y) => Number(y || 0)).filter(Boolean) : [];
+  const latest = years.length ? Math.max(...years) : new Date().getFullYear();
+  const prev = years.includes(latest - 1) ? latest - 1 : null;
+
+  const selected = normalizeGestoriaTrabajoCategory(key);
+  const selectedTotals = selected ? totals[selected] || {} : {};
+  const pct = (curr, base) => {
+    const b = Number(base || 0);
+    const c = Number(curr || 0);
+    if (!b) return 0;
+    return ((c - b) / b) * 100;
+  };
+
+  const kpiCards = selected
+    ? [
+        { title: `${getGestoriaTrabajoCategoryLabel(selected) || selected} · Total`, value: selectedTotals.total ?? 0, note: "Trabajos" },
+        { title: "Abiertos", value: selectedTotals.abiertos ?? 0, note: "En curso / pendiente" },
+        { title: "Completados 30d", value: selectedTotals.completados_30d ?? 0, note: "Últimos 30 días" },
+        { title: "Importe", value: euroFormatter.format(Number(selectedTotals.importe_total || 0)), note: "Total" },
+      ]
+    : [
+        { title: "Herencias", value: Number(payload?.segmentacion_trabajos?.herencias_total || 0), note: "Total" },
+        { title: "Tráfico", value: Number(payload?.segmentacion_trabajos?.trafico_total || 0), note: "Total" },
+        { title: "Expedientes", value: Number(payload?.segmentacion_trabajos?.expedientes_total || 0), note: "Total" },
+        { title: "Tasaciones", value: Number(payload?.segmentacion_trabajos?.tasaciones_total || 0), note: "Total" },
+        { title: "Rentas", value: Number(payload?.segmentacion_trabajos?.rentas_total || 0), note: "Total" },
+      ];
+  renderGestoriaDashKpis(gestoriaDashServiciosKpis, kpiCards);
+
+  // Cards de acceso rápido por servicio.
+  const quickKeys = ["herencias", "trafico", "expedientes", "tasaciones", "rentas"];
+  gestoriaDashServiciosCards.innerHTML = "";
+  quickKeys.forEach((k) => {
+    const value =
+      (totals[k] && (totals[k].total ?? 0)) ??
+      Number(payload?.segmentacion_trabajos?.[`${k}_total`] || 0);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `card kpi-card${selected === k ? " active" : ""}`;
+    btn.innerHTML = `<h3>${escapeHtml(getGestoriaTrabajoCategoryLabel(k) || k)}</h3><div class="kpi-value">${escapeHtml(
+      String(value ?? 0)
+    )}</div><div class="muted">Abrir gestiones</div>`;
+    btn.addEventListener("click", () => {
+      setGestoriaDashboardView("gestiones");
+      openGestoriaTrabajosWithFilters({ tipo: k, target: gestoriaDashboardPaneGestiones });
+    });
+    gestoriaDashServiciosCards.appendChild(btn);
+  });
+
+  const labels = (Array.isArray(hist.labels) ? hist.labels : []).map((m, idx) => GESTORIA_DASH_MONTHS_ES[idx] || String(m || ""));
+  const series = hist?.series || {};
+  const curSeries = series[String(latest)] || {};
+  const prevSeries = prev ? series[String(prev)] || {} : {};
+  const cur = selected ? (Array.isArray(curSeries[selected]) ? curSeries[selected] : []) : [];
+  const prevArr = selected && prev ? (Array.isArray(prevSeries[selected]) ? prevSeries[selected] : []) : [];
+  if (!selected || !labels.length || !years.length || !cur.length) {
+    drawBarChart(
+      gestoriaDashServiciosChart,
+      labels.length ? labels : quickKeys.map((k) => getGestoriaTrabajoCategoryLabel(k) || k),
+      labels.length && years.length
+        ? [{ label: "Selecciona un servicio", values: new Array(labels.length).fill(0), color: "rgba(11,29,51,0.2)" }]
+        : [{ label: "Servicios", values: quickKeys.map(() => 0), color: "rgba(11,29,51,0.2)" }],
+      { legend: false, showValues: false, tooltip: false, axisMaxChars: 3 }
+    );
+    if (gestoriaDashServiciosInfo) {
+      gestoriaDashServiciosInfo.textContent = "Selecciona un servicio para ver el histórico mes a mes.";
+    }
+    return;
+  }
+
+  drawBarChart(
+    gestoriaDashServiciosChart,
+    labels,
+    [
+      { type: "line", label: `${getGestoriaTrabajoCategoryLabel(selected) || selected} ${latest}`, values: cur, color: "#0B1D33", lineWidth: 2, pointRadius: 2 },
+      ...(prev
+        ? [
+            {
+              type: "line",
+              label: `${getGestoriaTrabajoCategoryLabel(selected) || selected} ${prev}`,
+              values: prevArr,
+              color: "rgba(11,29,51,0.45)",
+              lineWidth: 2,
+              pointRadius: 2,
+            },
+          ]
+        : []),
+    ],
+    { legend: true, showValues: false, tooltip: true, axisMaxChars: 3 }
+  );
+  const prevTotal = prev ? Number((totals[selected] || {}).total_prev_year || 0) : 0;
+  const currentTotal = Number((totals[selected] || {}).total || 0);
+  if (gestoriaDashServiciosInfo) {
+    gestoriaDashServiciosInfo.textContent = prev
+      ? `Variación vs ${prev}: ${pct(currentTotal, prevTotal).toFixed(1)}%`
+      : "Histórico disponible.";
+  }
+};
+
 const initGestoriaDashboardTabs = () => {
   if (!gestoriaDashboardTabs || gestoriaDashboardTabs.dataset.ready === "1") return;
   gestoriaDashboardTabs.dataset.ready = "1";
@@ -50982,6 +51152,7 @@ const normalizeGestoriaDashboardView = (viewKey = "") => {
   if (!raw) return "general";
   if (raw === "resumen") return "general";
   if (raw === "general") return "general";
+  if (raw === "servicios") return "servicios";
   if (raw === "renta") return "renta";
   if (raw === "modelos") return "modelos";
   if (raw === "gestiones") return "gestiones";
@@ -51011,12 +51182,14 @@ const setGestoriaDashboardView = (viewKey = "general") => {
   }
 
   if (gestoriaDashboardPaneGeneral) gestoriaDashboardPaneGeneral.classList.toggle("hidden", key !== "general");
+  if (gestoriaDashboardPaneServicios) gestoriaDashboardPaneServicios.classList.toggle("hidden", key !== "servicios");
   if (gestoriaDashboardPaneRenta) gestoriaDashboardPaneRenta.classList.toggle("hidden", key !== "renta");
   if (gestoriaDashboardPaneModelos) gestoriaDashboardPaneModelos.classList.toggle("hidden", key !== "modelos");
   if (gestoriaDashboardPaneGestiones) gestoriaDashboardPaneGestiones.classList.toggle("hidden", key !== "gestiones");
   if (gestoriaDashboardPaneContabilidad) gestoriaDashboardPaneContabilidad.classList.toggle("hidden", key !== "contabilidad");
   if (gestoriaDashboardPaneDocumentos) gestoriaDashboardPaneDocumentos.classList.toggle("hidden", key !== "documentos");
 
+  if (key === "servicios") loadGestoriaDashboardServicios().catch(() => {});
   if (key === "renta") loadGestoriaRentaDashboard().catch(() => {});
   if (key === "modelos") loadGestoriaDashboardModelos().catch(() => {});
   if (key === "gestiones") loadGestoriaDashboardGestiones().catch(() => {});
@@ -52209,10 +52382,69 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   }
 };
 
+const loadGestoriaDashboardServicios = async ({ force = false } = {}) => {
+  if (!gestoriaDashboardPaneServicios || !gestoriaDashServiciosKey || !gestoriaDashServiciosReload) return;
+  if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  if (!canAccessGestoriaAdminDashboard()) {
+    gestoriaDashboardPaneServicios.innerHTML = "<p class='muted'>Este dashboard es solo para usuarios admin.</p>";
+    return;
+  }
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+
+  if (gestoriaDashServiciosKey.dataset.bound !== "1") {
+    gestoriaDashServiciosKey.dataset.bound = "1";
+    gestoriaDashServiciosKey.addEventListener("change", () => loadGestoriaDashboardServicios({ force: true }).catch(() => {}));
+  }
+  if (gestoriaDashServiciosReload.dataset.bound !== "1") {
+    gestoriaDashServiciosReload.dataset.bound = "1";
+    gestoriaDashServiciosReload.addEventListener("click", () => loadGestoriaDashboardServicios({ force: true }).catch(() => {}));
+  }
+
+  const currentKey = normalizeGestoriaTrabajoCategory(gestoriaDashServiciosKey.value || "");
+  gestoriaDashServiciosKey.innerHTML = "";
+  gestoriaDashServiciosKey.appendChild(createOption("", "Selecciona un servicio"));
+  GESTORIA_TRABAJO_CATEGORIES.forEach((row) => {
+    gestoriaDashServiciosKey.appendChild(createOption(row.key, row.label));
+  });
+  gestoriaDashServiciosKey.value = currentKey;
+
+  const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
+  const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
+  const expectedKey = scopeEmpresaId || String(empresa.id || "").trim();
+  if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
+    renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: gestoriaDashServiciosKey.value });
+    return;
+  }
+
+  gestoriaDashServiciosReload.disabled = true;
+  gestoriaDashServiciosReload.textContent = "Cargando...";
+  try {
+    const qs = new URLSearchParams();
+    if (workspaceId) qs.set("workspace_id", workspaceId);
+    else qs.set("empresa_id", String(empresa.id || "").trim());
+    if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+    const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
+    if (data?.error) throw new Error(String(data.error));
+    state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
+    renderGestoriaDashServicios(data, { key: gestoriaDashServiciosKey.value });
+  } catch (err) {
+    gestoriaDashServiciosKpis.innerHTML = `<p class="muted">No se pudo cargar Servicios: ${escapeHtml(String(err?.message || err || "").trim())}</p>`;
+    if (gestoriaDashServiciosInfo) gestoriaDashServiciosInfo.textContent = "";
+  } finally {
+    gestoriaDashServiciosReload.disabled = false;
+    gestoriaDashServiciosReload.textContent = "Actualizar";
+  }
+};
+
 const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const isAdminDash = canAccessGestoriaAdminDashboard();
 
   if (gestoriaDashboardEmpresaScope && gestoriaDashboardEmpresaScope.dataset.bound !== "1") {
     gestoriaDashboardEmpresaScope.dataset.bound = "1";
@@ -52236,7 +52468,17 @@ const loadGestoriaDashboard = () => {
     gestoriaDashboardEmpresaScope.value = current;
   }
   initGestoriaDashboardTabs();
-  setGestoriaDashboardView(state.gestoriaDashboardView || state.gestoriaDashboardPane || "general");
+  // General/Servicios: solo admin.
+  if (gestoriaDashboardTabs) {
+    gestoriaDashboardTabs
+      .querySelectorAll('[data-gestoria-dashboard-view="general"], [data-gestoria-dashboard-view="servicios"]')
+      .forEach((btn) => btn.classList.toggle("hidden", !isAdminDash));
+  }
+  const desiredView = normalizeGestoriaDashboardView(
+    state.gestoriaDashboardView || state.gestoriaDashboardPane || (isAdminDash ? "general" : "renta")
+  );
+  const safeView = !isAdminDash && (desiredView === "general" || desiredView === "servicios") ? "renta" : desiredView;
+  setGestoriaDashboardView(safeView);
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
@@ -52244,6 +52486,7 @@ const loadGestoriaDashboard = () => {
   if (workspaceId) qsBase.set("workspace_id", workspaceId);
   else qsBase.set("empresa_id", String(empresa.id || "").trim());
   if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
+  if (!isAdminDash) return;
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
     api(`/api/gestoria_trabajos?${qsBase.toString()}`),
@@ -52265,6 +52508,10 @@ const loadGestoriaDashboard = () => {
     renderGestoriaDashGeneralClientes(data.clientes_hist || {});
     renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
     renderGestoriaDashGeneralProductividad(data.productividad || {});
+    try {
+      const expectedKey = scopeEmpresaId || String(empresa.id || "").trim();
+      state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
+    } catch {}
     if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {
       gestoriaDashGeneralProdReload.dataset.bound = "1";
       gestoriaDashGeneralProdReload.addEventListener("click", () => loadGestoriaDashboard());
@@ -53595,6 +53842,228 @@ const loadSegurosAlertas = () => {
     state.segurosRenovarPendientesIds = [];
     populateSegurosOperationalSelects();
   });
+};
+
+const updateSegurosRenovacion = async (renovacionId, patch = {}) => {
+  const id = String(renovacionId || "").trim();
+  if (!id) return { error: "Renovación sin id" };
+  const payload = { id, ...patch };
+  try {
+    const resp = await fetch("/api/seguros_renovaciones_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.error) {
+      return { error: data.error || "No se pudo guardar" };
+    }
+    return data;
+  } catch (err) {
+    return { error: "No se pudo guardar" };
+  }
+};
+
+const renderSegurosRenovacionesTable = (items = []) => {
+  if (!segurosRenovacionesTable || !segurosRenovacionesInfo) return;
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    segurosRenovacionesTable.innerHTML = "<p class='muted'>Sin renovaciones en la ventana seleccionada.</p>";
+    segurosRenovacionesInfo.textContent = "";
+    return;
+  }
+  const estadoOptions = [
+    { value: "pendiente", label: "Pendiente" },
+    { value: "en_gestion", label: "En gestión" },
+    { value: "contactado", label: "Contactado" },
+    { value: "cotizado", label: "Cotizado" },
+    { value: "renovado", label: "Renovado" },
+    { value: "perdido", label: "Perdido" },
+    { value: "descartado", label: "Descartado" },
+  ];
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  [
+    "Vence",
+    "Tomador",
+    "Póliza",
+    "Compañía",
+    "Ramo",
+    "Prima",
+    "Seguimiento",
+    "Responsable",
+    "Próx. acción",
+    "Notas",
+    "Acciones",
+  ].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const venc = row.renovacion_fecha_vencimiento || row.fecha_vencimiento || "-";
+    const prima = row.prima_total ? euroFormatter.format(parseMoneyValue(row.prima_total)) : "-";
+    const seguimiento = String(row.renovacion_estado || "").trim() || "pendiente";
+    const responsable = String(row.renovacion_responsable || "").trim();
+    const notas = String(row.renovacion_notas || "").trim();
+    const next = String(row.proxima_accion_fecha || "").trim();
+
+    const tdVenc = document.createElement("td");
+    tdVenc.textContent = venc || "-";
+    tr.appendChild(tdVenc);
+
+    const tdTom = document.createElement("td");
+    tdTom.textContent = row.tomador || "-";
+    tr.appendChild(tdTom);
+
+    const tdPol = document.createElement("td");
+    tdPol.textContent = row.poliza_numero || "-";
+    tr.appendChild(tdPol);
+
+    const tdComp = document.createElement("td");
+    if (!applyCompanyCell(tdComp, "compania", row.compania || "", { compact: true })) {
+      tdComp.textContent = row.compania || "-";
+    }
+    tr.appendChild(tdComp);
+
+    const tdRamo = document.createElement("td");
+    if (!applyRamoCell(tdRamo, "ramo", row.ramo || "", { compact: true })) {
+      tdRamo.textContent = row.ramo || "-";
+    }
+    tr.appendChild(tdRamo);
+
+    const tdPrima = document.createElement("td");
+    tdPrima.textContent = prima;
+    tr.appendChild(tdPrima);
+
+    const tdSeg = document.createElement("td");
+    const estadoSelect = document.createElement("select");
+    estadoOptions.forEach((opt) => estadoSelect.appendChild(createOption(opt.value, opt.label)));
+    estadoSelect.value = estadoOptions.some((opt) => opt.value === seguimiento) ? seguimiento : "pendiente";
+    estadoSelect.addEventListener("change", async () => {
+      const result = await updateSegurosRenovacion(row.renovacion_id, { estado: estadoSelect.value });
+      if (result?.error) alert(result.error);
+    });
+    tdSeg.appendChild(estadoSelect);
+    tr.appendChild(tdSeg);
+
+    const tdResp = document.createElement("td");
+    const respInput = document.createElement("input");
+    respInput.className = "inline-input";
+    respInput.placeholder = "-";
+    respInput.value = responsable;
+    respInput.addEventListener("blur", async () => {
+      const value = String(respInput.value || "").trim();
+      if (value === responsable) return;
+      const result = await updateSegurosRenovacion(row.renovacion_id, { responsable: value });
+      if (result?.error) alert(result.error);
+    });
+    tdResp.appendChild(respInput);
+    tr.appendChild(tdResp);
+
+    const tdNext = document.createElement("td");
+    const nextInput = document.createElement("input");
+    nextInput.type = "date";
+    nextInput.value = next ? String(next).slice(0, 10) : "";
+    nextInput.addEventListener("change", async () => {
+      const value = String(nextInput.value || "").trim();
+      const result = await updateSegurosRenovacion(row.renovacion_id, { proxima_accion_fecha: value });
+      if (result?.error) alert(result.error);
+    });
+    tdNext.appendChild(nextInput);
+    tr.appendChild(tdNext);
+
+    const tdNotas = document.createElement("td");
+    const notasInput = document.createElement("input");
+    notasInput.className = "inline-input";
+    notasInput.placeholder = "";
+    notasInput.value = notas;
+    notasInput.addEventListener("blur", async () => {
+      const value = String(notasInput.value || "").trim();
+      if (value === notas) return;
+      const result = await updateSegurosRenovacion(row.renovacion_id, { notas: value });
+      if (result?.error) alert(result.error);
+    });
+    tdNotas.appendChild(notasInput);
+    tr.appendChild(tdNotas);
+
+    const tdActions = document.createElement("td");
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Abrir";
+    openBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!row.id) return;
+      openSeguroById(row.id, row.cliente_id || "");
+    });
+    tdActions.appendChild(openBtn);
+    const renewBtn = document.createElement("button");
+    renewBtn.type = "button";
+    renewBtn.className = "ghost";
+    renewBtn.textContent = "Renovar";
+    renewBtn.title = "Marca la póliza como renovada (acción)";
+    renewBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!row.id) return;
+      const fecha = row.renovacion_fecha_vencimiento || row.fecha_vencimiento || "";
+      if (!window.confirm("¿Marcar como renovada esta póliza?")) return;
+      await fetch("/api/seguros_poliza_accion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id, accion: "renovar", fecha }),
+      }).catch(() => {});
+      await updateSegurosRenovacion(row.renovacion_id, { estado: "renovado" });
+      loadSegurosRenovacionesQueue();
+      loadSegurosCrm();
+    });
+    tdActions.appendChild(renewBtn);
+    tr.appendChild(tdActions);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  segurosRenovacionesTable.innerHTML = "";
+  segurosRenovacionesTable.appendChild(table);
+  segurosRenovacionesInfo.textContent = `${rows.length} renovación(es).`;
+};
+
+const loadSegurosRenovacionesQueue = () => {
+  if (!segurosRenovacionesTable || !segurosRenovacionesInfo) return;
+  const empresa = resolveCrmSegurosEmpresa();
+  if (!empresa) {
+    segurosRenovacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    segurosRenovacionesInfo.textContent = "";
+    return;
+  }
+  const daysAhead = parseInt(String(segurosRenovacionesDaysAhead?.value || "45"), 10);
+  const daysPast = parseInt(String(segurosRenovacionesDaysPast?.value || "0"), 10);
+  const estado = String(segurosRenovacionesEstado?.value || "").trim();
+  const responsable = String(segurosRenovacionesResponsable?.value || "").trim();
+  const q = String(segurosRenovacionesSearch?.value || "").trim();
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    days_ahead: String(Number.isFinite(daysAhead) ? daysAhead : 45),
+    days_past: String(Number.isFinite(daysPast) ? daysPast : 0),
+    limit: "250",
+  });
+  if (estado) params.set("estado", estado);
+  if (responsable) params.set("responsable", responsable);
+  if (q) params.set("q", q);
+  segurosRenovacionesTable.innerHTML = "<p class='muted'>Cargando...</p>";
+  segurosRenovacionesInfo.textContent = "";
+  api(`/api/seguros_renovaciones_queue?${params.toString()}`)
+    .then((data) => renderSegurosRenovacionesTable(data.items || []))
+    .catch(() => {
+      segurosRenovacionesTable.innerHTML = "<p class='muted'>No se pudo cargar.</p>";
+      segurosRenovacionesInfo.textContent = "";
+    });
 };
 
 const loadSegurosChecklist = (polizaId) => {
@@ -63325,6 +63794,20 @@ viewTabs.addEventListener("click", (event) => {
   updateTableVisibility();
 });
 
+if (explorerLightningSidebar) {
+  explorerLightningSidebar.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-explorer-tab]");
+    if (!btn) return;
+    const key = String(btn.dataset.explorerTab || "").trim();
+    if (!key) return;
+    const tabBtn = viewTabs?.querySelector(`.tab[data-tab="${key}"]`);
+    const unavailable =
+      !tabBtn || tabBtn.classList.contains("hidden") || tabBtn.classList.contains("hidden-context");
+    if (unavailable) return;
+    tabBtn.click();
+  });
+}
+
 if (fincasBdtTabs) {
   fincasBdtTabs.addEventListener("click", (event) => {
     const btn = closestFromEvent(event, "[data-table]");
@@ -65379,6 +65862,39 @@ if (segurosCrmClienteOpen) {
 if (segurosCrmClienteInput) {
   segurosCrmClienteInput.addEventListener("change", () => {
     loadSegurosCrm();
+  });
+}
+
+if (segurosRenovacionesRefreshBtn) {
+  segurosRenovacionesRefreshBtn.addEventListener("click", () => {
+    loadSegurosRenovacionesQueue();
+  });
+}
+if (segurosRenovacionesDaysAhead) {
+  segurosRenovacionesDaysAhead.addEventListener("change", () => loadSegurosRenovacionesQueue());
+}
+if (segurosRenovacionesDaysPast) {
+  segurosRenovacionesDaysPast.addEventListener("change", () => loadSegurosRenovacionesQueue());
+}
+if (segurosRenovacionesEstado) {
+  segurosRenovacionesEstado.addEventListener("change", () => loadSegurosRenovacionesQueue());
+}
+if (segurosRenovacionesResponsable) {
+  segurosRenovacionesResponsable.addEventListener("input", () => {
+    scheduleSave(
+      "seguros-renovaciones-resp",
+      () => loadSegurosRenovacionesQueue(),
+      250
+    );
+  });
+}
+if (segurosRenovacionesSearch) {
+  segurosRenovacionesSearch.addEventListener("input", () => {
+    scheduleSave(
+      "seguros-renovaciones-search",
+      () => loadSegurosRenovacionesQueue(),
+      250
+    );
   });
 }
 

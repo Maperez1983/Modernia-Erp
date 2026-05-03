@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-						    <link rel="stylesheet" href="styles.css?v=251" />
+						    <link rel="stylesheet" href="styles.css?v=252" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2971,7 +2971,64 @@
 	      </section>
 
 	      <section id="explorerSection" class="hidden">
-	        <div class="app-lightning-shell">
+	        <div class="app-lightning-shell app-lightning-shell--sidebar">
+	          <aside id="explorerLightningSidebar" class="app-lightning-sidebar" aria-label="Navegación explorador">
+	            <div class="app-sidehead" aria-hidden="true">
+	              <span>Ex.</span>
+	            </div>
+	            <button type="button" class="app-side-item active" data-explorer-tab="operativa" title="Dashboard">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+	              <span class="app-side-label">Dash</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="crm" title="Inmobiliaria">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
+	              <span class="app-side-label">Inmo</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-dash" title="Dashboard gestoría">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
+	              <span class="app-side-label">Gest.</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-crm" title="Clientes gestoría">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+	              <span class="app-side-label">Cl.</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-docs" title="Inbox documental">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-inbox"></use></svg></span>
+	              <span class="app-side-label">Inbox</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-agenda" title="Agenda gestoría">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-calendar"></use></svg></span>
+	              <span class="app-side-label">Ag.</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-fact" title="Presupuestos">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
+	              <span class="app-side-label">Pres.</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="gestoria-conta" title="Contabilidad">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
+	              <span class="app-side-label">Conta</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="seguros-crm" title="Seguros">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-shield"></use></svg></span>
+	              <span class="app-side-label">Seg.</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="fin-crm" title="Financiaciones">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-bank"></use></svg></span>
+	              <span class="app-side-label">Fin</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="fin-sim" title="Simulador">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-spark"></use></svg></span>
+	              <span class="app-side-label">Sim</span>
+	            </button>
+	            <button type="button" class="app-side-item" data-explorer-tab="alta" title="Alta">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-plus"></use></svg></span>
+	              <span class="app-side-label">Alta</span>
+	            </button>
+	            <button type="button" class="app-side-item hidden" data-explorer-tab="aie" title="Personal AIE">
+	              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
+	              <span class="app-side-label">AIE</span>
+	            </button>
+	          </aside>
 	          <div class="app-lightning-main">
 	            <div class="section-head app-lightning-topbar">
 	              <div>
@@ -3136,14 +3193,32 @@
 		                      Email
 		                      <input name="email" type="email" />
 		                    </label>
-		                    <label class="span-2">
-		                      Dirección
-		                      <input name="direccion" />
-		                    </label>
-		                    <div class="form-actions span-2">
-		                      <button type="submit">Crear</button>
-		                      <span id="crmClienteCreateStatus" class="muted"></span>
-		                    </div>
+			                    <label class="span-2">
+			                      Dirección
+			                      <input name="direccion" />
+			                    </label>
+			                    <label class="span-2">
+			                      Canal
+			                      <select name="procedencia_canal" id="crmClienteCanal">
+			                        <option value=""></option>
+			                        <option>Oficina</option>
+			                        <option>Internet</option>
+			                        <option>Cliente referido</option>
+			                        <option>Colaborador interno</option>
+			                      </select>
+			                    </label>
+			                    <label class="span-2 hidden" id="crmClienteCanalClienteWrap">
+			                      Cliente referido
+			                      <select name="procedencia_cliente_id" id="crmClienteCanalCliente"></select>
+			                    </label>
+			                    <label class="span-2 hidden" id="crmClienteCanalUserWrap">
+			                      Colaborador interno
+			                      <select name="procedencia_user_id" id="crmClienteCanalUser"></select>
+			                    </label>
+			                    <div class="form-actions span-2">
+			                      <button type="submit">Crear</button>
+			                      <span id="crmClienteCreateStatus" class="muted"></span>
+			                    </div>
 		                    <div id="crmClienteCreateDuplicates" class="crm-dup-panel hidden span-2" aria-live="polite"></div>
 		                  </form>
 		                </div>
@@ -5173,14 +5248,32 @@
                   Población
                   <input name="poblacion" />
                 </label>
-                <label>
-                  Provincia
-                  <input name="provincia" />
-                </label>
-                <label>
-                  Fecha alta
-                  <input name="fecha" type="date" />
-                </label>
+	                <label>
+	                  Provincia
+	                  <input name="provincia" />
+	                </label>
+	                <label class="span-2">
+	                  Canal
+	                  <select name="procedencia_canal" id="gestoriaAltaCanal">
+	                    <option value=""></option>
+	                    <option>Oficina</option>
+	                    <option>Internet</option>
+	                    <option>Cliente referido</option>
+	                    <option>Colaborador interno</option>
+	                  </select>
+	                </label>
+	                <label class="span-2 hidden" id="gestoriaAltaCanalClienteWrap">
+	                  Cliente referido
+	                  <select name="procedencia_cliente_id" id="gestoriaAltaCanalCliente"></select>
+	                </label>
+	                <label class="span-2 hidden" id="gestoriaAltaCanalUserWrap">
+	                  Colaborador interno
+	                  <select name="procedencia_user_id" id="gestoriaAltaCanalUser"></select>
+	                </label>
+	                <label>
+	                  Fecha alta
+	                  <input name="fecha" type="date" />
+	                </label>
                 <label>
                   Tipo servicio
                   <select name="tipo">
@@ -5309,6 +5402,10 @@
 	            <button class="tab tc-module active" type="button" data-gestoria-dashboard-view="general" title="General">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
 	              <span class="tc-mod-label">General</span>
+	            </button>
+	            <button class="tab tc-module" type="button" data-gestoria-dashboard-view="servicios" title="Servicios">
+	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
+	              <span class="tc-mod-label">Servicios</span>
 	            </button>
 	            <button class="tab tc-module" type="button" data-gestoria-dashboard-view="renta" title="Renta">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
@@ -5532,6 +5629,34 @@
               <div id="gestoriaResponsablesTable"></div>
 	            </div>
 	          </div>
+	          </div>
+	          <div id="gestoriaDashboardPaneServicios" class="hidden">
+	            <div class="form-card">
+	              <div class="section-head">
+	                <div>
+	                  <h3>Servicios · Dashboard</h3>
+	                  <p class="muted">KPIs y evolución mensual por tipo de trabajo (herencias, tráfico, expedientes, tasaciones, rentas...).</p>
+	                </div>
+	                <div class="toolbar">
+	                  <select id="gestoriaDashServiciosKey" aria-label="Servicio"></select>
+	                  <button type="button" class="secondary" id="gestoriaDashServiciosReload">Actualizar</button>
+	                </div>
+	              </div>
+	              <div class="grid dashboard-kpis" id="gestoriaDashServiciosKpis"></div>
+	              <div class="crm-split">
+	                <div class="form-card">
+	                  <h3>Evolución (mes a mes)</h3>
+	                  <p class="muted">Comparativa del año en curso vs anterior.</p>
+	                  <canvas id="gestoriaDashServiciosChart" style="width:100%;height:320px;"></canvas>
+	                </div>
+	                <div class="form-card">
+	                  <h3>Distribución por servicio</h3>
+	                  <p class="muted">Accesos rápidos a Gestiones filtradas por tipo.</p>
+	                  <div id="gestoriaDashServiciosCards" class="grid dashboard-kpis"></div>
+	                </div>
+	              </div>
+	              <div class="footer muted" id="gestoriaDashServiciosInfo"></div>
+	            </div>
 	          </div>
 	          <div id="gestoriaDashboardPaneRenta" class="hidden">
             <div class="form-card">
@@ -5914,15 +6039,19 @@
               <p class="muted">Pólizas, seguimiento y oportunidades.</p>
             </div>
           </div>
-          <div class="tc-modulebar tc-modulebar--micro" id="segurosTabs" role="navigation" aria-label="Seguros">
-            <button class="tab tc-module active" type="button" data-seguros-tab="dashboard" title="Dashboard">
-              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
-              <span class="tc-mod-label">Dashboard</span>
-            </button>
-            <button class="tab tc-module" type="button" data-seguros-tab="bdt" title="Pólizas cargadas">
-              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
-              <span class="tc-mod-label">Pólizas</span>
-            </button>
+	          <div class="tc-modulebar tc-modulebar--micro" id="segurosTabs" role="navigation" aria-label="Seguros">
+	            <button class="tab tc-module active" type="button" data-seguros-tab="dashboard" title="Dashboard">
+	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
+	              <span class="tc-mod-label">Dashboard</span>
+	            </button>
+	            <button class="tab tc-module" type="button" data-seguros-tab="renovaciones" title="Renovaciones">
+	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clock"></use></svg></span>
+	              <span class="tc-mod-label">Renov.</span>
+	            </button>
+	            <button class="tab tc-module" type="button" data-seguros-tab="bdt" title="Pólizas cargadas">
+	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
+	              <span class="tc-mod-label">Pólizas</span>
+	            </button>
             <button class="tab tc-module" type="button" data-seguros-tab="alta" title="Alta pólizas">
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-plus"></use></svg></span>
               <span class="tc-mod-label">Alta</span>
@@ -6081,11 +6210,29 @@
                 % comisión sugerida
                 <input id="seguroOcrComisionPct" readonly />
               </label>
-              <label>
-                Comisión estimada
-                <input id="seguroOcrComisionEst" readonly />
-              </label>
-            </div>
+	              <label>
+	                Comisión estimada
+	                <input id="seguroOcrComisionEst" readonly />
+	              </label>
+	              <label class="span-2">
+	                Canal
+	                <select id="segurosOcrCanal">
+	                  <option value=""></option>
+	                  <option>Oficina</option>
+	                  <option>Internet</option>
+	                  <option>Cliente referido</option>
+	                  <option>Colaborador interno</option>
+	                </select>
+	              </label>
+	              <label class="span-2 hidden" id="segurosOcrCanalClienteWrap">
+	                Cliente referido
+	                <select id="segurosOcrCanalCliente"></select>
+	              </label>
+	              <label class="span-2 hidden" id="segurosOcrCanalUserWrap">
+	                Colaborador interno
+	                <select id="segurosOcrCanalUser"></select>
+	              </label>
+	            </div>
             <div class="form-actions">
               <span id="seguroOcrComisionSource" class="muted"></span>
             </div>
@@ -6155,11 +6302,29 @@
                 Prima total
                 <input id="segurosBdtOcrPrimaTotal" />
               </label>
-              <label>
-                Registro póliza
-                <select id="segurosBdtOcrSelect"></select>
-              </label>
-            </div>
+	              <label>
+	                Registro póliza
+	                <select id="segurosBdtOcrSelect"></select>
+	              </label>
+	              <label class="span-2">
+	                Canal
+	                <select id="segurosBdtOcrCanal">
+	                  <option value=""></option>
+	                  <option>Oficina</option>
+	                  <option>Internet</option>
+	                  <option>Cliente referido</option>
+	                  <option>Colaborador interno</option>
+	                </select>
+	              </label>
+	              <label class="span-2 hidden" id="segurosBdtOcrCanalClienteWrap">
+	                Cliente referido
+	                <select id="segurosBdtOcrCanalCliente"></select>
+	              </label>
+	              <label class="span-2 hidden" id="segurosBdtOcrCanalUserWrap">
+	                Colaborador interno
+	                <select id="segurosBdtOcrCanalUser"></select>
+	              </label>
+	            </div>
             <div class="form-actions">
               <button type="button" id="segurosBdtOcrClienteCreate" class="secondary hidden">Crear cliente</button>
               <button type="button" id="segurosBdtOcrClienteAddService" class="secondary hidden">Asignar Seguros</button>
@@ -6201,12 +6366,12 @@
             <div class="footer" id="segurosCrmInfo"></div>
           </div>
           </div>
-          <div class="seguros-tab active" data-seguros-tab="dashboard">
-          <div class="form-card">
-            <h3>KPIs</h3>
-            <p class="muted">Resumen de pólizas.</p>
-            <div id="segurosKpis"></div>
-          </div>
+	          <div class="seguros-tab active" data-seguros-tab="dashboard">
+	          <div class="form-card">
+	            <h3>KPIs</h3>
+	            <p class="muted">Resumen de pólizas.</p>
+	            <div id="segurosKpis"></div>
+	          </div>
           <div class="form-card">
             <h3>KPIs por ramo</h3>
             <p class="muted">Pulsa un ramo para ver sus pólizas y abrir/editar.</p>
@@ -6309,12 +6474,58 @@
                 </div>
               </div>
             </div>
-          </div>
-          </div>
-          <div class="seguros-tab" data-seguros-tab="gestion">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
+	          </div>
+	          </div>
+	          <div class="seguros-tab" data-seguros-tab="renovaciones">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Renovaciones</h3>
+	                <p class="muted">Cola de renovaciones con estado, responsable y próxima acción.</p>
+	              </div>
+	              <div class="toolbar">
+	                <label>
+	                  Días (adelante)
+	                  <input id="segurosRenovacionesDaysAhead" type="number" min="0" max="365" value="45" />
+	                </label>
+	                <label>
+	                  Días (atrasados)
+	                  <input id="segurosRenovacionesDaysPast" type="number" min="0" max="365" value="0" />
+	                </label>
+	                <button type="button" class="secondary ghost" id="segurosRenovacionesRefreshBtn">Recargar</button>
+	              </div>
+	            </div>
+	            <div class="table-tools">
+	              <label>
+	                Estado
+	                <select id="segurosRenovacionesEstado">
+	                  <option value="">Todos</option>
+	                  <option value="pendiente">Pendiente</option>
+	                  <option value="en_gestion">En gestión</option>
+	                  <option value="contactado">Contactado</option>
+	                  <option value="cotizado">Cotizado</option>
+	                  <option value="renovado">Renovado</option>
+	                  <option value="perdido">Perdido</option>
+	                  <option value="descartado">Descartado</option>
+	                </select>
+	              </label>
+	              <label>
+	                Responsable
+	                <input id="segurosRenovacionesResponsable" placeholder="(opcional)" />
+	              </label>
+	              <label class="span-2">
+	                Buscar
+	                <input id="segurosRenovacionesSearch" placeholder="Tomador, póliza, compañía..." />
+	              </label>
+	            </div>
+	            <div id="segurosRenovacionesTable"></div>
+	            <div class="footer" id="segurosRenovacionesInfo"></div>
+	          </div>
+	          </div>
+	          <div class="seguros-tab" data-seguros-tab="gestion">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
                 <h3>Copiloto Seguros</h3>
                 <p class="muted">Resúmenes, emails y ayuda rápida para pólizas.</p>
               </div>
@@ -7781,14 +7992,32 @@
                   Otro teléfono
                   <input name="otro_telefono" />
                 </label>
-                <label>
-                  Email
-                  <input name="email" type="email" />
-                </label>
-                <label>
-                  Id. personal
-                  <input name="id_personal" />
-                </label>
+	                <label>
+	                  Email
+	                  <input name="email" type="email" />
+	                </label>
+	                <label class="span-2">
+	                  Canal
+	                  <select name="procedencia_canal" id="clientesAltaCanal">
+	                    <option value=""></option>
+	                    <option>Oficina</option>
+	                    <option>Internet</option>
+	                    <option>Cliente referido</option>
+	                    <option>Colaborador interno</option>
+	                  </select>
+	                </label>
+	                <label class="span-2 hidden" id="clientesAltaCanalClienteWrap">
+	                  Cliente referido
+	                  <select name="procedencia_cliente_id" id="clientesAltaCanalCliente"></select>
+	                </label>
+	                <label class="span-2 hidden" id="clientesAltaCanalUserWrap">
+	                  Colaborador interno
+	                  <select name="procedencia_user_id" id="clientesAltaCanalUser"></select>
+	                </label>
+	                <label>
+	                  Id. personal
+	                  <input name="id_personal" />
+	                </label>
                 <label>
                   Cliente genérico web
                   <select name="cliente_generico_web">
@@ -9481,6 +9710,10 @@
                       </select>
                     </label>
                     <label>
+                      Servicio
+                      <select name="tipo_categoria" data-gestoria-categoria-select="1" data-default="laboral"></select>
+                    </label>
+                    <label>
                       Estado
                       <select name="estado">
                         <option>Presupuesto</option>
@@ -9533,6 +9766,10 @@
                         <option>Rectificativa</option>
                         <option>Otros renta</option>
                       </select>
+                    </label>
+                    <label>
+                      Servicio
+                      <select name="tipo_categoria" data-gestoria-categoria-select="1" data-default="rentas"></select>
                     </label>
                     <label>
                       Estado
@@ -9689,6 +9926,10 @@
                         <option>Complemento brecha de género</option>
                         <option>Otros administrativos</option>
                       </select>
+                    </label>
+                    <label>
+                      Servicio
+                      <select name="tipo_categoria" data-gestoria-categoria-select="1"></select>
                     </label>
                     <label>
                       Estado
@@ -10407,11 +10648,11 @@
         </script>
 		    <script src="app-routing.js?v=11"></script>
 		    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-												    <script src="app.js?v=726"></script>
+												    <script src="app.js?v=727"></script>
     <script>
 			      (function () {
 			        if (!("serviceWorker" in navigator)) return;
-											        const TARGET_SW = "/sw.js?v=324";
+											        const TARGET_SW = "/sw.js?v=325";
 		        try {
 		          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";

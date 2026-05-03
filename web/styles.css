@@ -3569,6 +3569,21 @@ body.theme-operativa .workspace-home-count {
   gap: 16px;
 }
 
+/* Explorer: en escritorio usamos sidebar Lightning, no el módulo horizontal legacy. */
+#explorerSection #viewTabs {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  #explorerSection #explorerLightningSidebar {
+    display: none;
+  }
+
+  #explorerSection #viewTabs {
+    display: flex;
+  }
+}
+
 .app-lightning-shell--sidebar {
   display: grid;
   grid-template-columns: 110px 1fr;
