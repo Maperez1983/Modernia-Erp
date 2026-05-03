@@ -33202,8 +33202,11 @@ const updateTableVisibility = () => {
   if (viewTabs) {
     // Dentro del shell "Lightning" el tab-bar general es duplicado (confunde).
     viewTabs.classList.toggle("hidden", isTecnocloudShellContext);
-    // Mantener sidebar "Explorer" sincronizada con el tab-bar (si se oculta el tab-bar, también se oculta el sidebar).
+    // La sidebar "Explorer" (verde) nunca debe convivir con el shell CRM (sidebar canónica).
+    // En producción se ha visto que, por caché/orden de llamadas, puede quedarse visible.
     try {
+      const shouldHideExplorerSidebar = isTecnocloudShellContext || viewTabs.classList.contains("hidden");
+      if (explorerLightningSidebar) explorerLightningSidebar.classList.toggle("hidden", shouldHideExplorerSidebar);
       syncExplorerLightningSidebar();
     } catch (e) {}
     const allowedByContext = (() => {
