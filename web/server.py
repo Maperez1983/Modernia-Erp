@@ -2770,6 +2770,7 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         empresa_id=empresa_id,
         table="seguros",
         uploaded_clause=uploaded_policy_filter(),
+        strict=True,
     )
 
     estado_bucket_expr = seguro_estado_bucket_expr("s")
@@ -28551,7 +28552,7 @@ def row_to_cells(row, columns):
         return [row_value(row, col) for col in columns]
 
 
-def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="seguros", uploaded_clause=None):
+def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="seguros", uploaded_clause=None, strict=False):
     """
     Many UI flows default to `uploaded_only=1` for Seguros. When there are no uploaded
     policies yet (no S3 key/url and no linked `gestoria_docs`), the strict filter makes
@@ -28562,6 +28563,8 @@ def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="se
     """
     if not uploaded_only:
         return 0
+    if strict:
+        return 1
     clause = uploaded_clause or uploaded_policy_filter()
     try:
         empresa_id = str(empresa_id or "").strip()
@@ -43348,6 +43351,55 @@ class Handler(BaseHTTPRequestHandler):
             except BrokenPipeError:
                 pass
             return
+        if parsed.path == "/share/presupuesto":
+            params = urllib.parse.parse_qs(parsed.query)
+            token = str(params.get("token", [""])[0] or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            conn = None
+            try:
+                conn = open_db_conn(self.db_path)
+                share = fetch_workspace_presupuesto_share(conn, token=token)
+                if not share:
+                    json_response(self, {"error": "share no encontrado"}, status=404)
+                    return
+                expires_dt = parse_datetime_value(share.get("expires_at"))
+                if expires_dt and expires_dt < datetime.now(timezone.utc):
+                    json_response(self, {"error": "share expirado"}, status=410)
+                    return
+                try:
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        "UPDATE workspace_presupuesto_shares SET last_access_at = ? WHERE token = ?",
+                        (now_iso, token),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+                payload = fetch_workspace_budget_pdf_payload(conn, share.get("presupuesto_id"), workspace_id=share.get("workspace_id"))
+                if not payload:
+                    json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                    return
+                pdf_bytes = build_workspace_budget_pdf(
+                    payload["budget"],
+                    payload["workspace"],
+                    payload["company"],
+                    payload["client"],
+                    payload.get("lineas") or [],
+                )
+                if not pdf_bytes:
+                    json_response(self, {"error": "no se pudo generar el PDF"}, status=500)
+                    return
+                # Sin filename -> Content-Disposition no se fuerza a descarga; el navegador decide (inline).
+                binary_response(self, pdf_bytes, content_type="application/pdf", filename=None)
+                return
+            finally:
+                try:
+                    if conn:
+                        conn.close()
+                except Exception:
+                    pass
         if parsed.path == "/api/health":
             # Readiness: el front usa esto para saber si puede operar.
             # Importante: NO bloqueamos aquí con migraciones pesadas (evita 502/timeouts en cold start).
@@ -55757,6 +55809,57 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            # Tareas automáticas: impagos / pendientes de cobro.
+            try:
+                estado_key = normalize_lookup_text(estado or "")
+                rel_tipo = "seguros_recibo"
+                rel_id = rec_id
+                cliente_nombre = ""
+                if cliente_id:
+                    c = conn.execute("SELECT nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+                    if c:
+                        cliente_nombre = c["nombre"] or ""
+                fecha_tarea = (fecha_vencimiento or fecha_emision or now[:10])[:10]
+                base_notas = f"Recibo {referencia or ''} · Póliza {poliza_numero or '-'} · {compania or '-'} · {ramo or '-'}"
+                if estado_key in {"IMPAGADO"}:
+                    ensure_action_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        tipo="Impago recibo",
+                        fecha=fecha_tarea,
+                        cliente_id=cliente_id,
+                        cliente_nombre=cliente_nombre,
+                        notas=(base_notas + " · Estado: impagado.").strip(),
+                        now=now,
+                    )
+                elif estado_key in {"PENDIENTE"}:
+                    ensure_action_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        tipo="Cobro pendiente",
+                        fecha=fecha_tarea,
+                        cliente_id=cliente_id,
+                        cliente_nombre=cliente_nombre,
+                        notas=(base_notas + " · Estado: pendiente.").strip(),
+                        now=now,
+                    )
+                else:
+                    close_actions_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        now=now,
+                    )
+            except Exception:
+                pass
             json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
             return
@@ -55819,6 +55922,66 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_recibos SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Tareas automáticas: impagos / pendientes de cobro.
+            try:
+                next_estado = str(updates.get("estado", row["estado"]) or "").strip()
+                next_key = normalize_lookup_text(next_estado)
+                empresa_id = str(row["empresa_id"] or "").strip()
+                cliente_id = str(updates.get("cliente_id", row["cliente_id"]) or "").strip() or None
+                referencia = str(updates.get("referencia", row["referencia"]) or "").strip() or None
+                poliza_numero = str(updates.get("poliza_numero", row["poliza_numero"]) or "").strip()
+                compania = str(updates.get("compania", row["compania"]) or "").strip()
+                ramo = str(updates.get("ramo", row["ramo"]) or "").strip()
+                fecha_emision = str(updates.get("fecha_emision", row["fecha_emision"]) or "").strip()
+                fecha_vencimiento = str(updates.get("fecha_vencimiento", row["fecha_vencimiento"]) or "").strip()
+                fecha_tarea = (fecha_vencimiento or fecha_emision or now[:10])[:10]
+                cliente_nombre = ""
+                if cliente_id:
+                    c = conn.execute("SELECT nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+                    if c:
+                        cliente_nombre = c["nombre"] or ""
+                base_notas = f"Recibo {referencia or ''} · Póliza {poliza_numero or '-'} · {compania or '-'} · {ramo or '-'}"
+                rel_tipo = "seguros_recibo"
+                rel_id = rec_id
+                if next_key in {"IMPAGADO"}:
+                    ensure_action_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        tipo="Impago recibo",
+                        fecha=fecha_tarea,
+                        cliente_id=cliente_id,
+                        cliente_nombre=cliente_nombre,
+                        notas=(base_notas + " · Estado: impagado.").strip(),
+                        now=now,
+                    )
+                elif next_key in {"PENDIENTE"}:
+                    ensure_action_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        tipo="Cobro pendiente",
+                        fecha=fecha_tarea,
+                        cliente_id=cliente_id,
+                        cliente_nombre=cliente_nombre,
+                        notas=(base_notas + " · Estado: pendiente.").strip(),
+                        now=now,
+                    )
+                else:
+                    close_actions_for_related(
+                        conn,
+                        empresa_id=empresa_id,
+                        servicio="Seguros",
+                        related_tipo=rel_tipo,
+                        related_id=rel_id,
+                        now=now,
+                    )
+            except Exception:
+                pass
             json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
             return
@@ -55832,6 +55995,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Recibo no encontrado"}, status=404)
                 return
             conn.execute("DELETE FROM seguros_recibos WHERE id = ?", (rec_id,))
+            try:
+                # Cierra tareas ligadas al recibo eliminado.
+                # (mejor que dejar pendientes huérfanas)
+                close_actions_for_related(
+                    conn,
+                    empresa_id=str(payload.get("empresa_id") or "") or "",
+                    servicio="Seguros",
+                    related_tipo="seguros_recibo",
+                    related_id=rec_id,
+                    now=now,
+                )
+            except Exception:
+                pass
             json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
             return
@@ -64010,6 +64186,34 @@ class Handler(BaseHTTPRequestHandler):
             if empresa_id:
                 payload["rows"] = [row for row in (payload.get("rows") or []) if str(row.get("empresa_id") or "") == empresa_id]
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_presupuesto_templates":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            include_inactive = str(params.get("include_inactive", ["0"])[0] or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+            limit = params.get("limit", ["200"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(
+                self,
+                fetch_workspace_presupuesto_templates(
+                    conn,
+                    workspace_id,
+                    servicio=servicio,
+                    include_inactive=include_inactive,
+                    limit=limit,
+                ),
+            )
             return
 
         if path == "/api/empresa_presupuestos":
