@@ -45937,57 +45937,94 @@ const loadCrmInmuebles = () => {
 };
 
 const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
+  const ensureInlinePrintStyles = () => {
+    if (document.getElementById("crmInlinePrintStyles")) return;
+    const style = document.createElement("style");
+    style.id = "crmInlinePrintStyles";
+    style.textContent = `
+      @media print {
+        body.crm-inline-printing > * { display: none !important; }
+        body.crm-inline-printing #crmInlinePrintRoot { display: block !important; }
+        body.crm-inline-printing #crmInlinePrintRoot * { visibility: visible; }
+      }
+      #crmInlinePrintRoot {
+        display: none;
+        padding: 18px;
+        color: #0f172a;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      #crmInlinePrintRoot h1 { font-size: 18px; margin: 0 0 12px; }
+      #crmInlinePrintRoot table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      #crmInlinePrintRoot th, #crmInlinePrintRoot td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+      #crmInlinePrintRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #475569; }
+    `;
+    document.head.appendChild(style);
+  };
+
+  const openInlinePrintModal = () => {
+    ensureInlinePrintStyles();
+    let modal = document.getElementById("crmInlinePrintModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "crmInlinePrintModal";
+      modal.className = "modal hidden";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 980px;">
+          <div class="modal-header">
+            <div>
+              <h3 data-print-title></h3>
+              <p class="muted" style="margin:0;">Vista previa (sin popups). Usa “Imprimir” para generar PDF/impresión.</p>
+            </div>
+            <button type="button" class="secondary ghost" data-print-close>Cerrar</button>
+          </div>
+          <div class="modal-body">
+            <div id="crmInlinePrintPreview"></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-print-do>Imprimir</button>
+          </div>
+        </div>
+      `;
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) modal.classList.add("hidden");
+      });
+      document.body.appendChild(modal);
+      modal.querySelector("[data-print-close]")?.addEventListener("click", () => modal.classList.add("hidden"));
+      modal.querySelector("[data-print-do]")?.addEventListener("click", () => {
+        try {
+          document.body.classList.add("crm-inline-printing");
+          let root = document.getElementById("crmInlinePrintRoot");
+          if (!root) {
+            root = document.createElement("div");
+            root.id = "crmInlinePrintRoot";
+            document.body.appendChild(root);
+          }
+          const currentTitle = String(modal.querySelector("[data-print-title]")?.textContent || title || "Impresión");
+          const previewHtml = modal.querySelector("#crmInlinePrintPreview")?.innerHTML || "";
+          root.innerHTML = `<h1>${escapeHtml(currentTitle)}</h1>${previewHtml}`;
+          window.setTimeout(() => window.print(), 50);
+        } finally {
+          window.setTimeout(() => {
+            document.body.classList.remove("crm-inline-printing");
+            const root = document.getElementById("crmInlinePrintRoot");
+            if (root) root.innerHTML = "";
+          }, 800);
+        }
+      });
+    }
+    const titleEl = modal.querySelector("[data-print-title]");
+    if (titleEl) titleEl.textContent = String(title || "Impresión");
+    const preview = modal.querySelector("#crmInlinePrintPreview");
+    if (preview) preview.innerHTML = html || "<p class='muted'>Sin datos para imprimir.</p>";
+    modal.classList.remove("hidden");
+    return;
+  };
+
   const win = window.open("", "_blank", "noopener,noreferrer");
   if (!win) {
-    // Fallback sin popup: imprimir vía iframe oculto.
-    try {
-      const frame = document.createElement("iframe");
-      frame.style.position = "fixed";
-      frame.style.right = "0";
-      frame.style.bottom = "0";
-      frame.style.width = "0";
-      frame.style.height = "0";
-      frame.style.border = "0";
-      frame.style.visibility = "hidden";
-      document.body.appendChild(frame);
-      const doc = frame.contentWindow?.document;
-      if (!doc) throw new Error("No iframe document");
-      doc.open();
-      doc.write(`<!doctype html>
-        <html lang="es">
-          <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>${escapeHtml(title)}</title>
-            <style>
-              body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
-              h1{font-size:18px;margin:0 0 12px;}
-              table{width:100%;border-collapse:collapse;font-size:12px;}
-              th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
-              th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
-            </style>
-          </head>
-          <body>
-            <h1>${escapeHtml(title)}</h1>
-            ${html}
-          </body>
-        </html>`);
-      doc.close();
-      const w = frame.contentWindow;
-      if (!w) throw new Error("No iframe window");
-      w.focus();
-      window.setTimeout(() => {
-        try {
-          w.print();
-        } finally {
-          window.setTimeout(() => frame.remove(), 500);
-        }
-      }, 200);
-      return;
-    } catch (err) {
-      alert("No se pudo imprimir (popup bloqueado).");
-      return;
-    }
+    // Fallback sin popup: vista previa en modal + `window.print()` (compatible con iOS/PWA).
+    openInlinePrintModal();
+    return;
   }
   win.document.open();
   win.document.write(`<!doctype html>
