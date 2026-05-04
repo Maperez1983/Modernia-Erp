@@ -2229,6 +2229,16 @@ def canonicalize_ramo(value):
         return "Caza"
     if "COMUNIDAD" in key:
         return "Comunidad"
+    if "MULTIRRIESGO" in key:
+        # Muchos PDFs devuelven "Multirriesgo" como producto/ramo. Lo mapeamos al catálogo canónico.
+        # - Comunidad: multirriesgo comunidades
+        # - Comercio: multirriesgo comercio / pyme / local / oficina
+        # - Hogar: multirriesgo hogar (o multirriesgo genérico)
+        if "COMUNIDAD" in key or "COMUNIDADES" in key:
+            return "Comunidad"
+        if any(token in key for token in ("COMERCIO", "PYME", "LOCAL", "OFICINA", "NEGOCIO", "AUTOEMPRENDEDOR")):
+            return "Comercio"
+        return "Hogar"
     if "COMERCIO" in key or "PYME" in key or key == "LOCAL":
         return "Comercio"
     if "HOGAR" in key:
@@ -2244,6 +2254,53 @@ def canonicalize_ramo(value):
         return "Auto"
     # Si no coincide pero no es ruido OCR, se conserva para no perder edición manual.
     return raw
+
+
+def infer_ramo_from_source_hint(source_hint: str) -> str:
+    """
+    Dado un nombre/clave de archivo (S3 key, filename, etc.) intenta inferir un ramo canónico.
+    Solo devuelve ramos del catálogo LEGAL_RAMOS_CANONICAL (para no distorsionar KPIs).
+    """
+    key = normalize_lookup_text(source_hint or "")
+    if not key:
+        return ""
+    # Nota: usamos canonicalize_ramo para aprovechar aliases ("RC", "IMPAGO", "MOTO"...)
+    for token in (
+        "IMPAGO",
+        "PROTECCION",
+        "PROTECCIÓN",
+        "DEFENSA",
+        "JURID",
+        "ARAG",
+        "SALUD",
+        "SANIT",
+        "DKV",
+        "DECESOS",
+        "ACCIDENT",
+        "VIDA",
+        "AHORRO",
+        "VIAJE",
+        "COMUNIDAD",
+        "COMERCIO",
+        "PYME",
+        "LOCAL",
+        "OFICINA",
+        "MULTIRRIESGO",
+        "HOGAR",
+        "AUTO",
+        "AUTOMOV",
+        "VEHIC",
+        "MOTO",
+        "MOTOR",
+        "RESPONSABILIDAD",
+        "RC",
+    ):
+        if token in key:
+            guessed = canonicalize_ramo(token)
+            if guessed:
+                return guessed
+    guessed = canonicalize_ramo(source_hint or "")
+    return guessed or ""
 
 
 def seguros_comision_tipo_from_produccion(produccion):
@@ -20218,6 +20275,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         }
     if smart_fields:
         fields.update(smart_fields)
+    if not fields.get("ramo"):
+        hinted_ramo = infer_ramo_from_source_hint(source_hint or "")
+        if hinted_ramo:
+            fields["ramo"] = hinted_ramo
     if "ramo" in fields:
         # OCR: evitar "ramos" basura (p.ej. 'IMPORTE', nombres, frases).
         # Si no mapea a un ramo canónico conocido, lo dejamos vacío para no distorsionar KPIs.
