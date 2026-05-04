@@ -27702,7 +27702,18 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 counts["remesadas_total"] += precio
         else:
             counts["no_remesadas"] += 1
-        if not str(item.get("responsable") or "").strip():
+        resp_raw = str(item.get("responsable") or "").strip()
+        resp_key = str(item.get("responsable_key") or "").strip()
+        resp_key_norm = normalize_action_key(resp_key) or resp_key
+        resp_text_norm = normalize_lookup_text(resp_raw)
+        resp_action_norm = normalize_action_key(resp_raw)
+        is_unassigned_resp = (
+            (not resp_raw)
+            or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
+            or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
+            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+        )
+        if is_unassigned_resp:
             counts["sin_responsable"] += 1
         key = str(item.get("responsable_key") or "sin-responsable")
         bucket = responsables.get(key)
@@ -27802,7 +27813,20 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         item for item in campaigns if float(item.get("precio_servicio") or 0.0) > 0.0001 and int(item.get("cobrada") or 0) != 1
     ]
     unpaid.sort(key=lambda x: (-float(x.get("precio_servicio") or 0.0), str(x.get("cliente") or "")))
-    unassigned = [item for item in campaigns if not str(item.get("responsable") or "").strip()]
+    unassigned = []
+    for item in campaigns:
+        resp_raw = str(item.get("responsable") or "").strip()
+        resp_key = str(item.get("responsable_key") or "").strip()
+        resp_key_norm = normalize_action_key(resp_key) or resp_key
+        resp_text_norm = normalize_lookup_text(resp_raw)
+        resp_action_norm = normalize_action_key(resp_raw)
+        if (
+            (not resp_raw)
+            or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
+            or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
+            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+        ):
+            unassigned.append(item)
     unassigned.sort(key=lambda x: (-float(x.get("precio_servicio") or 0.0), str(x.get("cliente") or "")))
 
     responsables_list = list(responsables.values())
