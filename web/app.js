@@ -53878,6 +53878,13 @@ const renderGestoriaRentaDashboard = (payload) => {
         canvasAttr: 'data-renta-chart="responsables"',
       })
     );
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Presentadas por responsable",
+        hint: "Rentas presentadas por asesor/responsable (Top).",
+        canvasAttr: 'data-renta-chart="presentadas_resp"',
+      })
+    );
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
     const hint = document.createElement("p");
@@ -53891,6 +53898,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       const presentedCanvas = root.querySelector('canvas[data-renta-chart="presentadas"]');
       const economyCanvas = root.querySelector('canvas[data-renta-chart="economia"]');
       const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
+      const presentedRespCanvas = root.querySelector('canvas[data-renta-chart="presentadas_resp"]');
       if (estadoCanvas) {
         drawBarChart(
           estadoCanvas,
@@ -54020,6 +54028,26 @@ const renderGestoriaRentaDashboard = (payload) => {
               setViewWithParam("responsable", keys[idx] || "");
             },
           }
+        );
+      }
+      if (presentedRespCanvas) {
+        const sorted = Array.isArray(responsables) ? responsables.slice() : [];
+        sorted.sort((a, b) => Number(b?.presentadas || 0) - Number(a?.presentadas || 0));
+        const top = sorted.slice(0, 14);
+        const labels = top.map((r) => String(r?.responsable || "Sin responsable"));
+        const values = top.map((r) => Number(r?.presentadas || 0));
+        drawBarChart(
+          presentedRespCanvas,
+          labels,
+          [
+            {
+              label: "Presentadas",
+              values,
+              color: "#0B1D33",
+              format: (v) => numberFormatter.format(Number(v || 0)),
+            },
+          ],
+          { legend: false, showValues: true, tooltip: true, axisLabelMaxChars: 14 }
         );
       }
     });
