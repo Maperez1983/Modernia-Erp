@@ -2727,7 +2727,6 @@ def seguros_contabilidad_where_clause(alias="gc"):
         f"OR ({p}.poliza_numero IS NOT NULL AND TRIM({p}.poliza_numero) <> '') "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM SEGUROS%' "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[SEGUROS]%' "
-        f"OR UPPER(COALESCE({p}.notas, '')) LIKE '%[SEGUROS][BANCO]%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'REGULARIZACIÓN', 'EXTORNO') "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% EMISI%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% RENOVA%')"
@@ -14294,8 +14293,8 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
     if ss_emp > 0:
         fields["ss_empresa"] = ss_emp
     elif fields.get("bruto"):
-        # Fallback: algunos formatos incluyen la "APORTACIÓN DE LA EMPRESA" en una tabla aparte
-        # sin una etiqueta explícita de "Seguridad Social EMPRESA". Sumamos la última columna por línea.
+        # Fallback: muchos formatos (Asesorías) incluyen la "APORTACIÓN DE LA EMPRESA" en una tabla aparte
+        # sin una etiqueta de "Seguridad Social EMPRESA". Sumamos la última columna por línea.
         try:
             bruto_val = float(parse_money_value(fields.get("bruto") or 0) or 0)
         except Exception:
@@ -14305,7 +14304,7 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
             if idx < 0:
                 idx = upper.find("APORTACION DE LA EMPRESA")
             if idx >= 0:
-                segment = raw[idx : idx + 3200]
+                segment = raw[idx: idx + 3200]
                 amount_re = re.compile(r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))")
                 total = 0.0
                 for line in segment.splitlines():
@@ -27497,6 +27496,10 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
         responsable_raw = str(entry.get("responsable") or "").strip()
+        # Normaliza valores "Sin responsable" guardados como texto para tratarlos como vacío.
+        responsable_norm = normalize_lookup_text(responsable_raw)
+        if responsable_norm in {"sin-responsable", "sinresponsable", "sresponsable", "sinresponsable"}:
+            responsable_raw = ""
         responsable_label = responsable_raw or "Sin responsable"
         responsable_key = normalize_lookup_text(responsable_label) or "sin-responsable"
         precio = coerce_renta_money(entry.get("precio_servicio")) or 0.0
@@ -27602,7 +27605,9 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 counts["remesadas_total"] += precio
         else:
             counts["no_remesadas"] += 1
-        if not str(item.get("responsable") or "").strip():
+        resp_raw = str(item.get("responsable") or "").strip()
+        resp_norm = normalize_lookup_text(resp_raw)
+        if (not resp_raw) or resp_norm in {"sin-responsable", "sinresponsable", "sresponsable", "sinresponsable"}:
             counts["sin_responsable"] += 1
         key = str(item.get("responsable_key") or "sin-responsable")
         bucket = responsables.get(key)
@@ -28109,6 +28114,9 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
     pending_count = 0
     total_count = 0
     presentadas_count = 0
+    sin_responsable_count = 0
+    sin_cobrar_count = 0
+    sin_remesar_count = 0
     preview = []
     for row in rows:
         row_dict = dict(row)
@@ -28122,6 +28130,22 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         if not entry:
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
+        try:
+            responsable_raw = entry.get("responsable") or entry.get("responsable_label") or ""
+            if not str(responsable_raw or "").strip():
+                sin_responsable_count += 1
+        except Exception:
+            pass
+        try:
+            precio = float(entry.get("precio_servicio") or entry.get("precio") or 0.0)
+        except Exception:
+            precio = 0.0
+        is_cobrada = 1 if parse_boolish(entry.get("cobrada")) else 0
+        is_remesada = 1 if parse_boolish(entry.get("remesada")) else 0
+        if precio > 0.0001 and not is_cobrada:
+            sin_cobrar_count += 1
+        if precio > 0.0001 and is_cobrada and not is_remesada:
+            sin_remesar_count += 1
         total_count += 1
         if estado == "Borrador":
             pending_count += 1
@@ -28156,6 +28180,9 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         "count": int(pending_count),
         "total": int(total_count),
         "presentadas": int(presentadas_count),
+        "sin_responsable": int(sin_responsable_count),
+        "sin_cobrar": int(sin_cobrar_count),
+        "sin_remesar": int(sin_remesar_count),
         "rows": preview,
     }
 
@@ -69834,13 +69861,16 @@ class Handler(BaseHTTPRequestHandler):
 	                        "puntuales": 0,
 	                        "modelos_mes": 0,
 	                        "rentas_ejercicio": "",
-	                        "rentas_total_ejercicio": 0,
-	                        "rentas_realizadas": 0,
-	                        "rentas_pendientes_presentar": 0,
-	                        "sin_vincular_servicio": 0,
-	                        "acciones_pendientes": 0,
-	                        "presupuestos_estudio": 0,
-	                        "encargos_pendientes": 0,
+		                        "rentas_total_ejercicio": 0,
+		                        "rentas_realizadas": 0,
+		                        "rentas_pendientes_presentar": 0,
+		                        "rentas_sin_responsable": 0,
+		                        "rentas_sin_cobrar": 0,
+		                        "rentas_sin_remesar": 0,
+		                        "sin_vincular_servicio": 0,
+		                        "acciones_pendientes": 0,
+		                        "presupuestos_estudio": 0,
+		                        "encargos_pendientes": 0,
 	                    },
                     "modelos": [],
                     "modelos_vencidos": [],
@@ -70039,6 +70069,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload["counts"]["rentas_total_ejercicio"] = int(renta_summary.get("total") or 0)
                 payload["counts"]["rentas_realizadas"] = int(renta_summary.get("presentadas") or 0)
                 payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
+                payload["counts"]["rentas_sin_responsable"] = int(renta_summary.get("sin_responsable") or 0)
+                payload["counts"]["rentas_sin_cobrar"] = int(renta_summary.get("sin_cobrar") or 0)
+                payload["counts"]["rentas_sin_remesar"] = int(renta_summary.get("sin_remesar") or 0)
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
                 try:

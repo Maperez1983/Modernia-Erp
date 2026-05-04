@@ -2616,10 +2616,13 @@ const gestoriaKpiActivos = document.getElementById("gestoriaKpiActivos");
 const gestoriaKpiAutonomos = document.getElementById("gestoriaKpiAutonomos");
 const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
-const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
-const gestoriaKpiRentasRealizadas = document.getElementById("gestoriaKpiRentasRealizadas");
-const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
-const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
+	const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
+	const gestoriaKpiRentasRealizadas = document.getElementById("gestoriaKpiRentasRealizadas");
+	const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
+	const gestoriaKpiRentasSinResponsable = document.getElementById("gestoriaKpiRentasSinResponsable");
+	const gestoriaKpiRentasSinCobrar = document.getElementById("gestoriaKpiRentasSinCobrar");
+	const gestoriaKpiRentasSinRemesar = document.getElementById("gestoriaKpiRentasSinRemesar");
+	const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
 const gestoriaRentasPendientesCount = document.getElementById("gestoriaRentasPendientesCount");
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
@@ -23064,9 +23067,9 @@ const openGestoriaCrm = () => {
 const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!userCanAccessService("gestoria")) return;
   let tab = String(targetTab || "gestoria-dash").trim() || "gestoria-dash";
-  // Permitimos abrir el dashboard aunque el usuario no sea admin.
-  // El propio `loadGestoriaDashboard()` mostrará un modo limitado (solo lectura / mensaje)
-  // si no tiene permisos. Evita que parezca que el botón “Dashboard” no funciona.
+  if (tab === "gestoria-dash" && !canAccessGestoriaAdminDashboard()) {
+    tab = "gestoria-crm";
+  }
   const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
@@ -45933,8 +45936,55 @@ const loadCrmInmuebles = () => {
 const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
   const win = window.open("", "_blank", "noopener,noreferrer");
   if (!win) {
-    alert("No se pudo abrir la ventana de impresión (popup bloqueado).");
-    return;
+    // Fallback sin popup: imprimir vía iframe oculto.
+    try {
+      const frame = document.createElement("iframe");
+      frame.style.position = "fixed";
+      frame.style.right = "0";
+      frame.style.bottom = "0";
+      frame.style.width = "0";
+      frame.style.height = "0";
+      frame.style.border = "0";
+      frame.style.visibility = "hidden";
+      document.body.appendChild(frame);
+      const doc = frame.contentWindow?.document;
+      if (!doc) throw new Error("No iframe document");
+      doc.open();
+      doc.write(`<!doctype html>
+        <html lang="es">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>${escapeHtml(title)}</title>
+            <style>
+              body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
+              h1{font-size:18px;margin:0 0 12px;}
+              table{width:100%;border-collapse:collapse;font-size:12px;}
+              th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
+              th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
+            </style>
+          </head>
+          <body>
+            <h1>${escapeHtml(title)}</h1>
+            ${html}
+          </body>
+        </html>`);
+      doc.close();
+      const w = frame.contentWindow;
+      if (!w) throw new Error("No iframe window");
+      w.focus();
+      window.setTimeout(() => {
+        try {
+          w.print();
+        } finally {
+          window.setTimeout(() => frame.remove(), 500);
+        }
+      }, 200);
+      return;
+    } catch (err) {
+      alert("No se pudo imprimir (popup bloqueado).");
+      return;
+    }
   }
   win.document.open();
   win.document.write(`<!doctype html>
@@ -53170,6 +53220,9 @@ const renderGestoriaRentaDashboard = (payload) => {
   const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
   const missing = Array.isArray(payload?.missing) ? payload.missing : [];
   const sinVincular = Array.isArray(payload?.sin_vincular) ? payload.sin_vincular : [];
+  const unremesadas = campaigns.filter(
+    (it) => Number(it?.precio_servicio || 0) > 0.0001 && Number(it?.cobrada || 0) === 1 && Number(it?.remesada || 0) !== 1
+  );
   const months = Array.isArray(payload?.months) ? payload.months : [];
   const cobrosMonths = Array.isArray(payload?.cobros?.months) ? payload.cobros.months : [];
   const cobrosSinFechaTotal = Number(payload?.cobros?.sin_fecha_total || 0);
@@ -53323,6 +53376,12 @@ const renderGestoriaRentaDashboard = (payload) => {
     value: numberFormatter.format(Number(counts.sin_responsable || 0)),
     note: "Encargos sin asignación.",
     onClick: () => setView("unassigned"),
+  });
+  addKpi({
+    title: "Sin remesar",
+    value: numberFormatter.format(unremesadas.length),
+    note: "Cobradas sin remesa.",
+    onClick: () => setView("unremesada"),
   });
   addKpi({
     title: "Clientes sin campaña",
@@ -53498,14 +53557,19 @@ const renderGestoriaRentaDashboard = (payload) => {
     if (view === "paid") {
       return base.filter((item) => Number(item.cobrada || 0) === 1);
     }
-    if (view === "remesadas") {
-      return base.filter((item) => Number(item.remesada || 0) === 1);
-    }
-    if (view === "sin_precio") {
-      return base.filter((item) => Number(item.precio_servicio || 0) <= 0.0001);
-    }
-    if (view === "unpaid") return unpaid;
-    if (view === "unassigned") return unassigned;
+	    if (view === "remesadas") {
+	      return base.filter((item) => Number(item.remesada || 0) === 1);
+	    }
+	    if (view === "unremesada") {
+	      return base.filter(
+	        (item) => Number(item.precio_servicio || 0) > 0.0001 && Number(item.cobrada || 0) === 1 && Number(item.remesada || 0) !== 1
+	      );
+	    }
+	    if (view === "sin_precio") {
+	      return base.filter((item) => Number(item.precio_servicio || 0) <= 0.0001);
+	    }
+	    if (view === "unpaid") return unpaid;
+	    if (view === "unassigned") return unassigned;
     if (view === "responsable" && viewParam) {
       const key = normalizeLookupText(viewParam) || viewParam;
       return base.filter((item) => String(item.responsable_key || "") === key);
@@ -53569,45 +53633,50 @@ const renderGestoriaRentaDashboard = (payload) => {
   };
 
   const root = document.createElement("div");
-  if (
-    view === "all" ||
-    view === "unpaid" ||
-    view === "unassigned" ||
-    view === "presented" ||
-    view === "draft" ||
-    view === "paid" ||
-    view === "remesadas" ||
-    view === "sin_precio" ||
-    view === "responsable"
-  ) {
+	  if (
+	    view === "all" ||
+	    view === "unpaid" ||
+	    view === "unassigned" ||
+	    view === "presented" ||
+	    view === "draft" ||
+	    view === "paid" ||
+	    view === "remesadas" ||
+	    view === "unremesada" ||
+	    view === "sin_precio" ||
+	    view === "responsable"
+	  ) {
     const items = resolveCampaignsForView();
     const title =
-      view === "all"
-        ? "Todas las campañas"
-        : view === "unpaid"
-        ? "Rentas sin cobrar"
-        : view === "unassigned"
-          ? "Rentas sin responsable"
-          : view === "presented"
-            ? "Rentas presentadas"
-            : view === "draft"
-              ? "Rentas borrador"
-              : view === "paid"
-                ? "Rentas cobradas"
-                : view === "remesadas"
-                  ? "Rentas remesadas"
+	      view === "all"
+	        ? "Todas las campañas"
+	        : view === "unpaid"
+	        ? "Rentas sin cobrar"
+	        : view === "unassigned"
+	          ? "Rentas sin responsable"
+	          : view === "unremesada"
+	            ? "Rentas sin remesar"
+	          : view === "presented"
+	            ? "Rentas presentadas"
+	            : view === "draft"
+	              ? "Rentas borrador"
+	              : view === "paid"
+	                ? "Rentas cobradas"
+	                : view === "remesadas"
+	                  ? "Rentas remesadas"
                   : view === "sin_precio"
                     ? "Rentas sin precio"
                 : `Rentas · ${viewParam || "Responsable"}`;
     const hint =
-      view === "all"
-        ? "Listado completo del ejercicio."
-        : view === "unpaid"
-        ? "Encargos con precio asignado y no marcados como cobrados."
-        : view === "unassigned"
-          ? "Encargos sin responsable asignado."
-          : view === "paid"
-            ? "Encargos marcados como cobrados."
+	      view === "all"
+	        ? "Listado completo del ejercicio."
+	        : view === "unpaid"
+	        ? "Encargos con precio asignado y no marcados como cobrados."
+	        : view === "unassigned"
+	          ? "Encargos sin responsable asignado."
+	          : view === "unremesada"
+	            ? "Encargos cobrados con precio asignado y no marcados como remesados."
+	          : view === "paid"
+	            ? "Encargos marcados como cobrados."
             : view === "draft"
               ? "Pendientes de presentar."
               : view === "presented"
@@ -54124,8 +54193,11 @@ const loadGestoriaDashboard = () => {
 		      } catch (e) {}
 		      state.gestoriaLastRentasEjercicio = year;
 		    }
-		    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
-	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
+			    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+			    if (gestoriaKpiRentasSinResponsable) gestoriaKpiRentasSinResponsable.textContent = counts.rentas_sin_responsable ?? 0;
+			    if (gestoriaKpiRentasSinCobrar) gestoriaKpiRentasSinCobrar.textContent = counts.rentas_sin_cobrar ?? 0;
+			    if (gestoriaKpiRentasSinRemesar) gestoriaKpiRentasSinRemesar.textContent = counts.rentas_sin_remesar ?? 0;
+		    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
 	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
@@ -54546,11 +54618,11 @@ const bindGestoriaDashboardKpis = () => {
 	      },
 	      title: "Modelos este mes",
 	    },
-	    {
-	      valueEl: gestoriaKpiRentasRealizadas,
-	      action: () => {
-	        openGestoriaServiceTab("gestoria-dash");
-	        window.setTimeout(() => {
+		    {
+		      valueEl: gestoriaKpiRentasRealizadas,
+		      action: () => {
+		        openGestoriaServiceTab("gestoria-dash");
+		        window.setTimeout(() => {
 	          try {
 	            setGestoriaDashboardView("rentas");
 	          } catch (e) {}
@@ -54564,11 +54636,11 @@ const bindGestoriaDashboardKpis = () => {
 	          }, 0);
 	        }, 0);
 	      },
-	      title: "Rentas realizadas",
-	    },
-		    {
-		      valueEl: gestoriaKpiRentasPendientes,
-		      action: () => {
+		      title: "Rentas realizadas",
+		    },
+			    {
+			      valueEl: gestoriaKpiRentasPendientes,
+			      action: () => {
 		        openGestoriaServiceTab("gestoria-dash");
 		        window.setTimeout(() => {
 		          try {
@@ -54581,13 +54653,67 @@ const bindGestoriaDashboardKpis = () => {
 		          }, 0);
 		        }, 0);
 		      },
-		      title: "Rentas pendientes",
+			      title: "Rentas pendientes",
+			    },
+			    {
+			      valueEl: gestoriaKpiRentasSinResponsable,
+			      action: () => {
+			        openGestoriaServiceTab("gestoria-dash");
+			        window.setTimeout(() => {
+			          try {
+			            setGestoriaDashboardView("rentas");
+			          } catch (e) {}
+			          window.setTimeout(() => {
+			            try {
+			              state.gestoriaRentaDashView = "unassigned";
+			            } catch (e) {}
+			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+			          }, 0);
+			        }, 0);
+			      },
+			      title: "Rentas sin responsable",
+			    },
+			    {
+			      valueEl: gestoriaKpiRentasSinCobrar,
+			      action: () => {
+			        openGestoriaServiceTab("gestoria-dash");
+			        window.setTimeout(() => {
+			          try {
+			            setGestoriaDashboardView("rentas");
+			          } catch (e) {}
+			          window.setTimeout(() => {
+			            try {
+			              state.gestoriaRentaDashView = "unpaid";
+			            } catch (e) {}
+			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+			          }, 0);
+			        }, 0);
+			      },
+			      title: "Rentas sin cobrar",
+			    },
+			    {
+			      valueEl: gestoriaKpiRentasSinRemesar,
+			      action: () => {
+			        openGestoriaServiceTab("gestoria-dash");
+			        window.setTimeout(() => {
+			          try {
+			            setGestoriaDashboardView("rentas");
+			          } catch (e) {}
+			          window.setTimeout(() => {
+			            try {
+			              state.gestoriaRentaDashView = "unremesada";
+			            } catch (e) {}
+			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+			          }, 0);
+			        }, 0);
+			      },
+			      title: "Rentas sin remesar",
+			    },
+		    {
+		      valueEl: gestoriaKpiSinVincular,
+		      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
+		      title: "Clientes sin vincular a Gestoría",
 		    },
-	    {
-	      valueEl: gestoriaKpiSinVincular,
-	      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
-	      title: "Clientes sin vincular a Gestoría",
-	    },
     {
       valueEl: gestoriaKpiGestionesCurso,
       action: () => openGestoriaTrabajosWithFilters({ estado: "En curso" }),
