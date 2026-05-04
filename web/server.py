@@ -28073,6 +28073,8 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
     ).fetchall()
 
     pending_count = 0
+    total_count = 0
+    presentadas_count = 0
     preview = []
     for row in rows:
         row_dict = dict(row)
@@ -28086,9 +28088,13 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         if not entry:
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
+        total_count += 1
+        if estado == "Borrador":
+            pending_count += 1
+        else:
+            presentadas_count += 1
         if estado != "Borrador":
             continue
-        pending_count += 1
         if len(preview) >= limit_val:
             continue
         doc_count = 0
@@ -28111,7 +28117,13 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
             }
         )
 
-    return {"ejercicio": ejercicio_val, "count": int(pending_count), "rows": preview}
+    return {
+        "ejercicio": ejercicio_val,
+        "count": int(pending_count),
+        "total": int(total_count),
+        "presentadas": int(presentadas_count),
+        "rows": preview,
+    }
 
 
 def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
@@ -69780,19 +69792,22 @@ class Handler(BaseHTTPRequestHandler):
                 placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
                 payload = {
-                    "counts": {
-                        "total": 0,
-                        "activos": 0,
-                        "autonomos": 0,
-                        "empresas": 0,
-                        "puntuales": 0,
-                        "modelos_mes": 0,
-                        "rentas_pendientes_presentar": 0,
-                        "sin_vincular_servicio": 0,
-                        "acciones_pendientes": 0,
-                        "presupuestos_estudio": 0,
-                        "encargos_pendientes": 0,
-                    },
+	                    "counts": {
+	                        "total": 0,
+	                        "activos": 0,
+	                        "autonomos": 0,
+	                        "empresas": 0,
+	                        "puntuales": 0,
+	                        "modelos_mes": 0,
+	                        "rentas_ejercicio": "",
+	                        "rentas_total_ejercicio": 0,
+	                        "rentas_realizadas": 0,
+	                        "rentas_pendientes_presentar": 0,
+	                        "sin_vincular_servicio": 0,
+	                        "acciones_pendientes": 0,
+	                        "presupuestos_estudio": 0,
+	                        "encargos_pendientes": 0,
+	                    },
                     "modelos": [],
                     "modelos_vencidos": [],
                     "rentas_pendientes": [],
@@ -69987,6 +70002,9 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 renta_summary = compute_gestoria_renta_pending_summary(conn, empresa_ids, ejercicio="", limit=12)
                 payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
+                payload["counts"]["rentas_total_ejercicio"] = int(renta_summary.get("total") or 0)
+                payload["counts"]["rentas_realizadas"] = int(renta_summary.get("presentadas") or 0)
+                payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
                 try:

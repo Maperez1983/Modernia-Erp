@@ -2617,6 +2617,7 @@ const gestoriaKpiAutonomos = document.getElementById("gestoriaKpiAutonomos");
 const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
 const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
+const gestoriaKpiRentasRealizadas = document.getElementById("gestoriaKpiRentasRealizadas");
 const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
 const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
 const gestoriaRentasPendientesCount = document.getElementById("gestoriaRentasPendientesCount");
@@ -54110,12 +54111,22 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiTotal) gestoriaKpiTotal.textContent = counts.total ?? 0;
     if (gestoriaKpiActivos) gestoriaKpiActivos.textContent = counts.activos ?? 0;
     if (gestoriaKpiAutonomos) gestoriaKpiAutonomos.textContent = counts.autonomos ?? 0;
-    if (gestoriaKpiEmpresas) gestoriaKpiEmpresas.textContent = counts.empresas ?? 0;
-    if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
-	    if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
-	    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
-    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
-    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
+	    if (gestoriaKpiEmpresas) gestoriaKpiEmpresas.textContent = counts.empresas ?? 0;
+	    if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
+		    if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
+		    if (gestoriaKpiRentasRealizadas) {
+		      const year = String(counts.rentas_ejercicio || "").trim();
+		      gestoriaKpiRentasRealizadas.textContent = counts.rentas_realizadas ?? 0;
+		      try {
+		        const card = gestoriaKpiRentasRealizadas.closest(".kpi-card");
+		        const note = card ? card.querySelector(".muted") : null;
+		        if (note) note.textContent = year ? `Ejercicio ${year}` : "Ejercicio fiscal";
+		      } catch (e) {}
+		      state.gestoriaLastRentasEjercicio = year;
+		    }
+		    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
+	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
 
@@ -54374,6 +54385,7 @@ const loadGestoriaDashboard = () => {
 	      gestoriaKpiEmpresas,
 	      gestoriaKpiPuntuales,
 	      gestoriaKpiModelosMes,
+	      gestoriaKpiRentasRealizadas,
 	      gestoriaKpiRentasPendientes,
 	      gestoriaKpiSinVincular,
 	      gestoriaRentasPendientesCount,
@@ -54526,19 +54538,51 @@ const bindGestoriaDashboardKpis = () => {
         }),
       title: "Clientes puntuales",
     },
-    {
-      valueEl: gestoriaKpiModelosMes,
-      action: () => {
-        openGestoriaCrm();
-        focusElementInView(gestoriaAlertModelos);
-      },
-      title: "Modelos este mes",
-    },
 	    {
-	      valueEl: gestoriaKpiRentasPendientes,
-	      action: () => openGestoriaCrmWithFilters({ tab: "renta" }),
-	      title: "Rentas pendientes",
+	      valueEl: gestoriaKpiModelosMes,
+	      action: () => {
+	        openGestoriaCrm();
+	        focusElementInView(gestoriaAlertModelos);
+	      },
+	      title: "Modelos este mes",
 	    },
+	    {
+	      valueEl: gestoriaKpiRentasRealizadas,
+	      action: () => {
+	        openGestoriaServiceTab("gestoria-dash");
+	        window.setTimeout(() => {
+	          try {
+	            setGestoriaDashboardView("rentas");
+	          } catch (e) {}
+	          window.setTimeout(() => {
+	            try {
+	              if (gestoriaDashRentaEjercicio && state.gestoriaLastRentasEjercicio) {
+	                gestoriaDashRentaEjercicio.value = state.gestoriaLastRentasEjercicio;
+	              }
+	            } catch (e) {}
+	            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+	          }, 0);
+	        }, 0);
+	      },
+	      title: "Rentas realizadas",
+	    },
+		    {
+		      valueEl: gestoriaKpiRentasPendientes,
+		      action: () => {
+		        openGestoriaServiceTab("gestoria-dash");
+		        window.setTimeout(() => {
+		          try {
+		            setGestoriaDashboardView("rentas");
+		          } catch (e) {}
+		          window.setTimeout(() => {
+		            try {
+		              focusElementInView(gestoriaAlertRentasPendientes);
+		            } catch (e) {}
+		          }, 0);
+		        }, 0);
+		      },
+		      title: "Rentas pendientes",
+		    },
 	    {
 	      valueEl: gestoriaKpiSinVincular,
 	      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
