@@ -67540,6 +67540,7 @@ class Handler(BaseHTTPRequestHandler):
                   h.banco,
                   h.oficina,
                   h.fecha_encargo,
+                  h.encargo,
                   h.fecha_firma,
                   h.estado,
                   h.asesor,
@@ -67548,7 +67549,13 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas h
                 LEFT JOIN clientes c ON c.id = h.cliente_id
                 WHERE h.empresa_id = ?
-                  AND LOWER(TRIM(COALESCE(h.estado, ''))) IN ('estudio', 'en estudio')
+                  AND (
+                    (
+                      h.encargo IS NOT NULL AND TRIM(h.encargo) <> ''
+                      AND LOWER(TRIM(h.encargo)) NOT IN ('no', 'rechazado', 'rechazada', 'cancelado', 'cancelada')
+                    )
+                    OR LOWER(TRIM(COALESCE(h.estado, ''))) IN ('encargo', 'encargado', 'encargada')
+                  )
                   AND (h.fecha_firma IS NULL OR TRIM(COALESCE(h.fecha_firma, '')) = '')
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(h.fecha_encargo, '')), ''), h.updated_at, h.created_at) DESC
                 LIMIT 500
@@ -72486,8 +72493,17 @@ class Handler(BaseHTTPRequestHandler):
                 "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
                 " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             )
-            estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
-            encargo_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('encargo', 'encargado', 'encargada')"
+            # Nota: históricamente el dashboard contaba "Estudio" como fase inicial.
+            # En el flujo real, la fase inicial se controla por el campo `encargo` (Sí/Pendiente),
+            # y opcionalmente por `estado = Encargo`.
+            encargo_field_expr = (
+                "encargo IS NOT NULL AND TRIM(encargo) <> '' "
+                "AND LOWER(TRIM(encargo)) NOT IN ('no', 'rechazado', 'rechazada', 'cancelado', 'cancelada')"
+            )
+            encargo_state_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('encargo', 'encargado', 'encargada')"
+            encargo_expr = f"({encargo_field_expr} OR {encargo_state_expr})"
+            # Compatibilidad: tratamos "estudio" como "encargo" para KPIs legacy.
+            estudio_expr = encargo_expr
             pendientes_firma_expr = f"NOT ({closed_expr})"
 
             # julianday() existe en SQLite pero NO en Postgres.

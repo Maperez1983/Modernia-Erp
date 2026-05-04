@@ -35387,9 +35387,29 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
   const banco = getHipotecaFieldValue(row, columns, ["banco", "entidad", "entidad_financiera"]);
   const oficina = getHipotecaFieldValue(row, columns, ["oficina"]);
   const estado = getHipotecaFieldValue(row, columns, ["estado"]);
+  const encargo = getHipotecaFieldValue(row, columns, ["encargo"]);
   const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
   const fechaEncargo = getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco"]);
   const anio = getHipotecaFieldValue(row, columns, ["anio", "año", "year"]);
+
+  const estadoNorm = normalizeSimple(estado);
+  const encargoNorm = normalizeSimple(encargo);
+  const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
+  const isEncargo =
+    estadoNorm === "encargo" ||
+    estadoNorm === "encargado" ||
+    estadoNorm === "encargada" ||
+    (encargoNorm && !encargoRejected.has(encargoNorm));
+
+  const extractYears = (value) => {
+    const raw = String(value || "");
+    const matches = raw.match(/\b(19\d{2}|20\d{2})\b/g);
+    return matches ? matches : [];
+  };
+  const yearTokens = Array.from(
+    new Set([...extractYears(fechaFirma), ...extractYears(fechaEncargo), ...extractYears(anio)])
+  );
+  const stageTags = isEncargo ? ["encargo"] : [];
 
   const clienteInmueble = safeParseJsonObject(getHipotecaFieldValue(row, columns, ["cliente_inmueble_json"]));
   const titulares = [
@@ -35420,7 +35440,7 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
     .map((token) => String(token || "").toUpperCase().replace(/[^0-9A-Z]/g, ""))
     .filter(Boolean);
 
-  const textParts = [cliente, titulares, banco, oficina, estado, fechaFirma, fechaEncargo, anio].filter(Boolean);
+  const textParts = [cliente, titulares, banco, oficina, estado, encargo, ...stageTags, fechaFirma, fechaEncargo, anio, ...yearTokens].filter(Boolean);
   const normalizedText = normalizeLookupText(textParts.join(" "));
   return { normalizedText, dniTokens, normalizedDocTokens };
 };
@@ -39030,10 +39050,10 @@ const loadHipotecaDashboard = () => {
           action: () => openHipotecaBdtFromDashboard(currentYear),
         },
         {
-          title: `Hipotecas en estudio ${currentYear}`,
-          value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
-          note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
-          action: () => openHipotecaBdtFromDashboard(`estudio ${currentYear}`),
+          title: `Hipotecas en encargo ${currentYear}`,
+          value: numberFormatter.format(data?.current?.encargos || 0),
+          note: `Total: ${numberFormatter.format(totals?.encargos || 0)}`,
+          action: () => openHipotecaBdtFromDashboard(`encargo ${currentYear}`),
         },
         {
           title: `Comisión cliente ${currentYear}`,
@@ -39210,11 +39230,20 @@ const loadHipotecaContabilidadHipotecas = async () => {
   const rows = rowsToObjectsByColumns(columns, data?.rows || []);
   hipotecaContabilidadHipoteca.innerHTML = "";
   hipotecaContabilidadHipoteca.appendChild(createOption("", "Selecciona hipoteca"));
-  const pendingStudyRows = [];
+  const pendingEncargoRows = [];
   const otherRows = [];
   rows.forEach((row) => {
-    if (normalizeSimple(row.estado) === "estudio" || normalizeSimple(row.estado) === "en estudio") {
-      pendingStudyRows.push(row);
+    const estado = normalizeSimple(row.estado);
+    const encargo = normalizeSimple(row.encargo);
+    const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
+    const isEncargo =
+      estado === "encargo" ||
+      estado === "encargado" ||
+      estado === "encargada" ||
+      (encargo && !encargoRejected.has(encargo));
+    const isSigned = Boolean(String(row.fecha_firma || "").trim());
+    if (isEncargo && !isSigned) {
+      pendingEncargoRows.push(row);
       return;
     }
     otherRows.push(row);
@@ -39231,11 +39260,12 @@ const loadHipotecaContabilidadHipotecas = async () => {
           .join(" · ")
       );
       option.dataset.hipotecaEstado = row.estado || "";
+      option.dataset.hipotecaEncargo = row.encargo || "";
       group.appendChild(option);
     });
     hipotecaContabilidadHipoteca.appendChild(group);
   };
-  appendOptions(pendingStudyRows, "Pendientes de cobro · Estudio");
+  appendOptions(pendingEncargoRows, "Pendientes de cobro · Encargo");
   appendOptions(otherRows, "Resto de hipotecas");
   return rows;
 };
@@ -40369,22 +40399,16 @@ const renderFinDashboard = (empresaId) => {
           onClick: () => openHipotecasFromKpi("Firmada"),
         },
         {
-          title: "Hipotecas en estudio",
-          value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
-          note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
-          onClick: () => openHipotecasFromKpi("Estudio"),
+          title: "Hipotecas en encargo",
+          value: numberFormatter.format(data?.current?.encargos || 0),
+          note: `Total: ${numberFormatter.format(totals?.encargos || 0)}`,
+          onClick: () => openHipotecasFromKpi("Encargo"),
         },
         {
           title: "Pendientes de firma",
           value: numberFormatter.format(data?.current?.pendientes_firma || 0),
           note: `Total: ${numberFormatter.format(totals?.pendientes_firma || 0)}`,
           onClick: () => openHipotecasFromKpi("Firma"),
-        },
-        {
-          title: "Encargos",
-          value: numberFormatter.format(data?.current?.encargos || 0),
-          note: `Total: ${numberFormatter.format(totals?.encargos || 0)}`,
-          onClick: () => openHipotecasFromKpi("Encargo"),
         },
         {
           title: "Rentabilidad negocio",
@@ -59637,7 +59661,7 @@ const loadFinHipotecasEstudio = async (empresaId) => {
   const rows = data.rows || [];
   state.finHipotecasEstudioRows = rows;
   if (!rows.length) {
-    finHipotecasEstudioTable.innerHTML = "<p class='muted'>Sin hipotecas en estudio.</p>";
+    finHipotecasEstudioTable.innerHTML = "<p class='muted'>Sin hipotecas en encargo.</p>";
     finHipotecasEstudioInfo.textContent = "";
     selectFinHipoteca(null);
     return;
@@ -59649,7 +59673,7 @@ const loadFinHipotecasEstudio = async (empresaId) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["encargo", "cliente", "banco", "estado", "asesor", "acciones"].forEach((label) => {
+  ["fecha encargo", "cliente", "banco", "estado", "asesor", "acciones"].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = formatHeader(label);
     headRow.appendChild(th);
@@ -59660,7 +59684,7 @@ const loadFinHipotecasEstudio = async (empresaId) => {
   rows.forEach((row) => {
     const tr = document.createElement("tr");
     if (row.id === selectedId) tr.classList.add("is-selected");
-    [row.fecha_encargo || "-", row.cliente || "-", row.banco || "-", normalizeFinStage(row.estado || "Estudio"), row.asesor || "-"].forEach((value) => {
+    [row.fecha_encargo || "-", row.cliente || "-", row.banco || "-", normalizeFinStage(row.estado || "Encargo"), row.asesor || "-"].forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value === null ? "" : value;
       tr.appendChild(td);
@@ -59688,7 +59712,7 @@ const loadFinHipotecasEstudio = async (empresaId) => {
   table.appendChild(tbody);
   finHipotecasEstudioTable.innerHTML = "";
   finHipotecasEstudioTable.appendChild(table);
-  finHipotecasEstudioInfo.textContent = `Mostrando ${rows.length} hipotecas en estudio.`;
+  finHipotecasEstudioInfo.textContent = `Mostrando ${rows.length} hipotecas en encargo.`;
   const selectedRow = rows.find((row) => row.id === selectedId) || rows[0];
   selectFinHipoteca(selectedRow);
 };
@@ -76999,7 +77023,7 @@ if (finHipotecaCreateAction) {
     const empresa = resolveCrmFinEmpresa();
     const row = state.finSelectedHipoteca;
     if (!empresa?.id || !row?.id) {
-      window.alert("Selecciona primero una hipoteca en estudio.");
+      window.alert("Selecciona primero una hipoteca en encargo.");
       return;
     }
     openActionCreator(new Date().toISOString().slice(0, 10), "", "financiaciones", {
@@ -78133,7 +78157,15 @@ if (hipotecaContabilidadHipoteca && hipotecaContabilidadForm) {
         dateInput.value = match[1];
       }
     }
-    if (normalizeSimple(selected.dataset.hipotecaEstado) === "estudio" || normalizeSimple(selected.dataset.hipotecaEstado) === "en estudio") {
+    const estado = normalizeSimple(selected.dataset.hipotecaEstado);
+    const encargo = normalizeSimple(selected.dataset.hipotecaEncargo);
+    const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
+    const isEncargo =
+      estado === "encargo" ||
+      estado === "encargado" ||
+      estado === "encargada" ||
+      (encargo && !encargoRejected.has(encargo));
+    if (isEncargo) {
       if (gestionInput) gestionInput.value = "Comisión cliente";
       if (tipoInput) tipoInput.value = "Ingreso";
     }
