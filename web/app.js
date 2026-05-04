@@ -21565,6 +21565,7 @@ const syncCrmTecnocloudVerticalNav = () => {
   const vertical = resolveCrmTecnocloudVertical();
   const isGestoria = vertical === "gestoria";
   const isInmo = vertical === "inmo";
+  const isFin = vertical === "fin";
   const allowedViews =
     vertical === "seguros"
       ? new Set(["seguros"])
@@ -21615,6 +21616,23 @@ const syncCrmTecnocloudVerticalNav = () => {
     }
   } catch (e) {}
 
+  // Sidebar Financiaciones: accesos operativos (Dash/Listado/Agenda/Más)
+  try {
+    if (crmLightningSidebar) {
+      crmLightningSidebar.querySelectorAll(".crm-side-fin").forEach((node) => {
+        node.classList.toggle("hidden", !isFin);
+      });
+      crmLightningSidebar.querySelectorAll(".crm-side-fin-launcher").forEach((node) => {
+        node.classList.toggle("hidden", isFin);
+      });
+      crmLightningSidebar.querySelectorAll('.crm-side-item.crm-side-fin[data-hipoteca-section]').forEach((btn) => {
+        const desired = String(state.hipotecaAltaView || "dashboard");
+        const current = desired === "alta" ? "bdt" : desired;
+        btn.classList.toggle("active", isFin && String(btn.dataset.hipotecaSection || "") === current);
+      });
+    }
+  } catch (e) {}
+
   // No mezclar pantallas: Gestoría NO debe mostrar el workspace del CRM Inmobiliaria.
   // Reutilizamos el estilo (topbar / módulos). La vista activa la decide `setCrmWorkspaceView`.
   if (crmWorkspaceShell) {
@@ -21639,7 +21657,7 @@ const syncCrmTecnocloudVerticalNav = () => {
 	    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria" || vertical === "fin");
 	    // En escritorio, la navegación principal va en la barra lateral; no duplicar con módulos en topbar.
 	    if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria" || !isNarrow);
-	    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin");
+	    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin" || !isNarrow);
 	    if (gestoriaModules) {
 	      gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
 	        btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
@@ -35456,12 +35474,20 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "") => {
     .sort((a, b) => getHipotecaFirmaTimestamp(b, columns) - getHipotecaFirmaTimestamp(a, columns));
 
   if (!normalizedQuery && !docQuery) {
+    const getSortTimestamp = (row) => {
+      const firma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+      const encargo = getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco"]);
+      return parseDateToTimestamp(firma || encargo);
+    };
+    const sorted = rows
+      .slice()
+      .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
     return {
-      mode: "latest_signed",
+      mode: "all",
       total: rows.length,
       signedTotal: signed.length,
-      filtered: signedSorted.slice(0, 5),
-      matchCount: signedSorted.slice(0, 5).length,
+      filtered: sorted.slice(0, 200),
+      matchCount: rows.length,
     };
   }
 
@@ -38278,8 +38304,8 @@ const renderHipotecaBdtList = ({ columns = [], rows = [], query } = {}) => {
     renderHipotecaBdtCards({ columns, rows: filteredRows });
   }
   if (hipotecaBdtInfo) {
-    if (result.mode === "latest_signed") {
-      hipotecaBdtInfo.textContent = `Mostrando últimas ${filteredRows.length} hipotecas firmadas · firmadas totales ${result.signedTotal} · dataset ${result.total}.`;
+    if (result.mode === "all") {
+      hipotecaBdtInfo.textContent = `Mostrando ${filteredRows.length} de ${result.total} hipotecas · firmadas ${result.signedTotal}. Usa el buscador para afinar.`;
     } else {
       const shown = filteredRows.length;
       hipotecaBdtInfo.textContent = `Resultados ${shown} de ${result.matchCount} · firmadas ${result.signedTotal} · dataset ${result.total}.`;
@@ -39441,6 +39467,14 @@ const setHipotecaAltaView = (view) => {
     if (finModules) {
       finModules.querySelectorAll("button.tab").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
+      });
+    }
+  } catch (e) {}
+  try {
+    if (crmLightningSidebar) {
+      const current = next === "alta" ? "bdt" : next;
+      crmLightningSidebar.querySelectorAll('.crm-side-item.crm-side-fin[data-hipoteca-section]').forEach((btn) => {
+        btn.classList.toggle("active", String(btn.dataset.hipotecaSection || "") === current);
       });
     }
   } catch (e) {}
@@ -78032,6 +78066,34 @@ if (hipotecaTabs) {
     });
   });
 }
+
+// Sidebar Financiaciones (verde): navegación principal y accesos a "Más".
+try {
+  if (crmLightningSidebar) {
+    crmLightningSidebar.querySelectorAll("button.crm-side-fin[data-hipoteca-section]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const section = String(btn.dataset.hipotecaSection || "").trim();
+        if (!section) return;
+        openFinCrm();
+        setHipotecaAltaView(section);
+      });
+    });
+    crmLightningSidebar.querySelectorAll("button.crm-side-fin[data-fin-open-sim]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        openFinServiceTab("fin-sim");
+      });
+    });
+    crmLightningSidebar.querySelectorAll("details.crm-side-more.crm-side-fin").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (!details.open) return;
+        crmLightningSidebar.querySelectorAll("details.crm-side-more").forEach((other) => {
+          if (other === details) return;
+          other.open = false;
+        });
+      });
+    });
+  }
+} catch (e) {}
 
 try {
   const crmTopFinModules = document.getElementById("crmTopFinModules");
