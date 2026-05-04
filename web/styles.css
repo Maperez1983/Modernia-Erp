@@ -3811,6 +3811,7 @@ body.theme-operativa .workspace-home-count {
 #crmSection .crm-lightning-sidebar {
   position: sticky;
   top: calc(14px + var(--safe-top));
+  z-index: 90;
   align-self: start;
   display: grid;
   gap: 10px;
@@ -4011,7 +4012,7 @@ body.theme-operativa .workspace-home-count {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 16px 28px rgba(11, 29, 51, 0.18);
   color: var(--ink);
-  z-index: 55;
+  z-index: 120;
 }
 
 #crmSection .crm-lightning-main {

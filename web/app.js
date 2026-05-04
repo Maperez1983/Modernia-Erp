@@ -1533,6 +1533,11 @@ const setCurrentUser = (name) => {
   } else {
     localStorage.removeItem("crm_current_user");
   }
+  try {
+    if (typeof loadSegurosRenewalAlertForUser === "function") {
+      loadSegurosRenewalAlertForUser();
+    }
+  } catch (e) {}
 };
 
 const UI = window.CRMUI || null;
@@ -21537,7 +21542,13 @@ const resolveCrmTecnocloudVertical = () => {
   // Tab explícito tiene prioridad sobre querystring (evita "mezclas" por URLs antiguas).
   if (tab === "seguros-crm") return "seguros";
   if (tab === "fin-crm" || tab === "fin-sim") return "fin";
-  if (tab === "crm") return "inmo";
+  if (tab === "crm") {
+    const view = String(state.crmWorkspaceView || "").trim();
+    if (view === "fin") return "fin";
+    if (view === "seguros") return "seguros";
+    if (view === "gestoria") return "gestoria";
+    return "inmo";
+  }
   if (tab.startsWith("gestoria")) return "gestoria";
   if (crmContext === "gestoria") return "gestoria";
   if (crmContext === "seguros") return "seguros";
@@ -21608,6 +21619,14 @@ const syncCrmTecnocloudVerticalNav = () => {
   applyToRoot(crmWorkspaceTabs);
   applyToRoot(crmLightningSidebar);
 
+  try {
+    if (crmLightningSidebar) {
+      crmLightningSidebar.querySelectorAll(".crm-side-inmo-only").forEach((node) => {
+        node.classList.toggle("hidden", vertical !== "inmo");
+      });
+    }
+  } catch (e) {}
+
   // Sidebar Gestoría: reutiliza el patrón "Lightning" pero navega por tabs propios (gestoria-*)
   // en lugar de views (data-crm-view). Se muestra solo en contexto Gestoría.
   try {
@@ -21662,7 +21681,8 @@ const syncCrmTecnocloudVerticalNav = () => {
 	    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria" || vertical === "fin");
 	    // En escritorio, la navegación principal va en la barra lateral; no duplicar con módulos en topbar.
 	    if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria" || !isNarrow);
-	    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin" || !isNarrow);
+	    // En Financiaciones, la navegación vive en el sidebar (no duplicar en topbar).
+	    if (finModules) finModules.classList.toggle("hidden", true);
 	    if (gestoriaModules) {
 	      gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
 	        btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
