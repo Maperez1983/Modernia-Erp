@@ -84,6 +84,13 @@ def looks_good_tomador(value: str) -> bool:
     if not cleaned or len(cleaned) < 5:
         return False
     key = normalize_lookup_text(cleaned)
+    # Evita capturas típicas de dirección/etiquetas.
+    if any(tok in f" {key} " for tok in (" CL ", " CALLE ", " AVDA ", " AVD ", " AVENIDA ", " DIRECCION ", " DIRECCIÓN ")):
+        return False
+    if re.search(r"\b\d{1,4}\b", cleaned):
+        return False
+    if key in ("EL MISMO", "MISMO", "ASEGURADORA", "ASEGURADO"):
+        return False
     if any(token in key for token in ("ASEGURADORA", "POLIZA", "PÓLIZA", "TOMADOR", "SEGURO")):
         return False
     # Persona: al menos 2 palabras; Empresa: admite 2 palabras + SL/S.A.
