@@ -40246,17 +40246,25 @@ const renderFinDashboard = (empresaId) => {
   updateTableVisibility();
   api(`/api/hipoteca_dashboard?empresa_id=${empresaId}`)
     .then((data) => {
-      const currentYear = String(data?.current_year || new Date().getFullYear());
-      const totals = data?.totals || {};
-      const openHipotecasFromKpi = (q) => {
-        if (finDashboardSection) finDashboardSection.classList.add("hidden");
-        if (finCrmSection) finCrmSection.classList.remove("hidden");
-        if (finCrmSearch) finCrmSearch.value = String(q || "");
-        loadFinHipotecasRegistradas();
-        try {
-          finCrmSection?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-        } catch {}
-      };
+	      const currentYear = String(data?.current_year || new Date().getFullYear());
+	      const totals = data?.totals || {};
+	      const openHipotecasFromKpi = (q) => {
+	        // Navegación robusta: abrir CRM Financiaciones y forzar el listado (BDT).
+	        state.hipotecaAltaView = "bdt";
+	        try {
+	          openFinCrm();
+	        } catch (e) {}
+	        try {
+	          setHipotecaAltaView("bdt");
+	        } catch (e) {}
+	        if (finCrmSearch) finCrmSearch.value = String(q || "");
+	        try {
+	          loadFinHipotecasRegistradas();
+	        } catch (e) {}
+	        try {
+	          finCrmSection?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+	        } catch {}
+	      };
       const kpis = [
         {
           title: `Hipotecas ${currentYear}`,
