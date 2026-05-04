@@ -6094,6 +6094,10 @@
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
 	              <span class="tc-mod-label">Dashboard</span>
 	            </button>
+              <button class="tab tc-module" type="button" data-seguros-tab="calidad" title="Calidad del dato">
+                <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clipboard"></use></svg></span>
+                <span class="tc-mod-label">Calidad</span>
+              </button>
 	            <button class="tab tc-module" type="button" data-seguros-tab="renovaciones" title="Renovaciones">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clock"></use></svg></span>
 	              <span class="tc-mod-label">Renov.</span>
@@ -6444,62 +6448,11 @@
 	            <div id="segurosComplianceKpis"></div>
 	          </div>
 	          <div class="form-card">
-	            <div class="section-head">
-	              <div>
-	                <h3>Calidad del dato</h3>
-	                <p class="muted">Alertas para mantener KPIs, renovaciones y cartera fiables.</p>
-	              </div>
-	              <button type="button" id="segurosQualityReload" class="secondary ghost">Actualizar</button>
-	            </div>
-	            <div id="segurosDataQuality"></div>
-	          </div>
-	          <div class="form-card">
 	            <h3>KPIs por ramo</h3>
 	            <p class="muted">Pulsa un ramo para ver sus pólizas y abrir/editar.</p>
 	            <div id="segurosRamoKpis" class="cliente-ramo-kpis"></div>
             <div id="segurosRamoChart"></div>
             <div id="segurosRamoListado" class="cliente-ramo-listado"></div>
-          </div>
-          <div class="form-card">
-            <h3>Acciones de póliza</h3>
-            <p class="muted">Renovar o anular con trazabilidad completa.</p>
-            <form id="segurosPolizaAccionForm" class="form-grid">
-              <label>
-                Póliza
-                <select id="segurosPolizaAccionId" name="id"></select>
-              </label>
-              <label>
-                Acción
-                <select id="segurosPolizaAccionTipo" name="accion">
-                  <option value="contratar">Contratar</option>
-                  <option value="activar">Activar (entrada en vigor)</option>
-                  <option value="renovar">Renovar</option>
-                  <option value="anular">Anular</option>
-                </select>
-              </label>
-              <label>
-                Fecha
-                <input id="segurosPolizaAccionFecha" name="fecha" type="date" />
-              </label>
-              <label>
-                Motivo (anulación)
-                <select id="segurosPolizaAccionMotivo" name="motivo_baja">
-                  <option value="">-</option>
-                  <option value="precio">Precio</option>
-                  <option value="siniestralidad">Siniestralidad</option>
-                  <option value="otros">Otros</option>
-                </select>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Aplicar acción</button>
-                <span id="segurosPolizaAccionStatus" class="muted"></span>
-              </div>
-            </form>
-          </div>
-          <div class="form-card">
-            <h3>Insights de mercado</h3>
-            <p class="muted">Distribución de pólizas por ramo y compañía.</p>
-            <div id="segurosInsights"></div>
           </div>
           <div class="form-card">
             <h3>Gráficos</h3>
@@ -6561,6 +6514,18 @@
             </div>
 	          </div>
 	          </div>
+            <div class="seguros-tab" data-seguros-tab="calidad">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Calidad del dato</h3>
+                    <p class="muted">Alertas para mantener KPIs, renovaciones y cartera fiables.</p>
+                  </div>
+                  <button type="button" id="segurosQualityReload" class="secondary ghost">Actualizar</button>
+                </div>
+                <div id="segurosDataQuality"></div>
+              </div>
+            </div>
 	          <div class="seguros-tab" data-seguros-tab="renovaciones">
 	          <div class="form-card">
 	            <div class="section-head">
@@ -6968,6 +6933,47 @@
             </form>
             <div id="segurosAgendaTable"></div>
             <div class="footer" id="segurosAgendaInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Acciones de póliza</h3>
+            <p class="muted">Renovar o anular con trazabilidad completa.</p>
+            <form id="segurosPolizaAccionForm" class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosPolizaAccionId" name="id"></select>
+              </label>
+              <label>
+                Acción
+                <select id="segurosPolizaAccionTipo" name="accion">
+                  <option value="contratar">Contratar</option>
+                  <option value="activar">Activar (entrada en vigor)</option>
+                  <option value="renovar">Renovar</option>
+                  <option value="anular">Anular</option>
+                </select>
+              </label>
+              <label>
+                Fecha
+                <input id="segurosPolizaAccionFecha" name="fecha" type="date" />
+              </label>
+              <label>
+                Motivo (anulación)
+                <select id="segurosPolizaAccionMotivo" name="motivo_baja">
+                  <option value="">-</option>
+                  <option value="precio">Precio</option>
+                  <option value="siniestralidad">Siniestralidad</option>
+                  <option value="otros">Otros</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Aplicar acción</button>
+                <span id="segurosPolizaAccionStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <h3>Insights de mercado</h3>
+            <p class="muted">Distribución de pólizas por ramo y compañía.</p>
+            <div id="segurosInsights"></div>
           </div>
           </div>
           <div class="seguros-tab" data-seguros-tab="campanas">

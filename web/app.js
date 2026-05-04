@@ -33872,6 +33872,9 @@ const setSegurosTab = (name) => {
   if (name === "renovaciones") {
     loadSegurosRenovacionesQueue();
   }
+  if (name === "calidad") {
+    loadSegurosDataQuality();
+  }
   if (name === "contabilidad") {
     hydrateSegurosContabilidadFormSelects().catch(() => {});
     loadSegurosContabilidad();
