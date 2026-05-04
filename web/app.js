@@ -28638,6 +28638,30 @@ const fillRoundedRect = (ctx, x, y, w, h, r = 8) => {
   ctx.fill();
 };
 
+const formatCompactNumberEs = (value, { suffix = "", decimals = 1 } = {}) => {
+  const num = Number(value || 0);
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+  const d = Math.max(0, Math.min(2, Number(decimals ?? 1)));
+  const fmt = (n) =>
+    new Intl.NumberFormat("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: d }).format(n);
+  if (abs >= 1e9) return `${sign}${fmt(abs / 1e9)} B${suffix}`;
+  if (abs >= 1e6) return `${sign}${fmt(abs / 1e6)} M${suffix}`;
+  if (abs >= 1e3) return `${sign}${fmt(abs / 1e3)} k${suffix}`;
+  return `${sign}${new Intl.NumberFormat("es-ES").format(abs)}${suffix}`;
+};
+
+const niceAxisMax = (rawMax) => {
+  const max = Math.max(0, Number(rawMax || 0));
+  if (!max) return 1;
+  const target = max * 1.08; // headroom
+  const exp = Math.floor(Math.log10(target));
+  const base = 10 ** exp;
+  const f = target / base;
+  const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return nf * base;
+};
+
 const drawBarChart = (canvas, labels, datasets, options = {}) => {
   if (!canvas) return;
   const ctx = prepareCanvas(canvas);
@@ -28699,7 +28723,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const axisMaxChars = options.axisLabelMaxChars
     || (rotateLabels ? (heavyCrowding ? 16 : 20) : Math.max(8, Math.floor(estimatedGroupWidth / 6)));
   const axisBottomPadding = options.axisBottomPadding
-    || (rotateLabels ? (heavyCrowding ? 112 : 96) : 78);
+    || (rotateLabels ? (heavyCrowding ? 112 : 96) : 56);
   const legendPosition = options.legendPosition || "top";
   let legendRightPadding = 0;
   if (options.legend && legendPosition === "right") {
@@ -28735,10 +28759,11 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       return n;
     })
   );
-  const maxValue = Math.max(
+  const rawMaxValue = Math.max(
     1,
     ...normalizedChartValues.map((val) => Math.abs(val))
   );
+  const maxValue = options.niceScale === false ? rawMaxValue : niceAxisMax(rawMaxValue);
   const secondaryValues = secondaryLineSets.flatMap((set) =>
     (set.values || []).map((val) => Number(val || 0))
   );
@@ -28757,12 +28782,25 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const gridLines = 4;
   ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
+  const axisFormat =
+    typeof options.yAxisFormat === "function"
+      ? options.yAxisFormat
+      : (value) => formatCompactNumberEs(value);
   for (let i = 0; i <= gridLines; i += 1) {
     const y = padding.top + (chartHeight / gridLines) * i;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(width - padding.right, y);
     ctx.stroke();
+    if (options.showYAxisLabels) {
+      const ratio = i / gridLines;
+      const value = maxValue - ratio * maxValue;
+      const text = axisFormat(value);
+      ctx.fillStyle = theme.muted;
+      ctx.font = `500 10px ${theme.fontBody}`;
+      const tw = ctx.measureText(text).width;
+      ctx.fillText(text, Math.max(2, padding.left - tw - 6), y - 2);
+    }
   }
 
   ctx.strokeStyle = theme.axis;
@@ -39181,7 +39219,13 @@ const loadHipotecaDashboard = () => {
                 format: (value) => numberFormatter.format(value),
               },
             ],
-            { legend: false, showValues: true, tooltip: true }
+            {
+              legend: false,
+              showValues: false,
+              tooltip: true,
+              showYAxisLabels: true,
+              yAxisFormat: (value) => formatCompactNumberEs(value, { decimals: 0 }),
+            }
           );
 
           const volumenYears = buildYearIndex([data?.series_volumen || []]);
@@ -39196,7 +39240,13 @@ const loadHipotecaDashboard = () => {
                 format: (value) => euroFormatter.format(value),
               },
             ],
-            { legend: false, showValues: true, tooltip: true }
+            {
+              legend: false,
+              showValues: false,
+              tooltip: true,
+              showYAxisLabels: true,
+              yAxisFormat: (value) => formatCompactNumberEs(value, { suffix: "€", decimals: 1 }),
+            }
           );
 
           const plazoYears = buildYearIndex([data?.series_plazo || []]);
@@ -39211,7 +39261,13 @@ const loadHipotecaDashboard = () => {
                 format: (value) => formatDaysMetric(value),
               },
             ],
-            { legend: false, showValues: true, tooltip: true }
+            {
+              legend: false,
+              showValues: false,
+              tooltip: true,
+              showYAxisLabels: true,
+              yAxisFormat: (value) => formatCompactNumberEs(value, { suffix: "d", decimals: 0 }),
+            }
           );
 
           const comisionYears = buildYearIndex([data?.series_comision || []]);
@@ -39226,7 +39282,13 @@ const loadHipotecaDashboard = () => {
                 format: (value) => euroFormatter.format(value),
               },
             ],
-            { legend: false, showValues: true, tooltip: true }
+            {
+              legend: false,
+              showValues: false,
+              tooltip: true,
+              showYAxisLabels: true,
+              yAxisFormat: (value) => formatCompactNumberEs(value, { suffix: "€", decimals: 1 }),
+            }
           );
 
           const oficinaLabels = (data?.series_oficinas || []).map((item) => item.label);
@@ -39244,13 +39306,15 @@ const loadHipotecaDashboard = () => {
             ],
             {
               legend: false,
-              showValues: true,
+              showValues: false,
               tooltip: true,
+              showYAxisLabels: true,
+              yAxisFormat: (value) => formatCompactNumberEs(value, { decimals: 0 }),
               rotateLabels: true,
-              axisBottomPadding: 132,
-              axisLabelMaxChars: 14,
+              axisBottomPadding: 118,
+              axisLabelMaxChars: 18,
               labelSkipStep: oficinaLabels.length >= 10 ? 2 : 1,
-              labelRotationAngle: Math.PI / 3.0,
+              labelRotationAngle: Math.PI / 3.35,
             }
           );
           if (hipotecaDashboardInfo) {
