@@ -74721,9 +74721,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             total_real = conn.execute(
                 f"""
@@ -74731,9 +74732,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
 
             total_con_numero = conn.execute(
@@ -74742,10 +74744,11 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                   AND {poliza_strict_expr} IS NOT NULL
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
