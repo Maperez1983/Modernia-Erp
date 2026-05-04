@@ -3506,6 +3506,7 @@ const fincasRenovacionChart = document.getElementById("fincasRenovacionChart");
 const fincasOportunidadesChart = document.getElementById("fincasOportunidadesChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
+const segurosRenewalAlert = document.getElementById("segurosRenewalAlert");
 const legalRadarAlert = document.getElementById("legalRadarAlert");
 const companySummary = document.getElementById("companySummary");
 const companySummaryTitle = document.getElementById("companySummaryTitle");
@@ -21052,8 +21053,11 @@ const setPage = (page) => {
   if (homeSection) {
     homeSection.classList.toggle("hidden", page !== "home");
   }
-  if (renewalAlert) {
-    renewalAlert.classList.toggle("hidden", page !== "home");
+  if (renewalAlert && page !== "home") {
+    renewalAlert.classList.add("hidden");
+  }
+  if (segurosRenewalAlert && page !== "home") {
+    segurosRenewalAlert.classList.add("hidden");
   }
   if (explorerSection) {
     explorerSection.classList.toggle("hidden", page !== "empresa");
@@ -24341,6 +24345,8 @@ const openWorkspacePortalPublic = async (token) => {
   }
   try {
     const data = await api(`/api/workspace_portal_public?token=${encodeURIComponent(token)}`);
+    const importadorActivo = Number(data?.importador_facturas || 0) === 1;
+    const facturasRecibidas = Array.isArray(data?.facturas_recibidas) ? data.facturas_recibidas : [];
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">
@@ -24368,15 +24374,74 @@ const openWorkspacePortalPublic = async (token) => {
 	              <strong>${numberFormatter.format((data.facturas || []).length)}</strong>
 	            </div>
 	            <div class="workspace-mini-kpi">
+	              <span>Facturas recibidas</span>
+	              <strong>${numberFormatter.format(facturasRecibidas.length)}</strong>
+	            </div>
+	            <div class="workspace-mini-kpi">
 	              <span>Requerimientos</span>
 	              <strong>${numberFormatter.format((data.requerimientos || []).length)}</strong>
 	            </div>
 	            <div class="workspace-mini-kpi">
 	              <span>Siniestros</span>
 	              <strong>${numberFormatter.format((data.seguros_siniestros || []).length)}</strong>
-	            </div>
 	          </div>
 	        </div>
+        </div>
+        ${
+          importadorActivo
+            ? `
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Importador Facturas</h3>
+                    <p class="muted">Sube tus facturas (PDF/imagen). Se procesan con OCR y se incorporan a contabilidad.</p>
+                  </div>
+                  <div class="toolbar">
+                    <a class="secondary" href="/api/workspace_portal_facturas_excel?token=${encodeURIComponent(token)}" target="_blank" rel="noreferrer">Descargar Excel</a>
+                  </div>
+                </div>
+                <form id="workspacePortalPublicFacturaForm" class="form-grid">
+                  <label class="span-2">
+                    Archivo (factura)
+                    <input type="file" name="archivo" required accept="application/pdf,image/*" />
+                  </label>
+                  <label class="span-2">
+                    Notas (opcional)
+                    <textarea name="notas" rows="2" placeholder="Ej. abril 2026, proveedor X..."></textarea>
+                  </label>
+                  <div class="form-actions span-2">
+                    <button type="submit">Subir factura</button>
+                    <span id="workspacePortalPublicFacturaStatus" class="muted"></span>
+                  </div>
+                </form>
+                <div class="workspace-billing-list">
+                  ${
+                    facturasRecibidas.length
+                      ? facturasRecibidas
+                          .slice(0, 12)
+                          .map(
+                            (row) => `
+                              <div class="workspace-billing-row">
+                                <div>
+                                  <strong>${escapeHtml(row.tercero || "Factura")}</strong>
+                                  <div class="muted">${escapeHtml(row.fecha_emision || "")}${row.numero ? ` · ${escapeHtml(row.numero)}` : ""}</div>
+                                </div>
+                                <div class="workspace-billing-meta">
+                                  <span>${euroFormatter.format(Number(row.total || 0))}</span>
+                                  <span>${escapeHtml(row.estado_ocr || "Pendiente")}</span>
+                                  ${row.doc_key ? `<button type="button" class="secondary ghost button-inline" data-portal-open-doc="${escapeHtml(row.doc_key)}">PDF</button>` : ""}
+                                </div>
+                              </div>
+                            `
+                          )
+                          .join("")
+                      : "<p class='muted'>Aún no hay facturas procesadas.</p>"
+                  }
+                </div>
+              </div>
+            `
+            : ""
+        }
         <div class="form-card">
           <h3>Subir documentación</h3>
           <p class="muted">Puedes aportar documentos directamente al expediente. Quedarán en revisión interna.</p>
@@ -24677,6 +24742,43 @@ const openWorkspacePortalPublic = async (token) => {
       `;
       const uploadForm = document.getElementById("workspacePortalPublicUploadForm");
       const uploadStatus = document.getElementById("workspacePortalPublicUploadStatus");
+      const facturaForm = document.getElementById("workspacePortalPublicFacturaForm");
+      const facturaStatus = document.getElementById("workspacePortalPublicFacturaStatus");
+
+      facturaForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(facturaForm);
+        const file = formData.get("archivo");
+        if (!(file instanceof File) || !file.size) {
+          if (facturaStatus) facturaStatus.textContent = "Selecciona un archivo.";
+          return;
+        }
+        if (facturaStatus) facturaStatus.textContent = "Subiendo factura...";
+        try {
+          const filename = file.name || "factura";
+          const nameHint = filename.replace(/\\.[a-z0-9]+$/i, "") || filename;
+          const upload = await uploadFileToPortalS3(file, token, facturaStatus, "factura");
+          if (!upload?.key && !upload?.public_url) throw new Error("No se pudo subir el archivo.");
+          const resp = await fetch("/api/workspace_portal_upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token,
+              nombre: nameHint,
+              servicio: "gestoria",
+              clasificacion: "Factura",
+              doc_key: upload.key,
+              doc_url: upload.public_url,
+              notas: String(formData.get("notas") || "").trim(),
+            }),
+          }).then((res) => res.json());
+          if (resp?.error) throw new Error(resp.error);
+          if (facturaStatus) facturaStatus.textContent = "Factura subida. Procesando OCR...";
+          await openWorkspacePortalPublic(token);
+        } catch (err) {
+          if (facturaStatus) facturaStatus.textContent = err?.message || "No se pudo subir la factura.";
+        }
+      });
       uploadForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const formData = new FormData(uploadForm);
@@ -24730,6 +24832,20 @@ const openWorkspacePortalPublic = async (token) => {
 	          if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
 	        }
 	      });
+      document.querySelectorAll("[data-portal-open-doc]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const key = String(button.dataset.portalOpenDoc || "").trim();
+          if (!key) return;
+          try {
+            const data = await api(`/api/workspace_portal_s3_url?token=${encodeURIComponent(token)}&key=${encodeURIComponent(key)}`);
+            const url = String(data?.url || "").trim();
+            if (!url) throw new Error("no_url");
+            window.open(url, "_blank", "noopener");
+          } catch (e) {
+            alert("No se pudo abrir el archivo.");
+          }
+        });
+      });
       document.querySelectorAll("[data-portal-request-upload]").forEach((button) => {
         button.addEventListener("click", () => {
           const requestId = button.dataset.portalRequestUpload || "";
@@ -41015,6 +41131,58 @@ const loadFincasRenewalAlert = () => {
   });
 };
 
+const loadSegurosRenewalAlertForUser = () => {
+  if (!segurosRenewalAlert) return Promise.resolve();
+  if (state.currentPage !== "home") return Promise.resolve();
+  if (!userCanAccessService("seguros")) {
+    segurosRenewalAlert.classList.add("hidden");
+    segurosRenewalAlert.textContent = "";
+    return Promise.resolve();
+  }
+  const empresa = resolveCrmSegurosEmpresa();
+  const responsable = String(getCurrentUser() || "").trim();
+  if (!empresa || !responsable) {
+    segurosRenewalAlert.classList.add("hidden");
+    segurosRenewalAlert.textContent = "";
+    return Promise.resolve();
+  }
+
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    days_ahead: "30",
+    days_past: "0",
+    limit: "250",
+    responsable,
+  });
+  return api(`/api/seguros_renovaciones_queue?${params.toString()}`)
+    .then((data) => {
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const count = Number(data?.count || items.length || 0) || 0;
+      if (!count) {
+        segurosRenewalAlert.classList.add("hidden");
+        segurosRenewalAlert.textContent = "";
+        return;
+      }
+      segurosRenewalAlert.classList.remove("hidden");
+      segurosRenewalAlert.innerHTML = "";
+
+      const text = document.createElement("div");
+      text.textContent = `Seguros: tienes ${count} póliza${count === 1 ? "" : "s"} que vence${count === 1 ? "" : "n"} en los próximos 30 días.`;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Ver pólizas";
+      button.addEventListener("click", () => {
+        openSegurosRenovacionesListado({ daysAhead: 30, daysPast: 0, responsable });
+      });
+      segurosRenewalAlert.appendChild(text);
+      segurosRenewalAlert.appendChild(button);
+    })
+    .catch(() => {
+      segurosRenewalAlert.classList.add("hidden");
+      segurosRenewalAlert.textContent = "";
+    });
+};
+
 const loadLegalRadarHomeAlert = () => {
   if (!legalRadarAlert) return Promise.resolve();
   const user = getAuthScopeUser();
@@ -54641,6 +54809,22 @@ const openSegurosBdtFromDashboard = ({ estadoMode = "all", estadoContains = "" }
   loadSegurosCrm();
 };
 
+const openSegurosRenovacionesListado = ({
+  daysAhead = 30,
+  daysPast = 0,
+  estado = "",
+  responsable = "",
+  q = "",
+} = {}) => {
+  if (segurosRenovacionesDaysAhead) segurosRenovacionesDaysAhead.value = String(daysAhead);
+  if (segurosRenovacionesDaysPast) segurosRenovacionesDaysPast.value = String(daysPast);
+  if (segurosRenovacionesEstado) segurosRenovacionesEstado.value = String(estado || "");
+  if (segurosRenovacionesResponsable) segurosRenovacionesResponsable.value = String(responsable || "");
+  if (segurosRenovacionesSearch) segurosRenovacionesSearch.value = String(q || "");
+  openSegurosCrm();
+  setSegurosTab("renovaciones");
+};
+
 const loadSegurosKpis = () => {
   if (!segurosKpis) return;
   const empresa = resolveCrmSegurosEmpresa();
@@ -54679,10 +54863,26 @@ const loadSegurosKpis = () => {
   const renderKpis = (data) => {
     const wrapper = document.createElement("div");
     wrapper.className = "grid crm-kpis";
-    const addKpi = (label, value) => {
+    const addKpi = (label, value, opts = null) => {
       const card = document.createElement("div");
-      card.className = "kpi-card";
+      const classNames = ["kpi-card"];
+      if (opts?.className) classNames.push(opts.className);
+      if (typeof opts?.onClick === "function") classNames.push("kpi-clickable");
+      card.className = classNames.join(" ");
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
+      if (opts?.title) card.title = String(opts.title);
+      if (typeof opts?.onClick === "function") {
+        card.role = "button";
+        card.tabIndex = 0;
+        const handler = () => opts.onClick();
+        card.addEventListener("click", handler);
+        card.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handler();
+          }
+        });
+      }
       wrapper.appendChild(card);
     };
     addKpi("Pólizas (real)", data.total_real ?? data.total ?? 0);
@@ -54697,7 +54897,11 @@ const loadSegurosKpis = () => {
     if (Number(data.en_vigor_sin_numero || 0) > 0) {
       addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
     }
-    addKpi("Vencen 30 días", data.vencen_30 || 0);
+    addKpi("Vencen 30 días", data.vencen_30 || 0, {
+      className: "kpi-card--alert",
+      title: "Abrir listado de pólizas próximas a vencer",
+      onClick: () => openSegurosRenovacionesListado({ daysAhead: 30, daysPast: 0 }),
+    });
     addKpi("Con faltantes", data.faltantes || 0);
     addKpi(
       "Facturación comisiones",
@@ -66072,6 +66276,7 @@ const init = async () => {
         await safe(loadWorkspaceCentral());
         await safe(loadUsuarios());
         renderUsuariosSelect();
+        await safe(loadSegurosRenewalAlertForUser());
         renderUsuariosTable();
         await safe(loadClientesCardStats());
         await safe(loadClientesStats());

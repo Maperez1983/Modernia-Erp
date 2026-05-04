@@ -7271,6 +7271,10 @@ tr.is-selected td {
   border-left: 3px solid rgba(var(--gold-rgb), 0.55);
 }
 
+.crm-kpis .kpi-card--alert {
+  border-left-color: rgba(180, 83, 9, 0.75);
+}
+
 .gestoria-renta-banner {
   width: 100%;
   display: grid;

@@ -37921,12 +37921,37 @@ def fetch_workspace_portal_public(conn, token):
         (row["workspace_id"], row["cliente_id"]),
     ).fetchall()
     empresa_ids = fetch_workspace_company_ids(conn, row["workspace_id"])
+    facturas_recibidas = []
     seguros_polizas = []
     seguros_recibos = []
     seguros_siniestros = []
     seguros_renovaciones = []
     if empresa_ids:
         placeholders = ",".join(["?"] * len(empresa_ids))
+        if int(row["importador_facturas"] or 0) == 1:
+            try:
+                facturas_recibidas = conn.execute(
+                    f"""
+                    SELECT
+                      f.id,
+                      f.fecha_emision,
+                      f.numero,
+                      f.tipo,
+                      f.total,
+                      COALESCE(f.estado_ocr, '') AS estado_ocr,
+                      COALESCE(f.doc_key, '') AS doc_key,
+                      COALESCE(t.nombre, f.descripcion, '') AS tercero
+                    FROM gestoria_facturas f
+                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                    WHERE f.cliente_id = ?
+                      AND f.empresa_id IN ({placeholders})
+                    ORDER BY COALESCE(NULLIF(TRIM(COALESCE(f.fecha_emision,'')),''), f.updated_at, f.created_at) DESC
+                    LIMIT 30
+                    """,
+                    [row["cliente_id"], *empresa_ids],
+                ).fetchall()
+            except Exception:
+                facturas_recibidas = []
         try:
             seguros_polizas = conn.execute(
                 f"""
@@ -38007,12 +38032,58 @@ def fetch_workspace_portal_public(conn, token):
         "email": row["email"],
         "docs": [dict(item) for item in docs],
         "facturas": [dict(item) for item in bills],
+        "facturas_recibidas": [dict(item) for item in facturas_recibidas],
         "requerimientos": [dict(item) for item in requests],
         "seguros_polizas": [dict(item) for item in seguros_polizas],
         "seguros_recibos": [dict(item) for item in seguros_recibos],
         "seguros_siniestros": [dict(item) for item in seguros_siniestros],
         "seguros_renovaciones": [dict(item) for item in seguros_renovaciones],
     }
+
+
+def build_gestoria_facturas_excel(template_path: Path, facturas_rows):
+    import io
+    import openpyxl
+
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb.active
+    start_row = 2
+
+    rows = list(facturas_rows or [])
+    for idx, row in enumerate(rows):
+        r = start_row + idx
+        fecha_asiento = (row.get("fecha_asiento") or row.get("fecha_emision") or "") or ""
+        fecha_factura = (row.get("fecha_emision") or "") or ""
+        numero = (row.get("numero") or "") or ""
+        tercero_nif = (row.get("tercero_nif") or "") or ""
+        tercero_nombre = (row.get("tercero_nombre") or row.get("tercero") or "") or ""
+        base = row.get("base_imponible") or 0.0
+        iva_pct = row.get("iva_pct") or 0.0
+        cuota_iva = row.get("cuota_iva") or 0.0
+        total = row.get("total") or 0.0
+        subcuenta = (row.get("subcuenta") or "") or ""
+        subcuenta_gi = (row.get("subcuenta_gastos_ingresos") or "") or ""
+
+        ws.cell(r, 1).value = str(fecha_asiento)
+        ws.cell(r, 2).value = str(fecha_factura)
+        ws.cell(r, 3).value = str(numero)
+        ws.cell(r, 4).value = f"=CONCATENATE(C{r},\" \",G{r})"
+        ws.cell(r, 5).value = str(subcuenta)
+        ws.cell(r, 6).value = str(tercero_nif)
+        ws.cell(r, 7).value = str(tercero_nombre)
+        ws.cell(r, 8).value = str(row.get("domicilio") or "")
+        ws.cell(r, 9).value = str(row.get("localidad") or "")
+        ws.cell(r, 10).value = str(row.get("provincia") or "")
+        ws.cell(r, 11).value = str(row.get("codigo_postal") or "")
+        ws.cell(r, 12).value = float(base) if base not in (None, "") else 0.0
+        ws.cell(r, 13).value = float(iva_pct) if iva_pct not in (None, "") else 0.0
+        ws.cell(r, 14).value = float(cuota_iva) if cuota_iva not in (None, "") else 0.0
+        ws.cell(r, 15).value = str(subcuenta_gi)
+        ws.cell(r, 16).value = float(total) if total not in (None, "") else 0.0
+
+    buff = io.BytesIO()
+    wb.save(buff)
+    return buff.getvalue()
 
 
 def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, token=None):
@@ -65709,6 +65780,148 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_portal_facturas_excel":
+            token = (params.get("token", [""])[0] or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            portal = conn.execute(
+                """
+                SELECT id, workspace_id, cliente_id, COALESCE(importador_facturas, 0) AS importador_facturas
+                FROM workspace_portal_clientes
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            if int(portal["importador_facturas"] or 0) != 1:
+                json_response(self, {"error": "Importador Facturas no activo para este portal"}, status=403)
+                return
+            empresa_ids = fetch_workspace_company_ids(conn, portal["workspace_id"])
+            if not empresa_ids:
+                json_response(self, {"error": "workspace sin empresa operativa"}, status=400)
+                return
+            # Filtro opcional por periodo o rango.
+            periodo = (params.get("periodo", [""])[0] or "").strip()
+            date_from = (params.get("from", [""])[0] or "").strip()
+            date_to = (params.get("to", [""])[0] or "").strip()
+            if periodo and (not date_from and not date_to):
+                match = re.match(r"^([0-9]{4})-([0-9]{2})$", periodo)
+                if match:
+                    year = int(match.group(1))
+                    month = int(match.group(2))
+                    try:
+                        start = datetime(year, month, 1).date()
+                        if month == 12:
+                            end = datetime(year + 1, 1, 1).date() - timedelta(days=1)
+                        else:
+                            end = datetime(year, month + 1, 1).date() - timedelta(days=1)
+                        date_from = start.isoformat()
+                        date_to = end.isoformat()
+                    except Exception:
+                        date_from = ""
+                        date_to = ""
+            where = ["f.cliente_id = ?"]
+            values = [portal["cliente_id"]]
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            where.append(f"f.empresa_id IN ({placeholders})")
+            values.extend(list(empresa_ids))
+            if date_from:
+                where.append("date(COALESCE(NULLIF(f.fecha_emision,''), f.created_at)) >= date(?)")
+                values.append(date_from)
+            if date_to:
+                where.append("date(COALESCE(NULLIF(f.fecha_emision,''), f.created_at)) <= date(?)")
+                values.append(date_to)
+            rows = conn.execute(
+                f"""
+                SELECT
+                  f.fecha_emision,
+                  COALESCE(a.fecha, f.fecha_emision) AS fecha_asiento,
+                  f.numero,
+                  f.base_imponible,
+                  f.iva_pct,
+                  f.cuota_iva,
+                  f.total,
+                  COALESCE(t.nif, '') AS tercero_nif,
+                  COALESCE(t.nombre, '') AS tercero_nombre,
+                  COALESCE(t.cuenta_contable, '') AS subcuenta,
+                  COALESCE((
+                    SELECT al.cuenta
+                    FROM gestoria_asiento_lineas al
+                    WHERE al.asiento_id = a.id
+                      AND LOWER(COALESCE(al.descripcion, '')) IN ('gasto', 'ingreso')
+                    LIMIT 1
+                  ), '') AS subcuenta_gastos_ingresos
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                WHERE {" AND ".join(where)}
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(f.fecha_emision,'')),''), f.updated_at, f.created_at) ASC
+                """,
+                values,
+            ).fetchall()
+            template_path = ROOT.parent / "templates" / "Plantilla conversor asientos facturas.xlsx"
+            try:
+                excel_bytes = build_gestoria_facturas_excel(template_path, [dict(r) for r in (rows or [])])
+            except Exception as exc:
+                json_response(self, {"error": f"No se pudo generar Excel: {str(exc)}"}, status=500)
+                return
+            filename = "asientos_facturas.xlsx"
+            if periodo:
+                filename = f"asientos_facturas_{periodo}.xlsx"
+            binary_response(
+                self,
+                excel_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=filename,
+            )
+            return
+
+        if path == "/api/workspace_portal_s3_url":
+            token = (params.get("token", [""])[0] or "").strip()
+            key = (params.get("key", [""])[0] or "").strip()
+            if not token or not key:
+                json_response(self, {"error": "token y key requeridos"}, status=400)
+                return
+            key = _normalize_s3_key(key)
+            portal = conn.execute(
+                """
+                SELECT id, workspace_id
+                FROM workspace_portal_clientes
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            allowed_prefix = f"portal/{portal['workspace_id']}/{portal['id']}/"
+            if not key.startswith(allowed_prefix):
+                json_response(self, {"error": "key fuera de alcance del portal"}, status=403)
+                return
+            client = s3_client()
+            if not client:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            bucket, _region = s3_config()
+            try:
+                # Verifica existencia y firma.
+                client.head_object(Bucket=bucket, Key=key)
+                url = client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=3600,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
+                return
+            json_response(self, {"url": url, "key": key})
             return
 
         if path == "/api/workspace_factura_pdf":
