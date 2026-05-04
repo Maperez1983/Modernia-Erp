@@ -21436,7 +21436,7 @@ const syncCrmInsertOptionsForVertical = (vertical = "") => {
   } else if (v === "seguros") {
     ["actividad", "cliente"].forEach((k) => allowed.add(k));
   } else if (v === "gestoria") {
-    ["actividad", "cliente"].forEach((k) => allowed.add(k));
+    ["actividad", "cliente", "presupuesto", "renta"].forEach((k) => allowed.add(k));
   } else {
     ["actividad", "cliente", "captacion", "demanda", "edificio"].forEach((k) => allowed.add(k));
   }
@@ -21515,20 +21515,23 @@ const syncCrmTecnocloudVerticalNav = () => {
     inmuebleDetail.classList.toggle("hidden", !isInmo);
   }
 
-  // Topbar: alterna módulos Inmobiliaria vs Gestoría.
-  try {
-    const inmoModules = document.getElementById("crmTopModules");
-    const gestoriaModules = document.getElementById("crmTopGestoriaModules");
-    const finModules = document.getElementById("crmTopFinModules");
-    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria" || vertical === "fin");
-    if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria");
-    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin");
-    if (gestoriaModules) {
-      gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
-        btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
-      });
-    }
-  } catch (e) {}
+	  // Topbar: alterna módulos Inmobiliaria vs Gestoría.
+	  try {
+	    const inmoModules = document.getElementById("crmTopModules");
+	    const gestoriaModules = document.getElementById("crmTopGestoriaModules");
+	    const finModules = document.getElementById("crmTopFinModules");
+	    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+	    const isNarrow = viewportW > 0 && viewportW <= 820;
+	    if (inmoModules) inmoModules.classList.toggle("hidden", vertical === "gestoria" || vertical === "fin");
+	    // En escritorio, la navegación principal va en la barra lateral; no duplicar con módulos en topbar.
+	    if (gestoriaModules) gestoriaModules.classList.toggle("hidden", vertical !== "gestoria" || !isNarrow);
+	    if (finModules) finModules.classList.toggle("hidden", vertical !== "fin");
+	    if (gestoriaModules) {
+	      gestoriaModules.querySelectorAll("[data-crm-service-tab]").forEach((btn) => {
+	        btn.classList.toggle("active", String(btn.dataset.crmServiceTab || "") === String(currentTab || ""));
+	      });
+	    }
+	  } catch (e) {}
 
   // Financiaciones: usar módulos "card" en topbar, no micro-tabs internos.
   try {
@@ -21536,9 +21539,12 @@ const syncCrmTecnocloudVerticalNav = () => {
   } catch (e) {}
 
   const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin" || vertical === "seguros";
-  [crmTopNewBtn, crmQuickNewBtn, crmRecentBtn].forEach((btn) => {
-    if (btn) btn.classList.toggle("hidden", !showInmoChrome);
-  });
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+  const isNarrow = viewportW > 0 && viewportW <= 820;
+  // Evitar duplicidad: solo un punto de entrada para "+ Nuevo".
+  if (crmTopNewBtn) crmTopNewBtn.classList.toggle("hidden", !showInmoChrome || isNarrow);
+  if (crmQuickNewBtn) crmQuickNewBtn.classList.toggle("hidden", !showInmoChrome || !isNarrow);
+  if (crmRecentBtn) crmRecentBtn.classList.toggle("hidden", !showInmoChrome);
   if (!showInmoChrome) {
     setCrmQuickNewOpen(false);
     setCrmRecentOpen(false);
@@ -78105,7 +78111,12 @@ const redrawDashboardOnResize = () => {
 let dashboardResizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(dashboardResizeTimer);
-  dashboardResizeTimer = setTimeout(redrawDashboardOnResize, 120);
+  dashboardResizeTimer = setTimeout(() => {
+    redrawDashboardOnResize();
+    try {
+      syncCrmTecnocloudVerticalNav();
+    } catch (e) {}
+  }, 120);
 });
 
 // --- CRM Inmobiliaria: catálogo de poblaciones (todas) -----------------------
