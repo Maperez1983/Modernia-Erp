@@ -1188,6 +1188,12 @@ body.crm-fin #companySummary {
   box-sizing: border-box;
 }
 
+.textarea-grow {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+}
+
 .form-grid input[type="file"] {
   overflow: hidden;
   text-overflow: ellipsis;

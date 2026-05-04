@@ -36030,10 +36030,12 @@ const ensureHipotecaFichaPanel = () => {
 	          <div class="form-card">
 	            <h4>Comentarios</h4>
 	            <p class="muted">Notas internas sobre la operación (no se incluyen en documentos).</p>
-	            <label>
-	              <span>Comentarios</span>
-	              <textarea data-json="hipoteca_detalle_json" data-path="comentarios" rows="4" placeholder="Añade aquí observaciones, acuerdos, incidencias, etc."></textarea>
-	            </label>
+              <div class="form-grid">
+	              <label class="span-2">
+	                <span>Comentarios</span>
+	                <textarea class="textarea-grow" data-json="hipoteca_detalle_json" data-path="comentarios" rows="10" placeholder="Añade aquí observaciones, acuerdos, incidencias, etc."></textarea>
+	              </label>
+              </div>
 	          </div>
 	        </div>
 
