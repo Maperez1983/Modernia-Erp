@@ -100,6 +100,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             login_data = {}
         self.assertTrue(login_resp.ok, msg=f"Login HTTP {login_resp.status} · {login_data}")
         self.assertTrue(bool(login_data.get("ok")), msg=f"Login no OK · {login_data}")
+        # Espera a que el frontend desbloquee la sesión antes de navegar a CRM.
+        page.wait_for_function("() => !document.body.classList.contains('auth-locked')", timeout=20000)
 
     def _open_crm_inmo(self, page):
         page.goto(f"{self.base_url}/?crm=inmo&nosw=1&swcleared=1", wait_until="domcontentloaded")
@@ -170,6 +172,19 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             """,
             payload,
         )
+
+    def _create_cliente_db(self, *, nombre="CLIENTE E2E", nif="12345678Z"):
+        now = _now_iso()
+        cliente_id = os.urandom(16).hex()
+        self.conn.execute(
+            """
+            INSERT INTO clientes (id, empresa_id, nombre, nif, estado, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'Activo', datetime(?), datetime(?))
+            """,
+            (cliente_id, "emp-e2e", nombre, nif, now, now),
+        )
+        self.conn.commit()
+        return cliente_id
 
     def _wait_agenda_contains(self, page, text, timeout_ms=20000):
         page.wait_for_function(
@@ -522,6 +537,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             self._login(page)
             self._open_crm_inmo(page)
 
+            cliente_id = self._create_cliente_db(nombre="CLIENTE E2E AGENDA", nif="00000000T")
+
             # Prepara dataset: varias acciones con combinaciones de tipo/estado.
             today = datetime.now()
             yesterday = today - timedelta(days=1)
@@ -536,7 +553,7 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             actions = [
                 {**base, "fecha": _iso_date(today), "hora": "10:00", "asunto": "E2E AGENDA PEND", "tipo": "Llamada", "estado": "Pendiente"},
                 {**base, "fecha": _iso_date(today), "hora": "11:00", "asunto": "E2E AGENDA DONE", "tipo": "Email", "estado": "Completada"},
-                {**base, "fecha": _iso_date(tomorrow), "hora": "12:00", "asunto": "E2E AGENDA CITA", "tipo": "Cita de adquisición", "estado": "Pendiente"},
+                {**base, "cliente_id": cliente_id, "cliente_nombre": "CLIENTE E2E AGENDA", "fecha": _iso_date(tomorrow), "hora": "12:00", "asunto": "E2E AGENDA CITA", "tipo": "Cita de adquisición", "estado": "Pendiente"},
                 {**base, "fecha": _iso_date(yesterday), "hora": "09:00", "asunto": "E2E AGENDA CAD", "tipo": "Seguimiento", "estado": "Pendiente"},
                 {**base, "fecha": _iso_date(today), "hora": "13:00", "asunto": "E2E AGENDA CANCEL", "tipo": "Visita", "estado": "Cancelada"},
             ]
@@ -552,6 +569,7 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             page.select_option("#crmAgendaPreset", "citas_7dias")
             page.wait_for_timeout(300)  # debounce/render
             self._wait_agenda_contains(page, "E2E AGENDA CITA", timeout_ms=20000)
+            self._wait_agenda_contains(page, "CLIENTE E2E AGENDA", timeout_ms=20000)
 
             # 2) Preset: actividades caducadas (debería incluir la de ayer).
             page.select_option("#crmAgendaPreset", "actividades_caducadas")
@@ -565,6 +583,7 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
 
             # 4) Búsqueda: filtra por texto (pendiente).
             page.select_option("#crmAgendaEstadoFilter", "")
+            page.select_option("#crmAgendaPreset", "actividades_hoy")
             page.fill("#crmAgendaSearch", "E2E AGENDA PEND")
             page.wait_for_timeout(350)
             self._wait_agenda_contains(page, "E2E AGENDA PEND", timeout_ms=20000)
