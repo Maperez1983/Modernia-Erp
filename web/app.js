@@ -55408,39 +55408,13 @@ const loadSegurosKpis = () => {
       }
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas (real)", data.total_real ?? data.total ?? 0);
-    addKpi("Pólizas (filas)", data.total || 0);
-    if (Number(data.total_con_numero || 0) > 0) {
-      addKpi("Con nº póliza", data.total_con_numero || 0);
-    }
     addKpi("Pólizas en vigor", data.en_vigor || 0);
-    if (Number(data.en_vigor_con_numero || 0) > 0) {
-      addKpi("En vigor (con nº)", data.en_vigor_con_numero || 0);
-    }
-    if (Number(data.en_vigor_sin_numero || 0) > 0) {
-      addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
-    }
-    addKpi("Vencen 30 días", data.vencen_30 || 0, {
-      className: "kpi-card--alert",
-      title: "Abrir listado de pólizas próximas a vencer",
-      onClick: () => openSegurosRenovacionesListado({ daysAhead: 30, daysPast: 0 }),
-    });
-    addKpi("Con faltantes", data.faltantes || 0);
-    addKpi(
-      "Facturación comisiones",
-      euroFormatter.format(Number(data.facturacion_comision || 0))
-    );
-    addKpi("Gastos", euroFormatter.format(Number(data.gastos || 0)));
-    if (data.prima_total !== undefined && data.prima_total !== null) {
-      addKpi("Prima total", euroFormatter.format(data.prima_total || 0));
-    }
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
   };
   const params = new URLSearchParams({ empresa_id: empresa.id });
-  // KPIs deben reflejar toda la cartera (en vigor, vencimientos, primas),
-  // independientemente de si el PDF está enlazado.
-  params.set("uploaded_only", "0");
+  // Base real: pólizas con PDF subido (en vigor = subidas).
+  params.set("uploaded_only", "1");
   api(`/api/seguros_kpis?${params.toString()}`)
     .then((data) => {
       state.segurosKpisCache = data || {};
