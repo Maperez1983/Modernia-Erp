@@ -2727,6 +2727,7 @@ def seguros_contabilidad_where_clause(alias="gc"):
         f"OR ({p}.poliza_numero IS NOT NULL AND TRIM({p}.poliza_numero) <> '') "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM SEGUROS%' "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[SEGUROS]%' "
+        f"OR UPPER(COALESCE({p}.notas, '')) LIKE '%[SEGUROS][BANCO]%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'REGULARIZACIÓN', 'EXTORNO') "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% EMISI%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% RENOVA%')"
