@@ -3495,6 +3495,7 @@ const fincasDashboardSection = document.getElementById("fincasDashboardSection")
 const fincasDashboardKpis = document.getElementById("fincasDashboardKpis");
 const fincasDashboardYearSelect = document.getElementById("fincasDashboardYear");
 const fincasPresupuestoChart = document.getElementById("fincasPresupuestoChart");
+const fincasPolizasMesChart = document.getElementById("fincasPolizasMesChart");
 const fincasResponsableChart = document.getElementById("fincasResponsableChart");
 const fincasConversionChart = document.getElementById("fincasConversionChart");
 const fincasComisionCompaniaChart = document.getElementById("fincasComisionCompaniaChart");
@@ -39453,6 +39454,8 @@ const renderFincasDashboard = (empresaId) => {
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
     const seriesEnVigorMes = data.series_en_vigor_mes || [];
+    const seriesMesEfecto = data.series_polizas_mes_efecto || [];
+    const seriesMesCreacion = data.series_polizas_mes_creacion || [];
     syncFincasDashboardYearSelector(series, selectedYear);
     const effectiveSelectedYear = String(fincasDashboardYearSelect?.value || selectedYear);
     if (effectiveSelectedYear !== String(selectedYear)) {
@@ -39619,6 +39622,51 @@ const renderFincasDashboard = (empresaId) => {
           secondaryAxisFormat: (value) => numberFormatter.format(Math.round(Number(value || 0))),
         }
       );
+
+      // Pólizas por mes: efecto vs creación (para medir volumen de entrada mensual).
+      if (fincasPolizasMesChart) {
+        const monthLabels = Array.from({ length: 12 }, (_, idx) => {
+          const m = String(idx + 1).padStart(2, "0");
+          return `${effectiveSelectedYear}-${m}`;
+        });
+        const monthToShort = (raw) => {
+          const s = String(raw || "");
+          if (!s.includes("-")) return s;
+          const [yy, mm] = s.split("-", 2);
+          const monthNum = Number(mm || 0);
+          const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+          const monthLabel = monthNames[Math.max(0, Math.min(11, monthNum - 1))] || s;
+          return `${monthLabel} ${String(yy || "").slice(-2)}`;
+        };
+        const mapSeries = (rows) => {
+          const acc = {};
+          (rows || []).forEach((row) => {
+            const month = String(row?.month || "").trim();
+            if (!month) return;
+            acc[month] = Number(row?.total ?? row?.altas ?? 0) || 0;
+          });
+          return monthLabels.map((m) => acc[m] || 0);
+        };
+        drawBarChart(
+          fincasPolizasMesChart,
+          monthLabels.map(monthToShort),
+          [
+            {
+              label: "Mes efecto",
+              values: mapSeries(seriesMesEfecto),
+              color: "#0B1D33",
+              format: (value) => numberFormatter.format(value),
+            },
+            {
+              label: "Mes creación",
+              values: mapSeries(seriesMesCreacion),
+              color: "#38BDF8",
+              format: (value) => numberFormatter.format(value),
+            },
+          ],
+          { legend: true, showValues: true, tooltip: true, legendPosition: "right" }
+        );
+      }
 
       const responsables = (data.responsables || []).slice(0, 8);
       const respLabels = responsables.map((item) => item.label);

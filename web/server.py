@@ -2916,6 +2916,46 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
             }
         )
 
+    # Series adicionales para medir "entrada" de pólizas:
+    # - Por mes de efecto (fecha_efecto)
+    # - Por mes de creación (created_at)
+    effect_month_expr = f"STRFTIME('%Y-%m', {fecha_efecto_date})"
+    created_month_expr = "STRFTIME('%Y-%m', s.created_at)"
+    effect_month_rows = conn.execute(
+        f"""
+        SELECT
+          {effect_month_expr} AS month,
+          COUNT(*) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+          AND {effect_month_expr} IS NOT NULL
+        GROUP BY {effect_month_expr}
+        ORDER BY {effect_month_expr}
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+    created_month_rows = conn.execute(
+        f"""
+        SELECT
+          {created_month_expr} AS month,
+          COUNT(*) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND SUBSTR({created_month_expr}, 1, 4) = ?
+          AND {created_month_expr} IS NOT NULL
+        GROUP BY {created_month_expr}
+        ORDER BY {created_month_expr}
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+    series_polizas_mes_efecto = [{"month": row_value(r, "month", "") or "", "total": int(row_value(r, "total", 0) or 0)} for r in effect_month_rows]
+    series_polizas_mes_creacion = [{"month": row_value(r, "month", "") or "", "total": int(row_value(r, "total", 0) or 0)} for r in created_month_rows]
+
     # KPIs "cartera" (en vigor) deben basarse en pólizas activas, no en el año de efecto.
     responsables = conn.execute(
         f"""
@@ -3063,6 +3103,8 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         "current": current,
         "series": series_payload,
         "series_en_vigor_mes": series_en_vigor_mes,
+        "series_polizas_mes_efecto": series_polizas_mes_efecto,
+        "series_polizas_mes_creacion": series_polizas_mes_creacion,
         "responsables": [dict(r) for r in responsables],
         "comision_companias": [dict(r) for r in comision_companias],
         "comision_ramos": [dict(r) for r in comision_ramos],
