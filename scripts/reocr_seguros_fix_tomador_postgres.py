@@ -41,6 +41,16 @@ def clean_tomador_value(value: str) -> str:
     raw = re.sub(r"\s+", " ", raw).strip(" ,;:-\n\r\t")
     if not raw:
         return ""
+    # Corta en tokens típicos donde empieza el ruido OCR.
+    stop = re.search(
+        r"\b(DOCUMENTO|DOC\.?|NIF|DNI|CIF|MATRICULA|MATRÍCULA|VEHICULO|VEHÍCULO|"
+        r"DECLARACION|DECLARACIÓN|FECHA|PROVINCIA|DATOS\s+DEL\s+MEDIADOR|MEDIADOR|"
+        r"DIRECCION|DIRECCIÓN|DOMICILIO)\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if stop:
+        raw = raw[: stop.start()].strip(" ,;:-")
     # Heurística simple: si viene como "APELLIDOS, NOMBRE" lo normalizamos.
     cleaned = normalize_person_name(raw) or raw
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:-")
@@ -90,6 +100,8 @@ def looks_good_tomador(value: str) -> bool:
     if re.search(r"\b\d{1,4}\b", cleaned):
         return False
     if key in ("EL MISMO", "MISMO", "ASEGURADORA", "ASEGURADO"):
+        return False
+    if any(tok in key for tok in ("NIF", "DNI", "CIF", "DECLARACION", "DECLARACIÓN", "MEDIADOR")):
         return False
     if any(token in key for token in ("ASEGURADORA", "POLIZA", "PÓLIZA", "TOMADOR", "SEGURO")):
         return False
