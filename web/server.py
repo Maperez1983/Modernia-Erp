@@ -2229,16 +2229,6 @@ def canonicalize_ramo(value):
         return "Caza"
     if "COMUNIDAD" in key:
         return "Comunidad"
-    if "MULTIRRIESGO" in key:
-        # Muchos PDFs devuelven "Multirriesgo" como producto/ramo. Lo mapeamos al catálogo canónico.
-        # - Comunidad: multirriesgo comunidades
-        # - Comercio: multirriesgo comercio / pyme / local / oficina
-        # - Hogar: multirriesgo hogar (o multirriesgo genérico)
-        if "COMUNIDAD" in key or "COMUNIDADES" in key:
-            return "Comunidad"
-        if any(token in key for token in ("COMERCIO", "PYME", "LOCAL", "OFICINA", "NEGOCIO", "AUTOEMPRENDEDOR")):
-            return "Comercio"
-        return "Hogar"
     if "COMERCIO" in key or "PYME" in key or key == "LOCAL":
         return "Comercio"
     if "HOGAR" in key:
@@ -2304,8 +2294,6 @@ def infer_ramo_from_source_hint(source_hint: str) -> str:
         return ""
     canonical_keys = {normalize_lookup_text(item) for item in LEGAL_RAMOS_CANONICAL}
     return guessed if normalize_lookup_text(guessed) in canonical_keys else ""
-
-
 def seguros_comision_tipo_from_produccion(produccion):
     value = normalize_lookup_text(produccion or "")
     if "cambio" in value:
@@ -14352,42 +14340,81 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
     ss_emp = _find_amount_near([r"\bSEGURIDAD\s+SOCIAL\b[^\n\r]{0,60}?EMP", r"\bAPORTACI[ÓO]N\s+EMPRESA\b"])
     if ss_emp > 0:
         fields["ss_empresa"] = ss_emp
-    elif fields.get("bruto"):
-        # Fallback: muchos formatos (Asesorías) incluyen la "APORTACIÓN DE LA EMPRESA" en una tabla aparte
-        # sin una etiqueta de "Seguridad Social EMPRESA". Sumamos la última columna por línea.
-        try:
-            bruto_val = float(parse_money_value(fields.get("bruto") or 0) or 0)
-        except Exception:
-            bruto_val = 0.0
-        try:
-            idx = upper.find("APORTACIÓN DE LA EMPRESA")
-            if idx < 0:
-                idx = upper.find("APORTACION DE LA EMPRESA")
-            if idx >= 0:
-                segment = raw[idx: idx + 3200]
-                amount_re = re.compile(r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))")
-                total = 0.0
-                for line in segment.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    candidates = amount_re.findall(line)
-                    if len(candidates) < 2:
-                        continue
-                    last_amt = float(parse_money_value(candidates[-1]) or 0)
-                    # Excluye bases (suelen ser el bruto repetido).
-                    if last_amt <= 0:
-                        continue
-                    if bruto_val and last_amt >= bruto_val:
-                        continue
-                    total += last_amt
-                if total > 0:
-                    fields["ss_empresa"] = round(total, 2)
-        except Exception:
-            pass
 
     return fields
 
+
+def _detect_nif_in_nomina_page(text: str) -> str:
+    raw = str(text or "")
+    if not raw.strip():
+        return ""
+    parsed = _parse_nomina_pdf_fields(raw)
+    nif = normalize_nif(parsed.get("empleado_nif") or "")
+    if nif:
+        return nif
+    upper = raw.upper()
+    candidates = re.findall(r"\b(?:[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]|\d{8}[A-Z])\b", upper)
+    if candidates:
+        return normalize_nif(candidates[0])
+    return ""
+
+
+def split_nominas_pdf_by_nif(pdf_bytes: bytes) -> list[dict]:
+    """
+    Divide un PDF que contiene varias nóminas (una por empleado) en PDFs por NIF.
+    Agrupa páginas contiguas: si una página no tiene NIF, se asume que pertenece al último NIF visto.
+    Retorna una lista de items: {nif, pages:[idxs], pdf_bytes}.
+    """
+    blob = pdf_bytes or b""
+    if not blob.startswith(b"%PDF"):
+        return []
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        return []
+    out: list[dict] = []
+    reader = PdfReader(BytesIO(blob))
+    current_nif = ""
+    current_pages: list[int] = []
+
+    def _flush():
+        nonlocal current_nif, current_pages
+        if not current_pages:
+            current_nif = ""
+            return
+        writer = PdfWriter()
+        for idx in current_pages:
+            try:
+                writer.add_page(reader.pages[idx])
+            except Exception:
+                pass
+        buf = BytesIO()
+        try:
+            writer.write(buf)
+        except Exception:
+            current_pages = []
+            current_nif = ""
+            return
+        out.append({"nif": current_nif, "pages": list(current_pages), "pdf_bytes": buf.getvalue()})
+        current_pages = []
+        current_nif = ""
+
+    for idx, page in enumerate(reader.pages):
+        text = ""
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
+        nif = _detect_nif_in_nomina_page(text)
+        if nif and current_pages and nif != current_nif:
+            _flush()
+        if nif:
+            current_nif = nif
+        if not current_nif:
+            continue
+        current_pages.append(idx)
+    _flush()
+    return [it for it in out if it.get("nif") and it.get("pdf_bytes")]
 
 def ocr_nomina_from_s3(s3_key: str, *, filename: str = "") -> dict:
     key = str(s3_key or "").strip()
@@ -14452,24 +14479,6 @@ def _should_run_rrhh_nomina_ocr(payload: dict) -> bool:
     if tipo in {"nómina", "nomina"}:
         return True
     return False
-
-
-def _extract_nomina_meta(fields: dict) -> dict:
-    if not isinstance(fields, dict):
-        return {"year": 0, "month": 0, "nif": ""}
-    year = 0
-    month = 0
-    nif = ""
-    try:
-        year = int(fields.get("year") or 0) if str(fields.get("year") or "").strip() else 0
-    except Exception:
-        year = 0
-    try:
-        month = int(fields.get("month") or 0) if str(fields.get("month") or "").strip() else 0
-    except Exception:
-        month = 0
-    nif = normalize_nif(fields.get("empleado_nif") or fields.get("nif") or fields.get("dni") or "")
-    return {"year": year, "month": month, "nif": nif}
 
 
 def _fetch_rrhh_nominas_ocr(conn, workspace_id: str, persona_id: str, *, ejercicio: str = "") -> list[dict]:
@@ -20310,10 +20319,6 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         }
     if smart_fields:
         fields.update(smart_fields)
-    if not fields.get("ramo"):
-        hinted_ramo = infer_ramo_from_source_hint(source_hint or "")
-        if hinted_ramo:
-            fields["ramo"] = hinted_ramo
     if "ramo" in fields:
         # OCR: evitar "ramos" basura (p.ej. 'IMPORTE', nombres, frases).
         # Si no mapea a un ramo canónico conocido, lo dejamos vacío para no distorsionar KPIs.
@@ -27592,10 +27597,6 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
         responsable_raw = str(entry.get("responsable") or "").strip()
-        # Normaliza valores "Sin responsable" guardados como texto para tratarlos como vacío.
-        responsable_norm = normalize_lookup_text(responsable_raw)
-        if responsable_norm in {"sin-responsable", "sinresponsable", "sresponsable", "sinresponsable"}:
-            responsable_raw = ""
         responsable_label = responsable_raw or "Sin responsable"
         responsable_key = normalize_lookup_text(responsable_label) or "sin-responsable"
         precio = coerce_renta_money(entry.get("precio_servicio")) or 0.0
@@ -27701,18 +27702,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 counts["remesadas_total"] += precio
         else:
             counts["no_remesadas"] += 1
-        resp_raw = str(item.get("responsable") or "").strip()
-        resp_key = str(item.get("responsable_key") or "").strip()
-        resp_key_norm = normalize_action_key(resp_key) or resp_key
-        resp_text_norm = normalize_lookup_text(resp_raw)
-        resp_action_norm = normalize_action_key(resp_raw)
-        is_unassigned_resp = (
-            (not resp_raw)
-            or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
-            or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
-            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
-        )
-        if is_unassigned_resp:
+        if not str(item.get("responsable") or "").strip():
             counts["sin_responsable"] += 1
         key = str(item.get("responsable_key") or "sin-responsable")
         bucket = responsables.get(key)
@@ -28011,19 +28001,16 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
         FROM cliente_gestoria cg
         JOIN clientes c ON c.id = cg.cliente_id
         WHERE COALESCE(cg.mod_renta, 0) = 1
-          AND (
-            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
-            OR EXISTS (
-              SELECT 1
-              FROM clientes_empresas ce
-              WHERE ce.empresa_id IN ({placeholders_emp})
-                AND ce.cliente_id = c.id
-                AND {service_filter}
-            )
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id IN ({placeholders_emp})
+              AND ce.cliente_id = c.id
+              AND {service_filter}
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
+        tuple([*empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
@@ -28222,9 +28209,6 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
     pending_count = 0
     total_count = 0
     presentadas_count = 0
-    sin_responsable_count = 0
-    sin_cobrar_count = 0
-    sin_remesar_count = 0
     preview = []
     for row in rows:
         row_dict = dict(row)
@@ -28238,32 +28222,6 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         if not entry:
             continue
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
-        try:
-            responsable_raw = entry.get("responsable") or entry.get("responsable_label") or ""
-            resp_text = str(responsable_raw or "").strip()
-            resp_text_norm = normalize_lookup_text(resp_text)
-            resp_action_norm = normalize_action_key(resp_text)
-            resp_key = str(entry.get("responsable_key") or "").strip()
-            resp_key_norm = normalize_action_key(resp_key) or resp_key
-            if (
-                (not resp_text)
-                or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
-                or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
-                or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
-            ):
-                sin_responsable_count += 1
-        except Exception:
-            pass
-        try:
-            precio = float(entry.get("precio_servicio") or entry.get("precio") or 0.0)
-        except Exception:
-            precio = 0.0
-        is_cobrada = 1 if parse_boolish(entry.get("cobrada")) else 0
-        is_remesada = 1 if parse_boolish(entry.get("remesada")) else 0
-        if precio > 0.0001 and not is_cobrada:
-            sin_cobrar_count += 1
-        if precio > 0.0001 and is_cobrada and not is_remesada:
-            sin_remesar_count += 1
         total_count += 1
         if estado == "Borrador":
             pending_count += 1
@@ -28298,9 +28256,6 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         "count": int(pending_count),
         "total": int(total_count),
         "presentadas": int(presentadas_count),
-        "sin_responsable": int(sin_responsable_count),
-        "sin_cobrar": int(sin_cobrar_count),
-        "sin_remesar": int(sin_remesar_count),
         "rows": preview,
     }
 
@@ -32378,6 +32333,9 @@ def ensure_workspace_product_tables(conn):
           nomina_ocr_error TEXT,
           nomina_ocr_json TEXT,
           nomina_ocr_updated_at TEXT,
+          nomina_year INTEGER,
+          nomina_month INTEGER,
+          nomina_empleado_nif TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -36659,29 +36617,6 @@ def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, pers
         (*params, max(1, min(int(limit or 200), 400))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
-
-
-def _resolve_persona_id_by_nif(conn, workspace_id: str, nif: str) -> tuple[str, str]:
-    ws = str(workspace_id or "").strip()
-    nif_norm = normalize_nif(nif or "")
-    if not ws or not nif_norm:
-        return "", ""
-    packed = re.sub(r"[\s\.\-]+", "", nif_norm.upper())
-    row = conn.execute(
-        """
-        SELECT id, COALESCE(empresa_id, '') AS empresa_id
-        FROM workspace_registro_personal
-        WHERE workspace_id = ?
-          AND UPPER(REPLACE(REPLACE(REPLACE(COALESCE(nif,''),' ',''),'-',''),'.','')) = ?
-          AND COALESCE(activo, 1) = 1
-        ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
-        LIMIT 1
-        """,
-        (ws, packed),
-    ).fetchone()
-    if not row:
-        return "", ""
-    return str(row_value(row, "id") or row_value(row, 0) or "").strip(), str(row_value(row, "empresa_id") or "").strip()
 
 
 def _parse_iso_date(value):
@@ -53417,23 +53352,10 @@ class Handler(BaseHTTPRequestHandler):
                             """
                             UPDATE workspace_rrhh_documentos
                             SET nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
-                                nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
                                 nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                             WHERE id = ? AND workspace_id = ?
                             """,
-                            (
-                                status,
-                                confidence,
-                                err,
-                                ocr_json,
-                                int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("year") or 0),
-                                int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("month") or 0),
-                                str(_extract_nomina_meta(ocr_res.get("fields") or {}).get("nif") or "").strip() or None,
-                                now,
-                                now,
-                                record_id,
-                                workspace_id,
-                            ),
+                            (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
                         )
                         after = conn.execute(
                             "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
@@ -53456,6 +53378,256 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_rrhh_nominas_import":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
+            filename = str(payload.get("filename") or payload.get("nombre") or "nominas.pdf").strip() or "nominas.pdf"
+            year = int(payload.get("year") or 0)
+            month = int(payload.get("month") or 0)
+            overwrite = 1 if str(payload.get("overwrite") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            dry_run = 1 if str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            if not doc_key:
+                json_response(self, {"error": "doc_key requerido"}, status=400)
+                return
+            if year < 2000 or year > 2100:
+                json_response(self, {"error": "year inválido"}, status=400)
+                return
+            if month < 1 or month > 12:
+                json_response(self, {"error": "month inválido"}, status=400)
+                return
+
+            blob, err = s3_get_object_bytes(doc_key)
+            if not blob:
+                json_response(self, {"error": f"No se pudo descargar el PDF: {err or 'S3'}"}, status=502)
+                return
+
+            splits = split_nominas_pdf_by_nif(blob)
+            if not splits:
+                json_response(
+                    self,
+                    {"error": "No se detectaron NIFs en el PDF. Asegúrate de que el PDF tenga texto seleccionable."},
+                    status=400,
+                )
+                return
+
+            rows = conn.execute(
+                "SELECT id, nif FROM workspace_registro_personal WHERE workspace_id = ? AND COALESCE(nif,'') != ''",
+                (workspace_id,),
+            ).fetchall()
+            nif_to_persona = {}
+            for r in rows or []:
+                nn = normalize_nif(r["nif"] or "")
+                if nn:
+                    nif_to_persona[nn] = r["id"]
+
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, region = s3_config()
+
+            results = []
+            created = 0
+            updated = 0
+            skipped = 0
+            not_found = 0
+            errors = 0
+
+            for it in splits:
+                nif = normalize_nif(it.get("nif") or "")
+                pdf_part = it.get("pdf_bytes") or b""
+                persona_id = nif_to_persona.get(nif) or ""
+                if not persona_id:
+                    not_found += 1
+                    results.append({"nif": nif, "status": "persona_not_found"})
+                    continue
+
+                existing = conn.execute(
+                    """
+                    SELECT id FROM workspace_rrhh_documentos
+                    WHERE workspace_id = ?
+                      AND persona_id = ?
+                      AND LOWER(COALESCE(tipo,'')) IN ('nómina','nomina')
+                      AND COALESCE(nomina_year,0) = ?
+                      AND COALESCE(nomina_month,0) = ?
+                    LIMIT 1
+                    """,
+                    (workspace_id, persona_id, year, month),
+                ).fetchone()
+                if existing and not overwrite:
+                    skipped += 1
+                    results.append({"nif": nif, "status": "skipped_exists", "doc_id": existing["id"]})
+                    continue
+
+                out_name = f"Nomina_{year}{str(month).zfill(2)}_{nif}.pdf"
+                key = s3_safe_key("rrhh_nominas", out_name)
+                public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                if not dry_run:
+                    try:
+                        client.put_object(Bucket=bucket, Key=key, Body=pdf_part, ContentType="application/pdf")
+                        _s3_grant_key(session, key, conn=conn)
+                    except Exception as exc:
+                        errors += 1
+                        results.append({"nif": nif, "status": "s3_error", "error": str(exc)})
+                        continue
+
+                now_local = now
+                try:
+                    if existing:
+                        record_id = str(existing["id"])
+                        prev_row = conn.execute(
+                            "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                            (record_id, workspace_id),
+                        ).fetchone()
+                        prev = dict(prev_row) if prev_row else None
+                        if not dry_run:
+                            conn.execute(
+                                """
+                                UPDATE workspace_rrhh_documentos
+                                SET doc_key = ?, doc_url = ?, tipo = ?, nombre = ?,
+                                    nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
+                                    updated_at = datetime(?)
+                                WHERE id = ? AND workspace_id = ?
+                                """,
+                                (key, public_url, "Nómina", out_name, year, month, nif, now_local, record_id, workspace_id),
+                            )
+                        updated += 1
+                        action = "update"
+                    else:
+                        record_id = os.urandom(16).hex()
+                        persona_row = conn.execute(
+                            "SELECT empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                            (workspace_id, persona_id),
+                        ).fetchone()
+                        empresa_id = str(persona_row["empresa_id"] or "").strip() if persona_row else ""
+                        if not dry_run:
+                            conn.execute(
+                                """
+                                INSERT INTO workspace_rrhh_documentos (
+                                  id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url,
+                                  permanente, estado, created_at, updated_at,
+                                  nomina_year, nomina_month, nomina_empleado_nif
+                                ) VALUES (
+                                  ?, ?, ?, ?, ?, ?, ?, ?,
+                                  0, 'Activo', datetime(?), datetime(?),
+                                  ?, ?, ?
+                                )
+                                """,
+                                (
+                                    record_id,
+                                    workspace_id,
+                                    empresa_id or None,
+                                    persona_id,
+                                    "Nómina",
+                                    out_name,
+                                    key,
+                                    public_url,
+                                    now_local,
+                                    now_local,
+                                    year,
+                                    month,
+                                    nif,
+                                ),
+                            )
+                        created += 1
+                        prev = None
+                        action = "create"
+
+                    ocr_status = ""
+                    ocr_fields = {}
+                    if not dry_run:
+                        try:
+                            ocr_res = ocr_nomina_from_s3(key, filename=out_name)
+                            ocr_status = str(ocr_res.get("status") or ("ok" if ocr_res.get("ok") else "error")).strip()
+                            confidence = float(ocr_res.get("confidence") or 0.0)
+                            err2 = str(ocr_res.get("error") or "").strip() or None
+                            ocr_fields = ocr_res.get("fields") or {}
+                            ocr_json = None
+                            try:
+                                ocr_json = json.dumps(
+                                    {"fields": ocr_fields, "text_preview": str(ocr_res.get("text") or "")[:8000]},
+                                    ensure_ascii=False,
+                                )
+                            except Exception:
+                                ocr_json = None
+                            conn.execute(
+                                """
+                                UPDATE workspace_rrhh_documentos
+                                SET nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
+                                    nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
+                                WHERE id = ? AND workspace_id = ?
+                                """,
+                                (ocr_status, confidence, err2, ocr_json, now_local, now_local, record_id, workspace_id),
+                            )
+                        except Exception:
+                            pass
+
+                    if not dry_run:
+                        after_row = conn.execute(
+                            "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                            (record_id, workspace_id),
+                        ).fetchone()
+                        log_workspace_registro_audit(
+                            conn,
+                            workspace_id,
+                            empresa_id=str(after_row["empresa_id"] or "").strip() if after_row else None,
+                            persona_id=persona_id,
+                            entity_type="rrhh_documento",
+                            entity_id=record_id,
+                            action=action,
+                            actor=session,
+                            before=prev,
+                            after=dict(after_row) if after_row else None,
+                            now=now_local,
+                        )
+                    results.append({"nif": nif, "status": "ok", "doc_id": record_id, "ocr_status": ocr_status, "fields": ocr_fields})
+                except Exception as exc:
+                    errors += 1
+                    results.append({"nif": nif, "status": "error", "error": str(exc)})
+
+            if not dry_run:
+                try:
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "counts": {
+                        "total_detected": len(splits),
+                        "created": created,
+                        "updated": updated,
+                        "skipped": skipped,
+                        "persona_not_found": not_found,
+                        "errors": errors,
+                    },
+                    "items": results,
+                },
+            )
             return
         elif parsed.path == "/api/workspace_rrhh_nomina_ocr":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -53510,190 +53682,13 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 UPDATE workspace_rrhh_documentos
                 SET nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
-                    nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
                     nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                 WHERE id = ? AND workspace_id = ?
                 """,
-                (
-                    status,
-                    confidence,
-                    err,
-                    ocr_json,
-                    int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("year") or 0),
-                    int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("month") or 0),
-                    str(_extract_nomina_meta(ocr_res.get("fields") or {}).get("nif") or "").strip() or None,
-                    now,
-                    now,
-                    record_id,
-                    workspace_id,
-                ),
+                (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "status": status, "confidence": confidence, "error": err, "fields": ocr_res.get("fields") or {}})
-            return
-        elif parsed.path == "/api/workspace_rrhh_nominas_import":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            if not workspace_id:
-                json_response(self, {"error": "workspace_id requerido"}, status=400)
-                return
-            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            items = payload.get("items")
-            if not isinstance(items, list) or not items:
-                json_response(self, {"error": "items requerido (lista)"}, status=400)
-                return
-            overwrite = str(payload.get("overwrite") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
-            dry_run = str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
-            results = []
-            created = 0
-            updated = 0
-            skipped = 0
-            errors = 0
-            for it in items:
-                try:
-                    doc_key = str((it or {}).get("doc_key") or "").strip()
-                    doc_url = str((it or {}).get("doc_url") or "").strip() or None
-                    filename = str((it or {}).get("filename") or (it or {}).get("nombre") or "nomina.pdf").strip() or "nomina.pdf"
-                    if not doc_key:
-                        errors += 1
-                        results.append({"ok": False, "error": "doc_key requerido", "filename": filename})
-                        continue
-                    ocr_res = ocr_nomina_from_s3(doc_key, filename=filename)
-                    fields = (ocr_res.get("fields") or {}) if isinstance(ocr_res, dict) else {}
-                    meta = _extract_nomina_meta(fields if isinstance(fields, dict) else {})
-                    nif = str(meta.get("nif") or "").strip()
-                    year = int(meta.get("year") or 0)
-                    month = int(meta.get("month") or 0)
-                    if not nif:
-                        errors += 1
-                        results.append({"ok": False, "error": "No se detectó NIF en la nómina", "filename": filename, "doc_key": doc_key, "status": ocr_res.get("status")})
-                        continue
-                    persona_id, empresa_id = _resolve_persona_id_by_nif(conn, workspace_id, nif)
-                    if not persona_id:
-                        errors += 1
-                        results.append({"ok": False, "error": "No encuentro empleado en RRHH por NIF", "empleado_nif": nif, "filename": filename, "doc_key": doc_key})
-                        continue
-                    # Deduplicación por persona+mes+año.
-                    existing = None
-                    if year and month:
-                        existing = conn.execute(
-                            """
-                            SELECT id, doc_key
-                            FROM workspace_rrhh_documentos
-                            WHERE workspace_id = ?
-                              AND persona_id = ?
-                              AND LOWER(COALESCE(tipo,'')) IN ('nómina','nomina')
-                              AND COALESCE(nomina_year, 0) = ?
-                              AND COALESCE(nomina_month, 0) = ?
-                            ORDER BY COALESCE(updated_at, created_at) DESC
-                            LIMIT 1
-                            """,
-                            (workspace_id, persona_id, int(year), int(month)),
-                        ).fetchone()
-                    if existing is not None and not overwrite:
-                        skipped += 1
-                        results.append({"ok": True, "action": "skipped", "reason": "duplicate", "id": str(row_value(existing, "id") or row_value(existing, 0) or ""), "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
-                        continue
-                    if dry_run:
-                        results.append({"ok": True, "action": "dry_run", "persona_id": persona_id, "empresa_id": empresa_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
-                        continue
-                    now_local = now
-                    ocr_json = None
-                    try:
-                        ocr_json = json.dumps(
-                            {"fields": fields or {}, "text_preview": str(ocr_res.get("text") or "")[:8000]},
-                            ensure_ascii=False,
-                        )
-                    except Exception:
-                        ocr_json = None
-                    status = str(ocr_res.get("status") or ("ok" if ocr_res.get("ok") else "error")).strip()
-                    confidence = float(ocr_res.get("confidence") or 0.0)
-                    err = str(ocr_res.get("error") or "").strip() or None
-                    fecha_emision = f"{year:04d}-{month:02d}-01" if (year and month) else None
-                    if existing is not None:
-                        rec_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip()
-                        conn.execute(
-                            """
-                            UPDATE workspace_rrhh_documentos
-                            SET empresa_id = ?, persona_id = ?, tipo = ?, nombre = ?, doc_key = ?, doc_url = ?, fecha_emision = ?,
-                                nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
-                                nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
-                                nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
-                            WHERE id = ? AND workspace_id = ?
-                            """,
-                            (
-                                empresa_id or None,
-                                persona_id,
-                                "Nómina",
-                                filename,
-                                doc_key,
-                                doc_url,
-                                fecha_emision,
-                                status,
-                                confidence,
-                                err,
-                                ocr_json,
-                                int(year or 0),
-                                int(month or 0),
-                                nif or None,
-                                now_local,
-                                now_local,
-                                rec_id,
-                                workspace_id,
-                            ),
-                        )
-                        updated += 1
-                        results.append({"ok": True, "action": "updated", "id": rec_id, "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
-                    else:
-                        rec_id = os.urandom(16).hex()
-                        conn.execute(
-                            """
-                            INSERT INTO workspace_rrhh_documentos (
-                              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url, fecha_emision,
-                              permanente, estado,
-                              nomina_ocr_status, nomina_ocr_confidence, nomina_ocr_error, nomina_ocr_json, nomina_ocr_updated_at,
-                              nomina_year, nomina_month, nomina_empleado_nif,
-                              created_at, updated_at
-                            ) VALUES (
-                              ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                              1, 'Activo',
-                              ?, ?, ?, ?, datetime(?),
-                              ?, ?, ?,
-                              datetime(?), datetime(?)
-                            )
-                            """,
-                            (
-                                rec_id,
-                                workspace_id,
-                                empresa_id or None,
-                                persona_id,
-                                "Nómina",
-                                filename,
-                                doc_key,
-                                doc_url,
-                                fecha_emision,
-                                status,
-                                confidence,
-                                err,
-                                ocr_json,
-                                now_local,
-                                int(year or 0),
-                                int(month or 0),
-                                nif or None,
-                                now_local,
-                                now_local,
-                            ),
-                        )
-                        created += 1
-                        results.append({"ok": True, "action": "created", "id": rec_id, "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
-                except Exception as exc:
-                    errors += 1
-                    results.append({"ok": False, "error": Handler._safe_exc_detail(exc), "filename": str((it or {}).get("filename") or "")})
-            if not dry_run:
-                conn.commit()
-            json_response(self, {"ok": True, "dry_run": dry_run, "created": created, "updated": updated, "skipped": skipped, "errors": errors, "results": results[:300]})
             return
         elif parsed.path == "/api/workspace_registro_alerts":
             workspace_id = str(payload.get("workspace_id") or params.get("workspace_id", [""])[0] or "").strip()
@@ -70195,16 +70190,13 @@ class Handler(BaseHTTPRequestHandler):
 	                        "puntuales": 0,
 	                        "modelos_mes": 0,
 	                        "rentas_ejercicio": "",
-		                        "rentas_total_ejercicio": 0,
-		                        "rentas_realizadas": 0,
-		                        "rentas_pendientes_presentar": 0,
-		                        "rentas_sin_responsable": 0,
-		                        "rentas_sin_cobrar": 0,
-		                        "rentas_sin_remesar": 0,
-		                        "sin_vincular_servicio": 0,
-		                        "acciones_pendientes": 0,
-		                        "presupuestos_estudio": 0,
-		                        "encargos_pendientes": 0,
+	                        "rentas_total_ejercicio": 0,
+	                        "rentas_realizadas": 0,
+	                        "rentas_pendientes_presentar": 0,
+	                        "sin_vincular_servicio": 0,
+	                        "acciones_pendientes": 0,
+	                        "presupuestos_estudio": 0,
+	                        "encargos_pendientes": 0,
 	                    },
                     "modelos": [],
                     "modelos_vencidos": [],
@@ -70403,9 +70395,6 @@ class Handler(BaseHTTPRequestHandler):
                 payload["counts"]["rentas_total_ejercicio"] = int(renta_summary.get("total") or 0)
                 payload["counts"]["rentas_realizadas"] = int(renta_summary.get("presentadas") or 0)
                 payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
-                payload["counts"]["rentas_sin_responsable"] = int(renta_summary.get("sin_responsable") or 0)
-                payload["counts"]["rentas_sin_cobrar"] = int(renta_summary.get("sin_cobrar") or 0)
-                payload["counts"]["rentas_sin_remesar"] = int(renta_summary.get("sin_remesar") or 0)
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
                 try:

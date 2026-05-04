@@ -2616,13 +2616,10 @@ const gestoriaKpiActivos = document.getElementById("gestoriaKpiActivos");
 const gestoriaKpiAutonomos = document.getElementById("gestoriaKpiAutonomos");
 const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
-	const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
-	const gestoriaKpiRentasRealizadas = document.getElementById("gestoriaKpiRentasRealizadas");
-	const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
-	const gestoriaKpiRentasSinResponsable = document.getElementById("gestoriaKpiRentasSinResponsable");
-	const gestoriaKpiRentasSinCobrar = document.getElementById("gestoriaKpiRentasSinCobrar");
-	const gestoriaKpiRentasSinRemesar = document.getElementById("gestoriaKpiRentasSinRemesar");
-	const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
+const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
+const gestoriaKpiRentasRealizadas = document.getElementById("gestoriaKpiRentasRealizadas");
+const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
+const gestoriaKpiSinVincular = document.getElementById("gestoriaKpiSinVincular");
 const gestoriaRentasPendientesCount = document.getElementById("gestoriaRentasPendientesCount");
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
@@ -12613,18 +12610,52 @@ const renderWorkspaceRrhhHub = () => {
       }
       const personaId = String(emp.id || "").trim();
       const rows = (docs || []).filter((row) => String(row.persona_id || "") === personaId);
-      return `
-        <div class="workspace-rrhh-panel-card">
-          <div class="section-head">
-            <div>
-              <h4>Documentación</h4>
-              <p class="muted">Contratos, DNI, certificados y formaciones.</p>
-            </div>
-          </div>
-          <form id="workspaceRrhhDocForm" class="form-grid">
-            <input type="hidden" name="id" />
-            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-            <input type="hidden" name="persona_id" value="${escapeHtml(personaId)}" />
+	      return `
+	        <div class="workspace-rrhh-panel-card">
+	          <div class="section-head">
+	            <div>
+	              <h4>Documentación</h4>
+	              <p class="muted">Contratos, DNI, certificados y formaciones.</p>
+	            </div>
+	          </div>
+	          ${manager ? `
+	            <div class="workspace-rrhh-block">
+	              <div class="workspace-rrhh-block-head">
+	                <div>
+	                  <h5>Importar nóminas (masivo)</h5>
+	                  <p class="muted">Sube el PDF mensual con todas las nóminas: se separarán por NIF y se guardarán en cada empleado.</p>
+	                </div>
+	              </div>
+	              <form id="workspaceRrhhNominasImportForm" class="form-grid">
+	                <label>
+	                  Año
+	                  <input name="year" type="number" min="2000" max="2100" value="${new Date().getFullYear()}" required />
+	                </label>
+	                <label>
+	                  Mes
+	                  <input name="month" type="number" min="1" max="12" value="${new Date().getMonth() + 1}" required />
+	                </label>
+	                <label class="inline-check">
+	                  <input type="checkbox" name="overwrite" />
+	                  Sobrescribir si existe
+	                </label>
+	                <label class="span-2">
+	                  PDF mensual (todas las nóminas)
+	                  <input type="file" name="archivo" accept="application/pdf" />
+	                </label>
+	                <input type="hidden" name="doc_key" />
+	                <input type="hidden" name="filename" />
+	                <div class="form-actions span-2">
+	                  <button type="submit">Procesar nóminas</button>
+	                  <span id="workspaceRrhhNominasImportStatus" class="muted"></span>
+	                </div>
+	              </form>
+	            </div>
+	          ` : ""}
+	          <form id="workspaceRrhhDocForm" class="form-grid">
+	            <input type="hidden" name="id" />
+	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+	            <input type="hidden" name="persona_id" value="${escapeHtml(personaId)}" />
             <label class="span-2">
               Persona
               <select name="persona_id" disabled required>
@@ -13864,27 +13895,37 @@ const renderWorkspaceRrhhHub = () => {
         </div>
       </div>
       ${manager ? `
-        <div class="rrhh-importer">
-          <div class="section-head" style="margin-top: 12px;">
+        <div class="workspace-rrhh-block">
+          <div class="workspace-rrhh-block-head">
             <div>
-              <h4 style="margin:0;">Importar nóminas (masivo)</h4>
-              <p class="muted">Sube varios PDFs: se detecta el DNI/NIF, se asigna al empleado y se recalculan importes.</p>
+              <h5>Importar nóminas (masivo)</h5>
+              <p class="muted">Sube el PDF mensual con todas las nóminas: se separarán por NIF y se guardarán en cada empleado.</p>
             </div>
           </div>
-          <div class="form-grid">
-            <label class="span-2">
-              Archivos PDF
-              <input id="workspaceRrhhNominaImportFiles" type="file" accept="application/pdf,.pdf" multiple />
+          <form id="workspaceRrhhNominasImportForm" class="form-grid">
+            <label>
+              Año
+              <input name="year" type="number" min="2000" max="2100" value="${new Date().getFullYear()}" required />
+            </label>
+            <label>
+              Mes
+              <input name="month" type="number" min="1" max="12" value="${new Date().getMonth() + 1}" required />
             </label>
             <label class="inline-check">
-              <input id="workspaceRrhhNominaImportOverwrite" type="checkbox" />
-              Sobrescribir duplicados (mismo mes)
+              <input type="checkbox" name="overwrite" />
+              Sobrescribir si existe
             </label>
+            <label class="span-2">
+              PDF mensual (todas las nóminas)
+              <input type="file" name="archivo" accept="application/pdf" />
+            </label>
+            <input type="hidden" name="doc_key" />
+            <input type="hidden" name="filename" />
             <div class="form-actions span-2">
-              <button type="button" class="secondary" data-rrhh-nomina-import>Importar</button>
-              <span id="workspaceRrhhNominaImportStatus" class="muted"></span>
+              <button type="submit">Procesar nóminas</button>
+              <span id="workspaceRrhhNominasImportStatus" class="muted"></span>
             </div>
-          </div>
+          </form>
         </div>
       ` : ""}
       <form id="workspaceRrhhDocForm" class="form-grid">
@@ -16488,6 +16529,51 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
+  const nominasImportForm = document.getElementById("workspaceRrhhNominasImportForm");
+  if (nominasImportForm) {
+    const fileInput = nominasImportForm.querySelector('[name="archivo"]');
+    if (fileInput) {
+      fileInput.addEventListener("change", async () => {
+        const status = document.getElementById("workspaceRrhhNominasImportStatus");
+        const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        if (!file) return;
+        try {
+          const upload = await uploadFileToS3(file, "rrhh", status);
+          nominasImportForm.querySelector('[name="doc_key"]').value = upload?.key || "";
+          nominasImportForm.querySelector('[name="filename"]').value = String(file.name || "").trim();
+          if (status) status.textContent = "PDF subido. Listo para procesar.";
+        } catch (err) {
+          if (status) status.textContent = err.message || "No se pudo subir.";
+        }
+      });
+    }
+    nominasImportForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhNominasImportStatus");
+      if (status) status.textContent = "Procesando nóminas...";
+      try {
+        const form = new FormData(nominasImportForm);
+        const payload = Object.fromEntries(form.entries());
+        payload.workspace_id = state.currentWorkspaceId;
+        payload.overwrite = nominasImportForm.querySelector('[name="overwrite"]')?.checked ? "1" : "0";
+        if (!String(payload.doc_key || "").trim()) throw new Error("Sube primero el PDF mensual.");
+        const res = await fetch("/api/workspace_rrhh_nominas_import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        const c = res.counts || {};
+        if (status) {
+          status.textContent = `OK · detectadas ${Number(c.total_detected || 0)} · creadas ${Number(c.created || 0)} · actualizadas ${Number(c.updated || 0)} · omitidas ${Number(c.skipped || 0)} · sin persona ${Number(c.persona_not_found || 0)} · errores ${Number(c.errors || 0)}`;
+        }
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo procesar.";
+      }
+    });
+  }
+
   const docForm = document.getElementById("workspaceRrhhDocForm");
   if (docForm) {
     const reset = () => {
@@ -16584,46 +16670,6 @@ const renderWorkspaceRrhhHub = () => {
       openS3File(String(row.doc_key || ""), String(row.doc_url || ""));
     });
   });
-
-  const nominaImportBtn = workspaceRrhhHub.querySelector("[data-rrhh-nomina-import]");
-  if (nominaImportBtn && manager) {
-    nominaImportBtn.addEventListener("click", async () => {
-      const status = document.getElementById("workspaceRrhhNominaImportStatus");
-      const input = document.getElementById("workspaceRrhhNominaImportFiles");
-      const overwrite = Boolean(document.getElementById("workspaceRrhhNominaImportOverwrite")?.checked);
-      const files = input?.files ? Array.from(input.files) : [];
-      if (!files.length) {
-        if (status) status.textContent = "Selecciona PDFs primero.";
-        return;
-      }
-      if (status) status.textContent = `Subiendo ${files.length} archivo(s)…`;
-      try {
-        const uploaded = [];
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          if (status) status.textContent = `Subiendo ${i + 1}/${files.length}: ${file.name}`;
-          const up = await uploadFileToS3(file, "rrhh", status);
-          uploaded.push({ doc_key: up?.key || "", doc_url: up?.public_url || "", filename: file.name });
-        }
-        if (status) status.textContent = "Procesando nóminas (OCR + asignación)…";
-        const res = await fetch("/api/workspace_rrhh_nominas_import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, overwrite: overwrite ? 1 : 0, items: uploaded }),
-        }).then((r) => r.json());
-        if (res.error) throw new Error(res.error);
-        const created = Number(res.created || 0);
-        const updated = Number(res.updated || 0);
-        const skipped = Number(res.skipped || 0);
-        const errors = Number(res.errors || 0);
-        if (status) status.textContent = `Importación lista: ${created} creadas, ${updated} actualizadas, ${skipped} duplicadas, ${errors} errores.`;
-        if (input) input.value = "";
-        await refreshWorkspaceRrhh();
-      } catch (err) {
-        if (status) status.textContent = err.message || "No se pudo importar.";
-      }
-    });
-  }
 };
 
 const renderWorkspaceModules = (rows = []) => {
@@ -33936,9 +33982,6 @@ const setSegurosTab = (name) => {
   if (name === "renovaciones") {
     loadSegurosRenovacionesQueue();
   }
-  if (name === "calidad") {
-    loadSegurosDataQuality();
-  }
   if (name === "contabilidad") {
     hydrateSegurosContabilidadFormSelects().catch(() => {});
     loadSegurosContabilidad();
@@ -46258,93 +46301,9 @@ const loadCrmInmuebles = () => {
 };
 
 const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
-  const ensureInlinePrintStyles = () => {
-    if (document.getElementById("crmInlinePrintStyles")) return;
-    const style = document.createElement("style");
-    style.id = "crmInlinePrintStyles";
-    style.textContent = `
-      @media print {
-        body.crm-inline-printing > * { display: none !important; }
-        body.crm-inline-printing #crmInlinePrintRoot { display: block !important; }
-        body.crm-inline-printing #crmInlinePrintRoot * { visibility: visible; }
-      }
-      #crmInlinePrintRoot {
-        display: none;
-        padding: 18px;
-        color: #0f172a;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      }
-      #crmInlinePrintRoot h1 { font-size: 18px; margin: 0 0 12px; }
-      #crmInlinePrintRoot table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      #crmInlinePrintRoot th, #crmInlinePrintRoot td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
-      #crmInlinePrintRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #475569; }
-    `;
-    document.head.appendChild(style);
-  };
-
-  const openInlinePrintModal = () => {
-    ensureInlinePrintStyles();
-    let modal = document.getElementById("crmInlinePrintModal");
-    if (!modal) {
-      modal = document.createElement("div");
-      modal.id = "crmInlinePrintModal";
-      modal.className = "modal hidden";
-      modal.innerHTML = `
-        <div class="modal-content" style="max-width: 980px;">
-          <div class="modal-header">
-            <div>
-              <h3 data-print-title></h3>
-              <p class="muted" style="margin:0;">Vista previa (sin popups). Usa “Imprimir” para generar PDF/impresión.</p>
-            </div>
-            <button type="button" class="secondary ghost" data-print-close>Cerrar</button>
-          </div>
-          <div class="modal-body">
-            <div id="crmInlinePrintPreview"></div>
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="secondary" data-print-do>Imprimir</button>
-          </div>
-        </div>
-      `;
-      modal.addEventListener("click", (event) => {
-        if (event.target === modal) modal.classList.add("hidden");
-      });
-      document.body.appendChild(modal);
-      modal.querySelector("[data-print-close]")?.addEventListener("click", () => modal.classList.add("hidden"));
-      modal.querySelector("[data-print-do]")?.addEventListener("click", () => {
-        try {
-          document.body.classList.add("crm-inline-printing");
-          let root = document.getElementById("crmInlinePrintRoot");
-          if (!root) {
-            root = document.createElement("div");
-            root.id = "crmInlinePrintRoot";
-            document.body.appendChild(root);
-          }
-          const currentTitle = String(modal.querySelector("[data-print-title]")?.textContent || title || "Impresión");
-          const previewHtml = modal.querySelector("#crmInlinePrintPreview")?.innerHTML || "";
-          root.innerHTML = `<h1>${escapeHtml(currentTitle)}</h1>${previewHtml}`;
-          window.setTimeout(() => window.print(), 50);
-        } finally {
-          window.setTimeout(() => {
-            document.body.classList.remove("crm-inline-printing");
-            const root = document.getElementById("crmInlinePrintRoot");
-            if (root) root.innerHTML = "";
-          }, 800);
-        }
-      });
-    }
-    const titleEl = modal.querySelector("[data-print-title]");
-    if (titleEl) titleEl.textContent = String(title || "Impresión");
-    const preview = modal.querySelector("#crmInlinePrintPreview");
-    if (preview) preview.innerHTML = html || "<p class='muted'>Sin datos para imprimir.</p>";
-    modal.classList.remove("hidden");
-    return;
-  };
-
   const win = window.open("", "_blank", "noopener,noreferrer");
   if (!win) {
-    // Fallback sin popup: vista previa en modal + `window.print()` (compatible con iOS/PWA).
-    openInlinePrintModal();
+    alert("No se pudo abrir la ventana de impresión (popup bloqueado).");
     return;
   }
   win.document.open();
@@ -53581,9 +53540,6 @@ const renderGestoriaRentaDashboard = (payload) => {
   const unassigned = Array.isArray(payload?.unassigned) ? payload.unassigned : [];
   const missing = Array.isArray(payload?.missing) ? payload.missing : [];
   const sinVincular = Array.isArray(payload?.sin_vincular) ? payload.sin_vincular : [];
-  const unremesadas = campaigns.filter(
-    (it) => Number(it?.precio_servicio || 0) > 0.0001 && Number(it?.cobrada || 0) === 1 && Number(it?.remesada || 0) !== 1
-  );
   const months = Array.isArray(payload?.months) ? payload.months : [];
   const cobrosMonths = Array.isArray(payload?.cobros?.months) ? payload.cobros.months : [];
   const cobrosSinFechaTotal = Number(payload?.cobros?.sin_fecha_total || 0);
@@ -53595,22 +53551,18 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
-	  const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
-	    const workspaceId = String(state.currentWorkspaceId || "").trim();
-	    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
-	    const params = new URLSearchParams();
-	    if (workspaceId) params.set("workspace_id", workspaceId);
-	    const empresa = resolveCrmGestoriaEmpresa();
-	    const exportEmpresaId = scopeEmpresaId || String(empresa?.id || "").trim();
-	    if (exportEmpresaId) params.set("empresa_id", exportEmpresaId);
-	    if (!workspaceId && !exportEmpresaId) {
-	      throw new Error("No hay workspace/empresa para generar el informe.");
-	    }
-	    if (ejercicio) params.set("ejercicio", ejercicio);
-	    if (kind) params.set("kind", kind);
-	    if (fields) params.set("fields", fields);
-	    if (responsableKey) params.set("responsable_key", responsableKey);
-	    if (query) params.set("q", query);
+  const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
+    const workspaceId = String(state.currentWorkspaceId || "").trim();
+    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+    if (!workspaceId) return;
+    const params = new URLSearchParams();
+    params.set("workspace_id", workspaceId);
+    if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
+    if (ejercicio) params.set("ejercicio", ejercicio);
+    if (kind) params.set("kind", kind);
+    if (fields) params.set("fields", fields);
+    if (responsableKey) params.set("responsable_key", responsableKey);
+    if (query) params.set("q", query);
     const endpoint = `/api/gestoria_renta_export?${params.toString()}`;
     const res = await fetch(endpoint, { method: "GET", credentials: "same-origin" });
     if (!res.ok) {
@@ -53741,12 +53693,6 @@ const renderGestoriaRentaDashboard = (payload) => {
     value: numberFormatter.format(Number(counts.sin_responsable || 0)),
     note: "Encargos sin asignación.",
     onClick: () => setView("unassigned"),
-  });
-  addKpi({
-    title: "Sin remesar",
-    value: numberFormatter.format(unremesadas.length),
-    note: "Cobradas sin remesa.",
-    onClick: () => setView("unremesada"),
   });
   addKpi({
     title: "Clientes sin campaña",
@@ -53922,19 +53868,14 @@ const renderGestoriaRentaDashboard = (payload) => {
     if (view === "paid") {
       return base.filter((item) => Number(item.cobrada || 0) === 1);
     }
-	    if (view === "remesadas") {
-	      return base.filter((item) => Number(item.remesada || 0) === 1);
-	    }
-	    if (view === "unremesada") {
-	      return base.filter(
-	        (item) => Number(item.precio_servicio || 0) > 0.0001 && Number(item.cobrada || 0) === 1 && Number(item.remesada || 0) !== 1
-	      );
-	    }
-	    if (view === "sin_precio") {
-	      return base.filter((item) => Number(item.precio_servicio || 0) <= 0.0001);
-	    }
-	    if (view === "unpaid") return unpaid;
-	    if (view === "unassigned") return unassigned;
+    if (view === "remesadas") {
+      return base.filter((item) => Number(item.remesada || 0) === 1);
+    }
+    if (view === "sin_precio") {
+      return base.filter((item) => Number(item.precio_servicio || 0) <= 0.0001);
+    }
+    if (view === "unpaid") return unpaid;
+    if (view === "unassigned") return unassigned;
     if (view === "responsable" && viewParam) {
       const key = normalizeLookupText(viewParam) || viewParam;
       return base.filter((item) => String(item.responsable_key || "") === key);
@@ -53998,50 +53939,45 @@ const renderGestoriaRentaDashboard = (payload) => {
   };
 
   const root = document.createElement("div");
-	  if (
-	    view === "all" ||
-	    view === "unpaid" ||
-	    view === "unassigned" ||
-	    view === "presented" ||
-	    view === "draft" ||
-	    view === "paid" ||
-	    view === "remesadas" ||
-	    view === "unremesada" ||
-	    view === "sin_precio" ||
-	    view === "responsable"
-	  ) {
+  if (
+    view === "all" ||
+    view === "unpaid" ||
+    view === "unassigned" ||
+    view === "presented" ||
+    view === "draft" ||
+    view === "paid" ||
+    view === "remesadas" ||
+    view === "sin_precio" ||
+    view === "responsable"
+  ) {
     const items = resolveCampaignsForView();
     const title =
-	      view === "all"
-	        ? "Todas las campañas"
-	        : view === "unpaid"
-	        ? "Rentas sin cobrar"
-	        : view === "unassigned"
-	          ? "Rentas sin responsable"
-	          : view === "unremesada"
-	            ? "Rentas sin remesar"
-	          : view === "presented"
-	            ? "Rentas presentadas"
-	            : view === "draft"
-	              ? "Rentas borrador"
-	              : view === "paid"
-	                ? "Rentas cobradas"
-	                : view === "remesadas"
-	                  ? "Rentas remesadas"
+      view === "all"
+        ? "Todas las campañas"
+        : view === "unpaid"
+        ? "Rentas sin cobrar"
+        : view === "unassigned"
+          ? "Rentas sin responsable"
+          : view === "presented"
+            ? "Rentas presentadas"
+            : view === "draft"
+              ? "Rentas borrador"
+              : view === "paid"
+                ? "Rentas cobradas"
+                : view === "remesadas"
+                  ? "Rentas remesadas"
                   : view === "sin_precio"
                     ? "Rentas sin precio"
                 : `Rentas · ${viewParam || "Responsable"}`;
     const hint =
-	      view === "all"
-	        ? "Listado completo del ejercicio."
-	        : view === "unpaid"
-	        ? "Encargos con precio asignado y no marcados como cobrados."
-	        : view === "unassigned"
-	          ? "Encargos sin responsable asignado."
-	          : view === "unremesada"
-	            ? "Encargos cobrados con precio asignado y no marcados como remesados."
-	          : view === "paid"
-	            ? "Encargos marcados como cobrados."
+      view === "all"
+        ? "Listado completo del ejercicio."
+        : view === "unpaid"
+        ? "Encargos con precio asignado y no marcados como cobrados."
+        : view === "unassigned"
+          ? "Encargos sin responsable asignado."
+          : view === "paid"
+            ? "Encargos marcados como cobrados."
             : view === "draft"
               ? "Pendientes de presentar."
               : view === "presented"
@@ -54243,13 +54179,6 @@ const renderGestoriaRentaDashboard = (payload) => {
         canvasAttr: 'data-renta-chart="responsables"',
       })
     );
-    chartGrid.appendChild(
-      buildChartCard({
-        title: "Presentadas por responsable",
-        hint: "Rentas presentadas por asesor/responsable (Top).",
-        canvasAttr: 'data-renta-chart="presentadas_resp"',
-      })
-    );
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
     const hint = document.createElement("p");
@@ -54263,7 +54192,6 @@ const renderGestoriaRentaDashboard = (payload) => {
       const presentedCanvas = root.querySelector('canvas[data-renta-chart="presentadas"]');
       const economyCanvas = root.querySelector('canvas[data-renta-chart="economia"]');
       const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
-      const presentedRespCanvas = root.querySelector('canvas[data-renta-chart="presentadas_resp"]');
       if (estadoCanvas) {
         drawBarChart(
           estadoCanvas,
@@ -54393,26 +54321,6 @@ const renderGestoriaRentaDashboard = (payload) => {
               setViewWithParam("responsable", keys[idx] || "");
             },
           }
-        );
-      }
-      if (presentedRespCanvas) {
-        const sorted = Array.isArray(responsables) ? responsables.slice() : [];
-        sorted.sort((a, b) => Number(b?.presentadas || 0) - Number(a?.presentadas || 0));
-        const top = sorted.slice(0, 14);
-        const labels = top.map((r) => String(r?.responsable || "Sin responsable"));
-        const values = top.map((r) => Number(r?.presentadas || 0));
-        drawBarChart(
-          presentedRespCanvas,
-          labels,
-          [
-            {
-              label: "Presentadas",
-              values,
-              color: "#0B1D33",
-              format: (v) => numberFormatter.format(Number(v || 0)),
-            },
-          ],
-          { legend: false, showValues: true, tooltip: true, axisLabelMaxChars: 14 }
         );
       }
     });
@@ -54586,11 +54494,8 @@ const loadGestoriaDashboard = () => {
 		      } catch (e) {}
 		      state.gestoriaLastRentasEjercicio = year;
 		    }
-			    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
-			    if (gestoriaKpiRentasSinResponsable) gestoriaKpiRentasSinResponsable.textContent = counts.rentas_sin_responsable ?? 0;
-			    if (gestoriaKpiRentasSinCobrar) gestoriaKpiRentasSinCobrar.textContent = counts.rentas_sin_cobrar ?? 0;
-			    if (gestoriaKpiRentasSinRemesar) gestoriaKpiRentasSinRemesar.textContent = counts.rentas_sin_remesar ?? 0;
-		    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
+		    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
 	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
@@ -55011,11 +54916,11 @@ const bindGestoriaDashboardKpis = () => {
 	      },
 	      title: "Modelos este mes",
 	    },
-		    {
-		      valueEl: gestoriaKpiRentasRealizadas,
-		      action: () => {
-		        openGestoriaServiceTab("gestoria-dash");
-		        window.setTimeout(() => {
+	    {
+	      valueEl: gestoriaKpiRentasRealizadas,
+	      action: () => {
+	        openGestoriaServiceTab("gestoria-dash");
+	        window.setTimeout(() => {
 	          try {
 	            setGestoriaDashboardView("rentas");
 	          } catch (e) {}
@@ -55029,11 +54934,11 @@ const bindGestoriaDashboardKpis = () => {
 	          }, 0);
 	        }, 0);
 	      },
-		      title: "Rentas realizadas",
-		    },
-			    {
-			      valueEl: gestoriaKpiRentasPendientes,
-			      action: () => {
+	      title: "Rentas realizadas",
+	    },
+		    {
+		      valueEl: gestoriaKpiRentasPendientes,
+		      action: () => {
 		        openGestoriaServiceTab("gestoria-dash");
 		        window.setTimeout(() => {
 		          try {
@@ -55046,67 +54951,13 @@ const bindGestoriaDashboardKpis = () => {
 		          }, 0);
 		        }, 0);
 		      },
-			      title: "Rentas pendientes",
-			    },
-			    {
-			      valueEl: gestoriaKpiRentasSinResponsable,
-			      action: () => {
-			        openGestoriaServiceTab("gestoria-dash");
-			        window.setTimeout(() => {
-			          try {
-			            setGestoriaDashboardView("rentas");
-			          } catch (e) {}
-			          window.setTimeout(() => {
-			            try {
-			              state.gestoriaRentaDashView = "unassigned";
-			            } catch (e) {}
-			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
-			          }, 0);
-			        }, 0);
-			      },
-			      title: "Rentas sin responsable",
-			    },
-			    {
-			      valueEl: gestoriaKpiRentasSinCobrar,
-			      action: () => {
-			        openGestoriaServiceTab("gestoria-dash");
-			        window.setTimeout(() => {
-			          try {
-			            setGestoriaDashboardView("rentas");
-			          } catch (e) {}
-			          window.setTimeout(() => {
-			            try {
-			              state.gestoriaRentaDashView = "unpaid";
-			            } catch (e) {}
-			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
-			          }, 0);
-			        }, 0);
-			      },
-			      title: "Rentas sin cobrar",
-			    },
-			    {
-			      valueEl: gestoriaKpiRentasSinRemesar,
-			      action: () => {
-			        openGestoriaServiceTab("gestoria-dash");
-			        window.setTimeout(() => {
-			          try {
-			            setGestoriaDashboardView("rentas");
-			          } catch (e) {}
-			          window.setTimeout(() => {
-			            try {
-			              state.gestoriaRentaDashView = "unremesada";
-			            } catch (e) {}
-			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
-			          }, 0);
-			        }, 0);
-			      },
-			      title: "Rentas sin remesar",
-			    },
-		    {
-		      valueEl: gestoriaKpiSinVincular,
-		      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
-		      title: "Clientes sin vincular a Gestoría",
+		      title: "Rentas pendientes",
 		    },
+	    {
+	      valueEl: gestoriaKpiSinVincular,
+	      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
+	      title: "Clientes sin vincular a Gestoría",
+	    },
     {
       valueEl: gestoriaKpiGestionesCurso,
       action: () => openGestoriaTrabajosWithFilters({ estado: "En curso" }),
