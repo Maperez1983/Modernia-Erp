@@ -13863,6 +13863,30 @@ const renderWorkspaceRrhhHub = () => {
           <p class="muted">${manager ? "Contratos, nóminas, DNI, certificados y formaciones del equipo." : "Aquí verás tu contrato, nóminas y documentos personales."}</p>
         </div>
       </div>
+      ${manager ? `
+        <div class="rrhh-importer">
+          <div class="section-head" style="margin-top: 12px;">
+            <div>
+              <h4 style="margin:0;">Importar nóminas (masivo)</h4>
+              <p class="muted">Sube varios PDFs: se detecta el DNI/NIF, se asigna al empleado y se recalculan importes.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label class="span-2">
+              Archivos PDF
+              <input id="workspaceRrhhNominaImportFiles" type="file" accept="application/pdf,.pdf" multiple />
+            </label>
+            <label class="inline-check">
+              <input id="workspaceRrhhNominaImportOverwrite" type="checkbox" />
+              Sobrescribir duplicados (mismo mes)
+            </label>
+            <div class="form-actions span-2">
+              <button type="button" class="secondary" data-rrhh-nomina-import>Importar</button>
+              <span id="workspaceRrhhNominaImportStatus" class="muted"></span>
+            </div>
+          </div>
+        </div>
+      ` : ""}
       <form id="workspaceRrhhDocForm" class="form-grid">
         <input type="hidden" name="id" />
         <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
@@ -16560,6 +16584,46 @@ const renderWorkspaceRrhhHub = () => {
       openS3File(String(row.doc_key || ""), String(row.doc_url || ""));
     });
   });
+
+  const nominaImportBtn = workspaceRrhhHub.querySelector("[data-rrhh-nomina-import]");
+  if (nominaImportBtn && manager) {
+    nominaImportBtn.addEventListener("click", async () => {
+      const status = document.getElementById("workspaceRrhhNominaImportStatus");
+      const input = document.getElementById("workspaceRrhhNominaImportFiles");
+      const overwrite = Boolean(document.getElementById("workspaceRrhhNominaImportOverwrite")?.checked);
+      const files = input?.files ? Array.from(input.files) : [];
+      if (!files.length) {
+        if (status) status.textContent = "Selecciona PDFs primero.";
+        return;
+      }
+      if (status) status.textContent = `Subiendo ${files.length} archivo(s)…`;
+      try {
+        const uploaded = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (status) status.textContent = `Subiendo ${i + 1}/${files.length}: ${file.name}`;
+          const up = await uploadFileToS3(file, "rrhh", status);
+          uploaded.push({ doc_key: up?.key || "", doc_url: up?.public_url || "", filename: file.name });
+        }
+        if (status) status.textContent = "Procesando nóminas (OCR + asignación)…";
+        const res = await fetch("/api/workspace_rrhh_nominas_import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, overwrite: overwrite ? 1 : 0, items: uploaded }),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        const created = Number(res.created || 0);
+        const updated = Number(res.updated || 0);
+        const skipped = Number(res.skipped || 0);
+        const errors = Number(res.errors || 0);
+        if (status) status.textContent = `Importación lista: ${created} creadas, ${updated} actualizadas, ${skipped} duplicadas, ${errors} errores.`;
+        if (input) input.value = "";
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo importar.";
+      }
+    });
+  }
 };
 
 const renderWorkspaceModules = (rows = []) => {

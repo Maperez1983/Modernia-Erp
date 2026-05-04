@@ -14451,6 +14451,24 @@ def _should_run_rrhh_nomina_ocr(payload: dict) -> bool:
     return False
 
 
+def _extract_nomina_meta(fields: dict) -> dict:
+    if not isinstance(fields, dict):
+        return {"year": 0, "month": 0, "nif": ""}
+    year = 0
+    month = 0
+    nif = ""
+    try:
+        year = int(fields.get("year") or 0) if str(fields.get("year") or "").strip() else 0
+    except Exception:
+        year = 0
+    try:
+        month = int(fields.get("month") or 0) if str(fields.get("month") or "").strip() else 0
+    except Exception:
+        month = 0
+    nif = normalize_nif(fields.get("empleado_nif") or fields.get("nif") or fields.get("dni") or "")
+    return {"year": year, "month": month, "nif": nif}
+
+
 def _fetch_rrhh_nominas_ocr(conn, workspace_id: str, persona_id: str, *, ejercicio: str = "") -> list[dict]:
     ws = str(workspace_id or "").strip()
     pid = str(persona_id or "").strip()
@@ -32337,6 +32355,9 @@ def ensure_workspace_product_tables(conn):
         "nomina_ocr_error": "TEXT",
         "nomina_ocr_json": "TEXT",
         "nomina_ocr_updated_at": "TEXT",
+        "nomina_year": "INTEGER",
+        "nomina_month": "INTEGER",
+        "nomina_empleado_nif": "TEXT",
     }.items():
         try:
             ensure_column(conn, "workspace_rrhh_documentos", col_name, f"{col_name} {col_type}")
@@ -36604,6 +36625,29 @@ def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, pers
         (*params, max(1, min(int(limit or 200), 400))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def _resolve_persona_id_by_nif(conn, workspace_id: str, nif: str) -> tuple[str, str]:
+    ws = str(workspace_id or "").strip()
+    nif_norm = normalize_nif(nif or "")
+    if not ws or not nif_norm:
+        return "", ""
+    packed = re.sub(r"[\s\.\-]+", "", nif_norm.upper())
+    row = conn.execute(
+        """
+        SELECT id, COALESCE(empresa_id, '') AS empresa_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ?
+          AND UPPER(REPLACE(REPLACE(REPLACE(COALESCE(nif,''),' ',''),'-',''),'.','')) = ?
+          AND COALESCE(activo, 1) = 1
+        ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
+        LIMIT 1
+        """,
+        (ws, packed),
+    ).fetchone()
+    if not row:
+        return "", ""
+    return str(row_value(row, "id") or row_value(row, 0) or "").strip(), str(row_value(row, "empresa_id") or "").strip()
 
 
 def _parse_iso_date(value):
@@ -53339,10 +53383,23 @@ class Handler(BaseHTTPRequestHandler):
                             """
                             UPDATE workspace_rrhh_documentos
                             SET nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
+                                nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
                                 nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                             WHERE id = ? AND workspace_id = ?
                             """,
-                            (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
+                            (
+                                status,
+                                confidence,
+                                err,
+                                ocr_json,
+                                int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("year") or 0),
+                                int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("month") or 0),
+                                str(_extract_nomina_meta(ocr_res.get("fields") or {}).get("nif") or "").strip() or None,
+                                now,
+                                now,
+                                record_id,
+                                workspace_id,
+                            ),
                         )
                         after = conn.execute(
                             "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
@@ -53419,13 +53476,190 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 UPDATE workspace_rrhh_documentos
                 SET nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
+                    nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
                     nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                 WHERE id = ? AND workspace_id = ?
                 """,
-                (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
+                (
+                    status,
+                    confidence,
+                    err,
+                    ocr_json,
+                    int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("year") or 0),
+                    int(_extract_nomina_meta(ocr_res.get("fields") or {}).get("month") or 0),
+                    str(_extract_nomina_meta(ocr_res.get("fields") or {}).get("nif") or "").strip() or None,
+                    now,
+                    now,
+                    record_id,
+                    workspace_id,
+                ),
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "status": status, "confidence": confidence, "error": err, "fields": ocr_res.get("fields") or {}})
+            return
+        elif parsed.path == "/api/workspace_rrhh_nominas_import":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            items = payload.get("items")
+            if not isinstance(items, list) or not items:
+                json_response(self, {"error": "items requerido (lista)"}, status=400)
+                return
+            overwrite = str(payload.get("overwrite") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+            dry_run = str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+            results = []
+            created = 0
+            updated = 0
+            skipped = 0
+            errors = 0
+            for it in items:
+                try:
+                    doc_key = str((it or {}).get("doc_key") or "").strip()
+                    doc_url = str((it or {}).get("doc_url") or "").strip() or None
+                    filename = str((it or {}).get("filename") or (it or {}).get("nombre") or "nomina.pdf").strip() or "nomina.pdf"
+                    if not doc_key:
+                        errors += 1
+                        results.append({"ok": False, "error": "doc_key requerido", "filename": filename})
+                        continue
+                    ocr_res = ocr_nomina_from_s3(doc_key, filename=filename)
+                    fields = (ocr_res.get("fields") or {}) if isinstance(ocr_res, dict) else {}
+                    meta = _extract_nomina_meta(fields if isinstance(fields, dict) else {})
+                    nif = str(meta.get("nif") or "").strip()
+                    year = int(meta.get("year") or 0)
+                    month = int(meta.get("month") or 0)
+                    if not nif:
+                        errors += 1
+                        results.append({"ok": False, "error": "No se detectó NIF en la nómina", "filename": filename, "doc_key": doc_key, "status": ocr_res.get("status")})
+                        continue
+                    persona_id, empresa_id = _resolve_persona_id_by_nif(conn, workspace_id, nif)
+                    if not persona_id:
+                        errors += 1
+                        results.append({"ok": False, "error": "No encuentro empleado en RRHH por NIF", "empleado_nif": nif, "filename": filename, "doc_key": doc_key})
+                        continue
+                    # Deduplicación por persona+mes+año.
+                    existing = None
+                    if year and month:
+                        existing = conn.execute(
+                            """
+                            SELECT id, doc_key
+                            FROM workspace_rrhh_documentos
+                            WHERE workspace_id = ?
+                              AND persona_id = ?
+                              AND LOWER(COALESCE(tipo,'')) IN ('nómina','nomina')
+                              AND COALESCE(nomina_year, 0) = ?
+                              AND COALESCE(nomina_month, 0) = ?
+                            ORDER BY COALESCE(updated_at, created_at) DESC
+                            LIMIT 1
+                            """,
+                            (workspace_id, persona_id, int(year), int(month)),
+                        ).fetchone()
+                    if existing is not None and not overwrite:
+                        skipped += 1
+                        results.append({"ok": True, "action": "skipped", "reason": "duplicate", "id": str(row_value(existing, "id") or row_value(existing, 0) or ""), "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
+                        continue
+                    if dry_run:
+                        results.append({"ok": True, "action": "dry_run", "persona_id": persona_id, "empresa_id": empresa_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
+                        continue
+                    now_local = now
+                    ocr_json = None
+                    try:
+                        ocr_json = json.dumps(
+                            {"fields": fields or {}, "text_preview": str(ocr_res.get("text") or "")[:8000]},
+                            ensure_ascii=False,
+                        )
+                    except Exception:
+                        ocr_json = None
+                    status = str(ocr_res.get("status") or ("ok" if ocr_res.get("ok") else "error")).strip()
+                    confidence = float(ocr_res.get("confidence") or 0.0)
+                    err = str(ocr_res.get("error") or "").strip() or None
+                    fecha_emision = f"{year:04d}-{month:02d}-01" if (year and month) else None
+                    if existing is not None:
+                        rec_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip()
+                        conn.execute(
+                            """
+                            UPDATE workspace_rrhh_documentos
+                            SET empresa_id = ?, persona_id = ?, tipo = ?, nombre = ?, doc_key = ?, doc_url = ?, fecha_emision = ?,
+                                nomina_ocr_status = ?, nomina_ocr_confidence = ?, nomina_ocr_error = ?, nomina_ocr_json = ?,
+                                nomina_year = ?, nomina_month = ?, nomina_empleado_nif = ?,
+                                nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
+                            WHERE id = ? AND workspace_id = ?
+                            """,
+                            (
+                                empresa_id or None,
+                                persona_id,
+                                "Nómina",
+                                filename,
+                                doc_key,
+                                doc_url,
+                                fecha_emision,
+                                status,
+                                confidence,
+                                err,
+                                ocr_json,
+                                int(year or 0),
+                                int(month or 0),
+                                nif or None,
+                                now_local,
+                                now_local,
+                                rec_id,
+                                workspace_id,
+                            ),
+                        )
+                        updated += 1
+                        results.append({"ok": True, "action": "updated", "id": rec_id, "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
+                    else:
+                        rec_id = os.urandom(16).hex()
+                        conn.execute(
+                            """
+                            INSERT INTO workspace_rrhh_documentos (
+                              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url, fecha_emision,
+                              permanente, estado,
+                              nomina_ocr_status, nomina_ocr_confidence, nomina_ocr_error, nomina_ocr_json, nomina_ocr_updated_at,
+                              nomina_year, nomina_month, nomina_empleado_nif,
+                              created_at, updated_at
+                            ) VALUES (
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                              1, 'Activo',
+                              ?, ?, ?, ?, datetime(?),
+                              ?, ?, ?,
+                              datetime(?), datetime(?)
+                            )
+                            """,
+                            (
+                                rec_id,
+                                workspace_id,
+                                empresa_id or None,
+                                persona_id,
+                                "Nómina",
+                                filename,
+                                doc_key,
+                                doc_url,
+                                fecha_emision,
+                                status,
+                                confidence,
+                                err,
+                                ocr_json,
+                                now_local,
+                                int(year or 0),
+                                int(month or 0),
+                                nif or None,
+                                now_local,
+                                now_local,
+                            ),
+                        )
+                        created += 1
+                        results.append({"ok": True, "action": "created", "id": rec_id, "persona_id": persona_id, "empleado_nif": nif, "year": year, "month": month, "filename": filename})
+                except Exception as exc:
+                    errors += 1
+                    results.append({"ok": False, "error": Handler._safe_exc_detail(exc), "filename": str((it or {}).get("filename") or "")})
+            if not dry_run:
+                conn.commit()
+            json_response(self, {"ok": True, "dry_run": dry_run, "created": created, "updated": updated, "skipped": skipped, "errors": errors, "results": results[:300]})
             return
         elif parsed.path == "/api/workspace_registro_alerts":
             workspace_id = str(payload.get("workspace_id") or params.get("workspace_id", [""])[0] or "").strip()
