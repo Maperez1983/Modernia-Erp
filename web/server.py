@@ -43818,8 +43818,19 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if forced in ("0", "false", "no", "off"):
             return False
-        proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
-        return proto == "https" or bool(os.environ.get("RENDER"))
+        # Only mark cookies Secure when we are confident the client is using HTTPS.
+        # Rely on proxy headers instead of environment detection: some deployments may
+        # expose HTTP (or omit X-Forwarded-Proto) and a Secure cookie would never be sent
+        # back by the browser, causing a login loop.
+        forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
+        if forwarded_proto:
+            forwarded_proto = forwarded_proto.split(",", 1)[0].strip()
+        if forwarded_proto == "https":
+            return True
+        forwarded = (self.headers.get("Forwarded") or "").strip().lower()
+        if "proto=https" in forwarded:
+            return True
+        return False
 
     def _session_cookie_domain(self):
         forced = (os.environ.get("APP_SESSION_COOKIE_DOMAIN") or "").strip()
