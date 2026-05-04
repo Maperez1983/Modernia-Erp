@@ -72646,37 +72646,35 @@ if (gestoriaBudgetsEstadoFilter) {
 	  });
 	}
 
-	if (gestoriaTrabajoTipoSeedCoreBtn) {
-	  gestoriaTrabajoTipoSeedCoreBtn.addEventListener("click", async () => {
-	    const isAdmin = canAccessGestoriaAdminDashboard();
-	    if (!isAdmin) return;
-	    const ok = window.confirm("¿Instalar el catálogo core de servicios de Gestoría? Se activarán/actualizarán los servicios base y se desactivarán los no core.");
-	    if (!ok) return;
-	    try {
-	      gestoriaTrabajoTipoSeedCoreBtn.disabled = true;
-	      const res = await fetch("/api/gestoria_trabajo_tipos_seed_core", {
-	        method: "POST",
-	        headers: { "Content-Type": "application/json" },
-	        body: JSON.stringify({ deactivate_others: true }),
-	      }).then((r) => r.json());
-	      if (res?.error) throw new Error(res.error);
-	      const rows = await loadGestoriaTrabajoTipos({ force: true });
-	      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
-	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
-	      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
-	      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
-	      renderGestoriaBudgetTipoTemplateFields();
-	      renderGestoriaTrabajoTiposAdmin(rows);
-	      if (gestoriaTrabajoTiposInfo) {
-	        gestoriaTrabajoTiposInfo.textContent = `Catálogo core instalado: +${res.inserted || 0} nuevos, ${res.updated || 0} actualizados, ${res.deactivated || 0} desactivados.`;
-	      }
-	    } catch (e) {
-	      window.alert(String(e?.message || e || "No se pudo instalar el catálogo core."));
-	    } finally {
-	      gestoriaTrabajoTipoSeedCoreBtn.disabled = false;
-	    }
-	  });
-	}
+		{
+		  const seedCoreBtn = document.getElementById("gestoriaTrabajoTipoSeedCoreBtn");
+		  if (seedCoreBtn && seedCoreBtn.dataset.bound !== "1") seedCoreBtn.addEventListener("click", async () => {
+		    seedCoreBtn.dataset.bound = "1";
+		    const isAdmin = canAccessGestoriaAdminDashboard();
+		    if (!isAdmin) return;
+		    const ok = window.confirm("¿Instalar el catálogo core de servicios de Gestoría? Se activarán/actualizarán los servicios base y se desactivarán los no core.");
+		    if (!ok) return;
+		    try {
+		      seedCoreBtn.disabled = true;
+		      // Seed en frontend para evitar deploys rotos por endpoints inexistentes.
+		      const res = await seedGestoriaCoreServicios({ deactivateOthers: true });
+		      const rows = await loadGestoriaTrabajoTipos({ force: true });
+		      hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
+		      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
+		      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
+		      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
+		      renderGestoriaBudgetTipoTemplateFields();
+		      renderGestoriaTrabajoTiposAdmin(rows);
+		      if (gestoriaTrabajoTiposInfo) {
+		        gestoriaTrabajoTiposInfo.textContent = `Catálogo core instalado: +${res.inserted || 0} nuevos, ${res.updated || 0} actualizados, ${res.deactivated || 0} desactivados.`;
+		      }
+		    } catch (e) {
+		      window.alert(String(e?.message || e || "No se pudo instalar el catálogo core."));
+		    } finally {
+		      seedCoreBtn.disabled = false;
+		    }
+		  });
+		}
 
 if (gestoriaTrabajoTipoAddBtn) {
   gestoriaTrabajoTipoAddBtn.addEventListener("click", async () => {
