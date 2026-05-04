@@ -12118,6 +12118,47 @@ body.crm-context-fin #crmSection #crmViewFin #hipotecaTabs {
   display: none;
 }
 
+/* Financiaciones: el topbar debe mostrar todas las cards sin scroll horizontal. */
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  overflow-x: hidden;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  row-gap: 10px;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
+  width: 86px;
+  min-width: 86px;
+  height: 72px;
+  padding: 9px 6px;
+  border-radius: 14px;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico {
+  width: 28px;
+  height: 28px;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico svg {
+  width: 26px;
+  height: 26px;
+}
+
+body.crm-context-fin #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-label {
+  font-size: 10px;
+}
+
 /* Sub-bars dentro de verticales (Gestoría dashboard, Seguros tabs, etc.). */
 body.crm-context-vertical #crmSection .crm-lightning-subbar {
   border: 1px solid rgba(var(--ink-rgb), 0.08);
