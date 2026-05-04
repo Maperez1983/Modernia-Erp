@@ -21168,6 +21168,11 @@ const setPage = (page) => {
   if (homeSection) {
     homeSection.classList.toggle("hidden", page !== "home");
   }
+  if (page === "home") {
+    try {
+      loadSegurosRenewalAlertForUser();
+    } catch (e) {}
+  }
   if (renewalAlert && page !== "home") {
     renewalAlert.classList.add("hidden");
   }
@@ -35411,13 +35416,7 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
   const anio = getHipotecaFieldValue(row, columns, ["anio", "año", "year"]);
 
   const estadoNorm = normalizeSimple(estado);
-  const encargoNorm = normalizeSimple(encargo);
-  const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
-  const isEncargo =
-    estadoNorm === "encargo" ||
-    estadoNorm === "encargado" ||
-    estadoNorm === "encargada" ||
-    (encargoNorm && !encargoRejected.has(encargoNorm));
+  const isEncargo = estadoNorm === "encargo" || estadoNorm === "encargado" || estadoNorm === "encargada";
 
   const extractYears = (value) => {
     const raw = String(value || "");
@@ -39262,13 +39261,7 @@ const loadHipotecaContabilidadHipotecas = async () => {
   const otherRows = [];
   rows.forEach((row) => {
     const estado = normalizeSimple(row.estado);
-    const encargo = normalizeSimple(row.encargo);
-    const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
-    const isEncargo =
-      estado === "encargo" ||
-      estado === "encargado" ||
-      estado === "encargada" ||
-      (encargo && !encargoRejected.has(encargo));
+    const isEncargo = estado === "encargo" || estado === "encargado" || estado === "encargada";
     const isSigned = Boolean(String(row.fecha_firma || "").trim());
     if (isEncargo && !isSigned) {
       pendingEncargoRows.push(row);
@@ -39288,7 +39281,6 @@ const loadHipotecaContabilidadHipotecas = async () => {
           .join(" · ")
       );
       option.dataset.hipotecaEstado = row.estado || "";
-      option.dataset.hipotecaEncargo = row.encargo || "";
       group.appendChild(option);
     });
     hipotecaContabilidadHipoteca.appendChild(group);
@@ -41571,7 +41563,9 @@ const loadFincasRenewalAlert = () => {
 
 const loadSegurosRenewalAlertForUser = () => {
   if (!segurosRenewalAlert) return Promise.resolve();
-  if (state.currentPage !== "home") return Promise.resolve();
+  const currentPage = String(state.currentPage || "").trim();
+  // En el primer boot/login, `state.currentPage` puede estar aún vacío aunque estemos en Home.
+  if (currentPage && currentPage !== "home") return Promise.resolve();
   if (!userCanAccessService("seguros")) {
     segurosRenewalAlert.classList.add("hidden");
     segurosRenewalAlert.textContent = "";
@@ -66498,6 +66492,11 @@ const setAuthUi = (user) => {
   if (authLogoutBtn) {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
+  try {
+    if (user && state.currentPage === "home") {
+      loadSegurosRenewalAlertForUser();
+    }
+  } catch (e) {}
 };
 
 const showAuthOverlay = (message = "") => {
@@ -78222,13 +78221,7 @@ if (hipotecaContabilidadHipoteca && hipotecaContabilidadForm) {
       }
     }
     const estado = normalizeSimple(selected.dataset.hipotecaEstado);
-    const encargo = normalizeSimple(selected.dataset.hipotecaEncargo);
-    const encargoRejected = new Set(["no", "rechazado", "rechazada", "cancelado", "cancelada"]);
-    const isEncargo =
-      estado === "encargo" ||
-      estado === "encargado" ||
-      estado === "encargada" ||
-      (encargo && !encargoRejected.has(encargo));
+    const isEncargo = estado === "encargo" || estado === "encargado" || estado === "encargada";
     if (isEncargo) {
       if (gestionInput) gestionInput.value = "Comisión cliente";
       if (tipoInput) tipoInput.value = "Ingreso";
