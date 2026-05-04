@@ -27685,8 +27685,17 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         else:
             counts["no_remesadas"] += 1
         resp_raw = str(item.get("responsable") or "").strip()
-        resp_norm = normalize_lookup_text(resp_raw)
-        if (not resp_raw) or resp_norm in {"sin-responsable", "sinresponsable", "sresponsable", "sinresponsable"}:
+        resp_key = str(item.get("responsable_key") or "").strip()
+        resp_key_norm = normalize_action_key(resp_key) or resp_key
+        resp_text_norm = normalize_lookup_text(resp_raw)
+        resp_action_norm = normalize_action_key(resp_raw)
+        is_unassigned_resp = (
+            (not resp_raw)
+            or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
+            or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
+            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+        )
+        if is_unassigned_resp:
             counts["sin_responsable"] += 1
         key = str(item.get("responsable_key") or "sin-responsable")
         bucket = responsables.get(key)
@@ -28215,8 +28224,16 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         try:
             responsable_raw = entry.get("responsable") or entry.get("responsable_label") or ""
             resp_text = str(responsable_raw or "").strip()
-            resp_norm = normalize_lookup_text(resp_text)
-            if (not resp_text) or resp_norm in {"sin-responsable", "sinresponsable", "sresponsable"}:
+            resp_text_norm = normalize_lookup_text(resp_text)
+            resp_action_norm = normalize_action_key(resp_text)
+            resp_key = str(entry.get("responsable_key") or "").strip()
+            resp_key_norm = normalize_action_key(resp_key) or resp_key
+            if (
+                (not resp_text)
+                or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
+                or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
+                or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+            ):
                 sin_responsable_count += 1
         except Exception:
             pass
