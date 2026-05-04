@@ -18318,7 +18318,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             return dates[0], dates[1]
         return "", ""
     def clean_tomador_value(value):
-        raw = normalize_person_name(value)
+        raw_input = str(value or "")
+        raw_input_key = normalize_lookup_text(raw_input)
+        if "ASEGURADORA" in raw_input_key:
+            return ""
+        raw = normalize_person_name(raw_input)
         if not raw:
             return ""
         raw = re.sub(r"^(NOMBRE|TOMADOR|ASEGURADO|CONTRATANTE|TITULAR)\s*[:\-]?\s*", "", raw, flags=re.IGNORECASE)
@@ -18335,6 +18339,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             raw = raw[: stop_match.start()].strip()
         raw = re.sub(r"\s{2,}", " ", raw).strip(" ,;:-")
         raw_upper = normalize_lookup_text(raw)
+        if raw_upper in ("EL MISMO", "EL MISMA", "MISMO", "MISMA"):
+            return ""
+        # OCR típico: confunde el tomador con textos legales/etiquetas.
+        if "ASEGURADORA" in raw_upper:
+            return ""
+        if "DIRECCION" in raw_upper or "DIRECCIÓN" in raw_upper or "DOMICILIO" in raw_upper:
+            return ""
+        # Evita direcciones capturadas como tomador.
+        if re.search(r"(^|\s)(CL|CALLE|AVDA|AVD|AVENIDA|PASEO|PLAZA|URB|URBANIZACION)\b", raw_upper) and re.search(r"\d", raw):
+            return ""
         banned_fragments = (
             "DE ESTA POLIZA",
             "SISTEMA DE REGULARIZACION",
