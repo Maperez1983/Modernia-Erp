@@ -53237,18 +53237,22 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const formatMoney = (value) => euroFormatter.format(Number(value || 0));
 
-  const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
-    const workspaceId = String(state.currentWorkspaceId || "").trim();
-    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
-    if (!workspaceId) return;
-    const params = new URLSearchParams();
-    params.set("workspace_id", workspaceId);
-    if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
-    if (ejercicio) params.set("ejercicio", ejercicio);
-    if (kind) params.set("kind", kind);
-    if (fields) params.set("fields", fields);
-    if (responsableKey) params.set("responsable_key", responsableKey);
-    if (query) params.set("q", query);
+	  const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
+	    const workspaceId = String(state.currentWorkspaceId || "").trim();
+	    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
+	    const params = new URLSearchParams();
+	    if (workspaceId) params.set("workspace_id", workspaceId);
+	    const empresa = resolveCrmGestoriaEmpresa();
+	    const exportEmpresaId = scopeEmpresaId || String(empresa?.id || "").trim();
+	    if (exportEmpresaId) params.set("empresa_id", exportEmpresaId);
+	    if (!workspaceId && !exportEmpresaId) {
+	      throw new Error("No hay workspace/empresa para generar el informe.");
+	    }
+	    if (ejercicio) params.set("ejercicio", ejercicio);
+	    if (kind) params.set("kind", kind);
+	    if (fields) params.set("fields", fields);
+	    if (responsableKey) params.set("responsable_key", responsableKey);
+	    if (query) params.set("q", query);
     const endpoint = `/api/gestoria_renta_export?${params.toString()}`;
     const res = await fetch(endpoint, { method: "GET", credentials: "same-origin" });
     if (!res.ok) {
