@@ -2300,7 +2300,10 @@ def infer_ramo_from_source_hint(source_hint: str) -> str:
             if guessed:
                 return guessed
     guessed = canonicalize_ramo(source_hint or "")
-    return guessed or ""
+    if not guessed:
+        return ""
+    canonical_keys = {normalize_lookup_text(item) for item in LEGAL_RAMOS_CANONICAL}
+    return guessed if normalize_lookup_text(guessed) in canonical_keys else ""
 
 
 def seguros_comision_tipo_from_produccion(produccion):
