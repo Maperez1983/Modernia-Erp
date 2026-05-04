@@ -35681,15 +35681,43 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Localidad</span>
                 <input data-json="cliente_inmueble_json" data-path="inmueble.localidad" />
               </label>
-              <label>
-                <span>Provincia</span>
-                <input data-json="cliente_inmueble_json" data-path="inmueble.provincia" />
-              </label>
-            </div>
-          </div>
-          <div class="form-card">
-            <h4>Datos del comprador (C1 / C2)</h4>
-            <div class="form-grid">
+	              <label>
+	                <span>Provincia</span>
+	                <input data-json="cliente_inmueble_json" data-path="inmueble.provincia" />
+	              </label>
+	            </div>
+	          </div>
+	          <div class="form-card">
+	            <h4>Intervinientes</h4>
+	            <p class="muted" style="margin-top:-6px;">Añade avalistas, apoderados u otros intervinientes de la operación.</p>
+	            <input type="hidden" data-json="cliente_inmueble_json" data-path="intervinientes" data-json-mode="json" />
+	            <div class="form-grid">
+	              <label class="span-2">
+	                <span>Rol</span>
+	                <select id="hipotecaIntervinienteRol">
+	                  <option value="Avalista">Avalista</option>
+	                  <option value="Apoderado/a">Apoderado/a</option>
+	                  <option value="Representante">Representante</option>
+	                  <option value="Interviniente">Interviniente</option>
+	                </select>
+	              </label>
+	              <label class="span-2">
+	                <span>Nombre</span>
+	                <input id="hipotecaIntervinienteNombre" placeholder="Nombre y apellidos" />
+	              </label>
+	              <label>
+	                <span>NIF/NIE</span>
+	                <input id="hipotecaIntervinienteNif" placeholder="12345678Z" />
+	              </label>
+	              <div class="form-actions">
+	                <button type="button" class="secondary" id="hipotecaIntervinienteAddBtn">Añadir</button>
+	              </div>
+	            </div>
+	            <div id="hipotecaIntervinientesList" class="inline-list"></div>
+	          </div>
+	          <div class="form-card">
+	            <h4>Datos del comprador (C1 / C2)</h4>
+	            <div class="form-grid">
               <label class="span-2">
                 <span>C1 · Nombre</span>
                 <input data-json="cliente_inmueble_json" data-path="comprador.c1.nombre" />
@@ -35782,10 +35810,10 @@ const ensureHipotecaFichaPanel = () => {
           </div>
         </div>
 
-        <div id="hipotecaFichaTabHipoteca" class="stack hidden">
-          <div class="form-card">
-            <h4>Datos principales</h4>
-            <div class="form-grid">
+	        <div id="hipotecaFichaTabHipoteca" class="stack hidden">
+	          <div class="form-card">
+	            <h4>Datos principales</h4>
+	            <div class="form-grid">
               <label class="span-2">
                 <span>Banco / entidad</span>
                 <select name="banco" id="hipotecaFichaBancoSelect"></select>
@@ -35928,17 +35956,25 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Registro intermediario (BDE)</span>
                 <input data-json="hipoteca_detalle_json" data-path="precontractual.registro" placeholder="Identificador / URL" />
               </label>
-              <label class="span-2">
-                <span>Seguro RC profesional</span>
-                <input data-json="hipoteca_detalle_json" data-path="precontractual.seguro_rc" placeholder="Aseguradora / póliza" />
-              </label>
-            </div>
-          </div>
-        </div>
+	              <label class="span-2">
+	                <span>Seguro RC profesional</span>
+	                <input data-json="hipoteca_detalle_json" data-path="precontractual.seguro_rc" placeholder="Aseguradora / póliza" />
+	              </label>
+	            </div>
+	          </div>
+	          <div class="form-card">
+	            <h4>Comentarios</h4>
+	            <p class="muted">Notas internas sobre la operación (no se incluyen en documentos).</p>
+	            <label>
+	              <span>Comentarios</span>
+	              <textarea data-json="hipoteca_detalle_json" data-path="comentarios" rows="4" placeholder="Añade aquí observaciones, acuerdos, incidencias, etc."></textarea>
+	            </label>
+	          </div>
+	        </div>
 
-        <div id="hipotecaFichaTabLiquidacion" class="stack hidden">
-          <div id="hipotecaLiquidacionTabs" class="tabs" style="margin-bottom: 12px;">
-            <button class="tab active" type="button" data-hipoteca-liq-tab="comprador">Liquidación comprador</button>
+	        <div id="hipotecaFichaTabLiquidacion" class="stack hidden">
+	          <div id="hipotecaLiquidacionTabs" class="tabs" style="margin-bottom: 12px;">
+	            <button class="tab active" type="button" data-hipoteca-liq-tab="comprador">Liquidación comprador</button>
             <button class="tab" type="button" data-hipoteca-liq-tab="vendedor">Liquidación vendedor</button>
             <button class="tab" type="button" data-hipoteca-liq-tab="cheques">Cuadre de cheques</button>
             <button class="tab" type="button" data-hipoteca-liq-tab="notaria">Parte notaría</button>
@@ -37176,7 +37212,21 @@ const collectHipotecaFichaJson = (panel, jsonKey) => {
     const raw = el.value ?? "";
     const shouldBeNumber =
       el.inputMode === "decimal" || el.type === "number" || el.hasAttribute("readonly");
-    const value = shouldBeNumber ? normalizeMoneyLike(raw) : String(raw);
+    let value = shouldBeNumber ? normalizeMoneyLike(raw) : String(raw);
+    // Permitir campos que guardan JSON (arrays/objetos) en inputs/textarea.
+    // Uso: `data-json-mode="json"` y el valor es un JSON serializado.
+    if (el.dataset.jsonMode === "json") {
+      const text = String(raw || "").trim();
+      if (!text) {
+        value = null;
+      } else {
+        try {
+          value = JSON.parse(text);
+        } catch {
+          value = null;
+        }
+      }
+    }
     setNestedValue(out, path, value);
   });
   return out;
@@ -37188,6 +37238,18 @@ const fillHipotecaFichaJson = (panel, jsonKey, obj) => {
     const path = el.dataset.path;
     if (!path) return;
     const value = getNestedValue(source, path);
+    if (el.dataset.jsonMode === "json") {
+      if (value === null || value === undefined || value === "") {
+        el.value = "";
+      } else {
+        try {
+          el.value = JSON.stringify(value);
+        } catch {
+          el.value = "";
+        }
+      }
+      return;
+    }
     if (el.inputMode === "decimal") {
       if (value === null || value === undefined || value === "") {
         el.value = "";
@@ -37207,6 +37269,114 @@ const fillHipotecaFichaJson = (panel, jsonKey, obj) => {
     }
     el.value = value === null || value === undefined ? "" : String(value);
   });
+};
+
+const parseJsonArraySafe = (text) => {
+  try {
+    const raw = String(text || "").trim();
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const setupHipotecaIntervinientes = (panel) => {
+  if (!panel) return;
+  const field = panel.querySelector('[data-json="cliente_inmueble_json"][data-path="intervinientes"]');
+  const listEl = panel.querySelector("#hipotecaIntervinientesList");
+  const rolEl = panel.querySelector("#hipotecaIntervinienteRol");
+  const nombreEl = panel.querySelector("#hipotecaIntervinienteNombre");
+  const nifEl = panel.querySelector("#hipotecaIntervinienteNif");
+  const addBtn = panel.querySelector("#hipotecaIntervinienteAddBtn");
+  if (!field || !listEl || !rolEl || !nombreEl || !nifEl || !addBtn) return;
+
+  const readList = () => parseJsonArraySafe(field.value).filter((item) => item && typeof item === "object");
+  const writeList = (items) => {
+    try {
+      field.value = JSON.stringify(items || []);
+    } catch {
+      field.value = "[]";
+    }
+  };
+
+  const render = () => {
+    const items = readList();
+    listEl.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Sin intervinientes.";
+      listEl.appendChild(empty);
+      return;
+    }
+    items.forEach((item, idx) => {
+      const row = document.createElement("div");
+      row.className = "inline-row";
+      const rol = String(item.rol || "").trim() || "Interviniente";
+      const nombre = String(item.nombre || "").trim() || "-";
+      const nif = String(item.nif || "").trim();
+      const meta = [rol, nif ? `NIF ${nif}` : ""].filter(Boolean).join(" · ");
+      row.innerHTML = `
+        <div>
+          <div>${escapeHtml(nombre)}</div>
+          <div class="muted">${escapeHtml(meta || "-")}</div>
+        </div>
+        <div class="inline-actions">
+          <button type="button" class="secondary" data-hipoteca-interviniente-remove="${idx}">Quitar</button>
+        </div>
+      `;
+      listEl.appendChild(row);
+    });
+    listEl.querySelectorAll("[data-hipoteca-interviniente-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const index = Number(btn.dataset.hipotecaIntervinienteRemove);
+        const items = readList();
+        if (!Number.isFinite(index) || index < 0 || index >= items.length) return;
+        items.splice(index, 1);
+        writeList(items);
+        render();
+      });
+    });
+  };
+
+  if (panel.dataset.hipotecaIntervinientesListeners !== "1") {
+    panel.dataset.hipotecaIntervinientesListeners = "1";
+    addBtn.addEventListener("click", () => {
+      const nombre = String(nombreEl.value || "").trim();
+      if (!nombre) {
+        window.alert("Introduce el nombre del interviniente.");
+        nombreEl.focus();
+        return;
+      }
+      const rol = String(rolEl.value || "").trim() || "Interviniente";
+      const nif = normalizeNifValue(nifEl.value || "");
+      const items = readList();
+      items.push({ rol, nombre, nif });
+      writeList(items);
+      nombreEl.value = "";
+      nifEl.value = "";
+      try {
+        nombreEl.focus();
+      } catch {}
+      render();
+    });
+    [nombreEl, nifEl].forEach((el) => {
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          addBtn.click();
+        }
+      });
+    });
+    nifEl.addEventListener("input", () => {
+      const normalized = normalizeNifValue(nifEl.value);
+      if (normalized !== nifEl.value) nifEl.value = normalized;
+    });
+  }
+
+  render();
 };
 
 const normalizeRegistroName = (value) =>
@@ -37662,6 +37832,7 @@ const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
   fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
   fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
   fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  setupHipotecaIntervinientes(panel);
   setHipotecaLiquidacionTab(panel.dataset.liqTab || "comprador");
   syncHipotecaFichaPdfState(panel, {});
   syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
@@ -37797,6 +37968,7 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
   fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
   fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  setupHipotecaIntervinientes(panel);
   setHipotecaLiquidacionTab(panel.dataset.liqTab || "comprador");
   syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
   autofillHipotecaLiquidacionFromFicha(panel);
@@ -40076,46 +40248,63 @@ const renderFinDashboard = (empresaId) => {
     .then((data) => {
       const currentYear = String(data?.current_year || new Date().getFullYear());
       const totals = data?.totals || {};
+      const openHipotecasFromKpi = (q) => {
+        if (finDashboardSection) finDashboardSection.classList.add("hidden");
+        if (finCrmSection) finCrmSection.classList.remove("hidden");
+        if (finCrmSearch) finCrmSearch.value = String(q || "");
+        loadFinHipotecasRegistradas();
+        try {
+          finCrmSection?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        } catch {}
+      };
       const kpis = [
         {
           title: `Hipotecas ${currentYear}`,
           value: numberFormatter.format(data?.current?.total || 0),
           note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
+          onClick: () => openHipotecasFromKpi(""),
         },
         {
           title: "Firmadas mes",
           value: numberFormatter.format(data?.current?.firmadas_mes || 0),
           note: "Mes actual",
+          onClick: () => openHipotecasFromKpi("Firmada"),
         },
         {
           title: "Hipotecas en estudio",
           value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
           note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+          onClick: () => openHipotecasFromKpi("Estudio"),
         },
         {
           title: "Pendientes de firma",
           value: numberFormatter.format(data?.current?.pendientes_firma || 0),
           note: `Total: ${numberFormatter.format(totals?.pendientes_firma || 0)}`,
+          onClick: () => openHipotecasFromKpi("Firma"),
         },
         {
           title: "Encargos",
           value: numberFormatter.format(data?.current?.encargos || 0),
           note: `Total: ${numberFormatter.format(totals?.encargos || 0)}`,
+          onClick: () => openHipotecasFromKpi("Encargo"),
         },
         {
           title: "Rentabilidad negocio",
           value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
           note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
+          onClick: () => openHipotecasFromKpi(""),
         },
         {
           title: "Porcentaje medio",
           value: formatPercent(data?.current?.porcentaje_medio),
           note: "Financiación",
+          onClick: () => openHipotecasFromKpi(""),
         },
         {
           title: "Comisión total",
           value: euroFormatter.format(data?.current?.comision_total || 0),
           note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
+          onClick: () => openHipotecasFromKpi(""),
         },
       ];
 
@@ -40124,10 +40313,23 @@ const renderFinDashboard = (empresaId) => {
         const card = document.createElement("div");
         card.className = "card";
         card.innerHTML = `
-          <h3>${kpi.title}</h3>
-          <div class="muted">${kpi.value}</div>
-          <div class="muted">${kpi.note}</div>
-        `;
+	          <h3>${kpi.title}</h3>
+	          <div class="muted">${kpi.value}</div>
+	          <div class="muted">${kpi.note}</div>
+	        `;
+        if (typeof kpi.onClick === "function") {
+          card.classList.add("kpi-clickable");
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
+          card.title = "Ver listado";
+          card.addEventListener("click", () => kpi.onClick());
+          card.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              kpi.onClick();
+            }
+          });
+        }
         finDashboardKpis.appendChild(card);
       });
 
