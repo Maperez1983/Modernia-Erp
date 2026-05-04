@@ -23064,9 +23064,9 @@ const openGestoriaCrm = () => {
 const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!userCanAccessService("gestoria")) return;
   let tab = String(targetTab || "gestoria-dash").trim() || "gestoria-dash";
-  if (tab === "gestoria-dash" && !canAccessGestoriaAdminDashboard()) {
-    tab = "gestoria-crm";
-  }
+  // Permitimos abrir el dashboard aunque el usuario no sea admin.
+  // El propio `loadGestoriaDashboard()` mostrará un modo limitado (solo lectura / mensaje)
+  // si no tiene permisos. Evita que parezca que el botón “Dashboard” no funciona.
   const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
