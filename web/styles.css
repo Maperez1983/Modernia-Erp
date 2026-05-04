@@ -4877,14 +4877,15 @@ body.tc-resizing {
     overflow-x: hidden;
   }
 
-  /* CRM: en escritorio mantenemos scroll lateral (no wrap) para conservar el patrón Lightning. */
+  /* CRM: en escritorio evitamos scroll lateral; la navegación principal vive en el sidebar. */
   #crmSection .crm-workspace-tabs.crm-lightning-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 }
 
@@ -4908,8 +4909,8 @@ body.tc-resizing {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow-x: hidden;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
@@ -4943,7 +4944,7 @@ body.tc-resizing {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex: 1 1 auto;
   min-width: 0;
 }
