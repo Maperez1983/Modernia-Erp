@@ -35345,6 +35345,8 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
   const oficina = getHipotecaFieldValue(row, columns, ["oficina"]);
   const estado = getHipotecaFieldValue(row, columns, ["estado"]);
   const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+  const fechaEncargo = getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco"]);
+  const anio = getHipotecaFieldValue(row, columns, ["anio", "año", "year"]);
 
   const clienteInmueble = safeParseJsonObject(getHipotecaFieldValue(row, columns, ["cliente_inmueble_json"]));
   const titulares = [
@@ -35375,7 +35377,7 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
     .map((token) => String(token || "").toUpperCase().replace(/[^0-9A-Z]/g, ""))
     .filter(Boolean);
 
-  const textParts = [cliente, titulares, banco, oficina, estado, fechaFirma].filter(Boolean);
+  const textParts = [cliente, titulares, banco, oficina, estado, fechaFirma, fechaEncargo, anio].filter(Boolean);
   const normalizedText = normalizeLookupText(textParts.join(" "));
   return { normalizedText, dniTokens, normalizedDocTokens };
 };
@@ -38943,67 +38945,112 @@ const loadHipotecaDashboard = () => {
         hipotecaDashboardYearSelect.value = nextValue;
       }
       const totals = data?.totals || {};
+      const openHipotecaBdtFromDashboard = (query = "") => {
+        try {
+          openFinCrm();
+        } catch (e) {}
+        try {
+          setHipotecaAltaView("bdt");
+        } catch (e) {}
+        try {
+          if (hipotecaBdtSearch) hipotecaBdtSearch.value = String(query || "").trim();
+        } catch (e) {}
+        try {
+          loadHipotecaBdt(false);
+        } catch (e) {}
+      };
+      const openHipotecaContabilidadFromDashboard = () => {
+        try {
+          openFinCrm();
+        } catch (e) {}
+        try {
+          setHipotecaAltaView("contabilidad");
+        } catch (e) {}
+      };
       const kpis = [
         {
           title: `Hipotecas ${currentYear}`,
           value: numberFormatter.format(data?.current?.total || 0),
           note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
+          action: () => openHipotecaBdtFromDashboard(currentYear),
         },
         {
           title: `Volumen ${currentYear}`,
           value: euroFormatter.format(data?.current?.volumen_total || 0),
           note: `Total: ${euroFormatter.format(totals?.volumen_total || 0)}`,
+          action: () => openHipotecaBdtFromDashboard(currentYear),
         },
         {
           title: `Plazo medio ${currentYear}`,
           value: formatDaysMetric(data?.current?.plazo_medio_dias),
           note: `Total: ${formatDaysMetric(totals?.plazo_medio_dias)}`,
+          action: () => openHipotecaBdtFromDashboard(currentYear),
         },
         {
           title: `Hipotecas en estudio ${currentYear}`,
           value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
           note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+          action: () => openHipotecaBdtFromDashboard(`estudio ${currentYear}`),
         },
         {
           title: `Comisión cliente ${currentYear}`,
           value: euroFormatter.format(data?.current?.comision_total || 0),
           note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
+          action: () => openHipotecaBdtFromDashboard(currentYear),
         },
         {
           title: `Ingresos ${currentYear}`,
           value: euroFormatter.format(data?.current?.ingresos || 0),
           note: `Total: ${euroFormatter.format(totals?.ingresos || 0)}`,
+          action: () => openHipotecaContabilidadFromDashboard(),
         },
         {
           title: `Gastos ${currentYear}`,
           value: euroFormatter.format(data?.current?.gastos || 0),
           note: `Total: ${euroFormatter.format(totals?.gastos || 0)}`,
+          action: () => openHipotecaContabilidadFromDashboard(),
         },
         {
           title: `Resultado ${currentYear}`,
           value: euroFormatter.format(data?.current?.resultado || 0),
           note: `Total: ${euroFormatter.format(totals?.resultado || 0)}`,
+          action: () => openHipotecaContabilidadFromDashboard(),
         },
         {
           title: "Rentabilidad negocio",
           value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
           note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
+          action: () => openHipotecaContabilidadFromDashboard(),
         },
         {
           title: "Porcentaje medio",
           value: formatPercent(data?.current?.porcentaje_medio),
           note: `Total: ${formatPercent(totals?.porcentaje_medio)}`,
+          action: () => openHipotecaBdtFromDashboard(currentYear),
         },
       ];
       hipotecaDashboardKpis.innerHTML = "";
       kpis.forEach((kpi) => {
         const card = document.createElement("div");
-        card.className = "card";
+        card.className = "card kpi-card";
         card.innerHTML = `
           <h3>${kpi.title}</h3>
           <div class="muted">${kpi.value}</div>
           <div class="muted">${kpi.note}</div>
         `;
+        if (typeof kpi.action === "function") {
+          card.classList.add("kpi-clickable");
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
+          card.setAttribute("aria-label", `Abrir detalle: ${kpi.title}`);
+          card.addEventListener("click", kpi.action);
+          card.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              kpi.action();
+            }
+          });
+        }
         hipotecaDashboardKpis.appendChild(card);
       });
       renderHipotecaEntityKpis(data?.entity_kpis || [], currentYear);
