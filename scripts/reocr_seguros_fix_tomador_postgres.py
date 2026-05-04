@@ -29,10 +29,25 @@ if str(ROOT) not in sys.path:
 from web.db_backend import open_postgres_conn  # noqa: E402
 from web.server import (  # noqa: E402
     canonicalize_ramo,
-    clean_tomador_value,
     normalize_lookup_text,
+    normalize_person_name,
     process_seguros_ocr,
 )
+
+
+def clean_tomador_value(value: str) -> str:
+    raw = str(value or "")
+    raw = raw.replace("\u00a0", " ")
+    raw = re.sub(r"\s+", " ", raw).strip(" ,;:-\n\r\t")
+    if not raw:
+        return ""
+    # Heurística simple: si viene como "APELLIDOS, NOMBRE" lo normalizamos.
+    cleaned = normalize_person_name(raw) or raw
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:-")
+    # Evita capturas tipo etiquetas
+    if normalize_lookup_text(cleaned) in ("TOMADOR", "ASEGURADO", "ASEGURADORA"):
+        return ""
+    return cleaned
 
 
 def looks_bad_tomador(value: str) -> bool:
@@ -181,4 +196,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
