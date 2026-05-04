@@ -66710,6 +66710,77 @@ if (crmLightningSidebar) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
       return;
     }
+    const gestoriaMore = closestFromEvent(event, "[data-gestoria-more]");
+    if (gestoriaMore) {
+      const key = String(gestoriaMore.dataset.gestoriaMore || "").trim();
+      try {
+        const details = gestoriaMore.closest("details");
+        if (details) details.open = false;
+      } catch (e) {}
+      if (!key) return;
+      if (key === "config") {
+        openGestoriaServiceTab("gestoria-dash");
+        window.setTimeout(() => {
+          try {
+            setGestoriaDashboardView("servicios");
+          } catch (e) {}
+          window.setTimeout(() => {
+            try {
+              focusElementInView(gestoriaTrabajoTiposCard || gestoriaDashServiciosPaneAnalytics);
+            } catch (e) {}
+          }, 0);
+        }, 0);
+        return;
+      }
+      if (key === "conta") {
+        openGestoriaServiceTab("gestoria-conta");
+        window.setTimeout(() => {
+          try {
+            focusElementInView(gestoriaContabilidadForm || gestoriaContaSection);
+          } catch (e) {}
+        }, 0);
+        return;
+      }
+      if (key === "informes") {
+        openGestoriaServiceTab("gestoria-dash");
+        window.setTimeout(() => {
+          try {
+            setGestoriaDashboardView("rentas");
+          } catch (e) {}
+          window.setTimeout(() => {
+            try {
+              focusElementInView(gestoriaDashRentaContent || gestoriaDashboardTabs);
+            } catch (e) {}
+          }, 0);
+        }, 0);
+        return;
+      }
+      if (key === "import") {
+        openGestoriaRentaCampaign();
+        window.setTimeout(() => {
+          try {
+            focusElementInView(gestoriaCrmUploadRentaBtn || gestoriaCrmSection);
+          } catch (e) {}
+        }, 0);
+        return;
+      }
+      if (key === "audit") {
+        openGestoriaServiceTab("gestoria-docs");
+        window.setTimeout(() => {
+          try {
+            focusElementInView(gestoriaAuditTable || gestoriaDocsSection);
+          } catch (e) {}
+        }, 0);
+        return;
+      }
+      if (key === "ayuda") {
+        try {
+          openCrmSupportModal();
+        } catch (e) {}
+        return;
+      }
+      return;
+    }
     const svcBtn = closestFromEvent(event, "[data-crm-service-tab]");
     if (svcBtn) {
       const tab = String(svcBtn.dataset.crmServiceTab || "").trim();
