@@ -27906,16 +27906,19 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
         FROM cliente_gestoria cg
         JOIN clientes c ON c.id = cg.cliente_id
         WHERE COALESCE(cg.mod_renta, 0) = 1
-          AND EXISTS (
-            SELECT 1
-            FROM clientes_empresas ce
-            WHERE ce.empresa_id IN ({placeholders_emp})
-              AND ce.cliente_id = c.id
-              AND {service_filter}
+          AND (
+            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+            OR EXISTS (
+              SELECT 1
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders_emp})
+                AND ce.cliente_id = c.id
+                AND {service_filter}
+            )
           )
         ORDER BY LOWER(COALESCE(c.nombre, '')) ASC
         """,
-        tuple([*empresa_ids, *empresa_ids]),
+        tuple([*empresa_ids, *empresa_ids, *empresa_ids]),
     ).fetchall()
 
     campaigns = []
@@ -28132,7 +28135,9 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         estado = normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status"))
         try:
             responsable_raw = entry.get("responsable") or entry.get("responsable_label") or ""
-            if not str(responsable_raw or "").strip():
+            resp_text = str(responsable_raw or "").strip()
+            resp_norm = normalize_lookup_text(resp_text)
+            if (not resp_text) or resp_norm in {"sin-responsable", "sinresponsable", "sresponsable"}:
                 sin_responsable_count += 1
         except Exception:
             pass
