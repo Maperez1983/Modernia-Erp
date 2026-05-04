@@ -14293,6 +14293,39 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
     ss_emp = _find_amount_near([r"\bSEGURIDAD\s+SOCIAL\b[^\n\r]{0,60}?EMP", r"\bAPORTACI[ÓO]N\s+EMPRESA\b"])
     if ss_emp > 0:
         fields["ss_empresa"] = ss_emp
+    elif fields.get("bruto"):
+        # Fallback: algunos formatos incluyen la "APORTACIÓN DE LA EMPRESA" en una tabla aparte
+        # sin una etiqueta explícita de "Seguridad Social EMPRESA". Sumamos la última columna por línea.
+        try:
+            bruto_val = float(parse_money_value(fields.get("bruto") or 0) or 0)
+        except Exception:
+            bruto_val = 0.0
+        try:
+            idx = upper.find("APORTACIÓN DE LA EMPRESA")
+            if idx < 0:
+                idx = upper.find("APORTACION DE LA EMPRESA")
+            if idx >= 0:
+                segment = raw[idx : idx + 3200]
+                amount_re = re.compile(r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))")
+                total = 0.0
+                for line in segment.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    candidates = amount_re.findall(line)
+                    if len(candidates) < 2:
+                        continue
+                    last_amt = float(parse_money_value(candidates[-1]) or 0)
+                    # Excluye bases (suelen ser el bruto repetido).
+                    if last_amt <= 0:
+                        continue
+                    if bruto_val and last_amt >= bruto_val:
+                        continue
+                    total += last_amt
+                if total > 0:
+                    fields["ss_empresa"] = round(total, 2)
+        except Exception:
+            pass
 
     return fields
 
