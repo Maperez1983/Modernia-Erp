@@ -4870,13 +4870,14 @@ body.tc-resizing {
     overflow-x: hidden;
   }
 
+  /* CRM: en escritorio mantenemos scroll lateral (no wrap) para conservar el patrón Lightning. */
   #crmSection .crm-workspace-tabs.crm-lightning-tabs {
-    flex-wrap: wrap;
-    overflow-x: hidden;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
 
   #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 }
 
@@ -4904,12 +4905,31 @@ body.tc-resizing {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent;
   gap: 10px;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs::-webkit-scrollbar {
-  height: 0;
+  height: 8px;
+}
+
+#crmSection .crm-workspace-tabs.crm-lightning-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#crmSection .crm-workspace-tabs.crm-lightning-tabs::-webkit-scrollbar-thumb {
+  background: rgba(var(--ink-rgb), 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+#crmSection .crm-workspace-tabs.crm-lightning-tabs:hover::-webkit-scrollbar-thumb {
+  background: rgba(var(--ink-rgb), 0.34);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
