@@ -53982,6 +53982,8 @@ const renderGestoriaRentaDashboard = (payload) => {
     const sliceLimit = isRentaShowAll ? 250 : limit;
     items.slice(0, sliceLimit).forEach((item) => {
       const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", () => openClienteRentaFromDashboard(item.cliente_id));
       const fecha = formatCell("fecha", item.presentacion_fecha || "") || item.presentacion_fecha || "-";
       const cobro = Number(item.cobrada || 0) === 1 ? "Cobrada" : "Pendiente";
       [
@@ -54002,7 +54004,10 @@ const renderGestoriaRentaDashboard = (payload) => {
       btn.type = "button";
       btn.className = "secondary";
       btn.textContent = "Abrir renta";
-      btn.addEventListener("click", () => openClienteRentaFromDashboard(item.cliente_id));
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openClienteRentaFromDashboard(item.cliente_id);
+      });
       actionTd.appendChild(btn);
       tr.appendChild(actionTd);
       tbody.appendChild(tr);
@@ -55156,23 +55161,25 @@ const bindGestoriaDashboardKpis = () => {
 	      },
 	      title: "Rentas realizadas",
 	    },
-		    {
-		      valueEl: gestoriaKpiRentasPendientes,
-		      action: () => {
-		        openGestoriaServiceTab("gestoria-dash");
-		        window.setTimeout(() => {
-		          try {
-		            setGestoriaDashboardView("rentas");
-		          } catch (e) {}
-		          window.setTimeout(() => {
-		            try {
-		              focusElementInView(gestoriaAlertRentasPendientes);
-		            } catch (e) {}
-		          }, 0);
-		        }, 0);
-		      },
-		      title: "Rentas pendientes",
-		    },
+			    {
+			      valueEl: gestoriaKpiRentasPendientes,
+			      action: () => {
+			        openGestoriaServiceTab("gestoria-dash");
+			        window.setTimeout(() => {
+			          try {
+			            setGestoriaDashboardView("rentas");
+			          } catch (e) {}
+			          window.setTimeout(() => {
+			            try {
+			              state.gestoriaRentaDashView = "draft";
+			              state.gestoriaRentaDashViewParam = "";
+			            } catch (e) {}
+			            loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+			          }, 0);
+			        }, 0);
+			      },
+			      title: "Rentas pendientes",
+			    },
 	    {
 	      valueEl: gestoriaKpiSinVincular,
 	      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
