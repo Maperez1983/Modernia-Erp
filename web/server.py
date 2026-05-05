@@ -29,6 +29,7 @@ import xml.etree.ElementTree as ET
 import socket
 import ipaddress
 import calendar
+from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO, StringIO
 from copy import copy as shallow_copy
@@ -73743,7 +73744,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
-            in_vigor_expr = in_vigor_policy_filter()
+            in_vigor_expr = in_vigor_policy_filter("s")
             estado_bucket_expr = seguro_estado_bucket_expr()
             uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
 
@@ -74524,7 +74525,7 @@ class Handler(BaseHTTPRequestHandler):
             days_past_int = max(0, min(365, days_past_int))
             limit_int = max(10, min(1000, limit_int))
 
-            in_vigor_expr = in_vigor_policy_filter()
+            in_vigor_expr = in_vigor_policy_filter("s")
             fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
             fecha_venc_raw_date = seguro_date_sql("fecha_vencimiento", "s")
             fecha_venc_expr = (
@@ -74705,7 +74706,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            in_vigor_expr = in_vigor_policy_filter()
+            in_vigor_expr = in_vigor_policy_filter("s")
             # Fechas normalizadas (maneja YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY)
             # Nota: el bucket de estado usa esta normalización; vencimientos debe usarla también.
             fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
@@ -74836,10 +74837,11 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
+                  AND {in_vigor_expr}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             en_vigor_real = conn.execute(
                 f"""
@@ -74847,10 +74849,11 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
+                  AND {in_vigor_expr}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
 
             en_vigor_con_numero = conn.execute(
@@ -74859,11 +74862,12 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                   AND {poliza_strict_expr} IS NOT NULL
+                  AND {in_vigor_expr}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             en_vigor_sin_numero = conn.execute(
                 f"""
@@ -74871,11 +74875,12 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                   AND {poliza_strict_expr} IS NULL
+                  AND {in_vigor_expr}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
@@ -74884,12 +74889,13 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {fecha_venc_expr} IS NOT NULL
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
+                  AND {in_vigor_expr}
                   AND DATE({fecha_venc_expr}) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             altas_30 = conn.execute(
                 f"""
@@ -74930,10 +74936,10 @@ class Handler(BaseHTTPRequestHandler):
                     compania IS NULL OR TRIM(compania) = '' OR
                     fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
                   )
-                  AND {pdf_assoc_expr}
+                  AND ({pdf_assoc_expr} OR ? = 0)
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             quality_rows = conn.execute(
                 """
@@ -74955,12 +74961,13 @@ class Handler(BaseHTTPRequestHandler):
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
-                    AND {pdf_assoc_expr}
+                    AND ({pdf_assoc_expr} OR ? = 0)
                     AND {exclude_sin_seguro}
+                    AND {in_vigor_expr}
                   GROUP BY 1
                 ) t
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             comisiones = conn.execute(
                 f"""
@@ -74972,12 +74979,13 @@ class Handler(BaseHTTPRequestHandler):
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
-                    AND {pdf_assoc_expr}
+                    AND ({pdf_assoc_expr} OR ? = 0)
                     AND {exclude_sin_seguro}
+                    AND {in_vigor_expr}
                   GROUP BY 1
                 ) t
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, uploaded_param),
             ).fetchone()
             seguros_totals = compute_seguros_contabilidad_totals(conn, empresa_id)
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}

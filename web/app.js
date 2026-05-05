@@ -55411,9 +55411,29 @@ const openSegurosRenovacionesListado = ({
   if (segurosRenovacionesEstado) segurosRenovacionesEstado.value = String(estado || "");
   if (segurosRenovacionesResponsable) segurosRenovacionesResponsable.value = String(responsable || "");
   if (segurosRenovacionesSearch) segurosRenovacionesSearch.value = String(q || "");
-  openSegurosCrm();
+  // Evita que un fallo al "re-abrir" el CRM bloquee el salto a Renovaciones.
+  try {
+    const currentCrm = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+    const hasTabs = !!document.getElementById("segurosTabs");
+    if (currentCrm !== "seguros" || !hasTabs) {
+      try {
+        openSegurosCrm();
+      } catch (e) {}
+    }
+  } catch (e) {}
   setSegurosTab("renovaciones");
 };
+
+document.addEventListener("click", (event) => {
+  const target = closestFromEvent(event, "[data-open-seguros-renovaciones]");
+  if (!target) return;
+  const daysAhead = parseInt(String(target.dataset.daysAhead || "30"), 10);
+  const daysPast = parseInt(String(target.dataset.daysPast || "0"), 10);
+  openSegurosRenovacionesListado({
+    daysAhead: Number.isFinite(daysAhead) ? daysAhead : 30,
+    daysPast: Number.isFinite(daysPast) ? daysPast : 0,
+  });
+});
 
 const loadSegurosKpis = () => {
   if (!segurosKpis) return;
@@ -55450,24 +55470,32 @@ const loadSegurosKpis = () => {
       )
       .join("");
   };
-  const renderKpis = (data) => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "grid crm-kpis";
-    const addKpi = (label, value, opts = null) => {
-      const card = document.createElement("div");
-      const classNames = ["kpi-card"];
-      if (opts?.className) classNames.push(opts.className);
-      if (typeof opts?.onClick === "function") classNames.push("kpi-clickable");
-      card.className = classNames.join(" ");
-      card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
-      if (opts?.title) card.title = String(opts.title);
-      if (typeof opts?.onClick === "function") {
-        card.role = "button";
-        card.tabIndex = 0;
-        const handler = () => opts.onClick();
-        card.addEventListener("click", handler);
-        card.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
+	  const renderKpis = (data) => {
+	    const wrapper = document.createElement("div");
+	    wrapper.className = "grid crm-kpis";
+	    const addKpi = (label, value, opts = null) => {
+	      const card = document.createElement("div");
+	      const classNames = ["kpi-card"];
+	      if (opts?.className) classNames.push(opts.className);
+	      if (typeof opts?.onClick === "function") classNames.push("kpi-clickable");
+	      card.className = classNames.join(" ");
+	      if (opts?.dataset && typeof opts.dataset === "object") {
+	        Object.entries(opts.dataset).forEach(([key, val]) => {
+	          if (!key) return;
+	          try {
+	            card.dataset[key] = String(val ?? "");
+	          } catch (e) {}
+	        });
+	      }
+	      card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
+	      if (opts?.title) card.title = String(opts.title);
+	      if (typeof opts?.onClick === "function") {
+	        card.setAttribute("role", "button");
+	        card.tabIndex = 0;
+	        const handler = () => opts.onClick();
+	        card.addEventListener("click", handler);
+	        card.addEventListener("keydown", (event) => {
+	          if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             handler();
           }
@@ -55475,13 +55503,40 @@ const loadSegurosKpis = () => {
       }
       wrapper.appendChild(card);
     };
+    addKpi("Pólizas (real)", data.total_real ?? data.total ?? 0);
+    addKpi("Pólizas (filas)", data.total || 0);
+    if (Number(data.total_con_numero || 0) > 0) {
+      addKpi("Con nº póliza", data.total_con_numero || 0);
+    }
     addKpi("Pólizas en vigor", data.en_vigor || 0);
+    if (Number(data.en_vigor_con_numero || 0) > 0) {
+      addKpi("En vigor (con nº)", data.en_vigor_con_numero || 0);
+    }
+    if (Number(data.en_vigor_sin_numero || 0) > 0) {
+      addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
+    }
+	    addKpi("Vencen 30 días", data.vencen_30 || 0, {
+	      className: "kpi-card--alert",
+	      title: "Abrir listado de pólizas próximas a vencer",
+	      onClick: () => openSegurosRenovacionesListado({ daysAhead: 30, daysPast: 0 }),
+	      dataset: { openSegurosRenovaciones: "1", daysAhead: "30", daysPast: "0" },
+	    });
+    addKpi("Con faltantes", data.faltantes || 0);
+    addKpi(
+      "Facturación comisiones",
+      euroFormatter.format(Number(data.facturacion_comision || 0))
+    );
+    addKpi("Gastos", euroFormatter.format(Number(data.gastos || 0)));
+    if (data.prima_total !== undefined && data.prima_total !== null) {
+      addKpi("Prima total", euroFormatter.format(data.prima_total || 0));
+    }
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
   };
   const params = new URLSearchParams({ empresa_id: empresa.id });
-  // Base real: pólizas con PDF subido (en vigor = subidas).
-  params.set("uploaded_only", "1");
+  // KPIs deben reflejar toda la cartera (en vigor, vencimientos, primas),
+  // independientemente de si el PDF está enlazado.
+  params.set("uploaded_only", "0");
   api(`/api/seguros_kpis?${params.toString()}`)
     .then((data) => {
       state.segurosKpisCache = data || {};
