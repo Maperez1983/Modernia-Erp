@@ -70276,9 +70276,9 @@ class Handler(BaseHTTPRequestHandler):
                 is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
                     is_superadmin_actor(None, session)
                 )
-                if not is_admin_actor:
-                    json_response(self, {"error": "Solo disponible para usuarios admin."}, status=403)
-                    return
+                # El dashboard es útil para todo el equipo de Gestoría. Para usuarios no-admin devolvemos
+                # el mismo payload pero evitando campos sensibles (p.ej. emails) en algunos bloques.
+                limited_mode = not bool(is_admin_actor)
 
                 # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
                 now_ts = time.time()
@@ -70923,15 +70923,26 @@ class Handler(BaseHTTPRequestHandler):
                     ).fetchall()
                     perf = [dict(r) for r in (perf_rows or [])]
 
-                    users = conn.execute(
-                        """
-                        SELECT id, nombre, apellido, usuario, email, rol, servicio
-                        FROM usuarios
-                        WHERE COALESCE(activo, 1) = 1
-                          AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
-                        ORDER BY LOWER(COALESCE(nombre, '')) ASC
-                        """
-                    ).fetchall()
+                    if limited_mode:
+                        users = conn.execute(
+                            """
+                            SELECT id, nombre, apellido, usuario, rol, servicio
+                            FROM usuarios
+                            WHERE COALESCE(activo, 1) = 1
+                              AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+                            ORDER BY LOWER(COALESCE(nombre, '')) ASC
+                            """
+                        ).fetchall()
+                    else:
+                        users = conn.execute(
+                            """
+                            SELECT id, nombre, apellido, usuario, email, rol, servicio
+                            FROM usuarios
+                            WHERE COALESCE(activo, 1) = 1
+                              AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+                            ORDER BY LOWER(COALESCE(nombre, '')) ASC
+                            """
+                        ).fetchall()
                     user_rows = [dict(r) for r in (users or [])]
 
                     perf_map = {}
