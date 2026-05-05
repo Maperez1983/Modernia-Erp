@@ -54550,10 +54550,6 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  if (!canAccessGestoriaAdminDashboard()) {
-    gestoriaDashboardPaneServicios.innerHTML = "<p class='muted'>Este dashboard es solo para usuarios admin.</p>";
-    return;
-  }
   const workspaceId = String(state.currentWorkspaceId || "").trim();
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
 
@@ -54600,7 +54596,6 @@ const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-  const isAdminDash = canAccessGestoriaAdminDashboard();
 
   if (gestoriaDashboardEmpresaScope && gestoriaDashboardEmpresaScope.dataset.bound !== "1") {
     gestoriaDashboardEmpresaScope.dataset.bound = "1";
@@ -54624,14 +54619,6 @@ const loadGestoriaDashboard = () => {
     gestoriaDashboardEmpresaScope.value = current;
   }
   initGestoriaDashboardTabs();
-  if (!isAdminDash) {
-    if (gestoriaDashboardTabs) gestoriaDashboardTabs.classList.add("hidden");
-    if (gestoriaDashboardPaneGeneral) {
-      gestoriaDashboardPaneGeneral.innerHTML =
-        "<div class='form-card'><h3>Dashboard de gestoría</h3><p class='muted'>Este dashboard está disponible solo para usuarios admin.</p></div>";
-    }
-    return;
-  }
   const desiredView = normalizeGestoriaDashboardView(state.gestoriaDashboardView || state.gestoriaDashboardPane || "general");
   setGestoriaDashboardView(desiredView);
   bindGestoriaDashboardKpis();
