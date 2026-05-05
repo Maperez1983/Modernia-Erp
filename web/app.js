@@ -32922,6 +32922,37 @@ const loadGestoriaContaQueue = () => {
   });
 };
 
+// Dashboard Gestoría (no admin): evitar avalanchas de peticiones concurrentes a /api/gestoria_trabajos
+// (pueden saturar el pool de Postgres en Render). Cachea la respuesta por empresa unos segundos y
+// reutiliza la misma Promise mientras está en vuelo.
+const _gestoriaTrabajosDashCache = new Map();
+const fetchGestoriaTrabajosForDashboard = (empresaId) => {
+  const key = String(empresaId || "").trim();
+  if (!key) return Promise.resolve({ rows: [] });
+  const now = Date.now();
+  const cached = _gestoriaTrabajosDashCache.get(key);
+  if (cached) {
+    if (cached.data && now - cached.ts < 15000) {
+      return Promise.resolve(cached.data);
+    }
+    if (cached.promise && now - cached.ts < 15000) {
+      return cached.promise;
+    }
+  }
+  const promise = api(`/api/gestoria_trabajos?empresa_id=${encodeURIComponent(key)}`)
+    .then((data) => {
+      const payload = data && typeof data === "object" ? data : { rows: [] };
+      _gestoriaTrabajosDashCache.set(key, { ts: Date.now(), data: payload, promise: null });
+      return payload;
+    })
+    .catch((error) => {
+      _gestoriaTrabajosDashCache.delete(key);
+      throw error;
+    });
+  _gestoriaTrabajosDashCache.set(key, { ts: now, data: null, promise });
+  return promise;
+};
+
 const loadGestoriaTrabajosOverview = () => {
   if (!gestoriaTrabajosTable || !gestoriaTrabajosInfo) return;
   const empresa = resolveCrmGestoriaEmpresa();
@@ -32950,7 +32981,7 @@ const loadGestoriaTrabajosOverview = () => {
       });
     })
     .catch(() => {});
-  api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`).then((data) => {
+  fetchGestoriaTrabajosForDashboard(empresa.id).then((data) => {
     let rows = data.rows || [];
     const tipoFilterRaw = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
     const tipoFilter = normalizeGestoriaTrabajoCategory(tipoFilterRaw);
@@ -33071,7 +33102,7 @@ const loadGestoriaPipeline = () => {
     return;
   }
   ensureGestoriaTrabajoCategorySelects();
-  api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`).then((data) => {
+  fetchGestoriaTrabajosForDashboard(empresa.id).then((data) => {
     const rows = data.rows || [];
     const servicioRaw = gestoriaPipelineServicio ? gestoriaPipelineServicio.value.trim() : "";
     const servicio = normalizeGestoriaTrabajoCategory(servicioRaw);
