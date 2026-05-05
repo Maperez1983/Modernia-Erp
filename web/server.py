@@ -14085,6 +14085,54 @@ def _parse_renta_pdf_fields(text: str) -> dict:
                 return v
         return None
 
+    def _extract_dni_meta() -> tuple[str, str, int]:
+        """
+        Intenta detectar metadatos del documento (Modelo 100):
+        - fecha de expedición del DNI (ISO)
+        - fecha de caducidad del DNI (ISO) o "" si no se detecta
+        - flag DNI permanente (0/1)
+
+        Nota: en muchos PDFs estos campos no están presentes; este extractor es best-effort.
+        """
+        expedicion = ""
+        caducidad = ""
+        permanente = 0
+
+        # 1) Detecta "PERMANENTE" cerca de DNI/NIF.
+        # Algunos OCR devuelven bloques tipo "DNI ... PERMANENTE" o "Caducidad DNI: PERMANENTE".
+        for m in re.finditer(r"\b(CADUCIDAD|DNI|NIF|NIE)\b", raw, flags=re.IGNORECASE):
+            start = max(0, m.start() - 80)
+            end = min(len(raw), m.end() + 260)
+            ctx = raw[start:end]
+            if re.search(r"\bPERMANENT[EA]\b", ctx, flags=re.IGNORECASE):
+                permanente = 1
+                break
+
+        # 2) Caducidad: intenta etiquetas explícitas.
+        for pat in (
+            r"Fecha\s+de\s+caducidad(?:\s+del\s+(?:DNI|NIF|NIE|documento))?",
+            r"Caducidad(?:\s+del\s+(?:DNI|NIF|NIE|documento))?",
+            r"Caduca(?:\s+el)?",
+            r"DNI\s+caducidad",
+        ):
+            cad = _extract_date_after(pat)
+            if cad:
+                caducidad = cad
+                break
+
+        # 3) Expedición: intenta etiquetas explícitas.
+        for pat in (
+            r"Fecha\s+de\s+expedici[oó]n(?:\s+del\s+(?:DNI|NIF|NIE|documento))?",
+            r"Expedici[oó]n(?:\s+del\s+(?:DNI|NIF|NIE|documento))?",
+            r"Expedido(?:\s+el)?",
+        ):
+            exp = _extract_date_after(pat)
+            if exp:
+                expedicion = exp
+                break
+
+        return expedicion, caducidad, permanente
+
     def _extract_presentador_block() -> tuple[str, str]:
         """
         Algunos Modelo 100 incluyen el bloque del presentador con:
@@ -14156,6 +14204,14 @@ def _parse_renta_pdf_fields(text: str) -> dict:
     hijos_count = _extract_hijos_count()
     if hijos_count is not None:
         fields["hijos_count"] = hijos_count
+
+    dni_expedicion, dni_caducidad, dni_permanente = _extract_dni_meta()
+    if dni_expedicion:
+        fields["dni_expedicion"] = dni_expedicion
+    if dni_caducidad:
+        fields["dni_caducidad"] = dni_caducidad
+    if dni_permanente:
+        fields["dni_permanente"] = 1
 
     ibans = _find_ibans(raw)
     if ibans:
@@ -15202,6 +15258,9 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                                 "pagos_a_cuenta_total",
                                 "resultado_declaracion",
                                 "presentacion_fecha",
+                                "dni_expedicion",
+                                "dni_caducidad",
+                                "dni_permanente",
                                 "csv",
                                 "expediente",
                             ):
@@ -15261,6 +15320,9 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                                             "rendimientos_trabajo_total",
                                             "cuota_resultante_autoliquidacion",
                                             "pagos_a_cuenta_total",
+                                            "dni_expedicion",
+                                            "dni_caducidad",
+                                            "dni_permanente",
                                             "csv",
                                             "expediente",
                                         )

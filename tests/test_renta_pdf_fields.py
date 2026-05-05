@@ -33,3 +33,14 @@ class RentaPdfFieldsTests(unittest.TestCase):
         out = _parse_renta_pdf_fields(text)
         self.assertAlmostEqual(out.get("base_imponible_general") or 0.0, 21624.24, places=2)
         self.assertAlmostEqual(out.get("resultado_declaracion") or 0.0, -518.61, places=2)
+
+    def test_extracts_dni_caducidad_date(self):
+        text = "MODELO 100\nDocumento identificativo\nFecha de caducidad DNI: 31/12/2030\n"
+        out = _parse_renta_pdf_fields(text)
+        self.assertEqual(out.get("dni_caducidad"), "2030-12-31")
+
+    def test_extracts_dni_permanente(self):
+        text = "MODELO 100\nCaducidad DNI: PERMANENTE\n"
+        out = _parse_renta_pdf_fields(text)
+        self.assertEqual(out.get("dni_permanente"), 1)
+        self.assertTrue(out.get("dni_caducidad") in (None, ""))

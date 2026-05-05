@@ -2597,6 +2597,8 @@ const gestoriaRentaCobrada = document.getElementById("gestoriaRentaCobrada");
 const gestoriaRentaFormaCobro = document.getElementById("gestoriaRentaFormaCobro");
 const gestoriaRentaRemesada = document.getElementById("gestoriaRentaRemesada");
 const gestoriaRentaRemesadaWrap = document.getElementById("gestoriaRentaRemesadaWrap");
+const gestoriaRentaDniCaducidad = document.getElementById("gestoriaRentaDniCaducidad");
+const gestoriaRentaDniPermanente = document.getElementById("gestoriaRentaDniPermanente");
 const gestoriaRentaDocId = document.getElementById("gestoriaRentaDocId");
 const gestoriaRentaDocumentoForm = document.getElementById("gestoriaRentaDocumentoForm");
 const gestoriaRentaDocumentoFile = document.getElementById("gestoriaRentaDocumentoFile");
@@ -61750,6 +61752,15 @@ const syncGestoriaRentaRemesaToggles = () => {
   }
 };
 
+const syncGestoriaRentaDniCaducidadToggle = () => {
+  if (!gestoriaRentaDniCaducidad || !gestoriaRentaDniPermanente) return;
+  const isPermanente = Boolean(gestoriaRentaDniPermanente.checked);
+  gestoriaRentaDniCaducidad.disabled = isPermanente;
+  if (isPermanente) {
+    gestoriaRentaDniCaducidad.value = "";
+  }
+};
+
 const parseRentaQuickNifFromNotas = (raw = "") => {
   const text = String(raw || "");
   const match = text.match(/nif\s*detectado\s*:\s*([a-z0-9-]+)/i);
@@ -62657,6 +62668,12 @@ const fillGestoriaRentaDetailsForm = (row = {}) => {
   setValue("precio_servicio", entry?.precio_servicio ?? "");
   setValue("responsable", entry?.responsable || "");
   setValue("referencia_hacienda", entry?.referencia_hacienda || "");
+  const dniPermanente = Number(entry?.dni_permanente || 0) === 1 || normalizeSimple(entry?.dni_caducidad || "") === "permanente";
+  setValue("dni_caducidad", !dniPermanente ? entry?.dni_caducidad || "" : "");
+  if (gestoriaRentaDniPermanente) {
+    gestoriaRentaDniPermanente.checked = dniPermanente;
+  }
+  syncGestoriaRentaDniCaducidadToggle();
   setValue("forma_cobro", entry?.forma_cobro || "");
   setValue("renta_detalles", entry?.gestion_notas || payload.notes || "");
   setValue("doc_id", entry?.doc_presentada_id || entry?.doc_borrador_id || "");
@@ -62710,6 +62727,9 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     precio_servicio: Number.isFinite(precioServicio) ? Number(precioServicio.toFixed(2)) : null,
     responsable: String(formPayload.responsable || "").trim(),
     referencia_hacienda: String(formPayload.referencia_hacienda || "").trim(),
+    dni_expedicion: String(selectedEntry?.dni_expedicion || "").trim(),
+    dni_caducidad: String(formPayload.dni_caducidad || "").trim(),
+    dni_permanente: gestoriaRentaDniPermanente?.checked ? 1 : 0,
     cobrada: gestoriaRentaCobrada?.checked ? 1 : 0,
     forma_cobro: String(formPayload.forma_cobro || "").trim(),
     remesada:
@@ -62718,6 +62738,9 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     doc_borrador_id: selectedEntry?.doc_borrador_id || "",
     gestion_notas: String(formPayload.renta_detalles || "").trim(),
   };
+  if (updatedEntry.dni_permanente === 1) {
+    updatedEntry.dni_caducidad = "";
+  }
   const nextEntries = entries.length
     ? entries.map((entry) => (String(entry.id || "").trim() === selectedId ? updatedEntry : entry))
     : [updatedEntry];
@@ -75539,6 +75562,20 @@ if (gestoriaRentaQuickFile) {
 if (gestoriaRentaFormaCobro) {
   gestoriaRentaFormaCobro.addEventListener("change", () => {
     syncGestoriaRentaRemesaToggles();
+  });
+}
+if (gestoriaRentaDniPermanente) {
+  gestoriaRentaDniPermanente.addEventListener("change", () => {
+    syncGestoriaRentaDniCaducidadToggle();
+  });
+}
+if (gestoriaRentaDniCaducidad) {
+  gestoriaRentaDniCaducidad.addEventListener("input", () => {
+    if (!gestoriaRentaDniPermanente) return;
+    if (String(gestoriaRentaDniCaducidad.value || "").trim()) {
+      gestoriaRentaDniPermanente.checked = false;
+    }
+    syncGestoriaRentaDniCaducidadToggle();
   });
 }
 
