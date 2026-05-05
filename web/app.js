@@ -33356,8 +33356,9 @@ const populateResponsableSelects = () => {
         const service = normalizeSimple(user.servicio || "");
         const role = normalizeSimple(user.rol || "");
         if (!service) {
-          // Si no hay "servicio" (legacy), permitimos al menos roles privilegiados.
-          return ["administrador", "admin", "direccion", "administracion", "control"].includes(role);
+          // Si no hay "servicio" (workspace memberships / legacy), no filtramos para no dejar selects vacíos.
+          // La selección de responsable es operativa, no un permiso de acceso.
+          return true;
         }
         if (service.includes(serviceFilter)) return true;
         // Permite administración/dirección aunque el filtro sea otro (p.ej. Gestoría/Inmobiliaria).
