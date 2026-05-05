@@ -54347,6 +54347,13 @@ const renderGestoriaRentaDashboard = (payload) => {
         canvasAttr: 'data-renta-chart="responsables"',
       })
     );
+    chartGrid.appendChild(
+      buildChartCard({
+        title: "Rentas por responsable",
+        hint: "Top responsables por número de campañas del ejercicio.",
+        canvasAttr: 'data-renta-chart="responsables_count"',
+      })
+    );
     root.appendChild(chartGrid);
     root.insertBefore(exportCard, chartGrid);
     const hint = document.createElement("p");
@@ -54360,6 +54367,7 @@ const renderGestoriaRentaDashboard = (payload) => {
       const presentedCanvas = root.querySelector('canvas[data-renta-chart="presentadas"]');
       const economyCanvas = root.querySelector('canvas[data-renta-chart="economia"]');
       const respCanvas = root.querySelector('canvas[data-renta-chart="responsables"]');
+      const respCountCanvas = root.querySelector('canvas[data-renta-chart="responsables_count"]');
       if (estadoCanvas) {
         drawBarChart(
           estadoCanvas,
@@ -54477,6 +54485,42 @@ const renderGestoriaRentaDashboard = (payload) => {
               color: "#F2C14E",
               colors: labels.map(() => "#F2C14E"),
               format: (value) => euroFormatter.format(Number(value || 0)),
+            },
+          ],
+          {
+            legend: false,
+            showValues: true,
+            tooltip: true,
+            onBarClick: (hit) => {
+              const idx = Number(hit?.labelIndex ?? -1);
+              if (idx < 0 || idx >= keys.length) return;
+              setViewWithParam("responsable", keys[idx] || "");
+            },
+          }
+        );
+      }
+      if (respCountCanvas) {
+        const top = [...responsables]
+          .map((row) => ({
+            label: row.responsable || "Sin responsable",
+            key: row.responsable_key || "",
+            campanas: Number(row.campanas || 0),
+          }))
+          .sort((a, b) => b.campanas - a.campanas)
+          .slice(0, 12);
+        const labels = top.length ? top.map((t) => t.label) : ["Sin datos"];
+        const keys = top.length ? top.map((t) => t.key) : [""];
+        const values = top.length ? top.map((t) => t.campanas) : [0];
+        drawBarChart(
+          respCountCanvas,
+          labels,
+          [
+            {
+              label: "Campañas",
+              values,
+              color: "#0B1D33",
+              colors: labels.map(() => "#0B1D33"),
+              format: (value) => numberFormatter.format(Number(value || 0)),
             },
           ],
           {
