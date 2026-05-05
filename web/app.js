@@ -52495,7 +52495,8 @@ const loadGestoriaCrm = async () => {
   } else if (isFullWithoutFilters) {
     params.set("limit", "200");
   } else if (noFilters && !state.gestoriaCrmFull) {
-    params.set("limit", "200");
+    // Sin filtros: no necesitamos 200 filas (puede saturar Postgres en Render).
+    params.set("limit", "80");
   } else if (limit) {
     params.set("limit", limit);
   }

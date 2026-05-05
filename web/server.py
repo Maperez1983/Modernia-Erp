@@ -29873,6 +29873,25 @@ def ensure_tables(db_path):
             _migration_mark(conn, "perf_indexes_v5")
     except Exception:
         pass
+    # Índices extra (iteración 6): /api/tabla (gestoria).
+    try:
+        if not _migration_done(conn, "perf_indexes_v6"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_empresa_updated ON gestoria (empresa_id, updated_at DESC)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_empresa_created ON gestoria (empresa_id, created_at DESC)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            _migration_mark(conn, "perf_indexes_v6")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
