@@ -21058,7 +21058,8 @@ const updateExplorerHeader = (empresaName) => {
     if (!canGestoria && currentTab === "gestoria-crm") setTab("operativa");
   }
   if (gestoriaDashTab) {
-    const canDash = canGestoria && canAccessGestoriaAdminDashboard();
+    // Dashboard Gestoría accesible a cualquier usuario con acceso a Gestoría.
+    const canDash = canGestoria;
     gestoriaDashTab.classList.toggle("hidden", !canDash);
     if (!canDash && currentTab === "gestoria-dash") setTab("gestoria-crm");
   }
@@ -23205,7 +23206,8 @@ const openGestoriaCrm = () => {
     }
   })();
   if (!userCanAccessService("gestoria")) return;
-  openGestoriaServiceTab(canAccessGestoriaAdminDashboard() ? "gestoria-dash" : "gestoria-crm");
+  // Dashboard de Gestoría debe estar disponible para usuarios no admin (vista limitada).
+  openGestoriaServiceTab("gestoria-dash");
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
@@ -23217,9 +23219,7 @@ const openGestoriaCrm = () => {
 const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!userCanAccessService("gestoria")) return;
   let tab = String(targetTab || "gestoria-dash").trim() || "gestoria-dash";
-  if (tab === "gestoria-dash" && !canAccessGestoriaAdminDashboard()) {
-    tab = "gestoria-crm";
-  }
+  // No forzar a gestoria-crm: el dashboard funciona también para no admin (sin opciones de administración).
   const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
