@@ -20577,18 +20577,15 @@ const loadWorkspaceDetail = async (workspaceId) => {
   const authUser = getAuthScopeUser();
   const isSuperAdmin = Boolean(authUser && isPrivilegedUser(authUser));
   let canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
-  if (isSuperAdmin) {
-    await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
-      state.usersList = data.rows || [];
-      populateResponsableSelects();
-      populateAsesorSelects();
-      refreshSegurosColaboradoresList();
-    });
-  } else {
-    state.usersList = authUser ? [authUser] : [];
+  // Necesario para selects (Responsable/Asesor) en CRMs verticales.
+  // El endpoint filtra lo sensible (emails) para usuarios no privilegiados.
+  await safeWorkspaceApi("/api/usuarios", { rows: authUser ? [authUser] : [] }).then((data) => {
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    state.usersList = rows.length ? rows : authUser ? [authUser] : [];
     populateResponsableSelects();
     populateAsesorSelects();
-  }
+    refreshSegurosColaboradoresList();
+  });
   // Reset inmediato para evitar que, si falla la carga, se queden datos “pegados” del workspace/persona anterior.
   state.currentWorkspaceClients = [];
   state.currentWorkspaceData = {};
