@@ -32939,7 +32939,7 @@ const fetchGestoriaTrabajosForDashboard = (empresaId) => {
       return cached.promise;
     }
   }
-  const promise = api(`/api/gestoria_trabajos?empresa_id=${encodeURIComponent(key)}`)
+  const promise = api(`/api/gestoria_trabajos?empresa_id=${encodeURIComponent(key)}&limit=600`)
     .then((data) => {
       const payload = data && typeof data === "object" ? data : { rows: [] };
       _gestoriaTrabajosDashCache.set(key, { ts: Date.now(), data: payload, promise: null });

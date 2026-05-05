@@ -14338,6 +14338,25 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
     if ss_trab > 0:
         fields["ss_trabajador"] = ss_trab
     ss_emp = _find_amount_near([r"\bSEGURIDAD\s+SOCIAL\b[^\n\r]{0,60}?EMP", r"\bAPORTACI[ÓO]N\s+EMPRESA\b"])
+    # Fallback: algunas nóminas no imprimen "Seguridad social empresa", pero sí el bloque
+    # "APORTACIÓN DE LA EMPRESA" con varias líneas cuya última columna suma el coste SS empresa.
+    if ss_emp <= 0 and "APORTACIÓN DE LA EMPRESA" in upper:
+        try:
+            start = upper.find("APORTACIÓN DE LA EMPRESA")
+            segment = raw[start : start + 2200] if start >= 0 else raw
+            total = 0.0
+            for line in segment.splitlines():
+                # Coge el último importe de cada línea con importes.
+                amounts = re.findall(r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))", line)
+                if len(amounts) < 2:
+                    continue
+                last_amt = parse_money_value(amounts[-1])
+                if last_amt and float(last_amt) > 0:
+                    total += float(last_amt)
+            if total > 0:
+                ss_emp = round(total, 2)
+        except Exception:
+            pass
     if ss_emp > 0:
         fields["ss_empresa"] = ss_emp
 
@@ -29832,6 +29851,25 @@ def ensure_tables(db_path):
                 except Exception:
                     pass
             _migration_mark(conn, "perf_indexes_v4")
+    except Exception:
+        pass
+    # Índices extra (iteración 5): gestoria_trabajos (dashboard/pipeline).
+    try:
+        if not _migration_done(conn, "perf_indexes_v5"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_trabajos_empresa_created ON gestoria_trabajos (empresa_id, created_at DESC)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_trabajos_cliente_created ON gestoria_trabajos (cliente_id, created_at DESC)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            _migration_mark(conn, "perf_indexes_v5")
     except Exception:
         pass
     conn.execute(
@@ -69020,6 +69058,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_trabajos":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            limit_raw = (params.get("limit", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             empresa_ids = []
             if str(empresa_id or "").strip():
@@ -69032,6 +69071,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+
+            limit = 500
+            if limit_raw:
+                try:
+                    limit = int(limit_raw)
+                except Exception:
+                    limit = 500
+            limit = max(1, min(2000, limit))
+
             where = []
             values = []
             if cliente_id:
@@ -69054,8 +69102,9 @@ class Handler(BaseHTTPRequestHandler):
                 LEFT JOIN clientes c ON c.id = gt.cliente_id
                 WHERE {where_clause}
                 ORDER BY gt.created_at DESC
+                LIMIT ?
                 """,
-                values,
+                [*values, limit],
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
