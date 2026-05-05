@@ -17076,6 +17076,43 @@ def pdftotext_extract(pdf_path, pages=None):
         except Exception as err:
             return "", f"pdftotext: {err}"
 
+
+def pypdf_extract_text(pdf_path, pages=None):
+    """
+    Extractor de texto embebido vía `pypdf` (sin dependencias externas).
+    Útil en Render cuando no está instalado `pdftotext`/poppler.
+    """
+    try:
+        from pypdf import PdfReader
+    except Exception as exc:
+        return "", f"pypdf no disponible: {exc}"
+    try:
+        reader = PdfReader(pdf_path)
+    except Exception as exc:
+        return "", f"pypdf: no se pudo leer PDF: {exc}"
+    max_pages = None
+    if pages and isinstance(pages, int) and pages > 0:
+        max_pages = pages
+    else:
+        try:
+            max_pages = int(os.getenv("RENTA_PYPDF_MAX_PAGES", "25") or 25)
+        except Exception:
+            max_pages = 25
+    max_pages = max(1, min(200, int(max_pages or 25)))
+    out = []
+    err_msg = ""
+    for idx, page in enumerate(reader.pages):
+        if idx >= max_pages:
+            break
+        try:
+            txt = page.extract_text() or ""
+        except Exception as exc:
+            err_msg = err_msg or f"pypdf: extract_text fallo: {exc}"
+            txt = ""
+        if txt:
+            out.append(txt)
+    return "\n".join(out).strip(), err_msg
+
 def pdfinfo_page_size(pdf_path):
     cmd = (
         shutil.which("pdfinfo")
@@ -17568,6 +17605,18 @@ def extract_renta_pdf_text(pdf_path, *, source_hint=""):
             return full_text, "", "pdftotext"
         # Si falla el full, usamos la sonda como degradación.
         return probe_text, full_err or "", "pdftotext"
+
+    # 1b) Fallback sin binarios: pypdf (extrae texto embebido).
+    # En PDFs descargados de la AEAT (no escaneados) esto suele ser suficiente y evita OCR lento.
+    if (not ok_text(probe_text)) and err and "no encontrado" in str(err).lower():
+        p_probe, p_err = pypdf_extract_text(pdf_path, pages=1)
+        if ok_text(p_probe) and (
+            has_nif(p_probe) or has_nif_label(p_probe) or _score_renta_ocr_text(p_probe) >= 120
+        ):
+            p_full, p_full_err = pypdf_extract_text(pdf_path, pages=None)
+            if ok_text(p_full):
+                return p_full, "", "pypdf"
+            return p_probe, p_full_err or p_err or "", "pypdf"
 
     # 2) OCR progresivo sobre páginas (normalmente 1-6, ampliable).
     # En producción (Render) puede NO existir `tesseract`. En ese caso, si hay OCR externo
