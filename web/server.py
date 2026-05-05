@@ -18296,6 +18296,24 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             length = len(token)
             if length < 5 or length > 24:
                 return -1
+            # Evita tokens que parezcan fechas compactas (20260407, 07042026, etc.)
+            if re.fullmatch(r"\d{8}", token):
+                try:
+                    year_first = int(token[:4])
+                    month = int(token[4:6])
+                    day = int(token[6:8])
+                    if 2000 <= year_first <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                        return -1
+                except Exception:
+                    pass
+                try:
+                    day = int(token[:2])
+                    month = int(token[2:4])
+                    year_last = int(token[4:8])
+                    if 2000 <= year_last <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                        return -1
+                except Exception:
+                    pass
             return digits * 2 + length
         best = max(candidates, key=score_token)
         return best
@@ -18305,6 +18323,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             return False
         if not re.search(r"\d", token):
             return False
+        # Evita fechas compactas que OCR confunde como póliza.
+        if re.fullmatch(r"\d{8}", token):
+            try:
+                y = int(token[:4])
+                m = int(token[4:6])
+                d = int(token[6:8])
+                if 2000 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+                    return False
+            except Exception:
+                pass
         month_noise = (
             "ENERO",
             "FEBRERO",
@@ -18359,7 +18387,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             r"\b("
             r"DOCUMENTO|DOC\.?|NIF|DNI|CIF|MATRICULA|MATRÍCULA|VEHICULO|VEHÍCULO|"
             r"TIPO|RIESGO|PLANTA|SITUACION|SITUACIÓN|USO|COBERTURAS|GARANTIAS|GARANTÍAS|"
-            r"DECLARACION|DECLARACIÓN|BENEFICIARIO|CLAUSULAS|CLÁUSULAS"
+            r"DECLARACION|DECLARACIÓN|FECHA|PROVINCIA|DIRECCION|DIRECCIÓN|DOMICILIO|"
+            r"BENEFICIARIO|CLAUSULAS|CLÁUSULAS"
             r")\b",
             raw,
             re.IGNORECASE,
@@ -20241,6 +20270,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         [
             r"(?:DIRECCI[ÓO]N|SITUACI[ÓO]N|UBICACI[ÓO]N)\s+DEL?\s+RIESGO\s*[:\-]?\s*([^\n\r]{8,120})",
             r"SITUACI[ÓO]N\s+DE\s+LA\s+VIVIENDA\s*[:\-]?\s*([^\n\r]{8,120})",
+            r"DOMICILIO\s+DEL?\s+RIESGO\s*[:\-]?\s*([^\n\r]{8,120})",
         ]
     )
     if direccion_riesgo:
@@ -20251,6 +20281,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     referencia_catastral = pick([
         r"(?:REFERENCIA\s+)?CATASTRAL\s*[:\-]?\s*([0-9A-Z\s\-]{14,25})",
         r"REF\.?\s*CATASTRAL\s*[:\-]?\s*([0-9A-Z\s\-]{14,25})",
+        r"REF\.?\s*CAT\.\s*[:\-]?\s*([0-9A-Z\s\-]{14,25})",
     ])
     if referencia_catastral:
         ref_norm = re.sub(r"[^0-9A-Z]", "", str(referencia_catastral or "").upper())
