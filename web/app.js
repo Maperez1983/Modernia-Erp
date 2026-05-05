@@ -54545,6 +54545,27 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   }
 };
 
+const isGestoriaRentaDashboardVisible = () => {
+  try {
+    return (
+      String(state.gestoriaDashboardView || "") === "rentas" &&
+      gestoriaDashServiciosPaneRentas &&
+      !gestoriaDashServiciosPaneRentas.classList.contains("hidden")
+    );
+  } catch {
+    return false;
+  }
+};
+
+const invalidateGestoriaRentaDashboardCache = ({ refreshIfVisible = true } = {}) => {
+  try {
+    if (state.gestoriaRentaDashCache) state.gestoriaRentaDashCache.ts = 0;
+  } catch {}
+  if (!refreshIfVisible) return;
+  if (!isGestoriaRentaDashboardVisible()) return;
+  loadGestoriaRentaDashboard({ force: true }).catch(() => {});
+};
+
 const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) => {
   if (!gestoriaDashboardPaneServicios || !gestoriaDashServiciosReload) return;
   if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
@@ -62368,6 +62389,7 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
     try {
       // Invalida cache de cards "Cliente Renta" para que aparezca el PDF recién asignado.
       state.gestoriaRentaCardsCache = null;
+      invalidateGestoriaRentaDashboardCache({ refreshIfVisible: true });
     } catch (e) {}
     const entryId = String(data?.entry_id || "").trim();
     if (entryId) {
@@ -62726,6 +62748,10 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
     if (gestoriaRentaEstadoPresentacion) {
       gestoriaRentaEstadoPresentacion.value = payload.estado_presentacion;
     }
+    try {
+      if (state.gestoriaRentaCardsCache) state.gestoriaRentaCardsCache.ts = 0;
+      invalidateGestoriaRentaDashboardCache({ refreshIfVisible: true });
+    } catch (e) {}
 	    if (gestoriaRentaDocumentoFile) {
 	      gestoriaRentaDocumentoFile.value = "";
 	    }
@@ -75382,6 +75408,7 @@ if (gestoriaRentaDetallesForm) {
           // Invalida caché de cards (vista Gestoría → Renta) para que el resumen se actualice.
           try {
             if (state.gestoriaRentaCardsCache) state.gestoriaRentaCardsCache.ts = 0;
+            invalidateGestoriaRentaDashboardCache({ refreshIfVisible: true });
             if (state.currentTab === "gestoria-crm" && state.gestoriaCrmTab === "renta") {
               loadGestoriaCrm();
             }
