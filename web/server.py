@@ -44310,6 +44310,63 @@ class Handler(BaseHTTPRequestHandler):
         token = self._parse_cookies().get(SESSION_COOKIE_NAME, "")
         return get_auth_session(token)
 
+    def _referer_tenant_workspace(self):
+        """
+        Best-effort: si el usuario venía navegando en modo tenant/workspace y por un bug
+        (o caché/SW) la URL pierde `holding=1&mode=tenant&workspace=...`, recuperamos el
+        workspace a partir del Referer para evitar caer al modo global.
+        """
+        try:
+            ref = (self.headers.get("Referer") or "").strip()
+            if not ref:
+                return ""
+            parsed = urllib.parse.urlparse(ref)
+            q = urllib.parse.parse_qs(parsed.query or "")
+            holding = str(q.get("holding", [""])[0] or "").strip()
+            mode = str(q.get("mode", [""])[0] or "").strip().lower()
+            ws = str(q.get("workspace", [""])[0] or "").strip()
+            if holding != "1" or mode != "tenant" or not ws:
+                return ""
+            # workspace ids actuales: hex 32 (pero aceptamos uuid con guiones por compat).
+            if re.fullmatch(r"[0-9a-fA-F]{32}", ws) or re.fullmatch(r"[0-9a-fA-F\\-]{32,36}", ws):
+                return ws
+        except Exception:
+            return ""
+        return ""
+
+    def _user_single_workspace(self, conn, session):
+        """
+        Devuelve el único workspace_id del usuario (si existe exactamente 1).
+        Para usuarios normales, esto permite forzar tenant y bloquear modo global.
+        """
+        try:
+            if not conn or not session:
+                return ""
+            uid = str(session.get("user_id") or "").strip()
+            if not uid:
+                return ""
+            try:
+                ensure_workspace_core_tables(conn)
+            except Exception:
+                pass
+            rows = conn.execute(
+                """
+                SELECT workspace_id
+                FROM workspace_miembros
+                WHERE usuario_id = ?
+                """,
+                (uid,),
+            ).fetchall()
+            ids = [
+                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+                for r in (rows or [])
+                if str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+            ]
+            ids = list(dict.fromkeys(ids))  # unique, stable order
+            return ids[0] if len(ids) == 1 else ""
+        except Exception:
+            return ""
+
     def _auth_user_payload(self, session):
         if not session:
             return None
@@ -45056,6 +45113,73 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/" or parsed.path == "":
+            # Guardarraíl arquitectónico:
+            # - Si la navegación pierde `holding=1&mode=tenant&workspace=...`, intentamos recuperarlo.
+            # - Usuarios no superadmin: forzamos tenant si tienen un único workspace (evita "modo global").
+            try:
+                params = urllib.parse.parse_qs(parsed.query or "")
+                holding = str(params.get("holding", [""])[0] or "").strip()
+                mode = str(params.get("mode", [""])[0] or "").strip().lower()
+                workspace = str(params.get("workspace", [""])[0] or "").strip()
+                # Atajo de debug: permite desactivar el redirect desde el navegador.
+                no_redirect = str(params.get("no_redirect", [""])[0] or "").strip() in ("1", "true", "yes", "on")
+                if not no_redirect:
+                    session = self._current_session()
+                    conn = None
+                    try:
+                        conn = open_db_conn(self.db_path)
+                        # 1) Si veníamos de tenant (Referer), recupera workspace aunque el usuario sea superadmin.
+                        if not (holding == "1" and mode == "tenant" and workspace):
+                            ws_ref = self._referer_tenant_workspace()
+                            if ws_ref:
+                                workspace = ws_ref
+                                holding = "1"
+                                mode = "tenant"
+                        # 2) Si el usuario no es superadmin, bloquea modo platform y fuerza tenant cuando sea posible.
+                        if session and conn and (not is_superadmin_actor(conn, session)):
+                            if mode == "platform":
+                                workspace = ""
+                                holding = ""
+                                mode = ""
+                            if not (holding == "1" and mode == "tenant" and workspace):
+                                ws_only = self._user_single_workspace(conn, session)
+                                if ws_only:
+                                    workspace = ws_only
+                                    holding = "1"
+                                    mode = "tenant"
+                        # Aplica redirect si ya tenemos tenant.
+                        if holding == "1" and mode == "tenant" and workspace and not (
+                            str(params.get("holding", [""])[0] or "").strip() == "1"
+                            and str(params.get("mode", [""])[0] or "").strip().lower() == "tenant"
+                            and str(params.get("workspace", [""])[0] or "").strip() == workspace
+                        ):
+                            # Preserva intención (view/crm/tab) del request actual, pero elimina global-only params.
+                            merged = {}
+                            for key, values in (params or {}).items():
+                                if not values:
+                                    continue
+                                if key in {"holding", "mode", "workspace", "empresa", "clientes", "cliente"}:
+                                    continue
+                                merged[key] = values[-1]
+                            base = {
+                                "holding": "1",
+                                "mode": "tenant",
+                                "workspace": workspace,
+                            }
+                            base.update(merged)
+                            qs = urllib.parse.urlencode(base, doseq=False)
+                            self.send_response(302)
+                            self.send_header("Location", f"/?{qs}")
+                            self.end_headers()
+                            return
+                    finally:
+                        try:
+                            if conn:
+                                conn.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             send_file(self, ROOT / "index.html")
             return
 
