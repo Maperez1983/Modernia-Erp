@@ -3960,6 +3960,34 @@ def ensure_workspace_core_tables(conn):
         )
         """
     )
+    # Nuevo modelo: "empresa" dentro del workspace (tenant) como entidad operativa.
+    # Mantiene `legacy_empresa_id` para compatibilidad mientras migramos endpoints antiguos.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_companies (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          legacy_empresa_id TEXT,
+          nombre TEXT NOT NULL,
+          nif TEXT,
+          direccion TEXT,
+          logo_url TEXT,
+          primary_color TEXT,
+          accent_color TEXT,
+          activo INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, legacy_empresa_id)
+        )
+        """
+    )
+    ensure_column(conn, "workspace_companies", "legacy_empresa_id", "legacy_empresa_id TEXT")
+    ensure_column(conn, "workspace_companies", "nif", "nif TEXT")
+    ensure_column(conn, "workspace_companies", "direccion", "direccion TEXT")
+    ensure_column(conn, "workspace_companies", "logo_url", "logo_url TEXT")
+    ensure_column(conn, "workspace_companies", "primary_color", "primary_color TEXT")
+    ensure_column(conn, "workspace_companies", "accent_color", "accent_color TEXT")
+    ensure_column(conn, "workspace_companies", "activo", "activo INTEGER NOT NULL DEFAULT 1")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_modulos (
@@ -38733,6 +38761,92 @@ def fetch_workspace_detail(conn, workspace_id):
         """,
         (workspace_id,),
     ).fetchall()
+    # v2 (tenant-native): empresas dentro del workspace (evita depender de `empresas` global).
+    # Si aún no hay filas, hacemos backfill best-effort desde workspace_empresas para no romper pantallas.
+    try:
+        ensure_workspace_core_tables(conn)
+    except Exception:
+        pass
+    try:
+        existing = conn.execute(
+            "SELECT COUNT(*) AS total FROM workspace_companies WHERE workspace_id = ?",
+            (workspace_id,),
+        ).fetchone()
+        total_existing = int(row_value(existing, "total", 0) or row_value(existing, 0) or 0)
+    except Exception:
+        total_existing = 0
+    if total_existing == 0:
+        try:
+            # Backfill desde joins legacy. No borra/edita nada si ya existe.
+            now_ts = datetime.now(timezone.utc).isoformat()
+            legacy = conn.execute(
+                """
+                SELECT we.empresa_id, we.rol, e.nombre, e.nif, e.direccion, e.logo_url, e.primary_color, e.accent_color, COALESCE(e.activo, 1) AS activo
+                FROM workspace_empresas we
+                JOIN empresas e ON e.id = we.empresa_id
+                WHERE we.workspace_id = ?
+                """,
+                (workspace_id,),
+            ).fetchall()
+            for row in legacy or []:
+                legacy_id = str(row_value(row, "empresa_id") or "").strip()
+                if not legacy_id:
+                    continue
+                if conn.execute(
+                    "SELECT 1 FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ? LIMIT 1",
+                    (workspace_id, legacy_id),
+                ).fetchone():
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO workspace_companies (
+                      id, workspace_id, legacy_empresa_id, nombre, nif, direccion,
+                      logo_url, primary_color, accent_color, activo, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        workspace_id,
+                        legacy_id,
+                        str(row_value(row, "nombre") or "").strip() or "-",
+                        str(row_value(row, "nif") or "").strip(),
+                        str(row_value(row, "direccion") or "").strip(),
+                        str(row_value(row, "logo_url") or "").strip(),
+                        str(row_value(row, "primary_color") or "").strip(),
+                        str(row_value(row, "accent_color") or "").strip(),
+                        int(row_value(row, "activo") or 1),
+                        now_ts,
+                        now_ts,
+                    ),
+                )
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    try:
+        companies_v2 = conn.execute(
+            """
+            SELECT
+              id,
+              workspace_id,
+              COALESCE(legacy_empresa_id, '') AS legacy_empresa_id,
+              nombre,
+              COALESCE(nif, '') AS nif,
+              COALESCE(direccion, '') AS direccion,
+              COALESCE(logo_url, '') AS logo_url,
+              COALESCE(primary_color, '') AS primary_color,
+              COALESCE(accent_color, '') AS accent_color,
+              COALESCE(activo, 1) AS activo
+            FROM workspace_companies
+            WHERE workspace_id = ?
+            ORDER BY nombre COLLATE NOCASE ASC
+            """,
+            (workspace_id,),
+        ).fetchall()
+    except Exception:
+        companies_v2 = []
     modules = conn.execute(
         """
         SELECT id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json
@@ -38768,6 +38882,7 @@ def fetch_workspace_detail(conn, workspace_id):
     return {
         "workspace": dict(workspace),
         "companies": [dict(row) for row in companies],
+        "companies_v2": [dict(row) for row in companies_v2],
         "modules": module_rows,
         "commercial_package": package,
         "permission_matrix": permission_matrix,

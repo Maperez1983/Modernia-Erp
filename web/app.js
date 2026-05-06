@@ -21821,7 +21821,7 @@ const openCrmInmobiliario = () => {
     loadUsuarios().catch(() => {});
   }
   if (isTenantWorkspaceMode()) {
-    const companies = state.currentWorkspaceDetail?.companies || [];
+    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
       alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
       return;
@@ -23322,7 +23322,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     loadUsuarios().catch(() => {});
   }
   if (isTenantWorkspaceMode()) {
-    const companies = state.currentWorkspaceDetail?.companies || [];
+    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
       alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
       return;
