@@ -54081,8 +54081,8 @@ const renderGestoriaRentaDashboard = (payload) => {
     if (view === "unpaid") return unpaid;
     if (view === "unassigned") return unassigned;
     if (view === "responsable" && viewParam) {
-      const key = normalizeLookupText(viewParam) || viewParam;
-      return base.filter((item) => String(item.responsable_key || "") === key);
+      const key = normalizeLookupText(viewParam);
+      return base.filter((item) => normalizeLookupText(item.responsable_key || "") === key);
     }
     return [];
   };
