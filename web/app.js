@@ -48115,6 +48115,19 @@ const openCrmAgendaEditModal = (row) => {
   document.body.classList.add("modal-open");
 };
 
+const resolveCrmAgendaRowById = (id) => {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  const rows = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll : [];
+  return rows.find((r) => String(r?.id || "").trim() === key) || null;
+};
+
+const openCrmAgendaEditModalById = (id) => {
+  const row = resolveCrmAgendaRowById(id);
+  if (!row) return;
+  openCrmAgendaEditModal(row);
+};
+
 const normalizeCrmAgendaView = (raw) => {
   const value = normalizeSimple(raw || "");
   if (value === "list" || value === "lista") return "list";
@@ -48292,7 +48305,8 @@ const buildCrmAgendaDenseTableNode = (rows = []) => {
   const tbody = document.createElement("tbody");
   items.forEach((row) => {
     const tr = document.createElement("tr");
-    tr.addEventListener("click", () => openCrmAgendaEditModal(row));
+    tr.dataset.actionId = String(row?.id || "").trim();
+    tr.addEventListener("click", () => openCrmAgendaEditModalById(tr.dataset.actionId));
 
     const selectTd = document.createElement("td");
     selectTd.className = "crm-dense-select";
@@ -48374,7 +48388,12 @@ const buildCrmAgendaEventNode = (row) => {
       ${meta ? `<div class="agenda-meta">${escapeHtml(meta)}</div>` : ""}
     </div>
   `;
-  btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+  btn.dataset.actionId = String(row?.id || "").trim();
+  btn.addEventListener("click", () => {
+    const id = String(btn.dataset.actionId || "").trim();
+    if (!id) return;
+    openCrmAgendaEditModalById(id);
+  });
   return btn;
 };
 
@@ -48838,7 +48857,12 @@ const renderCrmAgendaCalendar = (rows = []) => {
 	    btn.style.setProperty("--tc-ev-bg", colors.bg);
 	    btn.style.setProperty("--tc-ev-border", colors.border);
 	    btn.innerHTML = `<div class="tc-agenda-event-time">${escapeHtml(when)}${badge ? ` <span class="tc-agenda-event-badge">${escapeHtml(badge)}</span>` : ""}</div><div class="tc-agenda-event-title">${escapeHtml(asunto)}</div>${meta ? `<div class="tc-agenda-event-meta">${escapeHtml(meta)}</div>` : ""}`;
-	    btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+	    btn.dataset.actionId = String(row?.id || "").trim();
+	    btn.addEventListener("click", () => {
+	      const id = String(btn.dataset.actionId || "").trim();
+	      if (!id) return;
+	      openCrmAgendaEditModalById(id);
+	    });
 	    return btn;
 	  };
 
