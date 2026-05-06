@@ -36361,6 +36361,53 @@ def infer_workspace_id_for_empresa(conn, session, empresa_id):
     return "", candidates
 
 
+def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id):
+    """
+    En el modelo v2, la empresa operativa vive en `workspace_companies` (por workspace).
+    Para compatibilidad con tablas legacy, resolvemos su `legacy_empresa_id` (empresas.id).
+    """
+    ws_id = str(workspace_id or "").strip()
+    wc_id = str(workspace_company_id or "").strip()
+    if not ws_id or not wc_id or not conn:
+        return ""
+    try:
+        ensure_workspace_core_tables(conn)
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            """
+            SELECT legacy_empresa_id
+            FROM workspace_companies
+            WHERE workspace_id = ? AND id = ?
+            LIMIT 1
+            """,
+            (ws_id, wc_id),
+        ).fetchone()
+    except Exception:
+        row = None
+    legacy_id = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
+    return legacy_id
+
+
+def resolve_empresa_id_for_request(conn, session, *, workspace_id="", empresa_id="", workspace_company_id="", write=False):
+    """
+    Resolución unificada:
+    - Acepta `empresa_id` (legacy) o `workspace_company_id` (v2).
+    - Enforce membership: si llega `workspace_id`, exige pertenencia del usuario.
+    - Devuelve (empresa_id_legacy, workspace_company_id, error_str)
+    """
+    ws_id = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    wc_id = str(workspace_company_id or "").strip()
+    if ws_id:
+        ok, err = enforce_workspace_membership(conn, session, ws_id, write=write)
+        if not ok:
+            return "", wc_id, err or "No autorizado"
+    if not eid and ws_id and wc_id:
+        eid = resolve_legacy_empresa_id_from_workspace_company(conn, ws_id, wc_id) or ""
+    return eid, wc_id, ""
+
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
     if not workspace_id or not user_id:
         return ""
@@ -65075,6 +65122,29 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+            # Compat v2: permitir `workspace_company_id` en endpoints que esperan `empresa_id`.
+            # Si llega workspace_id + workspace_company_id y falta empresa_id, resolvemos automáticamente
+            # (sin tocar cada endpoint individual).
+            try:
+                ws_for_company = (params.get("workspace_id", [""])[0] or "").strip() or ws_id
+                wc_param = (params.get("workspace_company_id", [""])[0] or "").strip()
+                eid_param = (params.get("empresa_id", [""])[0] or "").strip()
+                if ws_for_company and wc_param and not eid_param:
+                    eid_res, _wc, err2 = resolve_empresa_id_for_request(
+                        conn,
+                        session,
+                        workspace_id=ws_for_company,
+                        empresa_id="",
+                        workspace_company_id=wc_param,
+                        write=False,
+                    )
+                    if err2:
+                        json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                        return
+                    if eid_res:
+                        params["empresa_id"] = [eid_res]
+            except Exception:
+                pass
 
         if path == "/api/me":
             session = session or self._current_session()

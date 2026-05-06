@@ -1768,6 +1768,8 @@ const state = {
   currentWorkspaceEntryMode: "platform",
   currentWorkspaceCompanyId: "",
   currentWorkspaceCompanyName: "",
+  // v2: id interno de la empresa dentro del workspace (tenant). Se usa para queries `workspace_company_id`.
+  currentWorkspaceCompanyWsId: "",
   currentWorkspaceClientId: "",
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
@@ -6432,6 +6434,7 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
     || null;
   state.currentWorkspaceCompanyId = selected?.id || "";
   state.currentWorkspaceCompanyName = selected?.nombre || "";
+  state.currentWorkspaceCompanyWsId = selected?.workspace_company_id || "";
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
   renderWorkspaceCompanyScopedData();
@@ -6454,6 +6457,14 @@ const getWorkspaceCompanyFilter = () =>
   (state.currentWorkspaceEntryMode || "platform") === "tenant"
     ? ""
     : String(state.currentWorkspaceCompanyId || "").trim();
+
+const getWorkspaceCompanyQuery = () => {
+  if ((state.currentWorkspaceEntryMode || "platform") === "tenant") return "";
+  const wsCompanyId = String(state.currentWorkspaceCompanyWsId || "").trim();
+  if (wsCompanyId) return `&workspace_company_id=${encodeURIComponent(wsCompanyId)}`;
+  const legacy = String(state.currentWorkspaceCompanyId || "").trim();
+  return legacy ? `&empresa_id=${encodeURIComponent(legacy)}` : "";
+};
 const getWorkspaceCompanyContextLabel = () =>
   (state.currentWorkspaceEntryMode || "platform") === "tenant"
     ? getWorkspaceDisplayName(state.currentWorkspaceName || state.currentWorkspaceTarget || DEFAULT_TENANT_WORKSPACE_SLUG)
@@ -6589,16 +6600,14 @@ const renderWorkspaceCompanyScopedData = () => {
   state.workspaceTimePeriods = timePeriods;
   renderWorkspaceTimePeriodLock(timePeriods);
   if (workspaceTimeExportBtn) {
-    const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+    const companyQuery = getWorkspaceCompanyQuery();
     workspaceTimeExportBtn.href = `/api/workspace_registro_horario_export?workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}&month=${encodeURIComponent(state.workspaceTimeMonth || "")}${companyQuery}`;
   }
 };
 
 const loadWorkspaceCompanyScopedPanels = async () => {
   if (!state.currentWorkspaceId) return;
-  const companyQuery = state.currentWorkspaceCompanyId
-    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
-    : "";
+  const companyQuery = getWorkspaceCompanyQuery();
   const [gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks] = await Promise.all([
     safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
     safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
@@ -11662,7 +11671,7 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
   }
 
 	  const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
-	  const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+	  const companyQuery = getWorkspaceCompanyQuery();
 	  const allowUnscoped = Boolean(manager && state.workspaceRrhhScopeAll);
 	  const scopePersonaId = allowUnscoped ? "" : selectedPersonaId;
 	  const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
@@ -15899,7 +15908,7 @@ const renderWorkspaceRrhhHub = () => {
         alert("Selecciona un mes para exportar.");
         return;
       }
-      const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+      const companyQuery = getWorkspaceCompanyQuery();
       const url = `/api/workspace_rrhh_payroll_export?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&month=${encodeURIComponent(month)}${companyQuery}`;
       window.open(url, "_blank");
     });
@@ -18247,9 +18256,7 @@ const hydrateWorkspaceTimeUserSelect = () => {
 const refreshWorkspaceTimeSetup = async () => {
   if (!state.currentWorkspaceId) return;
   await ensureWorkspaceCompaniesLoaded();
-  const companyQuery = state.currentWorkspaceCompanyId
-    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
-    : "";
+  const companyQuery = getWorkspaceCompanyQuery();
   const timeUsers = await safeWorkspaceApi(
     `/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}&limit=300`,
     { rows: [] }
@@ -18284,9 +18291,7 @@ const refreshWorkspaceTimeSweepStatus = async () => {
     if (workspaceTimeSweepRunNow) workspaceTimeSweepRunNow.classList.add("hidden");
     return;
   }
-  const companyQuery = state.currentWorkspaceCompanyId
-    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
-    : "";
+  const companyQuery = getWorkspaceCompanyQuery();
   const data = await safeWorkspaceApi(
     `/api/workspace_registro_sweep_status?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`,
     null
@@ -20682,14 +20687,25 @@ const loadWorkspaceDetail = async (workspaceId) => {
   // Usamos `id` para evitar ambigüedad entre slugs legacy (modernia/verifika2) y nombres rebrandeados.
   state.currentWorkspaceTarget = String(detail.workspace?.id || workspaceId || "").trim() || String(workspaceId || "").trim();
   syncHoldingUrlParams();
-  const companies = detail.companies || [];
+  const companies = (() => {
+    const companiesV2 = Array.isArray(detail?.companies_v2) ? detail.companies_v2 : [];
+    const legacy = Array.isArray(detail?.companies) ? detail.companies : [];
+    if (!companiesV2.length) return legacy;
+    return companiesV2.map((row) => {
+      const legacyId = String(row?.legacy_empresa_id || "").trim();
+      return {
+        ...row,
+        workspace_company_id: row?.id,
+        id: legacyId || row?.id,
+      };
+    });
+  })();
   const tenantOperationalMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
   const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
   state.currentWorkspaceCompanyId = tenantOperationalMode ? "" : (companyMatch?.id || companies[0]?.id || "");
   state.currentWorkspaceCompanyName = tenantOperationalMode ? "" : (companyMatch?.nombre || companies[0]?.nombre || "");
-  const companyQuery = state.currentWorkspaceCompanyId
-    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
-    : "";
+  state.currentWorkspaceCompanyWsId = tenantOperationalMode ? "" : (companyMatch?.workspace_company_id || companies[0]?.workspace_company_id || "");
+  const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
   const viewHint = String(
