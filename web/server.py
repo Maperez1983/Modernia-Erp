@@ -26379,13 +26379,26 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
         if key:
             out_set.add(key)
 
+    def build_initial_surname_alias(full_name):
+        parts = [p for p in re.split(r"\s+", str(full_name or "").strip()) if p]
+        if len(parts) < 2:
+            return ""
+        first = parts[0]
+        last = parts[-1]
+        if not first or not last:
+            return ""
+        return f"{first[0]}{last}"
+
     matchers = set()
     add_matcher(matchers, persona["nombre"])
+    # Alias tipo "MPEREZ" (inicial+apellido) para casos donde en rentas guardan el responsable como usuario corto.
+    add_matcher(matchers, build_initial_surname_alias(persona["nombre"]))
     if user:
         add_matcher(matchers, user["usuario"])
         add_matcher(matchers, user["email"])
         full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
         add_matcher(matchers, full_name)
+        add_matcher(matchers, build_initial_surname_alias(full_name))
 
     # Si no podemos construir matchers, no podemos atribuir productividad automáticamente.
     if not matchers:
