@@ -29767,6 +29767,213 @@ def ensure_tables(db_path):
         apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
     ensure_s3_grants_table(conn)
+    # === Workspace companies v2 rollout (Fase 4) ===
+    # Añade `workspace_company_id` de forma retrocompatible: no rompe queries legacy por `empresa_id`,
+    # pero permite que la UI/tenant trabaje con el id interno del workspace.
+    try:
+        if not _migration_done(conn, "workspace_company_id_rollout_v1"):
+            try:
+                ensure_workspace_core_tables(conn)
+            except Exception:
+                pass
+
+            # Tablas donde ya existe workspace_id (mapeo directo y barato).
+            tables_workspace_scoped = [
+                "workspace_facturacion",
+                "workspace_facturacion_series",
+                "workspace_facturacion_remesas",
+                "workspace_facturacion_cobros",
+                "workspace_documentos_inbox",
+                "workspace_registro_personal",
+                "workspace_registro_horario",
+                "workspace_presupuestos",
+                "workspace_fincas_comunidades",
+                "workspace_fincas_proveedores",
+            ]
+            # Tablas legacy (sin workspace_id hoy). Añadimos columna para migración progresiva.
+            tables_legacy = [
+                "clientes",
+                "clientes_empresas",
+                "movimientos",
+                "seguros",
+                "gestoria",
+                "gestoria_trabajos",
+                "gestoria_trabajo_tipos",
+                "gestoria_docs",
+                "gestoria_contabilidad",
+                "gestoria_terceros",
+                "gestoria_facturas",
+                "gestoria_asientos",
+                "gestoria_import_lotes",
+                "gestoria_import_documentos",
+                "gestoria_import_reglas",
+                "auditoria",
+                "crm_stage_events",
+                "captaciones",
+                "inmuebles",
+                "operaciones_inmobiliarias",
+                "demandas",
+                "visitas",
+                "acciones",
+                "inmueble_compradores",
+                "hipotecas",
+                "asesoramientos_financiacion",
+                "alquileres",
+                "inversores",
+                "inversure_operaciones",
+                "seguros_recibos",
+                "seguros_siniestros",
+                "seguros_eventos",
+                "seguros_reclamaciones",
+                "seguros_idd_asesoramiento",
+                "seguros_consentimientos",
+                "seguros_renovaciones",
+                "seguros_ipid_log",
+                "seguros_quality_rules",
+                "hipotecas_contabilidad_excluidas",
+            ]
+
+            def _col_exists(t, col):
+                try:
+                    return col in (table_columns(conn, t) or set())
+                except Exception:
+                    return False
+
+            for t in tables_workspace_scoped + tables_legacy:
+                try:
+                    ensure_column(conn, t, "workspace_company_id", "workspace_company_id TEXT")
+                except Exception:
+                    pass
+                # Añade workspace_id en legacy clave (sin romper): útil para aislamiento definitivo.
+                if t in {"hipotecas", "seguros", "operaciones_inmobiliarias", "inmuebles", "clientes", "acciones"}:
+                    try:
+                        ensure_column(conn, t, "workspace_id", "workspace_id TEXT")
+                    except Exception:
+                        pass
+
+            # Backfill barato: tablas con workspace_id + empresa_id -> workspace_company_id.
+            for t in tables_workspace_scoped:
+                if not (_col_exists(t, "workspace_id") and _col_exists(t, "empresa_id") and _col_exists(t, "workspace_company_id")):
+                    continue
+                try:
+                    backend = _backend_name(conn)
+                    if backend == "postgres":
+                        conn.execute(
+                            f"""
+                            UPDATE {t} AS x
+                            SET workspace_company_id = wc.id
+                            FROM workspace_companies wc
+                            WHERE x.workspace_id = wc.workspace_id
+                              AND x.empresa_id = wc.legacy_empresa_id
+                              AND (x.workspace_company_id IS NULL OR TRIM(COALESCE(x.workspace_company_id, '')) = '')
+                              AND COALESCE(TRIM(COALESCE(x.empresa_id, '')), '') <> ''
+                            """
+                        )
+                    else:
+                        conn.execute(
+                            f"""
+                            UPDATE {t}
+                            SET workspace_company_id = (
+                              SELECT wc.id
+                              FROM workspace_companies wc
+                              WHERE wc.workspace_id = {t}.workspace_id
+                                AND wc.legacy_empresa_id = {t}.empresa_id
+                              LIMIT 1
+                            )
+                            WHERE (workspace_company_id IS NULL OR TRIM(COALESCE(workspace_company_id, '')) = '')
+                              AND COALESCE(TRIM(COALESCE(empresa_id, '')), '') <> ''
+                              AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                            """
+                        )
+                except Exception:
+                    pass
+
+            # Backfill de workspace_id en legacy (solo cuando es unívoco por empresa_id).
+            # Esto evita contaminación multi-tenant: si una empresa está vinculada a varios workspaces, no rellena.
+            for t in ["hipotecas", "seguros", "operaciones_inmobiliarias", "inmuebles", "clientes", "acciones"]:
+                if not (_col_exists(t, "workspace_id") and _col_exists(t, "empresa_id")):
+                    continue
+                try:
+                    backend = _backend_name(conn)
+                    if backend == "postgres":
+                        conn.execute(
+                            f"""
+                            UPDATE {t} AS x
+                            SET workspace_id = we.workspace_id
+                            FROM (
+                              SELECT empresa_id, MIN(workspace_id) AS workspace_id
+                              FROM workspace_empresas
+                              GROUP BY empresa_id
+                              HAVING COUNT(DISTINCT workspace_id) = 1
+                            ) we
+                            WHERE x.empresa_id = we.empresa_id
+                              AND (x.workspace_id IS NULL OR TRIM(COALESCE(x.workspace_id, '')) = '')
+                            """
+                        )
+                    else:
+                        conn.execute(
+                            f"""
+                            UPDATE {t}
+                            SET workspace_id = (
+                              SELECT we.workspace_id
+                              FROM workspace_empresas we
+                              WHERE we.empresa_id = {t}.empresa_id
+                              GROUP BY we.empresa_id
+                              HAVING COUNT(DISTINCT we.workspace_id) = 1
+                              LIMIT 1
+                            )
+                            WHERE (workspace_id IS NULL OR TRIM(COALESCE(workspace_id, '')) = '')
+                              AND COALESCE(TRIM(COALESCE(empresa_id, '')), '') <> ''
+                            """
+                        )
+                except Exception:
+                    pass
+
+            # Backfill workspace_company_id en legacy donde ya pudimos inferir workspace_id.
+            for t in ["hipotecas", "seguros", "operaciones_inmobiliarias", "inmuebles", "clientes", "acciones"]:
+                if not (_col_exists(t, "workspace_id") and _col_exists(t, "empresa_id") and _col_exists(t, "workspace_company_id")):
+                    continue
+                try:
+                    backend = _backend_name(conn)
+                    if backend == "postgres":
+                        conn.execute(
+                            f"""
+                            UPDATE {t} AS x
+                            SET workspace_company_id = wc.id
+                            FROM workspace_companies wc
+                            WHERE x.workspace_id = wc.workspace_id
+                              AND x.empresa_id = wc.legacy_empresa_id
+                              AND (x.workspace_company_id IS NULL OR TRIM(COALESCE(x.workspace_company_id, '')) = '')
+                              AND COALESCE(TRIM(COALESCE(x.workspace_id, '')), '') <> ''
+                              AND COALESCE(TRIM(COALESCE(x.empresa_id, '')), '') <> ''
+                            """
+                        )
+                    else:
+                        conn.execute(
+                            f"""
+                            UPDATE {t}
+                            SET workspace_company_id = (
+                              SELECT wc.id
+                              FROM workspace_companies wc
+                              WHERE wc.workspace_id = {t}.workspace_id
+                                AND wc.legacy_empresa_id = {t}.empresa_id
+                              LIMIT 1
+                            )
+                            WHERE (workspace_company_id IS NULL OR TRIM(COALESCE(workspace_company_id, '')) = '')
+                              AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                              AND COALESCE(TRIM(COALESCE(empresa_id, '')), '') <> ''
+                            """
+                        )
+                except Exception:
+                    pass
+
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            _migration_mark(conn, "workspace_company_id_rollout_v1")
+    except Exception:
+        pass
     # Clientes: atributo de captación/recomendación (distinto de "responsable").
     # `schema.sql` solo crea tablas; en instalaciones existentes añadimos columnas en best-effort.
     try:
@@ -45935,6 +46142,28 @@ class Handler(BaseHTTPRequestHandler):
                 if not str(payload.get("empresa_id") or "").strip():
                     conn = get_db(self.db_path)
                     self._track_conn(conn)
+                    # Compat v2: si viene workspace_id + workspace_company_id, resolvemos empresa_id legacy
+                    # antes de aplicar heurísticas por nombre/servicio.
+                    try:
+                        ws_id_payload = str(payload.get("workspace_id") or "").strip()
+                        wc_id_payload = str(payload.get("workspace_company_id") or "").strip()
+                        if ws_id_payload and wc_id_payload:
+                            session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                            eid_res, _wc, err2 = resolve_empresa_id_for_request(
+                                conn,
+                                session_tmp,
+                                workspace_id=ws_id_payload,
+                                empresa_id="",
+                                workspace_company_id=wc_id_payload,
+                                write=True,
+                            )
+                            if err2:
+                                json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                                return
+                            if eid_res:
+                                payload["empresa_id"] = eid_res
+                    except Exception:
+                        pass
                     inferred = infer_empresa_id_for_payload(conn, payload)
                     if inferred:
                         payload["empresa_id"] = inferred
