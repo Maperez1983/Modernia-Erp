@@ -48176,7 +48176,8 @@ const resolveCrmAgendaAmbitoLabel = (row = {}) => {
 };
 
 const initCrmAgendaPrefsIfNeeded = () => {
-  const DEFAULT_PRESET = "citas_7dias";
+  // Por defecto: agenda de EQUIPO (no solo la del usuario activo).
+  const DEFAULT_PRESET = "citas_7dias_equipo";
   if (!state.crmAgendaView) {
     let view = "list";
     let day = formatAgendaDate(new Date());
@@ -48194,7 +48195,8 @@ const initCrmAgendaPrefsIfNeeded = () => {
     } catch (e) {}
     try {
       const storedPreset = String(localStorage.getItem("crm.agenda.preset") || "").trim();
-      if (storedPreset) preset = storedPreset;
+      // Migración suave: si existía el preset antiguo, pásalo a equipo.
+      if (storedPreset) preset = storedPreset === "citas_7dias" ? DEFAULT_PRESET : storedPreset;
     } catch (e) {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
@@ -48236,7 +48238,7 @@ const persistCrmAgendaPrefs = () => {
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
     localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
     if (crmAgendaPreset) {
-      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias"));
+      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias_equipo"));
     }
   } catch (e) {}
 };
@@ -48493,11 +48495,8 @@ const renderCrmAgendaCalendar = (rows = []) => {
     .map((name) => candidateKeyMap.get(normalizePersonKey(name)) || "")
     .filter(Boolean);
   if (!selection.length) {
-    // Tecnocloud: por defecto, agenda centrada en el usuario activo (evita scroll horizontal).
-    const current = String(getCurrentUser() || "").trim();
-    const currentKey = normalizePersonKey(current);
-    const preferred = currentKey ? candidateKeyMap.get(currentKey) : "";
-    state.crmAgendaPeople = preferred ? [preferred] : candidates.slice(0, 1);
+    // Por defecto: mostrar EQUIPO completo.
+    state.crmAgendaPeople = candidates.slice();
     persistAgendaUiPrefs();
   } else {
     state.crmAgendaPeople = selection.slice();
