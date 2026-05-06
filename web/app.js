@@ -21176,6 +21176,20 @@ const slugify = (value) =>
 
 const setUrlParams = (params, { replace = false } = {}) => {
   const url = new URL(window.location.href);
+  // Guardarraíl tenant/workspace:
+  // Si venimos de una URL con `holding=1&mode=tenant&workspace=...` no permitimos perder esos parámetros
+  // al navegar dentro de la SPA (evita caer al "CRM general" y perder empresas del workspace).
+  try {
+    const prev = new URLSearchParams(url.search || "");
+    const prevWorkspace = String(prev.get("workspace") || "").trim();
+    const prevMode = String(prev.get("mode") || "").trim().toLowerCase();
+    const prevHolding = String(prev.get("holding") || "").trim();
+    if (prevHolding === "1" && prevMode === "tenant" && prevWorkspace) {
+      if (!params.get("workspace")) params.set("workspace", prevWorkspace);
+      if (!params.get("mode")) params.set("mode", "tenant");
+      if (!params.get("holding")) params.set("holding", "1");
+    }
+  } catch (_e) {}
   url.search = params.toString();
   if (replace) {
     history.replaceState({}, "", url.toString());
