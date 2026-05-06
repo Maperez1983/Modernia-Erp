@@ -53688,15 +53688,19 @@ const renderGestoriaDashboardDocumentos = (rows = []) => {
   gestoriaDashDocsInfo.textContent = `Mostrando ${Math.min(items.length, 30)} documentos.`;
 };
 
-const openClienteRentaFromDashboard = (clienteId) => {
+const openClienteRentaFromDashboard = (clienteId, options = {}) => {
   const id = String(clienteId || "").trim();
   if (!id) return;
+  const ejercicio = String(options?.ejercicio ?? "").trim();
+  const rentaEntryId = String(options?.entryId ?? "").trim();
   state.pendingClienteOpen = {
     id,
     clienteTab: "servicios",
     operativaTab: "gestoria",
     gestoriaModule: "renta",
   };
+  if (rentaEntryId) state.pendingClienteOpen.gestoriaRentaEntryId = rentaEntryId;
+  if (ejercicio) state.pendingClienteOpen.gestoriaRentaEjercicio = ejercicio;
   openClienteDetail(id);
 };
 
@@ -54740,7 +54744,7 @@ const loadGestoriaDashboard = () => {
       gestoriaDashGeneralProdReload.addEventListener("click", () => loadGestoriaDashboard());
     }
 
-    const renderAlertList = (target, items, emptyText, lineBuilder) => {
+    const renderAlertList = (target, items, emptyText, lineBuilder, onClick) => {
       if (!target) return;
       if (!items || !items.length) {
         target.innerHTML = `<p class="muted">${emptyText}</p>`;
@@ -54752,6 +54756,23 @@ const loadGestoriaDashboard = () => {
         const row = document.createElement("div");
         row.className = "inline-row";
         row.innerHTML = lineBuilder(item);
+        if (typeof onClick === "function") {
+          row.classList.add("clickable");
+          row.setAttribute("role", "button");
+          row.tabIndex = 0;
+          const handler = () => {
+            try {
+              onClick(item);
+            } catch (e) {}
+          };
+          row.addEventListener("click", handler);
+          row.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handler();
+            }
+          });
+        }
         list.appendChild(row);
       });
       target.innerHTML = "";
@@ -54845,6 +54866,9 @@ const loadGestoriaDashboard = () => {
         const ejercicio = row.ejercicio || "-";
         const estado = row.estado_presentacion || "Borrador";
         return `<div class="muted">${ejercicio}</div><div>${cliente}</div><div class="muted">${estado} · ${row.doc_count || 0} docs</div>`;
+      },
+      (row) => {
+        openClienteRentaFromDashboard(row?.cliente_id, { ejercicio: row?.ejercicio });
       }
     );
     renderAlertList(
@@ -63335,6 +63359,18 @@ const loadClienteGestoria = (clienteId) => {
   api(`/api/cliente_gestoria?cliente_id=${clienteId}`).then((data) => {
     const row = data.row || {};
     state.currentClienteGestoriaData = row;
+    try {
+      const pending = state.pendingClienteOpen || {};
+      const pendingId = String(pending.id || "").trim();
+      const ejercicio = String(pending.gestoriaRentaEjercicio || "").trim();
+      if (pendingId && String(clienteId) === pendingId && ejercicio && Array.isArray(row.renta_entries)) {
+        const match = row.renta_entries.find((entry) => String(entry?.ejercicio ?? "").trim() === ejercicio);
+        if (match?.id) {
+          state.currentRentaEntryId = match.id;
+        }
+        delete pending.gestoriaRentaEjercicio;
+      }
+    } catch (e) {}
     const setValue = (name, value) => {
       const el = clienteGestoriaForm.querySelector(`[name="${name}"]`);
       if (!el) return;

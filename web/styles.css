@@ -8377,6 +8377,19 @@ body.crm-context-inmo .crm-resumen-compact-note {
   flex-wrap: wrap;
 }
 
+.inline-row.clickable {
+  cursor: pointer;
+}
+
+.inline-row.clickable:hover {
+  border-color: rgba(18, 50, 71, 0.18);
+}
+
+.inline-row.clickable:focus {
+  outline: 2px solid rgba(var(--gold-rgb), 0.55);
+  outline-offset: 2px;
+}
+
 .inline-row select,
 .inline-row .inline-input {
   flex: 1 1 220px;
