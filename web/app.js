@@ -21540,6 +21540,17 @@ const resolveCrmSegurosEmpresa = () => {
 };
 
 const resolveCrmGestoriaEmpresa = () => {
+  // En modo tenant, la "fuente de verdad" es la empresa activa del workspace (o su matriz de servicio),
+  // nunca el fallback por nombre ("Fincas...") que pertenece al modo global.
+  try {
+    if (isTenantWorkspaceMode()) {
+      const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeWsCompanyId) {
+        const active = resolveEmpresaById(activeWsCompanyId);
+        if (active) return active;
+      }
+    }
+  } catch (e) {}
   const explicit = resolveEmpresaById(state.crmGestoriaEmpresaId);
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("gestoria"));
@@ -23283,6 +23294,29 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   let tab = String(targetTab || "gestoria-dash").trim() || "gestoria-dash";
   // No forzar a gestoria-crm: el dashboard funciona también para no admin (sin opciones de administración).
   const canRetryEmpresas = Boolean(opts?.retryEmpresas ?? true);
+  // Si entramos por URL tenant directa o venimos de un salto entre vistas,
+  // puede que el detalle del workspace aún no esté cargado (y entonces "no hay empresas").
+  try {
+    if (isTenantWorkspaceMode()) {
+      const params = new URLSearchParams(window.location.search || "");
+      const wsId = String(params.get("workspace") || state.currentWorkspaceId || "").trim();
+      const currentLoaded = String(state.currentWorkspaceDetail?.workspace?.id || state.currentWorkspaceDetail?.id || "").trim();
+      if (wsId && wsId !== currentLoaded) {
+        loadWorkspaceDetail(wsId)
+          .then(() => openGestoriaServiceTab(targetTab, opts))
+          .catch(() => {});
+        return;
+      }
+      // Si el workspace está cargado pero no hay empresa activa aún, fija la primera para evitar heurísticas globales.
+      const wsCompanies = state.currentWorkspaceDetail?.companies || [];
+      if (!state.currentWorkspaceCompanyId && Array.isArray(wsCompanies) && wsCompanies.length) {
+        state.currentWorkspaceCompanyId = wsCompanies[0].id;
+        try {
+          localStorage.setItem("crm.currentWorkspaceCompanyId", String(state.currentWorkspaceCompanyId || ""));
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
   // Necesario para selects (Responsable) en Gestoría (rentas, acciones, etc.).
   if (!state.usersList || !state.usersList.length) {
     loadUsuarios().catch(() => {});
@@ -23304,9 +23338,13 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
+    // En modo tenant NO intentamos caer a /api/empresas global (mezcla datos y confunde al usuario).
+    if (isTenantWorkspaceMode()) {
+      alert("No se pudo abrir Gestoría en este workspace: no hay empresa activa. Ve a Workspaces → Empresas y selecciona/activa una empresa para este workspace.");
+      return;
+    }
     if (canRetryEmpresas) {
-      // En algunos flujos (caché vieja / primer arranque / workspace tenant),
-      // `state.empresas` puede venir vacío y esto hace que parezca que los botones “no hacen nada”.
+      // En modo global, reintenta cargando empresas.
       api("/api/empresas")
         .then((empresas) => {
           if (!Array.isArray(empresas) || !empresas.length) throw new Error("No hay empresas disponibles.");
