@@ -63149,6 +63149,7 @@ const buildGestoriaRentaSearchHaystack = (row = {}) => {
     row.email,
     row.poblacion,
     row.provincia,
+    entry.ejercicio,
     entry.responsable,
     entry.referencia_hacienda,
     entry.estado_presentacion,
@@ -63165,7 +63166,31 @@ const buildGestoriaRentaSearchHaystack = (row = {}) => {
 };
 
 const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
-  const q = String(queryRaw || "").trim();
+  const raw = String(queryRaw || "").trim();
+  let q = raw;
+  // Búsqueda avanzada: permite filtrar por responsable desde el buscador.
+  // Ejemplos:
+  // - "resp:miguel"
+  // - "responsable: dgallardo"
+  // - "@miguel" (equivalente a resp:)
+  let responsableFilter = "";
+  try {
+    const m = q.match(/(?:^|\s)(?:resp(?:onsable)?\s*[:=]|responsable\s*[:=])\s*([^\s].*?)(?=\s+\w+\s*[:=]|\s*$)/i);
+    if (m && m[1]) {
+      responsableFilter = normalizeLookupText(m[1]);
+      q = (q.slice(0, m.index) + " " + q.slice((m.index || 0) + m[0].length)).trim();
+    }
+  } catch (_e) {}
+  try {
+    if (!responsableFilter) {
+      const m2 = q.match(/(?:^|\s)@([^\s]+)/);
+      if (m2 && m2[1]) {
+        responsableFilter = normalizeLookupText(m2[1]);
+        q = q.replace(m2[0], " ").trim();
+      }
+    }
+  } catch (_e) {}
+
   const normalizedQuery = normalizeLookupText(q);
   const docQuery = normalizeDocumento(q);
   const sortedAll = (Array.isArray(rows) ? rows : [])
@@ -63183,6 +63208,10 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
 
   const filtered = sortedAll.filter((row) => {
     const hay = buildGestoriaRentaSearchHaystack(row);
+    if (responsableFilter) {
+      const resp = normalizeLookupText(row?.renta_latest?.responsable || "");
+      if (!resp || !resp.includes(responsableFilter)) return false;
+    }
     if (normalizedQuery && hay.normalizedText.includes(normalizedQuery)) return true;
     if (docQuery && docQuery.length >= 5) {
       if (hay.docTokens.some((token) => token.includes(docQuery) || docQuery.includes(token))) return true;
