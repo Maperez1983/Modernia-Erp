@@ -32873,6 +32873,29 @@ def fetch_workspace_company_ids(conn, workspace_id):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
+    # Prefer v2: companies living inside the workspace.
+    try:
+        ensure_workspace_core_tables(conn)
+        rows_v2 = conn.execute(
+            """
+            SELECT legacy_empresa_id
+            FROM workspace_companies
+            WHERE workspace_id = ?
+              AND COALESCE(activo, 1) = 1
+              AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
+            ORDER BY nombre COLLATE NOCASE ASC
+            """,
+            (ws_id,),
+        ).fetchall()
+        legacy_ids = [
+            str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
+            for r in (rows_v2 or [])
+        ]
+        legacy_ids = [eid for eid in legacy_ids if eid]
+        if legacy_ids:
+            return legacy_ids
+    except Exception:
+        pass
     rows = conn.execute(
         "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
         (ws_id,),
@@ -49554,6 +49577,44 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (os.urandom(16).hex(), workspace_id, empresa_id, rol, now, now),
             )
+            # Backfill v2: ensure a workspace_company exists for this legacy company.
+            try:
+                ensure_workspace_core_tables(conn)
+                exists = conn.execute(
+                    "SELECT 1 FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ? LIMIT 1",
+                    (workspace_id, empresa_id),
+                ).fetchone()
+                if not exists:
+                    e = conn.execute(
+                        "SELECT nombre, nif, direccion, logo_url, primary_color, accent_color, COALESCE(activo, 1) AS activo FROM empresas WHERE id = ? LIMIT 1",
+                        (empresa_id,),
+                    ).fetchone()
+                    if e:
+                        now_ts = datetime.now(timezone.utc).isoformat()
+                        conn.execute(
+                            """
+                            INSERT INTO workspace_companies (
+                              id, workspace_id, legacy_empresa_id, nombre, nif, direccion,
+                              logo_url, primary_color, accent_color, activo, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                uuid.uuid4().hex,
+                                workspace_id,
+                                empresa_id,
+                                str(row_value(e, "nombre") or "").strip() or "-",
+                                str(row_value(e, "nif") or "").strip(),
+                                str(row_value(e, "direccion") or "").strip(),
+                                str(row_value(e, "logo_url") or "").strip(),
+                                str(row_value(e, "primary_color") or "").strip(),
+                                str(row_value(e, "accent_color") or "").strip(),
+                                int(row_value(e, "activo") or 1),
+                                now_ts,
+                                now_ts,
+                            ),
+                        )
+            except Exception:
+                pass
             conn.commit()
             json_response(self, {"ok": True})
             return
@@ -49571,6 +49632,20 @@ class Handler(BaseHTTPRequestHandler):
                 "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
                 (workspace_id, empresa_id),
             )
+            # Keep v2 consistent: mark workspace_company inactive (do not delete to preserve history).
+            try:
+                ensure_workspace_core_tables(conn)
+                conn.execute(
+                    """
+                    UPDATE workspace_companies
+                    SET activo = 0, updated_at = ?
+                    WHERE workspace_id = ?
+                      AND legacy_empresa_id = ?
+                    """,
+                    (datetime.now(timezone.utc).isoformat(), workspace_id, empresa_id),
+                )
+            except Exception:
+                pass
             conn.commit()
             json_response(self, {"ok": True})
             return
