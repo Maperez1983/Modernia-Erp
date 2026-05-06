@@ -26413,9 +26413,6 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
         row_dict = dict(row) if not isinstance(row, dict) else row
         captado_por_user_id = str(row_dict.get("captado_por_user_id") or "").strip()
         captado_by_me = bool(usuario_id) and bool(captado_por_user_id) and captado_por_user_id == usuario_id
-        if not captado_by_me:
-            if usuario_id and captado_por_user_id:
-                continue
         renta_payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
         entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         if ejercicio_val:

@@ -11964,7 +11964,8 @@ const renderWorkspaceRrhhHub = () => {
 		    const serviceActive = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
 		    const prodQuery = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim();
 		    const prodEstado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim();
-		    const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
+		      const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
+		      const autoEnabled = state.workspaceRrhhEconomicosProductividadAutoEnabled !== false;
 		    const dashboardPanel = renderRrhhEconomicosDashboardPanel({ personaId: pId, empresaId: eId });
 		    const productividadPanel = `
 		      <div class="workspace-rrhh-panel-card">
@@ -14610,13 +14611,13 @@ const renderWorkspaceRrhhHub = () => {
 
       let autoItems = [];
       let autoKpis = {};
-      if (state.workspaceRrhhEconomicosProductividadAutoEnabled) {
-        const data = await api(`/api/workspace_rrhh_productividad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
-        if (data?.error) throw new Error(data.error);
-        autoKpis = data?.kpis || {};
-        autoItems = Array.isArray(data?.items) ? data.items : [];
-        autoItems = autoItems.map((it) => ({ ...(it || {}), source: "auto" }));
-	      }
+	      if (autoEnabled) {
+	        const data = await api(`/api/workspace_rrhh_productividad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&empresa_id=${encodeURIComponent(empresaId)}&persona_id=${encodeURIComponent(personaId)}&service=${encodeURIComponent(serviceKey)}&ejercicio=${encodeURIComponent(ejercicio)}`);
+	        if (data?.error) throw new Error(data.error);
+	        autoKpis = data?.kpis || {};
+	        autoItems = Array.isArray(data?.items) ? data.items : [];
+	        autoItems = autoItems.map((it) => ({ ...(it || {}), source: "auto" }));
+		      }
 
 	      const items = [...manualItems, ...autoItems];
 	      const filteredItems = items.filter((it) => {
@@ -14648,15 +14649,15 @@ const renderWorkspaceRrhhHub = () => {
 	      }, { items: 0, cobradas: 0, parciales: 0, anuladas: 0, comision_total: 0, comision_cobradas: 0 });
 
       const kpiCards = (() => {
-        if (serviceKey === "renta" && state.workspaceRrhhEconomicosProductividadAutoEnabled) {
-          const k = autoKpis || {};
-          return [
-            { label: "Rentas presentadas", value: String(k.presentadas || 0) },
-            { label: "Rentas cobradas", value: String(k.cobradas || 0) },
-            { label: "Comisión (presentadas)", value: euroFormatter.format(parseMoneyValue(k.comision_presentadas || 0)) },
-            { label: "Comisión (cobradas)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
-          ];
-        }
+	        if (serviceKey === "renta" && autoEnabled) {
+	          const k = autoKpis || {};
+	          return [
+	            { label: "Rentas presentadas", value: String(k.presentadas || 0) },
+	            { label: "Rentas cobradas", value: String(k.cobradas || 0) },
+	            { label: "Comisión (presentadas)", value: euroFormatter.format(parseMoneyValue(k.comision_presentadas || 0)) },
+	            { label: "Comisión (cobradas)", value: euroFormatter.format(parseMoneyValue(k.comision_cobradas || 0)) },
+	          ];
+	        }
 	        return [
 	          { label: "Items", value: String(sums.items || 0) },
 	          { label: "Cobrados", value: String(sums.cobradas || 0) },
