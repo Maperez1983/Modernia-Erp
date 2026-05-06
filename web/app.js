@@ -4854,9 +4854,9 @@ const openActionEditor = (ev, context = null) => {
   if (actionModalEstado) actionModalEstado.value = ev.estado || "Pendiente";
   if (actionModalResponsable) {
     populateActionModalResponsables(ev.serviceId || ev.service || "");
-    if (ev.responsable) {
-      actionModalResponsable.value = ev.responsable;
-    }
+    // IMPORTANTE: si la acción no tiene responsable, no arrastres el valor anterior del <select>.
+    // (Bug: al editar una cita "sin responsable" se quedaba el responsable de la cita anterior).
+    actionModalResponsable.value = ev.responsable || "";
   }
   if (state.actionModalContext) {
     const ctx = state.actionModalContext;
