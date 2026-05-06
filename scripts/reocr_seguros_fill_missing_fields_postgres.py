@@ -84,9 +84,9 @@ def _is_good_tomador(value: str) -> bool:
         return False
     key = normalize_lookup_text(cleaned)
     # Genéricos / etiquetas
-    if any(tok in key for tok in ("EL TOMADOR DEL SEGURO", "TOMADOR DEL SEGURO", "DATOS DEL TOMADOR", "ASEGURADORA")):
+    if any(tok in key for tok in ("EL TOMADOR", "TOMADOR DEL SEGURO", "DATOS DEL TOMADOR", "ASEGURADORA")):
         return False
-    if key in ("EL MISMO", "MISMO", "EL MISMA", "MISMA"):
+    if key.startswith("EL MISMO") or key.startswith("EL MISMA") or key in ("EL MISMO", "MISMO", "EL MISMA", "MISMA"):
         return False
     # Direcciones
     if any(tok in f" {key} " for tok in (" CL ", " CALLE ", " AVDA ", " AVD ", " AVENIDA ", " DIRECCION ", " DIRECCIÓN ")):
