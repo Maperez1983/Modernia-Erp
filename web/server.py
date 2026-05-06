@@ -26004,9 +26004,12 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         prefetch_mult = 4 if include_docs else 3
         prefetch_limit = min(max(limit_val * prefetch_mult, 200), 600)
         order_by = "COALESCE(c.updated_at, c.created_at) DESC, LOWER(COALESCE(c.nombre, '')) ASC"
+    # Importante: `clientes_empresas.servicio` puede venir como etiqueta libre (p.ej. "Gestoría", "Gestoria - ...",
+    # "Administración Fincas", etc.). Usamos un filtro laxo por substring para no dejar el conteo a 0.
+    # Nota: `LOWER()` no elimina tildes; "gestoría" sigue conteniendo "gestor", así que `LIKE '%gestor%'` funciona.
     service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
+        "(LOWER(COALESCE(ce.servicio,'')) LIKE '%gestor%' "
+        " OR LOWER(COALESCE(ce.servicio,'')) LIKE '%finca%')"
     )
     service_filter_exists = (
         "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
