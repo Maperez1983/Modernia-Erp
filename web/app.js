@@ -47891,6 +47891,9 @@ const INMO_ACTION_RESULT_OPTIONS = {
 
 const openCrmAgendaEditModal = (row) => {
   if (!row || !row.id) return;
+  // Snapshot defensivo: evita que el modal se “contamine” si `row` se reutiliza o
+  // si los <select> no tienen la opción y el navegador conserva el valor previo.
+  const rowSnapshot = { ...(row || {}) };
   let modal = document.getElementById("crmAgendaEditModal");
   if (!modal) {
     modal = document.createElement("div");
@@ -48016,20 +48019,42 @@ const openCrmAgendaEditModal = (row) => {
   syncCatalog();
   if (statusEl) statusEl.textContent = "";
   if (form) {
-    form.querySelector('[name="id"]').value = row.id || "";
-    form.querySelector('[name="fecha"]').value = row.fecha || "";
-    form.querySelector('[name="hora"]').value = row.hora || "";
-    form.querySelector('[name="hora_fin"]').value = row.hora_fin || "";
-    form.querySelector('[name="asunto"]').value = row.asunto || "";
-    if (tipoSelect) tipoSelect.value = row.tipo || (tipoSelect.options[0]?.value || "");
-    if (responsableSelect) responsableSelect.value = row.responsable || "";
-    if (estadoSelect) estadoSelect.value = row.estado || "Pendiente";
-    if (form.querySelector('[name="notas"]')) form.querySelector('[name="notas"]').value = row.notas || "";
+    form.querySelector('[name="id"]').value = rowSnapshot.id || "";
+    form.querySelector('[name="fecha"]').value = rowSnapshot.fecha || "";
+    form.querySelector('[name="hora"]').value = rowSnapshot.hora || "";
+    form.querySelector('[name="hora_fin"]').value = rowSnapshot.hora_fin || "";
+    form.querySelector('[name="asunto"]').value = rowSnapshot.asunto || "";
+    // Si el value no existe entre las opciones, fuerza a limpiar para no heredar el anterior.
+    if (tipoSelect) {
+      const nextTipo = rowSnapshot.tipo || "";
+      tipoSelect.value = nextTipo;
+      if (nextTipo && tipoSelect.value !== nextTipo) tipoSelect.value = "";
+      if (!tipoSelect.value) tipoSelect.value = tipoSelect.options[0]?.value || "";
+    }
+    if (responsableSelect) {
+      const nextResp = rowSnapshot.responsable || "";
+      responsableSelect.value = nextResp;
+      if (nextResp && responsableSelect.value !== nextResp) responsableSelect.value = "";
+    }
+    if (estadoSelect) {
+      const nextEstado = rowSnapshot.estado || "Pendiente";
+      estadoSelect.value = nextEstado;
+      if (nextEstado && estadoSelect.value !== nextEstado) estadoSelect.value = "Pendiente";
+    }
+    if (form.querySelector('[name="notas"]')) form.querySelector('[name="notas"]').value = rowSnapshot.notas || "";
   }
 
   syncResultOptions();
-  if (resultadoSelect) resultadoSelect.value = row.resultado_cierre || "";
-  if (nextSelect) nextSelect.value = row.estado_siguiente || "";
+  if (resultadoSelect) {
+    const nextRes = rowSnapshot.resultado_cierre || "";
+    resultadoSelect.value = nextRes;
+    if (nextRes && resultadoSelect.value !== nextRes) resultadoSelect.value = "";
+  }
+  if (nextSelect) {
+    const nextSt = rowSnapshot.estado_siguiente || "";
+    nextSelect.value = nextSt;
+    if (nextSt && nextSelect.value !== nextSt) nextSelect.value = "";
+  }
 
   const cleanup = () => {
     modal.classList.add("hidden");
