@@ -63712,6 +63712,28 @@ class Handler(BaseHTTPRequestHandler):
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             if "response_payload" not in locals():
                 response_payload = {"ok": True, "id": action_row["id"] if action_row else None}
+            # Adjuntamos la acción creada normalizada para UI (evita recargar agenda completa).
+            try:
+                created = conn.execute(
+                    """
+                    SELECT
+                      a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
+                      COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                      a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
+                      a.documento_tipo, a.importe_propuesta,
+                      a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
+                      a.related_id, a.related_tipo
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.id = ?
+                    LIMIT 1
+                    """,
+                    (action_id,),
+                ).fetchone()
+                if created:
+                    response_payload["accion"] = dict(created)
+            except Exception:
+                pass
             if inmueble_id:
                 response_payload["inmueble_id"] = inmueble_id
                 try:
@@ -64062,6 +64084,28 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     )
             response_payload = {"ok": True}
+            # Adjuntamos la acción actualizada normalizada para UI (evita “guardo y no se ve”).
+            try:
+                updated = conn.execute(
+                    """
+                    SELECT
+                      a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
+                      COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                      a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
+                      a.documento_tipo, a.importe_propuesta,
+                      a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
+                      a.related_id, a.related_tipo
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.id = ?
+                    LIMIT 1
+                    """,
+                    (record_id,),
+                ).fetchone()
+                if updated:
+                    response_payload["accion"] = dict(updated)
+            except Exception:
+                pass
             if "financiacion_oportunidad_id" in updates:
                 response_payload["financiacion_oportunidad_id"] = updates["financiacion_oportunidad_id"]
             if "financiacion_asesoramiento_id" in updates:

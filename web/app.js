@@ -48082,7 +48082,13 @@ const openCrmAgendaEditModal = (row) => {
           return;
         }
         cleanup();
-        loadCrmAgenda();
+        if (data?.accion) {
+          upsertCrmAgendaActionRow(data.accion);
+          // Revalidación suave para asegurar rango correcto si la cita cambió de fecha.
+          scheduleSave("crm-agenda-revalidate", () => loadCrmAgenda(), 350);
+        } else {
+          loadCrmAgenda();
+        }
         renderCrmResumenDashboard();
         renderCrmResumenYtdBoard({ force: true }).catch(() => {});
         try {
@@ -49111,6 +49117,173 @@ const renderCrmAgendaWorkspace = () => {
   }
 };
 
+const applyCrmAgendaFilters = (rows = []) => {
+  const allRows = Array.isArray(rows) ? rows : [];
+  state.crmAgendaRowsAll = allRows;
+  const qRaw = String(crmAgendaSearch?.value || "").trim();
+  const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
+  const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
+  const presetRaw = normalizeSimple(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo") || "citas_7dias_equipo";
+  const presetEquipo = presetRaw.endsWith("_equipo");
+  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
+  state.crmAgendaPreset = presetRaw;
+  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
+  state.crmAgendaAmbito = ambitoFilter;
+  persistCrmAgendaPrefs();
+
+  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
+  const buildCurrentUserKeys = () => {
+    const keys = new Set();
+    const meRaw = getCurrentUser();
+    const meKey = normalizePersonKey(meRaw);
+    if (meKey) keys.add(meKey);
+    const users = Array.isArray(state.usersList) ? state.usersList : [];
+    const match = users.find((u) => normalizePersonKey(u?.usuario || "") === meKey) || null;
+    if (match) {
+      const full = `${match.nombre || ""} ${match.apellido || ""}`.trim();
+      const fullKey = normalizePersonKey(full);
+      if (fullKey) keys.add(fullKey);
+      const emailKey = normalizePersonKey(match.email || "");
+      if (emailKey) keys.add(emailKey);
+      const nombreKey = normalizePersonKey(match.nombre || "");
+      if (nombreKey) keys.add(nombreKey);
+    }
+    return keys;
+  };
+  const currentUserKeys = buildCurrentUserKeys();
+  const isMine = (row) => {
+    if (!currentUserKeys.size) return true;
+    const respKey = normalizePersonKey(row?.responsable || "");
+    return !respKey || currentUserKeys.has(respKey);
+  };
+  const normalizeTipoKey = (row) => {
+    const tipoNorm = normalizeSimple(row?.tipo || row?.asunto || "");
+    if (!tipoNorm) {
+      const hasHora = Boolean(String(row?.hora || row?.hora_fin || "").trim());
+      return hasHora ? "cita" : "actividad";
+    }
+    if (tipoNorm.includes("cita")) return "cita";
+    if (tipoNorm.includes("actividad")) return "actividad";
+    return "actividad";
+  };
+  const parseRowTs = (row) => {
+    const fechaKey = String(row?.fecha || "").trim();
+    if (!fechaKey) return 0;
+    const base = parseAgendaDate(fechaKey);
+    if (!base) return 0;
+    const timeRaw = String(row?.hora_fin || row?.hora || "").trim();
+    const parts = timeRaw.split(":");
+    const h = Number(parts[0]);
+    const m = Number(parts[1] || 0);
+    if (Number.isFinite(h) && Number.isFinite(m)) {
+      base.setHours(h);
+      base.setMinutes(m);
+    }
+    return base.getTime();
+  };
+  const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
+  const withinDays = (dateKey, days) => {
+    const d = parseAgendaDate(dateKey);
+    if (!d) return false;
+    const start = parseAgendaDate(anchorDayKey);
+    if (!start) return false;
+    const end = new Date(start);
+    end.setDate(end.getDate() + Number(days || 0));
+    return d >= start && d <= end;
+  };
+  const isCaducada = (row) => {
+    const estado = normalizeSimple(row?.estado || "");
+    if (estado.includes("complet") || estado.includes("realiz") || estado.includes("cancel")) return false;
+    const ts = parseRowTs(row);
+    return ts > 0 && ts < Date.now();
+  };
+  const matchPreset = (row) => {
+    if (!presetEquipo && !isMine(row)) return false;
+    const tipoKey = normalizeTipoKey(row);
+    const fechaKey = String(row?.fecha || "").trim();
+    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
+    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === anchorDayKey;
+    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
+    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
+    if (preset === "citas") return tipoKey === "cita";
+    if (preset === "actividades_caducadas") return tipoKey !== "cita" && (estadoFilter ? true : isCaducada(row));
+    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
+    return true;
+  };
+  const matchPresetCalendar = (row) => {
+    const tipoKey = normalizeTipoKey(row);
+    if (preset.startsWith("citas")) return tipoKey === "cita";
+    if (preset.startsWith("actividades")) return tipoKey !== "cita";
+    return true;
+  };
+  const matchAmbito = (row) => {
+    if (!ambitoFilter) return true;
+    const key = resolveCrmAgendaAmbitoKey(row);
+    if (ambitoFilter === "otros") return key === "otros";
+    return key === ambitoFilter;
+  };
+  const matchQuery = createAdvancedSearchMatcher(qRaw, {
+    text: (row) =>
+      [
+        row?.asunto,
+        row?.cliente,
+        row?.tipo,
+        row?.responsable,
+        row?.modalidad_contacto,
+        row?.estado,
+        row?.fecha,
+        row?.hora,
+        row?.related_tipo,
+        row?.related_id,
+        row?.inmueble_id,
+      ]
+        .map((v) => String(v || ""))
+        .join(" "),
+    fields: {
+      asunto: (row) => row?.asunto,
+      cliente: (row) => row?.cliente,
+      tipo: (row) => row?.tipo || row?.asunto,
+      responsable: (row) => row?.responsable,
+      estado: { get: (row) => row?.estado, match: "equals" },
+      fecha: (row) => row?.fecha,
+      ambito: {
+        test: (row, valueNorm) => {
+          const key = normalizeCrmAgendaAmbito(valueNorm || "");
+          if (!key) return true;
+          return resolveCrmAgendaAmbitoKey(row) === key;
+        },
+      },
+      relacion: (row) => row?.related_id || row?.inmueble_id || "",
+    },
+  });
+  const matchCommon = (row) => {
+    if (!matchAmbito(row)) return false;
+    if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
+    if (!matchQuery(row)) return false;
+    if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+    return true;
+  };
+
+  state.crmAgendaRowsFiltered = allRows.filter((row) => matchCommon(row) && matchPreset(row));
+  state.crmAgendaRowsCalendarFiltered = allRows.filter((row) => matchCommon(row) && matchPresetCalendar(row));
+};
+
+const upsertCrmAgendaActionRow = (accion) => {
+  if (!accion || !accion.id) return;
+  const next = { ...(accion || {}) };
+  const rows = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll.slice() : [];
+  const id = String(next.id || "").trim();
+  if (!id) return;
+  const idx = rows.findIndex((r) => String(r?.id || "").trim() === id);
+  if (idx >= 0) {
+    rows[idx] = { ...(rows[idx] || {}), ...next };
+  } else {
+    rows.push(next);
+  }
+  applyCrmAgendaFilters(rows);
+  renderCrmAgendaWorkspace();
+};
+
 const loadCrmAgenda = () => {
   if (!crmAgendaTable && !crmAgendaCalendar) {
     return;
@@ -49194,154 +49367,8 @@ const loadCrmAgenda = () => {
   if (rangeEnd) params.set("end", fmt(rangeEnd));
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data.rows) ? data.rows : [];
-    state.crmAgendaRowsAll = rows;
     renderCrmHomeAgendaPreview();
-		  const qRaw = String(crmAgendaSearch?.value || "").trim();
-		  const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
-		  const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-			  const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
-			  const presetEquipo = presetRaw.endsWith("_equipo");
-			  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
-			  state.crmAgendaPreset = presetRaw;
-			  const ambitoFilter = normalizeCrmAgendaAmbito(crmAgendaAmbitoFilter?.value || state.crmAgendaAmbito || "");
-			  state.crmAgendaAmbito = ambitoFilter;
-			  persistCrmAgendaPrefs();
-	  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
-	  const buildCurrentUserKeys = () => {
-	    const keys = new Set();
-	    const meRaw = getCurrentUser();
-	    const meKey = normalizePersonKey(meRaw);
-	    if (meKey) keys.add(meKey);
-	    const users = Array.isArray(state.usersList) ? state.usersList : [];
-	    const match = users.find((u) => normalizePersonKey(u?.usuario || "") === meKey) || null;
-	    if (match) {
-	      const full = `${match.nombre || ""} ${match.apellido || ""}`.trim();
-	      const fullKey = normalizePersonKey(full);
-	      if (fullKey) keys.add(fullKey);
-	      const emailKey = normalizePersonKey(match.email || "");
-	      if (emailKey) keys.add(emailKey);
-	      const nombreKey = normalizePersonKey(match.nombre || "");
-	      if (nombreKey) keys.add(nombreKey);
-	    }
-	    return keys;
-	  };
-	  const currentUserKeys = buildCurrentUserKeys();
-	  const isMine = (row) => {
-	    if (!currentUserKeys.size) return true;
-	    const respKey = normalizePersonKey(row?.responsable || "");
-	    return !respKey || currentUserKeys.has(respKey);
-	  };
-	  const normalizeTipoKey = (row) => {
-	    const tipoNorm = normalizeSimple(row?.tipo || row?.asunto || "");
-	    if (!tipoNorm) {
-	      const hasHora = Boolean(String(row?.hora || row?.hora_fin || "").trim());
-	      return hasHora ? "cita" : "actividad";
-	    }
-	    if (tipoNorm.includes("cita")) return "cita";
-	    if (tipoNorm.includes("actividad")) return "actividad";
-	    return "actividad";
-	  };
-	  const parseRowTs = (row) => {
-	    const fechaKey = String(row?.fecha || "").trim();
-	    if (!fechaKey) return 0;
-	    const base = parseAgendaDate(fechaKey);
-	    if (!base) return 0;
-	    const timeRaw = String(row?.hora_fin || row?.hora || "").trim();
-	    const parts = timeRaw.split(":");
-	    const h = Number(parts[0]);
-	    const m = Number(parts[1] || 0);
-	    if (Number.isFinite(h) && Number.isFinite(m)) {
-	      base.setHours(h);
-	      base.setMinutes(m);
-	    }
-	    return base.getTime();
-	  };
-		  // anchorDayKey ya calculado arriba para el rango; lo reutilizamos para filtros.
-		  const withinDays = (dateKey, days) => {
-		    const d = parseAgendaDate(dateKey);
-		    if (!d) return false;
-		    const start = parseAgendaDate(anchorDayKey);
-		    if (!start) return false;
-		    const end = new Date(start);
-		    end.setDate(end.getDate() + Number(days || 0));
-		    return d >= start && d <= end;
-		  };
-	  const isCaducada = (row) => {
-	    const estado = normalizeSimple(row?.estado || "");
-	    if (estado.includes("complet") || estado.includes("realiz") || estado.includes("cancel")) return false;
-	    const ts = parseRowTs(row);
-	    return ts > 0 && ts < Date.now();
-	  };
-				  const matchPreset = (row) => {
-				    if (!presetEquipo && !isMine(row)) return false;
-				    const tipoKey = normalizeTipoKey(row);
-				    const fechaKey = String(row?.fecha || "").trim();
-				    if (preset === "citas_caducadas") return tipoKey === "cita" && isCaducada(row);
-				    if (preset === "citas_hoy") return tipoKey === "cita" && fechaKey === anchorDayKey;
-				    if (preset === "citas_7dias") return tipoKey === "cita" && withinDays(fechaKey, 7);
-				    if (preset === "citas_7dias_caducadas") return tipoKey === "cita" && (isCaducada(row) || withinDays(fechaKey, 7));
-				    if (preset === "citas") return tipoKey === "cita";
-				    if (preset === "actividades_caducadas") return tipoKey !== "cita" && (estadoFilter ? true : isCaducada(row));
-				    if (preset === "actividades_hoy") return tipoKey !== "cita" && fechaKey === anchorDayKey;
-				    return true;
-				  };
-				  const matchPresetCalendar = (row) => {
-				    const tipoKey = normalizeTipoKey(row);
-				    // En vista calendario (día/semana/mes) el rango lo marca el propio calendario,
-				    // así que NO limitamos por “7 días”. El preset solo decide el tipo.
-				    if (preset.startsWith("citas")) return tipoKey === "cita";
-				    if (preset.startsWith("actividades")) return tipoKey !== "cita";
-				    return true;
-				  };
-		  const matchAmbito = (row) => {
-		    if (!ambitoFilter) return true;
-		    const key = resolveCrmAgendaAmbitoKey(row);
-		    if (ambitoFilter === "otros") return key === "otros";
-		    return key === ambitoFilter;
-		  };
-	    const matchQuery = createAdvancedSearchMatcher(qRaw, {
-	      text: (row) =>
-	        [
-	          row?.asunto,
-	          row?.cliente,
-	          row?.tipo,
-	          row?.responsable,
-	          row?.modalidad_contacto,
-	          row?.estado,
-	          row?.fecha,
-	          row?.hora,
-	          row?.related_tipo,
-	          row?.related_id,
-	          row?.inmueble_id,
-	        ]
-	          .map((v) => String(v || ""))
-	          .join(" "),
-	      fields: {
-	        asunto: (row) => row?.asunto,
-	        cliente: (row) => row?.cliente,
-	        tipo: (row) => row?.tipo || row?.asunto,
-	        responsable: (row) => row?.responsable,
-	        estado: { get: (row) => row?.estado, match: "equals" },
-	        fecha: (row) => row?.fecha,
-	        ambito: {
-	          test: (row, valueNorm) => {
-	            const key = normalizeCrmAgendaAmbito(valueNorm || "");
-	            if (!key) return true;
-	            return resolveCrmAgendaAmbitoKey(row) === key;
-	          },
-	        },
-	        relacion: (row) => row?.related_id || row?.inmueble_id || "",
-	      },
-	    });
-	    const matchCommon = (row) => {
-	      if (!matchAmbito(row)) return false;
-	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
-	      if (!matchQuery(row)) return false;
-	      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
-	      return true;
-	    };
-	    state.crmAgendaRowsFiltered = rows.filter((row) => matchCommon(row) && matchPreset(row));
-	    state.crmAgendaRowsCalendarFiltered = rows.filter((row) => matchCommon(row) && matchPresetCalendar(row));
+    applyCrmAgendaFilters(rows);
     renderCrmAgendaWorkspace();
 
     // Info diagnóstica: si hay truncado o rango activo, muéstralo.
@@ -68955,7 +68982,12 @@ if (crmAgendaForm) {
         if (data.error) return;
         crmAgendaForm.reset();
         ensureCrmAgendaSelectors().catch(() => {});
-        loadCrmAgenda();
+        if (data?.accion) {
+          upsertCrmAgendaActionRow(data.accion);
+          scheduleSave("crm-agenda-revalidate", () => loadCrmAgenda(), 350);
+        } else {
+          loadCrmAgenda();
+        }
       })
       .catch(() => {
         if (crmAgendaStatus) crmAgendaStatus.textContent = "Error al guardar.";
