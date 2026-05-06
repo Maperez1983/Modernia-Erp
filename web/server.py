@@ -3981,6 +3981,11 @@ def ensure_workspace_core_tables(conn):
         )
         """
     )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_companies_ws ON workspace_companies (workspace_id, activo, nombre)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_companies_legacy ON workspace_companies (legacy_empresa_id)")
+    except Exception:
+        pass
     ensure_column(conn, "workspace_companies", "legacy_empresa_id", "legacy_empresa_id TEXT")
     ensure_column(conn, "workspace_companies", "nif", "nif TEXT")
     ensure_column(conn, "workspace_companies", "direccion", "direccion TEXT")
@@ -49566,6 +49571,183 @@ class Handler(BaseHTTPRequestHandler):
                 "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
                 (workspace_id, empresa_id),
             )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_company_create":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            nif = str(payload.get("nif") or "").strip()
+            direccion = str(payload.get("direccion") or "").strip()
+            logo_url = str(payload.get("logo_url") or "").strip()
+            primary_color = str(payload.get("primary_color") or "").strip()
+            accent_color = str(payload.get("accent_color") or "").strip()
+            if not workspace_id or not nombre:
+                json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            try:
+                ensure_workspace_core_tables(conn)
+            except Exception:
+                pass
+            now_ts = datetime.now(timezone.utc).isoformat()
+            company_id = uuid.uuid4().hex
+            # Compat: crea/reutiliza empresa legacy global y la vincula al workspace.
+            legacy_empresa_id = ""
+            try:
+                existing = conn.execute(
+                    "SELECT id FROM empresas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?)) LIMIT 1",
+                    (nombre,),
+                ).fetchone()
+                if existing:
+                    legacy_empresa_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip()
+            except Exception:
+                legacy_empresa_id = ""
+            if not legacy_empresa_id:
+                legacy_empresa_id = uuid.uuid4().hex
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO empresas (id, nombre, activo, logo_url, nif, direccion, created_at, updated_at)
+                        VALUES (?, ?, 1, ?, ?, ?, datetime(?), datetime(?))
+                        """,
+                        (legacy_empresa_id, nombre, logo_url, nif, direccion, now_ts, now_ts),
+                    )
+                except Exception:
+                    # Si falla por unique en nombre (race), reintenta recuperando.
+                    try:
+                        row2 = conn.execute(
+                            "SELECT id FROM empresas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?)) LIMIT 1",
+                            (nombre,),
+                        ).fetchone()
+                        legacy_empresa_id = str(row_value(row2, "id") or row_value(row2, 0) or "").strip() if row2 else ""
+                    except Exception:
+                        legacy_empresa_id = ""
+            if legacy_empresa_id:
+                try:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at)
+                        VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+                        """,
+                        (uuid.uuid4().hex, workspace_id, legacy_empresa_id, now_ts, now_ts),
+                    )
+                except Exception:
+                    pass
+            conn.execute(
+                """
+                INSERT INTO workspace_companies (
+                  id, workspace_id, legacy_empresa_id, nombre, nif, direccion,
+                  logo_url, primary_color, accent_color, activo, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    company_id,
+                    workspace_id,
+                    legacy_empresa_id or None,
+                    nombre,
+                    nif,
+                    direccion,
+                    logo_url,
+                    primary_color,
+                    accent_color,
+                    now_ts,
+                    now_ts,
+                ),
+            )
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "company": {
+                        "id": company_id,
+                        "workspace_id": workspace_id,
+                        "legacy_empresa_id": legacy_empresa_id,
+                        "nombre": nombre,
+                        "nif": nif,
+                        "direccion": direccion,
+                    },
+                },
+            )
+            return
+        elif parsed.path == "/api/workspace_company_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            company_id = str(payload.get("id") or payload.get("company_id") or "").strip()
+            if not workspace_id or not company_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            try:
+                ensure_workspace_core_tables(conn)
+            except Exception:
+                pass
+            row = conn.execute(
+                "SELECT id, legacy_empresa_id FROM workspace_companies WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (company_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Empresa no encontrada"}, status=404)
+                return
+            legacy_empresa_id = str(row_value(row, "legacy_empresa_id") or "").strip()
+            fields = {}
+            for key in ["nombre", "nif", "direccion", "logo_url", "primary_color", "accent_color", "activo"]:
+                if key in payload:
+                    fields[key] = payload.get(key)
+            if not fields:
+                json_response(self, {"ok": True, "updated": False})
+                return
+            # Normaliza tipos
+            if "activo" in fields:
+                try:
+                    fields["activo"] = 1 if int(fields["activo"] or 0) else 0
+                except Exception:
+                    fields["activo"] = 1
+            set_parts = []
+            values = []
+            for k, v in fields.items():
+                set_parts.append(f"{k} = ?")
+                values.append(v if v is not None else "")
+            set_parts.append("updated_at = ?")
+            values.append(datetime.now(timezone.utc).isoformat())
+            values += [company_id, workspace_id]
+            conn.execute(
+                f"UPDATE workspace_companies SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?",
+                values,
+            )
+            # Compat best-effort: si existe empresa legacy, sincroniza campos básicos para no romper módulos antiguos.
+            if legacy_empresa_id:
+                try:
+                    legacy_updates = {}
+                    for k in ["nombre", "nif", "direccion", "logo_url", "activo"]:
+                        if k in fields:
+                            legacy_updates[k] = fields.get(k)
+                    if legacy_updates:
+                        parts = []
+                        vals = []
+                        for k, v in legacy_updates.items():
+                            parts.append(f"{k} = ?")
+                            vals.append(v if v is not None else "")
+                        parts.append("updated_at = datetime(?)")
+                        vals.append(datetime.now(timezone.utc).isoformat())
+                        vals.append(legacy_empresa_id)
+                        conn.execute(f"UPDATE empresas SET {', '.join(parts)} WHERE id = ?", vals)
+                except Exception:
+                    pass
             conn.commit()
             json_response(self, {"ok": True})
             return

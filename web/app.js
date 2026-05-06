@@ -6389,7 +6389,22 @@ const updateWorkspaceEntryChrome = () => {
 
 const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const { rerenderForms = true, reloadScopedPanels = true } = options;
-  const companies = state.currentWorkspaceDetail?.companies || [];
+  const raw = state.currentWorkspaceDetail || {};
+  const companiesV2 = Array.isArray(raw?.companies_v2) ? raw.companies_v2 : [];
+  const legacy = Array.isArray(raw?.companies) ? raw.companies : [];
+  const companies =
+    companiesV2.length
+      ? companiesV2.map((row) => {
+          const legacyId = String(row?.legacy_empresa_id || "").trim();
+          return {
+            ...row,
+            // `workspace_company_id` sirve para editar/archivar dentro del workspace (nuevo modelo).
+            workspace_company_id: row?.id,
+            // Compat: en el resto del sistema seguimos usando `empresa_id` legacy.
+            id: legacyId || row?.id,
+          };
+        })
+      : legacy;
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
     state.currentWorkspaceCompanyId = "";
     state.currentWorkspaceCompanyName = "";
@@ -9639,7 +9654,7 @@ const renderWorkspaceCompanies = (rows = []) => {
         <div class="section-head">
           <div>
             <h3>Crear empresa</h3>
-            <p class="muted">Crea una empresa nueva en el sistema y la vincula automáticamente a este workspace.</p>
+            <p class="muted">Crea una empresa dentro de este workspace (modelo tenant). No depende del selector global.</p>
           </div>
         </div>
         <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -9655,15 +9670,7 @@ const renderWorkspaceCompanies = (rows = []) => {
             Dirección (opcional)
             <input data-workspace-company-create-address placeholder="Calle..., 28000 Madrid" />
           </label>
-          <label style="min-width:170px">
-            Rol
-            <select data-workspace-company-create-role>
-              <option value="operativa" selected>Operativa</option>
-              <option value="holding">Holding</option>
-              <option value="marca">Marca</option>
-            </select>
-          </label>
-          <button type="button" class="secondary" data-workspace-company-create-btn>Crear y vincular</button>
+          <button type="button" class="secondary" data-workspace-company-create-btn>Crear empresa</button>
           <span class="muted" data-workspace-company-create-status></span>
         </div>
       </div>
@@ -9761,31 +9768,22 @@ const renderWorkspaceCompanies = (rows = []) => {
         const nameInput = workspaceCompanies.querySelector("[data-workspace-company-create-name]");
         const nifInput = workspaceCompanies.querySelector("[data-workspace-company-create-nif]");
         const addressInput = workspaceCompanies.querySelector("[data-workspace-company-create-address]");
-        const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-create-role]");
         const nombre = String(nameInput?.value || "").trim();
         const nif = String(nifInput?.value || "").trim();
         const direccion = String(addressInput?.value || "").trim();
-        const rol = String(roleSelect?.value || "operativa").trim() || "operativa";
         if (!nombre) {
           if (createStatus) createStatus.textContent = "Indica un nombre.";
           return;
         }
         try {
           if (createStatus) createStatus.textContent = "Creando...";
-          const created = await postJsonWithDbRetry("/api/empresa_create", {
-            nombre,
-            nif: nif || undefined,
-            direccion: direccion || undefined,
-          });
-          const empresaId = String(created?.id || "").trim();
-          if (!empresaId) throw new Error("No se pudo crear la empresa.");
-          if (createStatus) createStatus.textContent = "Vinculando...";
-          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+          await postJsonWithDbRetry("/api/workspace_company_create", {
             workspace_id: state.currentWorkspaceId,
-            empresa_id: empresaId,
-            rol,
+            nombre,
+            nif: nif || "",
+            direccion: direccion || "",
           });
-          if (createStatus) createStatus.textContent = "Empresa creada y vinculada.";
+          if (createStatus) createStatus.textContent = "Empresa creada en el workspace.";
           await loadWorkspaceDetail(state.currentWorkspaceId);
         } catch (error) {
           if (createStatus) createStatus.textContent = error?.message || "No se pudo crear/vincular.";
@@ -9954,7 +9952,8 @@ const renderWorkspaceCompanies = (rows = []) => {
                 <button
                   type="button"
                   class="secondary ghost"
-                  data-workspace-company-archive="${row.id || ""}"
+                  data-workspace-company-archive="${row.workspace_company_id || ""}"
+                  data-workspace-company-archive-legacy="${row.id || ""}"
                   ${canEdit ? "" : "disabled"}
                 >Archivar</button>
               </div>
@@ -10067,31 +10066,22 @@ const renderWorkspaceCompanies = (rows = []) => {
         const nameInput = workspaceCompanies.querySelector("[data-workspace-company-create-name]");
         const nifInput = workspaceCompanies.querySelector("[data-workspace-company-create-nif]");
         const addressInput = workspaceCompanies.querySelector("[data-workspace-company-create-address]");
-        const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-create-role]");
         const nombre = String(nameInput?.value || "").trim();
         const nif = String(nifInput?.value || "").trim();
         const direccion = String(addressInput?.value || "").trim();
-        const rol = String(roleSelect?.value || "operativa").trim() || "operativa";
         if (!nombre) {
           if (createStatus) createStatus.textContent = "Indica un nombre.";
           return;
         }
         try {
           if (createStatus) createStatus.textContent = "Creando...";
-          const created = await postJsonWithDbRetry("/api/empresa_create", {
-            nombre,
-            nif: nif || undefined,
-            direccion: direccion || undefined,
-          });
-          const empresaId = String(created?.id || "").trim();
-          if (!empresaId) throw new Error("No se pudo crear la empresa.");
-          if (createStatus) createStatus.textContent = "Vinculando...";
-          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+          await postJsonWithDbRetry("/api/workspace_company_create", {
             workspace_id: state.currentWorkspaceId,
-            empresa_id: empresaId,
-            rol,
+            nombre,
+            nif: nif || "",
+            direccion: direccion || "",
           });
-          if (createStatus) createStatus.textContent = "Empresa creada y vinculada.";
+          if (createStatus) createStatus.textContent = "Empresa creada en el workspace.";
           await loadWorkspaceDetail(state.currentWorkspaceId);
         } catch (error) {
           if (createStatus) createStatus.textContent = error?.message || "No se pudo crear/vincular.";
@@ -10233,15 +10223,26 @@ const renderWorkspaceCompanies = (rows = []) => {
   workspaceCompanies.querySelectorAll("[data-workspace-company-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!canEdit) return;
-      const companyId = String(button.dataset.workspaceCompanyArchive || "").trim();
-      if (!companyId) return;
+      const wsCompanyId = String(button.dataset.workspaceCompanyArchive || "").trim();
+      const legacyCompanyId = String(button.dataset.workspaceCompanyArchiveLegacy || "").trim();
+      if (!wsCompanyId && !legacyCompanyId) return;
       if (!window.confirm("¿Archivar esta empresa? No borra datos históricos, pero deja de estar activa.")) return;
       try {
-        await postJsonWithDbRetry("/api/empresa_delete", {
-          workspace_id: state.currentWorkspaceId,
-          id: companyId,
-          hard: false,
-        });
+        if (wsCompanyId) {
+          await postJsonWithDbRetry("/api/workspace_company_update", {
+            workspace_id: state.currentWorkspaceId,
+            id: wsCompanyId,
+            activo: 0,
+          });
+        }
+        // Best-effort: mantén compat con módulos legacy archivando también la empresa global.
+        if (legacyCompanyId) {
+          await postJsonWithDbRetry("/api/empresa_delete", {
+            workspace_id: state.currentWorkspaceId,
+            id: legacyCompanyId,
+            hard: false,
+          });
+        }
         await loadWorkspaceDetail(state.currentWorkspaceId);
       } catch (error) {
         alert(error?.message || "No se pudo archivar.");
