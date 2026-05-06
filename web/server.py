@@ -26406,6 +26406,8 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
     items = []
     presentadas = 0
     cobradas = 0
+    facturado_total = 0.0
+    comision_total = 0.0
     comision_presentadas = 0.0
     comision_cobradas = 0.0
 
@@ -26437,6 +26439,8 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
             denom = 1.0 + (iva_pct_val / 100.0 if iva_pct_val else 0.0)
             base_imponible = precio / denom if denom else precio
             comision = base_imponible * 0.30
+            facturado_total += base_imponible
+            comision_total += comision
             if is_presentada:
                 presentadas += 1
                 comision_presentadas += comision
@@ -26481,6 +26485,8 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
         "kpis": {
             "presentadas": int(presentadas),
             "cobradas": int(cobradas),
+            "facturado_total": round(facturado_total, 2),
+            "comision_total": round(comision_total, 2),
             "comision_presentadas": round(comision_presentadas, 2),
             "comision_cobradas": round(comision_cobradas, 2),
         },
