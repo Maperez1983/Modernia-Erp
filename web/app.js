@@ -5807,56 +5807,59 @@ const renderCompanyCards = () => {
 		      coreCards.appendChild(card);
 		    };
 
-	    const appendServiceCard = (serviceKey) => {
-	      const service = normalizeSimple(serviceKey);
-	      const card = document.createElement("div");
-	      card.className = "company-card";
-	      if (service === "inmobiliaria") {
-	        card.dataset.action = "crm-inmo";
-        card.innerHTML = `
-          <h3>CRM Inmobiliario</h3>
-          <div class="company-meta">Noticias, inmuebles y operaciones.</div>
-          <div class="company-meta">Servicio inmobiliario.</div>
-          <a class="card-link" href="/?crm=inmo" data-action="crm-inmo">Entrar</a>
-        `;
-	      } else if (service === "gestoria") {
-	        card.dataset.action = "crm-gestoria";
+		    const appendServiceCard = (serviceKey) => {
+		      const service = normalizeSimple(serviceKey);
+		      const card = document.createElement("div");
+		      card.className = "company-card";
+		      const tenantPrefix = workspaceScoped
+		        ? `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}`
+		        : "";
+		      if (service === "inmobiliaria") {
+		        card.dataset.action = "crm-inmo";
 	        card.innerHTML = `
-	          <h3>CRM Gestoría</h3>
-	          <div class="company-meta">Clientes en gestión y seguimiento.</div>
-	          <div class="company-meta">Servicio de gestoría.</div>
-	          <a class="card-link" href="/?crm=gestoria" data-action="crm-gestoria">Entrar</a>
+	          <h3>CRM Inmobiliario</h3>
+	          <div class="company-meta">Noticias, inmuebles y operaciones.</div>
+	          <div class="company-meta">Servicio inmobiliario.</div>
+	          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=inmo&tab=crm` : "/?crm=inmo"}" data-action="crm-inmo">Entrar</a>
 	        `;
-	      } else if (service === "fincas") {
-	        const href = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=fincas`;
-	        card.dataset.action = "workspace-fincas";
-	        card.innerHTML = `
-	          <h3>Fincas</h3>
-	          <div class="company-meta">Comunidades, incidencias, juntas y seguimiento.</div>
-	          <div class="company-meta">Área de administración de fincas.</div>
-	          <a class="card-link" href="${href}" data-action="workspace-fincas">Entrar</a>
+		      } else if (service === "gestoria") {
+		        card.dataset.action = "crm-gestoria";
+		        card.innerHTML = `
+		          <h3>CRM Gestoría</h3>
+		          <div class="company-meta">Clientes en gestión y seguimiento.</div>
+		          <div class="company-meta">Servicio de gestoría.</div>
+		          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=gestoria&tab=gestoria-crm` : "/?crm=gestoria"}" data-action="crm-gestoria">Entrar</a>
+		        `;
+		      } else if (service === "fincas") {
+		        const href = tenantPrefix ? `${tenantPrefix}&view=fincas` : `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=fincas`;
+		        card.dataset.action = "workspace-fincas";
+		        card.innerHTML = `
+		          <h3>Fincas</h3>
+		          <div class="company-meta">Comunidades, incidencias, juntas y seguimiento.</div>
+		          <div class="company-meta">Área de administración de fincas.</div>
+		          <a class="card-link" href="${href}" data-action="workspace-fincas">Entrar</a>
+		        `;
+		      } else if (service === "seguros") {
+		        card.dataset.action = "crm-seguros";
+		        card.innerHTML = `
+	          <h3>CRM Seguros</h3>
+	          <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
+	          <div class="company-meta">Servicio de seguros.</div>
+	          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=seguros&tab=seguros-crm` : "/?crm=seguros"}" data-action="crm-seguros">Entrar</a>
 	        `;
-	      } else if (service === "seguros") {
-	        card.dataset.action = "crm-seguros";
+	      } else if (service === "financiaciones") {
+	        card.dataset.action = "crm-fin";
 	        card.innerHTML = `
-          <h3>CRM Seguros</h3>
-          <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
-          <div class="company-meta">Servicio de seguros.</div>
-          <a class="card-link" href="/?crm=seguros" data-action="crm-seguros">Entrar</a>
-        `;
-      } else if (service === "financiaciones") {
-        card.dataset.action = "crm-fin";
-        card.innerHTML = `
-          <h3>CRM Financiaciones</h3>
-          <div class="company-meta">Hipotecas y seguimiento.</div>
-          <div class="company-meta">Servicio financiero.</div>
-	          <a class="card-link" href="/?crm=fin" data-action="crm-fin">Entrar</a>
-        `;
-	      } else {
-	        return;
-	      }
-	      coreCards.appendChild(card);
-	    };
+	          <h3>CRM Financiaciones</h3>
+	          <div class="company-meta">Hipotecas y seguimiento.</div>
+	          <div class="company-meta">Servicio financiero.</div>
+		          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=fin&tab=fin-crm` : "/?crm=fin"}" data-action="crm-fin">Entrar</a>
+	        `;
+		      } else {
+		        return;
+		      }
+		      coreCards.appendChild(card);
+		    };
 
 	    const appendSimuladoresCard = () => {
 	      const href = `/?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=motores&engine=simuladores`;
