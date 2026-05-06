@@ -67642,6 +67642,9 @@ class Handler(BaseHTTPRequestHandler):
             asesoramiento_id = params.get("asesoramiento_id", [""])[0]
             related_id = params.get("related_id", [""])[0]
             related_tipo = params.get("related_tipo", [""])[0]
+            start = params.get("start", [""])[0]
+            end = params.get("end", [""])[0]
+            order = params.get("order", [""])[0]
             limit = params.get("limit", [""])[0]
             offset = params.get("offset", [""])[0]
             servicio_key = str(servicio or "").strip().lower()
@@ -67673,6 +67676,9 @@ class Handler(BaseHTTPRequestHandler):
             asesoramiento_id = str(asesoramiento_id or "").strip()
             related_id = str(related_id or "").strip()
             related_tipo = str(related_tipo or "").strip()
+            start = str(start or "").strip()
+            end = str(end or "").strip()
+            order = str(order or "").strip().lower()
             if empresa_id:
                 where.append("a.empresa_id = ?")
                 values.append(empresa_id)
@@ -67691,7 +67697,19 @@ class Handler(BaseHTTPRequestHandler):
             if related_tipo:
                 where.append("LOWER(COALESCE(a.related_tipo, '')) = LOWER(?)")
                 values.append(related_tipo)
+            # Rango por fecha (YYYY-MM-DD). Evita traer 300 últimos y romper agenda con históricos.
+            # NOTA: `fecha` se guarda como texto en formato ISO (YYYY-MM-DD), así que las comparaciones
+            # lexicográficas son seguras en SQLite y Postgres.
+            if start:
+                where.append("a.fecha >= ?")
+                values.append(start)
+            if end:
+                where.append("a.fecha <= ?")
+                values.append(end)
             where_clause = " AND ".join(where) if where else "1=1"
+            order_sql = "DESC"
+            if order in {"asc", "1", "true"}:
+                order_sql = "ASC"
             rows = conn.execute(
                 f"""
                 SELECT
@@ -67704,7 +67722,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
                 WHERE {where_clause}
-                ORDER BY a.fecha DESC, a.hora DESC
+                ORDER BY a.fecha {order_sql}, a.hora {order_sql}
                 LIMIT ? OFFSET ?
                 """,
                 tuple(values + [limit_val, offset_val]),
@@ -67717,6 +67735,9 @@ class Handler(BaseHTTPRequestHandler):
                     "offset": offset_val,
                     "returned": len(rows),
                     "truncated": len(rows) >= limit_val,
+                    "start": start,
+                    "end": end,
+                    "order": order_sql.lower(),
                 },
             )
             return

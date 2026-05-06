@@ -49132,7 +49132,67 @@ const loadCrmAgenda = () => {
     return;
   }
   initCrmAgendaPrefsIfNeeded();
-  const params = new URLSearchParams({ empresa_id: empresa.id, servicio: "inmobiliaria" });
+  const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+  const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
+  const anchor = parseAgendaDate(anchorDayKey) || new Date();
+
+  const fmt = (d) => formatAgendaDate(d);
+  const clampDay = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+  const addDays = (d, delta) => {
+    const x = new Date(d);
+    x.setDate(x.getDate() + Number(delta || 0));
+    return x;
+  };
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const weekStart = getWeekStart(anchor);
+  const weekEnd = addDays(weekStart, 6);
+
+  // Rango por defecto: para vistas calendario, pide exactamente lo visible (con 1 día de margen).
+  // Para vista lista, el rango depende del preset para no traer miles de filas.
+  let rangeStart = null;
+  let rangeEnd = null;
+  if (view === "day") {
+    rangeStart = clampDay(anchor);
+    rangeEnd = clampDay(anchor);
+  } else if (view === "week") {
+    rangeStart = clampDay(addDays(weekStart, -1));
+    rangeEnd = clampDay(addDays(weekEnd, 1));
+  } else if (view === "month") {
+    rangeStart = clampDay(addDays(monthStart, -1));
+    rangeEnd = clampDay(addDays(monthEnd, 1));
+  } else {
+    const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
+    const preset = presetRaw.endsWith("_equipo") ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
+    if (preset === "citas_hoy" || preset === "actividades_hoy") {
+      rangeStart = clampDay(anchor);
+      rangeEnd = clampDay(anchor);
+    } else if (preset === "citas_7dias" || preset === "citas_7dias_caducadas") {
+      rangeStart = clampDay(anchor);
+      rangeEnd = clampDay(addDays(anchor, 7));
+    } else if (preset === "citas" || preset === "actividades" || preset === "actividades_caducadas") {
+      // Listados largos: 60 días hacia atrás/adelante para no truncar.
+      rangeStart = clampDay(addDays(anchor, -60));
+      rangeEnd = clampDay(addDays(anchor, 60));
+    } else {
+      rangeStart = clampDay(addDays(anchor, -30));
+      rangeEnd = clampDay(addDays(anchor, 30));
+    }
+  }
+
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    servicio: "inmobiliaria",
+    // Agenda requiere más filas; usamos rango + limit alto.
+    limit: "2000",
+    order: "asc",
+  });
+  if (rangeStart) params.set("start", fmt(rangeStart));
+  if (rangeEnd) params.set("end", fmt(rangeEnd));
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     state.crmAgendaRowsAll = rows;
@@ -49197,7 +49257,7 @@ const loadCrmAgenda = () => {
 	    }
 	    return base.getTime();
 	  };
-		  const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
+		  // anchorDayKey ya calculado arriba para el rango; lo reutilizamos para filtros.
 		  const withinDays = (dateKey, days) => {
 		    const d = parseAgendaDate(dateKey);
 		    if (!d) return false;
@@ -49284,6 +49344,16 @@ const loadCrmAgenda = () => {
 	    state.crmAgendaRowsFiltered = rows.filter((row) => matchCommon(row) && matchPreset(row));
 	    state.crmAgendaRowsCalendarFiltered = rows.filter((row) => matchCommon(row) && matchPresetCalendar(row));
     renderCrmAgendaWorkspace();
+
+    // Info diagnóstica: si hay truncado o rango activo, muéstralo.
+    try {
+      const meta = [];
+      if (data?.start || data?.end) meta.push(`${data.start || "?"} → ${data.end || "?"}`);
+      if (data?.truncated) meta.push("TRUNCADO");
+      if (crmAgendaInfo && meta.length) {
+        crmAgendaInfo.textContent = `${crmAgendaInfo.textContent || ""}${crmAgendaInfo.textContent ? " · " : ""}${meta.join(" · ")}`;
+      }
+    } catch (e) {}
   });
 };
 
