@@ -1086,6 +1086,11 @@ body.crm-fin #companySummary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.form-grid.fincas-budget-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+}
+
 .form-grid .span-all {
   grid-column: 1 / -1;
 }

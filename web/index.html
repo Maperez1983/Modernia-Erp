@@ -2436,7 +2436,7 @@
             </div>
             <div class="muted">Colegiado nº 3079</div>
 	          </div>
-	          <form id="workspaceFincasBudgetQuickForm" class="form-grid">
+		          <form id="workspaceFincasBudgetQuickForm" class="form-grid fincas-budget-grid">
 	            <input type="hidden" name="comunidad_id" />
 	            <input type="hidden" name="edificio_foto_key" />
 	            <label class="span-2">
@@ -2447,8 +2447,8 @@
 	              Precargar datos (opcional)
 	              <select name="comunidad_id_lookup"></select>
 	            </label>
-	            <div class="span-2 muted">Si la comunidad no está gestionada, deja este selector en “Nueva comunidad / no gestionada” y rellena los datos manualmente.</div>
-            <h4 class="span-2">Datos de la comunidad</h4>
+		            <div class="span-all muted">Si la comunidad no está gestionada, deja este selector en “Nueva comunidad / no gestionada” y rellena los datos manualmente.</div>
+	            <div class="form-grid-section">Datos de la comunidad</div>
             <label class="span-2">
               Denominación social
               <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
@@ -2457,7 +2457,7 @@
 	              Dirección
 	              <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
 	            </label>
-	            <div class="span-2 hidden" id="workspaceFincasBudgetMapWrap">
+		            <div class="span-2 hidden" id="workspaceFincasBudgetMapWrap">
 	              <iframe
 	                id="workspaceFincasBudgetMap"
 	                title="Mapa presupuesto"
@@ -2483,7 +2483,7 @@
                 <option>Rechazado</option>
               </select>
             </label>
-            <h4 class="span-2">Datos del presidente / solicitante</h4>
+	            <div class="form-grid-section">Datos del presidente / solicitante</div>
             <label class="span-2">
               Nombre
               <input name="solicitante_nombre" />
@@ -2504,7 +2504,7 @@
               Email
               <input name="solicitante_email" type="email" />
             </label>
-            <h4 class="span-2">Datos del edificio</h4>
+	            <div class="form-grid-section">Datos del edificio</div>
             <label>
               Viviendas
               <input name="num_vecinos" type="number" min="0" step="1" value="0" />
