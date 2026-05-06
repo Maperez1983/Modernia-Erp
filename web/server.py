@@ -26336,6 +26336,43 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
             ).fetchone()
         except Exception:
             user = None
+    # Fallback: si el trabajador no está vinculado a un `usuarios.id`, intentamos resolverlo por nombre.
+    # Motivo: en rentas el campo `responsable` suele almacenar el `usuarios.usuario` (no el nombre completo),
+    # y sin el vínculo no podemos atribuir correctamente.
+    if not user:
+        persona_nombre = str(persona["nombre"] or "").strip()
+        if persona_nombre:
+            try:
+                user = conn.execute(
+                    """
+                    SELECT id, usuario, email, nombre, apellido
+                    FROM usuarios
+                    WHERE TRIM(UPPER(COALESCE(nombre,'') || ' ' || COALESCE(apellido,''))) = TRIM(UPPER(?))
+                    LIMIT 1
+                    """,
+                    (persona_nombre,),
+                ).fetchone()
+            except Exception:
+                user = None
+        if not user and persona_nombre:
+            parts = [p for p in re.split(r"\s+", persona_nombre) if p]
+            if len(parts) >= 2:
+                first = parts[0]
+                last = parts[-1]
+                try:
+                    user = conn.execute(
+                        """
+                        SELECT id, usuario, email, nombre, apellido
+                        FROM usuarios
+                        WHERE UPPER(COALESCE(nombre,'')) LIKE UPPER(?)
+                          AND UPPER(COALESCE(apellido,'')) LIKE UPPER(?)
+                        ORDER BY COALESCE(updated_at, created_at) DESC
+                        LIMIT 1
+                        """,
+                        (f"{first}%", f"{last}%"),
+                    ).fetchone()
+                except Exception:
+                    user = None
 
     def add_matcher(out_set, raw):
         key = normalize_lookup_text(raw or "")
@@ -26350,7 +26387,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
         full_name = f"{user['nombre'] or ''} {user['apellido'] or ''}".strip()
         add_matcher(matchers, full_name)
 
-    # Si no hay vínculo con usuario/login, no podemos atribuir productividad automáticamente.
+    # Si no podemos construir matchers, no podemos atribuir productividad automáticamente.
     if not matchers:
         return {"kpis": {}, "items": []}
 
