@@ -4602,6 +4602,47 @@ const resolveDefaultTenantWorkspaceSlug = () => {
   return DEFAULT_TENANT_WORKSPACE_SLUG;
 };
 
+const getTenantWorkspaceIdFromUrl = () => {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const ws = String(params.get("workspace") || "").trim();
+    return ws;
+  } catch (_e) {
+    return "";
+  }
+};
+
+const shouldPreferTenantRouting = () => {
+  // Si ya estamos en modo tenant/workspace o hay un workspace_id recordado, no debemos caer al modo global.
+  if (isTenantWorkspaceMode && isTenantWorkspaceMode()) return true;
+  try {
+    const stored = String(localStorage.getItem("crm.currentWorkspaceId") || "").trim();
+    if (stored) return true;
+  } catch (_e) {}
+  return Boolean(String(state.currentWorkspaceId || "").trim());
+};
+
+const ensureTenantParams = (params) => {
+  if (!params) return params;
+  if (params.get("holding") === "1" && String(params.get("mode") || "").toLowerCase() === "tenant" && params.get("workspace")) {
+    return params;
+  }
+  if (!shouldPreferTenantRouting()) return params;
+  // workspace id: URL > state > localStorage
+  const wsFromUrl = getTenantWorkspaceIdFromUrl();
+  const wsFromState = String(state.currentWorkspaceId || "").trim();
+  let wsFromStore = "";
+  try {
+    wsFromStore = String(localStorage.getItem("crm.currentWorkspaceId") || "").trim();
+  } catch (_e) {}
+  const ws = wsFromUrl || wsFromState || wsFromStore;
+  if (!ws) return params;
+  params.set("holding", "1");
+  params.set("mode", "tenant");
+  params.set("workspace", ws);
+  return params;
+};
+
 const getAuthScopeUser = () => {
   if (state.authUser && (state.authUser.usuario || state.authUser.id)) {
     return state.authUser;
@@ -21800,6 +21841,7 @@ const openCrmInmobiliario = () => {
   window.setTimeout(() => loadCrmCompraventas(), 240);
   // Mantener URL "crm=inmo" para que los deep-links funcionen aunque `openCompany` haya puesto `?empresa=...`.
   const currentParams = new URLSearchParams(window.location.search);
+  ensureTenantParams(currentParams);
   currentParams.delete("empresa");
   currentParams.delete("clientes");
   currentParams.delete("cliente");
@@ -23276,6 +23318,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   setTab(tab);
   try {
     const currentParams = new URLSearchParams(window.location.search);
+    ensureTenantParams(currentParams);
     currentParams.delete("empresa");
     currentParams.delete("clientes");
     currentParams.delete("cliente");
@@ -23380,6 +23423,7 @@ const openSegurosCrm = () => {
   setTab("seguros-crm");
   try {
     const currentParams = new URLSearchParams(window.location.search);
+    ensureTenantParams(currentParams);
     currentParams.delete("empresa");
     currentParams.delete("clientes");
     currentParams.delete("cliente");
@@ -23455,6 +23499,7 @@ const openFinCrm = () => {
   } catch (e) {}
   try {
     const currentParams = new URLSearchParams(window.location.search);
+    ensureTenantParams(currentParams);
     currentParams.delete("empresa");
     currentParams.delete("clientes");
     currentParams.delete("cliente");
