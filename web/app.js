@@ -54080,9 +54080,15 @@ const renderGestoriaRentaDashboard = (payload) => {
     }
     if (view === "unpaid") return unpaid;
     if (view === "unassigned") return unassigned;
-    if (view === "responsable" && viewParam) {
-      const key = normalizeLookupText(viewParam);
-      return base.filter((item) => normalizeLookupText(item.responsable_key || "") === key);
+    if (view === "responsable") {
+      const raw = String(viewParam || "").trim();
+      const isMissing = !raw || raw === "sin-responsable";
+      const key = isMissing ? "" : normalizeLookupText(raw);
+      return base.filter((item) => {
+        const itemKey = String(item.responsable_key || "").trim();
+        if (isMissing) return !itemKey;
+        return normalizeLookupText(itemKey) === key;
+      });
     }
     return [];
   };
@@ -54120,7 +54126,8 @@ const renderGestoriaRentaDashboard = (payload) => {
     items.forEach((row) => {
       const tr = document.createElement("tr");
       tr.style.cursor = "pointer";
-      tr.addEventListener("click", () => setViewWithParam("responsable", row.responsable_key || ""));
+      const responsableKey = String(row.responsable_key || "").trim() || "sin-responsable";
+      tr.addEventListener("click", () => setViewWithParam("responsable", responsableKey));
       [
         row.responsable || "Sin responsable",
         numberFormatter.format(Number(row.campanas || 0)),
@@ -54503,7 +54510,7 @@ const renderGestoriaRentaDashboard = (payload) => {
         const top = [...responsables]
           .map((row) => ({
             label: row.responsable || "Sin responsable",
-            key: row.responsable_key || "",
+            key: String(row.responsable_key || "").trim() || "sin-responsable",
             pendiente: Number(row.pendiente || 0),
           }))
           .sort((a, b) => b.pendiente - a.pendiente)
@@ -54539,7 +54546,7 @@ const renderGestoriaRentaDashboard = (payload) => {
         const top = [...responsables]
           .map((row) => ({
             label: row.responsable || "Sin responsable",
-            key: row.responsable_key || "",
+            key: String(row.responsable_key || "").trim() || "sin-responsable",
             campanas: Number(row.campanas || 0),
           }))
           .sort((a, b) => b.campanas - a.campanas)

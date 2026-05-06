@@ -27873,7 +27873,14 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             (not resp_raw)
             or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
             or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
-            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+            or resp_text_norm in {
+                "SIN RESPONSABLE",
+                "SIN ASIGNAR",
+                "SIN ASIGNACION",
+                "SIN ASIGNACIÓN",
+                "SELECCIONA RESPONSABLE",
+                "SELECCIONAR RESPONSABLE",
+            }
         )
         if is_unassigned_resp:
             counts["sin_responsable"] += 1
@@ -27986,7 +27993,14 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
             (not resp_raw)
             or resp_key_norm in {"sin-responsable", "sin_responsable", "sinresponsable", "sresponsable"}
             or resp_action_norm in {"sin_responsable", "sinresponsable", "sresponsable", "sin_asignar", "sin_asignacion"}
-            or resp_text_norm in {"SIN RESPONSABLE", "SIN ASIGNAR", "SIN ASIGNACION", "SIN ASIGNACIÓN"}
+            or resp_text_norm in {
+                "SIN RESPONSABLE",
+                "SIN ASIGNAR",
+                "SIN ASIGNACION",
+                "SIN ASIGNACIÓN",
+                "SELECCIONA RESPONSABLE",
+                "SELECCIONAR RESPONSABLE",
+            }
         ):
             unassigned.append(item)
     unassigned.sort(key=lambda x: (-float(x.get("precio_servicio") or 0.0), str(x.get("cliente") or "")))
