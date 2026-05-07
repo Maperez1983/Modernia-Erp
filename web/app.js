@@ -61023,7 +61023,12 @@ const loadAcciones = (servicio, empresaId, container, infoEl) => {
     return;
   }
   container.dataset.service = servicio || "";
-  const params = new URLSearchParams({ servicio, empresa_id: empresaId });
+  const params = new URLSearchParams({ servicio });
+  if (isTenantWorkspaceMode()) {
+    if (state.currentWorkspaceId) params.set("workspace_id", state.currentWorkspaceId);
+  } else {
+    params.set("empresa_id", empresaId);
+  }
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     const events = buildAgendaEvents(rows, servicio, SERVICE_LABELS[servicio] || servicio);
@@ -69832,6 +69837,9 @@ if (actionModalSave) {
         if (actionModalStatus) actionModalStatus.textContent = "Cancelado.";
         return;
       }
+    }
+    if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+      payload.workspace_id = state.currentWorkspaceId;
     }
     const endpoint = currentActionEdit ? "/api/acciones_update" : "/api/acciones";
     apiPost(endpoint, payload)
