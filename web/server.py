@@ -39218,6 +39218,100 @@ def ensure_workspace_default_company(conn, workspace_id, nombre=None):
     return None
 
 
+def get_platform_empresa_id(conn) -> str:
+    """
+    Service-first compat: algunas tablas legacy aún exigen `empresa_id NOT NULL`.
+    Para que la operativa no dependa de empresas por workspace, usamos una única empresa técnica
+    (Verifika2) como fallback interno.
+    """
+    try:
+        # 1) cache en meta
+        try:
+            row = conn.execute("SELECT value FROM crm_meta WHERE key = ?", ("platform_empresa_id",)).fetchone()
+            cached = ""
+            if row:
+                try:
+                    cached = str(row.get("value") or "")
+                except Exception:
+                    cached = str(row[0] or "")
+            cached = (cached or "").strip()
+            if cached:
+                exists = conn.execute("SELECT 1 FROM empresas WHERE id = ? LIMIT 1", (cached,)).fetchone()
+                if exists:
+                    return cached
+        except Exception:
+            pass
+
+        # 2) busca por nombre
+        row2 = conn.execute(
+            "SELECT id FROM empresas WHERE LOWER(TRIM(nombre)) IN ('verifika2', 'verifika²') ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+        if row2:
+            eid = str(row_value(row2, "id") or row_value(row2, 0) or "").strip()
+            if eid:
+                backend = getattr(conn, "__crm_backend__", "") or ""
+                if backend == "postgres":
+                    conn.execute(
+                        """
+                        INSERT INTO crm_meta (key, value, updated_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (key) DO UPDATE
+                        SET value = EXCLUDED.value,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        ("platform_empresa_id", eid),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO crm_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                        ("platform_empresa_id", eid),
+                    )
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+                return eid
+
+        # 3) crea
+        eid = uuid.uuid4().hex
+        now_ts = datetime.now(timezone.utc).isoformat()
+        backend = getattr(conn, "__crm_backend__", "") or ""
+        if backend == "postgres":
+            conn.execute(
+                """
+                INSERT INTO empresas (id, nombre, activo, logo_url, nif, direccion, created_at, updated_at)
+                VALUES (%s, 'Verifika2', 1, '', '', '', %s, %s)
+                """,
+                (eid, now_ts, now_ts),
+            )
+            conn.execute(
+                """
+                INSERT INTO crm_meta (key, value, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (key) DO UPDATE
+                SET value = EXCLUDED.value,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                ("platform_empresa_id", eid),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO empresas (id, nombre, activo, logo_url, nif, direccion, created_at, updated_at)
+                VALUES (?, 'Verifika2', 1, '', '', '', datetime(?), datetime(?))
+                """,
+                (eid, now_ts, now_ts),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO crm_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                ("platform_empresa_id", eid),
+            )
+        conn.commit()
+        return eid
+    except Exception:
+        return ""
+
+
 def fetch_workspace_billing_summary(conn, workspace_id):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
@@ -46220,7 +46314,9 @@ class Handler(BaseHTTPRequestHandler):
                     session_tmp = getattr(self, "auth_session", None) or self._current_session()
                     if session_tmp and (not workspace_actor_is_privileged(conn, session_tmp)):
                         eid = str(payload.get("empresa_id") or "").strip()
-                        if eid:
+                        # Service-first: acciones (agenda) se acotan por workspace_id+servicio, no por empresa_id.
+                        skip_empresa_enforce = parsed.path in {"/api/acciones", "/api/acciones_update", "/api/acciones_delete"} and str(payload.get("workspace_id") or "").strip()
+                        if eid and not skip_empresa_enforce:
                             ok, err = enforce_empresa_membership(conn, session_tmp, eid, write=True)
                             if not ok:
                                 json_response(self, {"error": err or "No autorizado"}, status=403)
@@ -46647,6 +46743,19 @@ class Handler(BaseHTTPRequestHandler):
                         return
         empresa = None
         if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete"):
+            # Service-first: en acciones (agenda) la operativa debe depender de workspace+servicio,
+            # no de empresa. Aun así, por legacy, la tabla requiere `empresa_id NOT NULL`,
+            # así que usamos una empresa técnica (Verifika2) si no viene ninguna.
+            try:
+                session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                ws_id = str(payload.get("workspace_id") or "").strip()
+                if ws_id and session_tmp:
+                    ok, err = enforce_workspace_membership(conn, session_tmp, ws_id, write=True)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
+            except Exception:
+                pass
             payload_empresa_id = str(payload.get("empresa_id") or "").strip()
             # En acciones, preferimos `empresa_id` si viene; evita 502 si el frontend no envía `empresa_nombre`.
             if payload_empresa_id:
@@ -46665,6 +46774,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not empresa:
                     json_response(self, {"error": "Empresa no encontrada"}, status=400)
                     return
+            if not empresa:
+                platform_eid = get_platform_empresa_id(conn)
+                if platform_eid:
+                    empresa = conn.execute(
+                        "SELECT id FROM empresas WHERE id = ? LIMIT 1",
+                        (platform_eid,),
+                    ).fetchone()
         if (not empresa_scope_exempt) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
@@ -64501,22 +64617,25 @@ class Handler(BaseHTTPRequestHandler):
             asesoramiento_id_fk = str(payload.get("asesoramiento_id") or "").strip() or None
             related_id_fk = str(payload.get("related_id") or "").strip() or None
             related_tipo_fk = str(payload.get("related_tipo") or "").strip() or None
+            workspace_id_fk = str(payload.get("workspace_id") or "").strip() or None
             action_id = os.urandom(16).hex()
+            empresa_id_fk = (empresa["id"] if empresa else None) or get_platform_empresa_id(conn) or None
             conn.execute(
                 """
                 INSERT INTO acciones (
-                  id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
+                  id, empresa_id, workspace_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
                   fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado,
                   resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, notas, recordatorio_min,
                   related_id, related_tipo,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     action_id,
-                    empresa["id"],
+                    empresa_id_fk,
+                    workspace_id_fk,
                     servicio_store,
                     cliente_id,
                     inmueble_id_fk,
@@ -64548,7 +64667,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             audit_event(
                 conn,
-                empresa["id"],
+                empresa_id_fk,
                 "accion",
                 action_row["id"] if action_row else None,
                 "Crear acción",
@@ -64597,7 +64716,7 @@ class Handler(BaseHTTPRequestHandler):
                             pass
             elif servicio_norm == "financiaciones":
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
-                    apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+                    apply_fin_action_workflow(conn, empresa_id_fk, action_row, now)
             if "response_payload" not in locals():
                 response_payload = {"ok": True, "id": action_row["id"] if action_row else None}
             # Adjuntamos la acción creada normalizada para UI (evita recargar agenda completa).
@@ -68603,6 +68722,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/acciones":
+            workspace_id = params.get("workspace_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
             servicio = params.get("servicio", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
@@ -68638,6 +68758,7 @@ class Handler(BaseHTTPRequestHandler):
 
             where = ["a.servicio = ?"]
             values = [servicio_key]
+            workspace_id = str(workspace_id or "").strip()
             empresa_id = str(empresa_id or "").strip()
             cliente_id = str(cliente_id or "").strip()
             inmueble_id = str(inmueble_id or "").strip()
@@ -68647,7 +68768,11 @@ class Handler(BaseHTTPRequestHandler):
             start = str(start or "").strip()
             end = str(end or "").strip()
             order = str(order or "").strip().lower()
-            if empresa_id:
+            # Service-first: si llega workspace_id, acotamos por workspace y NO dependemos de empresa_id.
+            if workspace_id:
+                where.append("a.workspace_id = ?")
+                values.append(workspace_id)
+            elif empresa_id:
                 where.append("a.empresa_id = ?")
                 values.append(empresa_id)
             if cliente_id:
