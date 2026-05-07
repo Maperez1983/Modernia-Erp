@@ -21372,13 +21372,14 @@ const openCompany = (empresaName, options = {}) => {
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
     if (isTenantWorkspaceMode()) {
-      try {
-        setUiToast(
-          "Falta empresa en el workspace",
-          "No hay ninguna empresa vinculada o aún no se ha cargado. Ve a Workspaces → Empresas para crear/vincularla."
-        );
-      } catch (e) {}
-      return;
+      // En modo tenant, no bloqueamos la navegación por falta de empresas: usamos un placeholder.
+      // La empresa real se puede crear/vincular después, pero el CRM debe seguir funcionando.
+      state.empresas = [{ id: "", nombre: "Verifika2" }];
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Verifika2"));
+        empresaSelect.value = "";
+      }
     }
     if (!state.empresas.length) {
       api("/api/empresas")
@@ -21972,21 +21973,22 @@ const openCrmInmobiliario = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      try {
-        setUiToast(
-          "Falta empresa en el workspace",
-          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
-        );
-      } catch (e) {}
-      return;
-    }
-    state.empresas = companies;
-    if (empresaSelect) {
-      empresaSelect.innerHTML = "";
-      empresaSelect.appendChild(createOption("", "Todas las empresas"));
-      companies.forEach((item) => {
-        empresaSelect.appendChild(createOption(item.id, item.nombre));
-      });
+      // Modo tenant: no forzamos empresa; usamos placeholder.
+      state.empresas = [{ id: "", nombre: "Verifika2" }];
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Verifika2"));
+        empresaSelect.value = "";
+      }
+    } else {
+      state.empresas = companies;
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Todas las empresas"));
+        companies.forEach((item) => {
+          empresaSelect.appendChild(createOption(item.id, item.nombre));
+        });
+      }
     }
   }
   if (!state.empresas.length) {
@@ -23487,21 +23489,21 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      try {
-        setUiToast(
-          "Falta empresa en el workspace",
-          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
-        );
-      } catch (e) {}
-      return;
-    }
-    state.empresas = companies;
-    if (empresaSelect) {
-      empresaSelect.innerHTML = "";
-      empresaSelect.appendChild(createOption("", "Todas las empresas"));
-      companies.forEach((item) => {
-        empresaSelect.appendChild(createOption(item.id, item.nombre));
-      });
+      state.empresas = [{ id: "", nombre: "Verifika2" }];
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Verifika2"));
+        empresaSelect.value = "";
+      }
+    } else {
+      state.empresas = companies;
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Todas las empresas"));
+        companies.forEach((item) => {
+          empresaSelect.appendChild(createOption(item.id, item.nombre));
+        });
+      }
     }
   }
   const empresa = resolveCrmGestoriaEmpresa();
@@ -23631,21 +23633,21 @@ const openSegurosCrm = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      try {
-        setUiToast(
-          "Falta empresa en el workspace",
-          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
-        );
-      } catch (e) {}
-      return;
-    }
-    state.empresas = companies;
-    if (empresaSelect) {
-      empresaSelect.innerHTML = "";
-      empresaSelect.appendChild(createOption("", "Todas las empresas"));
-      companies.forEach((item) => {
-        empresaSelect.appendChild(createOption(item.id, item.nombre));
-      });
+      state.empresas = [{ id: "", nombre: "Verifika2" }];
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Verifika2"));
+        empresaSelect.value = "";
+      }
+    } else {
+      state.empresas = companies;
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Todas las empresas"));
+        companies.forEach((item) => {
+          empresaSelect.appendChild(createOption(item.id, item.nombre));
+        });
+      }
     }
   }
   const empresa = resolveCrmSegurosEmpresa();
@@ -23703,21 +23705,21 @@ const openFinCrm = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      try {
-        setUiToast(
-          "Falta empresa en el workspace",
-          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
-        );
-      } catch (e) {}
-      return;
-    }
-    state.empresas = companies;
-    if (empresaSelect) {
-      empresaSelect.innerHTML = "";
-      empresaSelect.appendChild(createOption("", "Todas las empresas"));
-      companies.forEach((item) => {
-        empresaSelect.appendChild(createOption(item.id, item.nombre));
-      });
+      state.empresas = [{ id: "", nombre: "Verifika2" }];
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Verifika2"));
+        empresaSelect.value = "";
+      }
+    } else {
+      state.empresas = companies;
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Todas las empresas"));
+        companies.forEach((item) => {
+          empresaSelect.appendChild(createOption(item.id, item.nombre));
+        });
+      }
     }
   }
   const empresa = resolveCrmFinEmpresa();
