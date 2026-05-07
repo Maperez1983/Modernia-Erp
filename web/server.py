@@ -1618,6 +1618,49 @@ def cliente_has_servicio(conn, cliente_id, servicios):
     return bool(row)
     return digits
 
+
+def cliente_has_servicio_in_workspace(conn, cliente_id, servicios, workspace_id=None):
+    """
+    Service-first: comprueba el vínculo cliente-servicio acotado a workspace si es posible.
+    Mantiene compatibilidad con datasets legacy que solo tienen `clientes_empresas.empresa_id`.
+    """
+    if not cliente_id or not servicios:
+        return True
+    ws_id = str(workspace_id or "").strip()
+    placeholders = ",".join(["?"] * len(servicios))
+    cols = table_columns(conn, "clientes_empresas") or set()
+    if ws_id and "workspace_id" in cols:
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM clientes_empresas
+            WHERE cliente_id = ?
+              AND workspace_id = ?
+              AND LOWER(servicio) IN ({placeholders})
+            LIMIT 1
+            """,
+            [cliente_id, ws_id, *servicios],
+        ).fetchone()
+        return bool(row)
+    # Legacy fallback: filtra por empresa_ids vinculadas al workspace
+    if ws_id:
+        empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
+        if empresa_ids:
+            eid_placeholders = ",".join(["?"] * len(empresa_ids))
+            row = conn.execute(
+                f"""
+                SELECT 1
+                FROM clientes_empresas
+                WHERE cliente_id = ?
+                  AND empresa_id IN ({eid_placeholders})
+                  AND LOWER(servicio) IN ({placeholders})
+                LIMIT 1
+                """,
+                [cliente_id, *empresa_ids, *servicios],
+            ).fetchone()
+            return bool(row)
+    return cliente_has_servicio(conn, cliente_id, servicios)
+
 def normalize_email(value):
     if not value:
         return ""
@@ -30011,6 +30054,27 @@ def ensure_tables(db_path):
             except Exception:
                 pass
             _migration_mark(conn, "workspace_company_id_rollout_v1")
+    except Exception:
+        pass
+    # === Service-first (clientes) ===
+    # `clientes_empresas` necesita `workspace_id` para aislar vínculos por workspace sin depender de empresa_id.
+    try:
+        if not _migration_done(conn, "service_first_clientes_v1"):
+            try:
+                ensure_column(conn, "clientes_empresas", "workspace_id", "workspace_id TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_clientes_empresas_ws_cliente_servicio ON clientes_empresas (workspace_id, cliente_id, servicio)"
+                )
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            _migration_mark(conn, "service_first_clientes_v1")
     except Exception:
         pass
     # Clientes: atributo de captación/recomendación (distinto de "responsable").
@@ -63128,6 +63192,13 @@ class Handler(BaseHTTPRequestHandler):
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             nombre_norm = re.sub(r"\s+", " ", str(nombre)).strip()
             nif = (payload.get("nif") or "").strip()
             dup = None
@@ -63167,73 +63238,114 @@ class Handler(BaseHTTPRequestHandler):
             captado_por_user_id = str(payload.get("captado_por_user_id") or "").strip()
             if not captado_por_user_id:
                 captado_por_user_id = procedencia_user_id or actor_user_id
+            cols = table_columns(conn, "clientes") or set()
+            insert_cols = [
+                "id",
+                "nombre",
+                "tipo_persona",
+                "nif",
+                "telefono",
+                "movil",
+                "otro_telefono",
+                "email",
+                "fecha_nacimiento",
+                "direccion",
+                "direccion_numero",
+                "codigo_postal",
+                "localidad",
+                "poblacion",
+                "provincia",
+                "id_personal",
+                "captado_por_user_id",
+                "procedencia_canal",
+                "procedencia_detalle",
+                "procedencia_user_id",
+                "procedencia_cliente_id",
+                "cliente_generico_web",
+                "tiene_pedido",
+                "viabilidad",
+                "fecha_estudio",
+                "valor_maximo_piso",
+                "perfil_kiron",
+                "estudio_vip",
+                "tipo",
+                "perfil",
+                "estado",
+                "created_at",
+                "updated_at",
+            ]
+            values = [
+                cliente_id,
+                nombre,
+                payload.get("tipo_persona"),
+                payload.get("nif"),
+                payload.get("telefono"),
+                payload.get("movil"),
+                payload.get("otro_telefono"),
+                payload.get("email"),
+                payload.get("fecha_nacimiento"),
+                payload.get("direccion"),
+                payload.get("direccion_numero"),
+                payload.get("codigo_postal"),
+                payload.get("localidad"),
+                payload.get("poblacion"),
+                payload.get("provincia"),
+                payload.get("id_personal"),
+                captado_por_user_id,
+                procedencia_canal,
+                procedencia_detalle,
+                procedencia_user_id,
+                procedencia_cliente_id or None,
+                parse_boolish(payload.get("cliente_generico_web")),
+                parse_boolish(payload.get("tiene_pedido")),
+                payload.get("viabilidad"),
+                payload.get("fecha_estudio"),
+                parse_optional_float(payload.get("valor_maximo_piso")),
+                payload.get("perfil_kiron"),
+                parse_boolish(payload.get("estudio_vip")),
+                payload.get("tipo"),
+                payload.get("perfil"),
+                payload.get("estado"),
+                datetime.now(timezone.utc).isoformat(),
+                datetime.now(timezone.utc).isoformat(),
+            ]
+            if "workspace_id" in cols:
+                insert_cols.insert(1, "workspace_id")
+                values.insert(1, workspace_id or None)
+            placeholders = ", ".join(["?"] * len(insert_cols))
             conn.execute(
-                """
-                INSERT INTO clientes (
-                  id, nombre, tipo_persona, nif, telefono, movil, otro_telefono, email, fecha_nacimiento,
-                  direccion, direccion_numero, codigo_postal, localidad, poblacion, provincia,
-                  id_personal, captado_por_user_id, procedencia_canal, procedencia_detalle, procedencia_user_id, procedencia_cliente_id,
-                  cliente_generico_web, tiene_pedido, viabilidad, fecha_estudio, valor_maximo_piso,
-                  perfil_kiron, estudio_vip, tipo, perfil, estado, created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    cliente_id,
-                    nombre,
-                    payload.get("tipo_persona"),
-                    payload.get("nif"),
-                    payload.get("telefono"),
-                    payload.get("movil"),
-                    payload.get("otro_telefono"),
-                    payload.get("email"),
-                    payload.get("fecha_nacimiento"),
-                    payload.get("direccion"),
-                    payload.get("direccion_numero"),
-                    payload.get("codigo_postal"),
-                    payload.get("localidad"),
-                    payload.get("poblacion"),
-                    payload.get("provincia"),
-                    payload.get("id_personal"),
-                    captado_por_user_id,
-                    procedencia_canal,
-                    procedencia_detalle,
-                    procedencia_user_id,
-                    procedencia_cliente_id or None,
-                    parse_boolish(payload.get("cliente_generico_web")),
-                    parse_boolish(payload.get("tiene_pedido")),
-                    payload.get("viabilidad"),
-                    payload.get("fecha_estudio"),
-                    parse_optional_float(payload.get("valor_maximo_piso")),
-                    payload.get("perfil_kiron"),
-                    parse_boolish(payload.get("estudio_vip")),
-                    payload.get("tipo"),
-                    payload.get("perfil"),
-                    payload.get("estado"),
-                    now,
-                    now,
-                ),
+                f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                tuple(values),
             )
             conn.commit()
             json_response(self, {"ok": True, "id": cliente_id})
             return
         elif parsed.path == "/api/clientes_link":
             cliente_id = payload.get("cliente_id")
-            empresa_id = payload.get("empresa_id")
-            if not cliente_id or not empresa_id:
-                json_response(self, {"error": "cliente_id y empresa_id requeridos"}, status=400)
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             cliente_exists = conn.execute(
                 "SELECT id FROM clientes WHERE id = ?",
                 (cliente_id,),
             ).fetchone()
-            empresa_exists = conn.execute(
-                "SELECT id FROM empresas WHERE id = ?",
-                (empresa_id,),
-            ).fetchone()
-            if not cliente_exists or not empresa_exists:
-                json_response(self, {"error": "Cliente o empresa no encontrados"}, status=400)
+            if not cliente_exists:
+                json_response(self, {"error": "Cliente no encontrado"}, status=400)
+                return
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            # Service-first compat: vínculo por servicio sin depender de empresas del workspace.
+            if not empresa_id:
+                empresa_id = get_platform_empresa_id(conn)
+            empresa_exists = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            if not empresa_exists:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
                 return
             servicio = (payload.get("servicio") or "").strip()
             if not servicio:
@@ -63278,16 +63390,25 @@ class Handler(BaseHTTPRequestHandler):
             link_done = False
             for attempt in range(10):
                 try:
-                    existing = conn.execute(
+                    ce_cols = table_columns(conn, "clientes_empresas") or set()
+                    has_ws = bool(workspace_id and "workspace_id" in ce_cols)
+                    existing_sql = (
                         """
                         SELECT id
                         FROM clientes_empresas
                         WHERE cliente_id = ?
                           AND empresa_id = ?
                           AND LOWER(servicio) = LOWER(?)
-                        LIMIT 1
-                        """,
-                        (cliente_id, empresa_id, servicio),
+                        """
+                        + (" AND COALESCE(workspace_id, '') = ? " if has_ws else "")
+                        + " LIMIT 1"
+                    )
+                    existing_params = [cliente_id, empresa_id, servicio]
+                    if has_ws:
+                        existing_params.append(workspace_id)
+                    existing = conn.execute(
+                        existing_sql,
+                        tuple(existing_params),
                     ).fetchone()
                     if existing:
                         conn.execute(
@@ -63325,29 +63446,44 @@ class Handler(BaseHTTPRequestHandler):
                             ),
                         )
                     else:
+                        insert_cols = [
+                            "id",
+                            "cliente_id",
+                            "empresa_id",
+                        ]
+                        insert_vals = [
+                            os.urandom(16).hex(),
+                            cliente_id,
+                            empresa_id,
+                        ]
+                        if "workspace_id" in ce_cols:
+                            insert_cols.append("workspace_id")
+                            insert_vals.append(workspace_id or None)
+                        insert_cols += [
+                            "servicio",
+                            "captado_por_user_id",
+                            "procedencia_canal",
+                            "procedencia_cliente_id",
+                            "estado",
+                            "fecha_inicio",
+                            "fecha_fin",
+                            "created_at",
+                            "updated_at",
+                        ]
+                        insert_vals += [
+                            servicio,
+                            captado_por_user_id,
+                            procedencia_canal or None,
+                            procedencia_cliente_id or None,
+                            payload.get("estado"),
+                            payload.get("fecha_inicio"),
+                            payload.get("fecha_fin"),
+                            now,
+                            now,
+                        ]
                         conn.execute(
-                            """
-                            INSERT INTO clientes_empresas (
-                              id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal, procedencia_cliente_id, estado,
-                              fecha_inicio, fecha_fin, created_at, updated_at
-                            ) VALUES (
-                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                            )
-                            """,
-                            (
-                                os.urandom(16).hex(),
-                                cliente_id,
-                                empresa_id,
-                                servicio,
-                                captado_por_user_id,
-                                procedencia_canal or None,
-                                procedencia_cliente_id or None,
-                                payload.get("estado"),
-                                payload.get("fecha_inicio"),
-                                payload.get("fecha_fin"),
-                                now,
-                                now,
-                            ),
+                            f"INSERT INTO clientes_empresas ({', '.join(insert_cols)}) VALUES ({', '.join(['?'] * len(insert_cols))})",
+                            tuple(insert_vals),
                         )
                     link_done = True
                     break
@@ -68256,13 +68392,24 @@ class Handler(BaseHTTPRequestHandler):
             services = parse_services_param(servicio)
             source = (params.get("source", [""])[0] or "").strip().lower()
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             normalized_services = [normalize_service_key(s) for s in services]
             is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
-                if empresa_id:
+                seguros_cols = table_columns(conn, "seguros") or set()
+                if workspace_id and "workspace_id" in seguros_cols:
+                    where.append("COALESCE(s.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders = ",".join(["?"] * len(empresa_ids))
+                        where.append(f"s.empresa_id IN ({placeholders})")
+                        values.extend(empresa_ids)
+                elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
                 where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
@@ -68288,20 +68435,37 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if services:
                 placeholders = ",".join(["?"] * len(services))
+                ce_cols = table_columns(conn, "clientes_empresas") or set()
+                where_parts = [f"LOWER(ce.servicio) IN ({placeholders})"]
+                values = list(services)
+                if workspace_id and "workspace_id" in ce_cols:
+                    where_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        values.extend(empresa_ids)
                 rows = conn.execute(
                     f"""
                     SELECT DISTINCT c.id, c.nombre, c.nif
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE LOWER(ce.servicio) IN ({placeholders})
+                    WHERE {' AND '.join(where_parts)}
                     ORDER BY c.nombre
                     """,
-                    services,
+                    values,
                 ).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT id, nombre, nif FROM clientes ORDER BY nombre"
-                ).fetchall()
+                c_cols = table_columns(conn, "clientes") or set()
+                if workspace_id and "workspace_id" in c_cols:
+                    rows = conn.execute(
+                        "SELECT id, nombre, nif FROM clientes WHERE COALESCE(workspace_id, '') = ? ORDER BY nombre",
+                        (workspace_id,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute("SELECT id, nombre, nif FROM clientes ORDER BY nombre").fetchall()
             json_response(self, [dict(r) for r in rows])
             return
 
@@ -68389,6 +68553,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             nif_norm = normalize_nif(nif)
             row = conn.execute(
                 """
@@ -68403,7 +68568,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             has_service = True
             if services:
-                has_service = cliente_has_servicio(conn, row["id"], services)
+                has_service = cliente_has_servicio_in_workspace(conn, row["id"], services, workspace_id=workspace_id)
             if not has_service:
                 json_response(
                     self,
@@ -72237,6 +72402,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/clientes":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()
             estado = params.get("estado", [""])[0].strip()
@@ -72255,7 +72421,18 @@ class Handler(BaseHTTPRequestHandler):
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
-                if empresa_id:
+                empresa_id = str(empresa_id or "").strip()
+                seguros_cols = table_columns(conn, "seguros") or set()
+                if workspace_id and "workspace_id" in seguros_cols:
+                    where.append("COALESCE(s.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders = ",".join(["?"] * len(empresa_ids))
+                        where.append(f"s.empresa_id IN ({placeholders})")
+                        values.extend(empresa_ids)
+                elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
                 if q:
@@ -72310,7 +72487,18 @@ class Handler(BaseHTTPRequestHandler):
                     placeholders = ",".join(["?"] * len(services))
                     where.append(f"LOWER(ce.servicio) IN ({placeholders})")
                     values.extend(services)
-                if empresa_id:
+                empresa_id = str(empresa_id or "").strip()
+                ce_cols = table_columns(conn, "clientes_empresas") or set()
+                if workspace_id and "workspace_id" in ce_cols:
+                    where.append("COALESCE(ce.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        values.extend(empresa_ids)
+                elif empresa_id:
                     where.append("ce.empresa_id = ?")
                     values.append(empresa_id)
                 if q:
@@ -72323,6 +72511,15 @@ class Handler(BaseHTTPRequestHandler):
                     values.append(estado)
                 where_clause = f"WHERE {' AND '.join(where)}" if where else ""
                 join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
+                if workspace_id:
+                    # Además del vínculo servicio, permitimos clientes "standalone" creados dentro del workspace.
+                    c_cols = table_columns(conn, "clientes") or set()
+                    if "workspace_id" in c_cols:
+                        where_clause = (
+                            f"WHERE (COALESCE(c.workspace_id, '') = ?)"
+                            + (f" AND {' AND '.join(where)}" if where else "")
+                        )
+                        values = [workspace_id, *values]
                 rows = conn.execute(
                     f"""
                     SELECT

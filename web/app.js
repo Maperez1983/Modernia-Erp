@@ -22418,6 +22418,9 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
 	if (procedencia_user_id) clientePayload.procedencia_user_id = procedencia_user_id;
 	if (procedencia_cliente_id) clientePayload.procedencia_cliente_id = procedencia_cliente_id;
 	if (captado_por_user_id) clientePayload.captado_por_user_id = captado_por_user_id;
+  if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+    clientePayload.workspace_id = state.currentWorkspaceId;
+  }
 
   const response = await fetch("/api/clientes", {
     method: "POST",
@@ -22447,16 +22450,16 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
     throw new Error("No se pudo crear el cliente.");
   }
 
-	await postJsonWithDbRetry(
-	  "/api/clientes_link",
-	  {
-	    cliente_id: clienteId,
-	    empresa_id: empresa.id,
-	    servicio: "Inmobiliaria",
-	    captado_por_user_id: captado_por_user_id || undefined,
-	    procedencia_canal: procedencia_canal || undefined,
-	    procedencia_cliente_id: procedencia_cliente_id || undefined,
-	    estado: "Activo",
+		await postJsonWithDbRetry(
+		  "/api/clientes_link",
+		  {
+		    cliente_id: clienteId,
+		    ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : { empresa_id: empresa.id }),
+		    servicio: "Inmobiliaria",
+		    captado_por_user_id: captado_por_user_id || undefined,
+		    procedencia_canal: procedencia_canal || undefined,
+		    procedencia_cliente_id: procedencia_cliente_id || undefined,
+		    estado: "Activo",
 	    fecha_inicio: new Date().toISOString().slice(0, 10),
 	  },
 	  { retries: 2, delayMs: 140 }
@@ -39017,7 +39020,7 @@ const findHipotecaBdtRowById = (id) => {
 const linkFinanciacionServiceToCliente = async (clienteId, empresaId) => {
   const payload = {
     cliente_id: clienteId,
-    empresa_id: empresaId,
+    ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : { empresa_id: empresaId }),
     servicio: "Financiaciones",
     estado: "Activo",
     fecha_inicio: new Date().toISOString().slice(0, 10),
@@ -39040,6 +39043,9 @@ const createClienteForHipoteca = async (nombre, sourceRow, columns) => {
     nombre: String(nombre || "").trim(),
     procedencia_detalle: "Financiaciones (BDT)",
   };
+  if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+    payload.workspace_id = state.currentWorkspaceId;
+  }
   const nif = getHipotecaFieldValue(sourceRow, columns, ["nif", "dni", "documento"]);
   const telefono = getHipotecaFieldValue(sourceRow, columns, ["telefono", "movil", "teléfono"]);
   const email = getHipotecaFieldValue(sourceRow, columns, ["email", "correo"]);
@@ -41108,6 +41114,9 @@ const loadClientesList = () => {
   if (serviceParam) {
     params.set("servicio", serviceParam);
   }
+  if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+    params.set("workspace_id", state.currentWorkspaceId);
+  }
   if (SEGUROS_ONLY_UPLOADED_MODE && normalizeSimple(serviceParam || "") === "seguros") {
     const fincas = (state.empresas || []).find((e) => e.nombre === FINCAS_COMPANY);
     if (fincas?.id) params.set("empresa_id", fincas.id);
@@ -41848,6 +41857,9 @@ const loadClientesTable = () => {
   }
   if (empresaId) {
     params.set("empresa_id", empresaId);
+  }
+  if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+    params.set("workspace_id", state.currentWorkspaceId);
   }
   if (q) {
     params.set("q", q);
