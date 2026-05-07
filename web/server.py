@@ -74336,23 +74336,33 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/hipoteca_stats":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            if not empresa_id and not workspace_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+            scope_clause, scope_values = build_service_scope_filter(conn, "hipotecas", "h", workspace_id, empresa_id)
 
             total = conn.execute(
-                "SELECT COUNT(*) AS total FROM hipotecas WHERE empresa_id = ?",
-                (empresa_id,),
+                f"SELECT COUNT(*) AS total FROM hipotecas h WHERE {scope_clause}",
+                scope_values,
             ).fetchone()
 
             firmadas_mes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """
+                + scope_clause
+                + """
                   AND """
                 + signed_expr
                 + """
@@ -74363,7 +74373,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND length(fecha_firma) >= 7
                   AND substr(NULLIF(fecha_firma, ''), 1, 7) = substr(datetime('now','localtime'), 1, 7)
                 """,
-                (empresa_id,),
+                scope_values,
             ).fetchone()
 
             averages = conn.execute(
@@ -74380,7 +74390,9 @@ class Handler(BaseHTTPRequestHandler):
                   ) AS porcentaje_medio,
                   AVG(COALESCE(comision, 0)) AS comision_media
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """
+                + scope_clause
+                + """
                   AND """
                 + signed_expr
                 + """
@@ -74388,7 +74400,7 @@ class Handler(BaseHTTPRequestHandler):
                 + closed_expr
                 + """
                 """,
-                (empresa_id,),
+                scope_values,
             ).fetchone()
 
             json_response(
