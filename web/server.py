@@ -39212,114 +39212,10 @@ def fetch_workspace_detail(conn, workspace_id):
 
 def ensure_workspace_default_company(conn, workspace_id, nombre=None):
     """
-    Garantiza que el workspace tenga al menos 1 empresa vinculada (legacy + v2).
-    Esto evita que pantallas operativas se bloqueen por no tener `empresa_id`.
+    DEPRECATED (service-first): la operativa ya no debe depender de empresas.
+    Se mantiene como stub por compatibilidad con instalaciones antiguas, pero NO crea ni vincula nada.
     """
-    if not workspace_id:
-        return None
-    try:
-        ensure_workspace_core_tables(conn)
-    except Exception:
-        pass
-    now_ts = datetime.now(timezone.utc).isoformat()
-    # ¿Ya hay alguna empresa v2 o legacy?
-    try:
-        any_v2 = conn.execute(
-            "SELECT id, legacy_empresa_id, nombre FROM workspace_companies WHERE workspace_id = ? AND COALESCE(activo, 1) = 1 ORDER BY nombre COLLATE NOCASE ASC LIMIT 1",
-            (workspace_id,),
-        ).fetchone()
-        if any_v2:
-            return dict(any_v2)
-    except Exception:
-        pass
-    try:
-        any_legacy = conn.execute(
-            """
-            SELECT e.id, e.nombre, COALESCE(e.nif, '') AS nif, COALESCE(e.direccion, '') AS direccion
-            FROM workspace_empresas we
-            JOIN empresas e ON e.id = we.empresa_id
-            WHERE we.workspace_id = ?
-            ORDER BY e.nombre COLLATE NOCASE ASC
-            LIMIT 1
-            """,
-            (workspace_id,),
-        ).fetchone()
-        if any_legacy:
-            # Backfill v2 desde el legacy encontrado.
-            company_id = uuid.uuid4().hex
-            conn.execute(
-                """
-                INSERT INTO workspace_companies (
-                  id, workspace_id, legacy_empresa_id, nombre, nif, direccion,
-                  logo_url, primary_color, accent_color, activo, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, '', '', '', 1, ?, ?)
-                """,
-                (
-                    company_id,
-                    workspace_id,
-                    str(row_value(any_legacy, "id") or row_value(any_legacy, 0) or "").strip() or None,
-                    str(row_value(any_legacy, "nombre") or "-").strip() or "-",
-                    str(row_value(any_legacy, "nif") or "").strip(),
-                    str(row_value(any_legacy, "direccion") or "").strip(),
-                    now_ts,
-                    now_ts,
-                ),
-            )
-            try:
-                conn.commit()
-            except Exception:
-                pass
-            return {"id": company_id, "legacy_empresa_id": str(row_value(any_legacy, "id") or "")}
-    except Exception:
-        pass
-
-    # No hay nada: crea una empresa por defecto (workspace -> empresa).
-    if not nombre:
-        try:
-            w = conn.execute("SELECT nombre FROM workspaces WHERE id = ? LIMIT 1", (workspace_id,)).fetchone()
-            nombre = str(row_value(w, "nombre") or row_value(w, 0) or "").strip()
-        except Exception:
-            nombre = ""
-    nombre = nombre or "Empresa"
-
-    legacy_empresa_id = ""
-    try:
-        existing = conn.execute(
-            "SELECT id FROM empresas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?)) LIMIT 1",
-            (nombre,),
-        ).fetchone()
-        if existing:
-            legacy_empresa_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip()
-    except Exception:
-        legacy_empresa_id = ""
-    if not legacy_empresa_id:
-        legacy_empresa_id = uuid.uuid4().hex
-        conn.execute(
-            """
-            INSERT INTO empresas (id, nombre, activo, logo_url, nif, direccion, created_at, updated_at)
-            VALUES (?, ?, 1, '', '', '', datetime(?), datetime(?))
-            """,
-            (legacy_empresa_id, nombre, now_ts, now_ts),
-        )
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at)
-        VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
-        """,
-        (uuid.uuid4().hex, workspace_id, legacy_empresa_id, now_ts, now_ts),
-    )
-    company_id = uuid.uuid4().hex
-    conn.execute(
-        """
-        INSERT INTO workspace_companies (
-          id, workspace_id, legacy_empresa_id, nombre, nif, direccion,
-          logo_url, primary_color, accent_color, activo, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, '', '', '', '', '', 1, ?, ?)
-        """,
-        (company_id, workspace_id, legacy_empresa_id, nombre, now_ts, now_ts),
-    )
-    conn.commit()
-    return {"id": company_id, "legacy_empresa_id": legacy_empresa_id, "nombre": nombre}
+    return None
 
 
 def fetch_workspace_billing_summary(conn, workspace_id):
@@ -66059,14 +65955,7 @@ class Handler(BaseHTTPRequestHandler):
             if not payload:
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
-            # Si el workspace no tiene empresas todavía, crea una por defecto (sin obligar al usuario).
-            # Esto evita que módulos legacy se bloqueen por no tener empresa_id.
-            try:
-                if not (payload.get("companies_v2") or payload.get("companies")):
-                    ensure_workspace_default_company(conn, workspace_id, nombre=(payload.get("workspace") or {}).get("nombre") or "")
-                    payload = fetch_workspace_detail(conn, workspace_id) or payload
-            except Exception:
-                pass
+            # Service-first: NO autocreamos empresas. La operativa no debe depender de ellas.
             # Contexto del actor (rol dentro del workspace) para el front en modo tenant.
             session = getattr(self, "auth_session", None) or self._current_session()
             member_role = ""
