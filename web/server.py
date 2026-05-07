@@ -26440,9 +26440,12 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
     if not matchers:
         return {"kpis": {}, "items": []}
 
+    # `clientes_empresas.servicio` es texto libre y a menudo incluye sufijos ("Gestoría - ...", "Fincas ...").
+    # Usamos un filtro laxo por substring para no dejar la productividad a 0.
+    # Nota: `LOWER()` no elimina tildes, pero "gestoría" sigue conteniendo "gestor", así que funciona.
     service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
+        "(LOWER(COALESCE(ce.servicio,'')) LIKE '%gestor%' "
+        " OR LOWER(COALESCE(ce.servicio,'')) LIKE '%finca%')"
     )
     rows = conn.execute(
         f"""
