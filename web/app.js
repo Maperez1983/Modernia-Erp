@@ -21372,7 +21372,12 @@ const openCompany = (empresaName, options = {}) => {
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
     if (isTenantWorkspaceMode()) {
-      alert("Este workspace no tiene empresas vinculadas (o no está cargado). Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      try {
+        setUiToast(
+          "Falta empresa en el workspace",
+          "No hay ninguna empresa vinculada o aún no se ha cargado. Ve a Workspaces → Empresas para crear/vincularla."
+        );
+      } catch (e) {}
       return;
     }
     if (!state.empresas.length) {
@@ -21967,7 +21972,12 @@ const openCrmInmobiliario = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      try {
+        setUiToast(
+          "Falta empresa en el workspace",
+          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
+        );
+      } catch (e) {}
       return;
     }
     state.empresas = companies;
@@ -23477,7 +23487,12 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      try {
+        setUiToast(
+          "Falta empresa en el workspace",
+          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
+        );
+      } catch (e) {}
       return;
     }
     state.empresas = companies;
@@ -23493,7 +23508,12 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   if (!empresa) {
     // En modo tenant NO intentamos caer a /api/empresas global (mezcla datos y confunde al usuario).
     if (isTenantWorkspaceMode()) {
-      alert("No se pudo abrir Gestoría en este workspace: no hay empresa activa. Ve a Workspaces → Empresas y selecciona/activa una empresa para este workspace.");
+      try {
+        setUiToast(
+          "Gestoría: falta empresa activa",
+          "Selecciona/activa una empresa del workspace en Workspaces → Empresas."
+        );
+      } catch (e) {}
       return;
     }
     if (canRetryEmpresas) {
@@ -23611,7 +23631,12 @@ const openSegurosCrm = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      try {
+        setUiToast(
+          "Falta empresa en el workspace",
+          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
+        );
+      } catch (e) {}
       return;
     }
     state.empresas = companies;
@@ -23678,7 +23703,12 @@ const openFinCrm = () => {
   if (isTenantWorkspaceMode()) {
     const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
-      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      try {
+        setUiToast(
+          "Falta empresa en el workspace",
+          "No hay ninguna empresa vinculada. Ve a Workspaces → Empresas para crear/vincularla."
+        );
+      } catch (e) {}
       return;
     }
     state.empresas = companies;
