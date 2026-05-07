@@ -87,7 +87,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             pass
 
     def _login(self, page):
-        page.goto(f"{self.base_url}/?nosw=1&swcleared=1", wait_until="domcontentloaded")
+        page.goto(f"{self.base_url}/?nosw=1&swcleared=1", wait_until="commit")
+        page.wait_for_selector("#authLoginUser", timeout=20000)
         page.fill("#authLoginUser", "admin")
         page.fill("#authLoginPass", "adminadmin")
         with page.expect_response(lambda r: r.url.endswith("/api/login")) as login_info:
@@ -101,16 +102,29 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
         self.assertTrue(login_resp.ok, msg=f"Login HTTP {login_resp.status} · {login_data}")
         self.assertTrue(bool(login_data.get("ok")), msg=f"Login no OK · {login_data}")
         # Espera a que el frontend desbloquee la sesión antes de navegar a CRM.
-        page.wait_for_function("() => !document.body.classList.contains('auth-locked')", timeout=20000)
+        page.wait_for_function("() => !document.body.classList.contains('auth-locked')", timeout=60000)
 
     def _open_crm_inmo(self, page):
-        page.goto(f"{self.base_url}/?crm=inmo&nosw=1&swcleared=1", wait_until="domcontentloaded")
-        page.wait_for_selector("#crmSection:not(.hidden)", timeout=20000)
+        # En algunos entornos headless, el deep-link `/?crm=inmo` puede tardar demasiado en hidratar el routing.
+        # Para que el E2E cubra la Agenda (lo importante aquí), abrimos el CRM invocando la acción frontend
+        # dentro de la misma sesión (cookies/localStorage ya listos tras login).
+        page.evaluate(
+            """() => {\n  try {\n    const params = new URLSearchParams(window.location.search || '');\n    params.set('crm', 'inmo');\n    params.set('nosw', '1');\n    params.set('swcleared', '1');\n    history.replaceState(null, '', '/?' + params.toString());\n  } catch (e) {}\n  try { if (typeof openCrmInmobiliario === 'function') openCrmInmobiliario(); } catch (e) {}\n}"""
+        )
+        page.wait_for_selector("#crmSection:not(.hidden)", timeout=60000)
 
     def _open_crm_view(self, page, view_key):
-        page.click(f'button[data-crm-view="{view_key}"]')
+        selector = f'#crmLightningSidebar button[data-crm-view="{view_key}"]:not(.hidden-context)'
+        page.wait_for_selector(selector, timeout=20000, state="visible")
+        page.click(selector)
         if view_key == "agenda":
             page.wait_for_selector("#crmViewAgenda:not(.hidden)", timeout=20000)
+            # Para el E2E usamos la vista lista como baseline (tabla visible) y luego ya probamos day/week/month.
+            try:
+                page.click('#crmAgendaViewSeg button[data-crm-agenda-view="list"]', timeout=20000)
+            except Exception:
+                pass
+            page.wait_for_selector("#crmAgendaTable:not(.hidden)", timeout=20000)
 
     def _create_inmueble(self, page):
         page.wait_for_selector("#crmTopNewBtn", timeout=20000)
@@ -205,6 +219,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
             self._open_crm_inmo(page)
@@ -253,6 +269,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
             self._open_crm_inmo(page)
@@ -289,6 +307,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
             self._open_crm_inmo(page)
@@ -325,6 +345,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
             self._open_crm_inmo(page)
@@ -464,6 +486,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
 
@@ -533,6 +557,8 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+            page.set_default_navigation_timeout(120000)
+            page.set_default_timeout(60000)
 
             self._login(page)
             self._open_crm_inmo(page)

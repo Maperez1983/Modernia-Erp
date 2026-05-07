@@ -21665,6 +21665,12 @@ const resolveCrmTecnocloudVertical = () => {
   if (tab === "seguros-crm") return "seguros";
   if (tab === "fin-crm" || tab === "fin-sim") return "fin";
   if (tab === "crm") {
+    // Si la URL fuerza vertical (`?crm=inmo|fin|seguros|gestoria`) debe tener prioridad incluso
+    // cuando `state.crmWorkspaceView` venga persistido de otra sesión/vertical.
+    if (crmContext === "gestoria") return "gestoria";
+    if (crmContext === "seguros") return "seguros";
+    if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") return "fin";
+    if (crmContext === "inmo" || crmContext === "inmobiliaria") return "inmo";
     const view = String(state.crmWorkspaceView || "").trim();
     if (view === "fin") return "fin";
     if (view === "seguros") return "seguros";
@@ -21704,6 +21710,15 @@ const syncCrmTecnocloudVerticalNav = () => {
   const isGestoria = vertical === "gestoria";
   const isInmo = vertical === "inmo";
   const isFin = vertical === "fin";
+  // Hardening: si la URL fuerza `?crm=inmo`, nunca ocultes las vistas base de Inmobiliaria.
+  // (En algunos arranques/headless el contexto puede tardar y acabar marcando hidden-context
+  // en botones críticos como Agenda.)
+  let forcedCrm = "";
+  try {
+    forcedCrm = String(new URLSearchParams(window.location.search || "").get("crm") || "").trim().toLowerCase();
+  } catch (e) {
+    forcedCrm = "";
+  }
   const allowedViews =
     vertical === "seguros"
       ? new Set(["seguros"])
@@ -21728,12 +21743,22 @@ const syncCrmTecnocloudVerticalNav = () => {
               "edificios",
               "legal",
             ]);
+  if (forcedCrm === "inmo" || forcedCrm === "inmobiliaria") {
+    ["resumen", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach((k) =>
+      allowedViews.add(k)
+    );
+  }
 
   const applyToRoot = (root) => {
     if (!root) return;
     root.querySelectorAll("[data-crm-view]").forEach((btn) => {
       const key = String(btn.dataset.crmView || "").trim();
       if (!key) return;
+      // Hard guarantee: en contexto `?crm=inmo` Agenda nunca debe quedar oculta.
+      if ((forcedCrm === "inmo" || forcedCrm === "inmobiliaria") && key === "agenda") {
+        btn.classList.remove("hidden-context");
+        return;
+      }
       btn.classList.toggle("hidden-context", !allowedViews.has(key));
     });
   };
@@ -21847,6 +21872,60 @@ const syncCrmTecnocloudVerticalNav = () => {
   }
 };
 
+// Algunos arranques (especialmente en headless / deep-links) pueden renderizar la sidebar antes de que
+// se ejecute `updateTableVisibility()`/`syncCrmTecnocloudVerticalNav()`, dejando botones con `hidden-context`
+// aunque el usuario haya forzado `?crm=inmo`. Esto rompe navegación (Agenda) y tests E2E.
+const ensureCrmForcedInmoNavVisibility = () => {
+  let forced = "";
+  try {
+    forced = String(new URLSearchParams(window.location.search || "").get("crm") || "").trim().toLowerCase();
+  } catch (e) {
+    forced = "";
+  }
+  if (!(forced === "inmo" || forced === "inmobiliaria")) return false;
+
+  const unhide = (root) => {
+    if (!root) return;
+    ["resumen", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach(
+      (key) => {
+        root.querySelectorAll(`[data-crm-view="${key}"]`).forEach((btn) => btn.classList.remove("hidden-context"));
+      }
+    );
+  };
+  unhide(crmWorkspaceTabs);
+  unhide(crmLightningSidebar);
+  return true;
+};
+
+try {
+  if (ensureCrmForcedInmoNavVisibility()) {
+    window.requestAnimationFrame(() => {
+      try {
+        ensureCrmForcedInmoNavVisibility();
+      } catch (e) {}
+    });
+    if (crmLightningSidebar && typeof MutationObserver !== "undefined") {
+      const obs = new MutationObserver(() => {
+        try {
+          ensureCrmForcedInmoNavVisibility();
+        } catch (e) {}
+        try {
+          const agendaBtn = crmLightningSidebar.querySelector('[data-crm-view="agenda"]');
+          if (agendaBtn && !agendaBtn.classList.contains("hidden-context")) {
+            obs.disconnect();
+          }
+        } catch (e) {}
+      });
+      obs.observe(crmLightningSidebar, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      window.setTimeout(() => {
+        try {
+          obs.disconnect();
+        } catch (e) {}
+      }, 60000);
+    }
+  }
+} catch (e) {}
+
 const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
@@ -21925,6 +22004,15 @@ const openCrmInmobiliario = () => {
   currentParams.delete("poliza");
   currentParams.set("crm", "inmo");
   setUrlParams(currentParams);
+  // Asegura navegación base visible incluso si la URL venía sin `crm=inmo` (openCompany puede haberla sobrescrito).
+  try {
+    ensureCrmForcedInmoNavVisibility();
+    window.setTimeout(() => {
+      try {
+        ensureCrmForcedInmoNavVisibility();
+      } catch (e) {}
+    }, 0);
+  } catch (e) {}
   // UX admin: si llega desde Home (sin ruta explícita), no persistimos un deep-link que haga
   // que un hard refresh "arranque" dentro del CRM en vez de mostrar la Home.
   try {
@@ -34739,6 +34827,13 @@ const updateTableVisibility = () => {
       crmContext === "hipotecas"
   );
   syncCrmTecnocloudVerticalNav();
+  // Hardening: si la URL fuerza Inmobiliaria, asegura que Agenda nunca queda oculta
+  // por un estado previo (p.ej. arranques headless / cache / secuencias raras).
+  try {
+    if ((crmContext === "inmo" || crmContext === "inmobiliaria") && crmLightningSidebar) {
+      crmLightningSidebar.querySelectorAll('[data-crm-view="agenda"]').forEach((btn) => btn.classList.remove("hidden-context"));
+    }
+  } catch (e) {}
 
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
@@ -67903,6 +67998,20 @@ if (crmLightningSidebar) {
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     const view = String(btn.dataset.crmView || "").trim();
+    if (view === "agenda") {
+      // Paridad con tabs superiores: en Agenda, además de cambiar la vista, cargamos datos y respetamos
+      // atajos de apertura (día/semana/mes) si existen.
+      const desired = normalizeCrmAgendaView(btn.dataset.crmAgendaOpen || state.crmAgendaView || "week");
+      try {
+        setCrmAgendaAnchorDay(formatAgendaDate(new Date()));
+      } catch (e) {}
+      try {
+        setCrmAgendaView(desired);
+      } catch (e) {}
+      setCrmWorkspaceView("agenda");
+      loadCrmAgenda();
+      return;
+    }
     setCrmWorkspaceView(view);
     const etapa = String(btn.dataset.etapa || "").trim();
     if (view === "captaciones" && etapa) {
