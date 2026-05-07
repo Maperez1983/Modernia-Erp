@@ -1242,6 +1242,19 @@ def infer_empresa_id_for_payload(conn, payload):
     current = str(payload.get("empresa_id") or "").strip()
     if current:
         return current
+    # Service-first: si viene workspace_id, evitamos bloquear endpoints legacy que aún exigen empresa_id.
+    # Usamos una empresa técnica única (Verifika2) como fallback; el aislamiento real lo hace workspace_id.
+    try:
+        ws_id = str(payload.get("workspace_id") or "").strip()
+    except Exception:
+        ws_id = ""
+    if ws_id:
+        try:
+            platform_eid = get_platform_empresa_id(conn)
+            if platform_eid:
+                return str(platform_eid).strip()
+        except Exception:
+            pass
     nombre = str(payload.get("empresa_nombre") or payload.get("empresa") or "").strip()
     if nombre:
         try:
@@ -33306,6 +33319,39 @@ def fetch_workspace_company_ids(conn, workspace_id):
     return fallback
 
 
+def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: str, empresa_id: str):
+    """
+    Devuelve (where_sql, values) para filtrar una tabla por scope.
+    Regla:
+      - Si hay workspace_id y la tabla tiene columna workspace_id -> filtra por workspace_id.
+      - Si no tiene workspace_id pero tiene empresa_id -> filtra por empresas vinculadas al workspace (o empresa técnica).
+      - Si no hay workspace_id -> filtra por empresa_id cuando aplica.
+    """
+    ws_id = str(workspace_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
+    cols = table_columns(conn, table_name) or set()
+    if ws_id:
+        if "workspace_id" in cols:
+            return (f"COALESCE({alias}.workspace_id, '') = ?", [ws_id])
+        if "empresa_id" in cols:
+            empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
+            if not empresa_ids:
+                try:
+                    platform_eid = get_platform_empresa_id(conn)
+                    if platform_eid:
+                        empresa_ids = [platform_eid]
+                except Exception:
+                    empresa_ids = []
+            if not empresa_ids:
+                return ("1=0", [])
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            return (f"{alias}.empresa_id IN ({placeholders})", list(empresa_ids))
+        return ("1=1", [])
+    if empresa_id and "empresa_id" in cols:
+        return (f"{alias}.empresa_id = ?", [empresa_id])
+    return ("1=1", [])
+
+
 def resolve_workspace_company_ids(conn, workspace_id, empresa_id=None):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
@@ -46674,6 +46720,7 @@ class Handler(BaseHTTPRequestHandler):
 
         empresa_nombre = payload.get("empresa_nombre")
         path_value = str(parsed.path or "")
+        payload_workspace_id = str(payload.get("workspace_id") or "").strip() if isinstance(payload, dict) else ""
         empresa_scope_exempt = (
             path_value.startswith("/api/workspace_")
             or path_value.startswith("/api/legal_")
@@ -46681,6 +46728,7 @@ class Handler(BaseHTTPRequestHandler):
             or path_value.startswith("/api/iivtnu_")
             or path_value.startswith("/api/irpf_")
             or path_value.startswith("/api/fiscal_")
+            or bool(payload_workspace_id)
             or path_value
             in {
                 "/api/convenios_catalog",
@@ -70817,11 +70865,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_docs":
             cliente_id = params.get("cliente_id", [""])[0]
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             service = (params.get("service", [""])[0] or "").strip().lower()
             limit = params.get("limit", [""])[0]
-            if not cliente_id and not empresa_id:
-                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+            if not cliente_id and not empresa_id and not workspace_id:
+                json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
 
             if cliente_id:
@@ -71008,7 +71057,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit_key = 50
             limit_key = max(1, min(200, int(limit_key)))
-            cache_key = (str(empresa_id or "").strip(), int(limit_key))
+            cache_key = (str(workspace_id or "").strip(), str(empresa_id or "").strip(), int(limit_key))
             now_ts = time.time()
             try:
                 with Handler._gestoria_docs_recent_lock:
@@ -71018,17 +71067,19 @@ class Handler(BaseHTTPRequestHandler):
                         return
             except Exception:
                 pass
+            # Service-first: permitir listado por workspace sin empresa explícita.
+            scope_clause, scope_values = build_service_scope_filter(conn, "gestoria_docs", "d", workspace_id, empresa_id)
             rows = conn.execute(
                 f"""
                 SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_docs d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE d.empresa_id = ?
+                WHERE {scope_clause}
                 ORDER BY d.fecha DESC
                 {limit_clause}
                 """,
-                (empresa_id,),
+                scope_values,
             ).fetchall()
             payload = {"rows": [dict(r) for r in rows]}
             try:
@@ -71046,10 +71097,23 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_contabilidad":
             try:
-                empresa_id = params.get("empresa_id", [""])[0]
-                if not empresa_id:
-                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+                empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+                if workspace_id:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
+                if not empresa_id and not workspace_id:
+                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                     return
+                empresa_id_effective = empresa_id
+                if not empresa_id_effective:
+                    try:
+                        empresa_id_effective = get_platform_empresa_id(conn) or ""
+                    except Exception:
+                        empresa_id_effective = ""
                 q = params.get("q", [""])[0].strip()
                 limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
                 try:
@@ -71065,17 +71129,18 @@ class Handler(BaseHTTPRequestHandler):
                 # Importante: NO ejecutar sync pesado dentro del request (provoca 502/timeouts).
                 if hipotecas_only and (want_sync or _hipotecas_sync_enabled()):
                     try:
-                        sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id)
+                        sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id_effective)
                     except Exception:
                         sync_state = {"scheduled": False, "reason": "schedule_failed"}
                 if seguros_only and (want_sync or _seguros_sync_enabled()):
                     try:
-                        seguros_sync_state = schedule_seguros_contabilidad_sync(self.db_path, empresa_id)
+                        seguros_sync_state = schedule_seguros_contabilidad_sync(self.db_path, empresa_id_effective)
                     except Exception:
                         seguros_sync_state = {"scheduled": False, "reason": "schedule_failed"}
 
-                where = ["gc.empresa_id = ?"]
-                values = [empresa_id]
+                scope_clause, scope_values = build_service_scope_filter(conn, "gestoria_contabilidad", "gc", workspace_id, empresa_id)
+                where = [scope_clause]
+                values = list(scope_values)
                 if seguros_only:
                     where.append(seguros_contabilidad_where_clause("gc"))
                 if hipotecas_only:
@@ -77948,7 +78013,8 @@ class Handler(BaseHTTPRequestHandler):
                 # SQLite identifiers: double-quote and escape double quotes.
                 return '"' + str(value or "").replace('"', '""') + '"'
 
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             year_filter = params.get("year", [""])[0].strip()
@@ -78000,7 +78066,30 @@ class Handler(BaseHTTPRequestHandler):
 
             where = []
             values = []
-            if empresa_id:
+            # Service-first: prefer workspace_id scope when present.
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                if "workspace_id" in columns:
+                    where.append("COALESCE(t.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif "empresa_id" in columns:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if not empresa_ids:
+                        json_response(self, {"columns": ["empresa"] + visible_columns, "rows": []})
+                        return
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.append(f"t.empresa_id IN ({placeholders_ws})")
+                    values.extend(empresa_ids)
+                # else: tabla sin columna de scope: devolvemos sin filtrar (solo para catálogos globales).
+            elif empresa_id:
                 where.append("t.empresa_id = ?")
                 values.append(empresa_id)
             if tabla == "seguros":
@@ -78009,7 +78098,7 @@ class Handler(BaseHTTPRequestHandler):
                     resolve_uploaded_only_param(
                         conn,
                         uploaded_only,
-                        empresa_id=empresa_id,
+                        empresa_id=empresa_id or "",
                         uploaded_clause=uploaded_policy_filter(),
                     )
                 )
