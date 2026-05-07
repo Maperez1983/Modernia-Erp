@@ -3036,36 +3036,54 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         (empresa_id, uploaded_param),
     ).fetchall()
 
+    # Comisionado debe basarse en Contabilidad (ingresos), no en el campo `seguros.comision`.
+    # Se enlaza con la póliza para agrupar por compañía/ramo cuando es posible.
     comision_companias = conn.execute(
         f"""
         SELECT
           COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
-          SUM(COALESCE({_money_sql('s.comision')}, 0)) AS total
-        FROM seguros s
-        WHERE s.empresa_id = ?
+          SUM(COALESCE({_money_sql('gc.importe')}, 0)) AS total
+        FROM gestoria_contabilidad gc
+        LEFT JOIN seguros s
+          ON s.empresa_id = gc.empresa_id
+         AND (
+           (gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> '' AND s.id = gc.seguro_id)
+           OR (gc.poliza_numero IS NOT NULL AND TRIM(gc.poliza_numero) <> '' AND TRIM(s.poliza_numero) = TRIM(gc.poliza_numero))
+         )
+        WHERE gc.empresa_id = ?
+          AND {seguros_contabilidad_where_clause('gc')}
+          AND substr(NULLIF(gc.fecha, ''), 1, 4) = ?
+          AND LOWER(TRIM(COALESCE(gc.tipo, ''))) <> 'gasto'
           AND ({uploaded_clause} OR ? = 0)
-          AND {exclude_sin_seguro}
-          AND {in_vigor_expr}
+          AND ({exclude_sin_seguro} OR s.id IS NULL)
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param),
+        (empresa_id, year, uploaded_param),
     ).fetchall()
 
     comision_ramos = conn.execute(
         f"""
         SELECT
           COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
-          SUM(COALESCE({_money_sql('s.comision')}, 0)) AS total
-        FROM seguros s
-        WHERE s.empresa_id = ?
+          SUM(COALESCE({_money_sql('gc.importe')}, 0)) AS total
+        FROM gestoria_contabilidad gc
+        LEFT JOIN seguros s
+          ON s.empresa_id = gc.empresa_id
+         AND (
+           (gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> '' AND s.id = gc.seguro_id)
+           OR (gc.poliza_numero IS NOT NULL AND TRIM(gc.poliza_numero) <> '' AND TRIM(s.poliza_numero) = TRIM(gc.poliza_numero))
+         )
+        WHERE gc.empresa_id = ?
+          AND {seguros_contabilidad_where_clause('gc')}
+          AND substr(NULLIF(gc.fecha, ''), 1, 4) = ?
+          AND LOWER(TRIM(COALESCE(gc.tipo, ''))) <> 'gasto'
           AND ({uploaded_clause} OR ? = 0)
-          AND {exclude_sin_seguro}
-          AND {in_vigor_expr}
+          AND ({exclude_sin_seguro} OR s.id IS NULL)
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param),
+        (empresa_id, year, uploaded_param),
     ).fetchall()
 
     prima_companias = conn.execute(
