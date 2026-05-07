@@ -20707,6 +20707,15 @@ const loadWorkspaceDetail = async (workspaceId) => {
   } else {
     canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
   }
+  // Normaliza companies: muchas pantallas legacy consumen `detail.companies`.
+  // En modo v2 (workspace_companies) preferimos `companies_v2`, pero exponemos también el array unificado en `companies`
+  // para no romper dependencias antiguas (RRHH, formularios, openCompany, etc.).
+  try {
+    const companiesV2 = Array.isArray(detail?.companies_v2) ? detail.companies_v2 : [];
+    const companiesLegacy = Array.isArray(detail?.companies) ? detail.companies : [];
+    const unified = companiesV2.length ? companiesV2 : companiesLegacy;
+    detail.companies = unified;
+  } catch (e) {}
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
