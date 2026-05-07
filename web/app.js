@@ -40337,7 +40337,32 @@ const renderFincasDashboard = (empresaId) => {
     fincasDashboardKpis.classList.remove("hidden");
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
-    const seriesEnVigorMes = data.series_en_vigor_mes || [];
+    const normalizeMonthKey = (raw) => {
+      const s = String(raw || "").trim();
+      const match = s.match(/^(\d{4})-(\d{2})/);
+      return match ? `${match[1]}-${match[2]}` : s;
+    };
+    const normalizeSeriesEnVigorMes = (rows = []) => {
+      const bucket = new Map();
+      (rows || []).forEach((row) => {
+        const key = normalizeMonthKey(row?.month);
+        if (!/^\d{4}-\d{2}$/.test(key)) return;
+        const value = Number(row?.altas ?? row?.total ?? 0) || 0;
+        bucket.set(key, (bucket.get(key) || 0) + value);
+      });
+      const keys = Array.from(bucket.keys()).sort();
+      let acumulado = 0;
+      return keys.map((key) => {
+        const altas = Number(bucket.get(key) || 0) || 0;
+        acumulado += altas;
+        return { month: key, altas, acumulado };
+      });
+    };
+    const rawSeriesEnVigorMes = data.series_en_vigor_mes || [];
+    const seriesEnVigorMes =
+      rawSeriesEnVigorMes.length > 18
+        ? normalizeSeriesEnVigorMes(rawSeriesEnVigorMes)
+        : rawSeriesEnVigorMes;
     const seriesMesEfecto = data.series_polizas_mes_efecto || [];
     const seriesMesCreacion = data.series_polizas_mes_creacion || [];
     syncFincasDashboardYearSelector(series, selectedYear);
@@ -40494,14 +40519,14 @@ const renderFincasDashboard = (empresaId) => {
             yAxis: "right",
             lineWidth: 3,
             pointRadius: 3,
-            showPointValues: true,
-            pointLabelStep: 2,
+            showPointValues: seriesEnVigorMes.length <= 14,
+            pointLabelStep: seriesEnVigorMes.length > 10 ? 3 : 2,
           },
         ],
         {
           legend: true,
           legendPosition: "right",
-          showValues: true,
+          showValues: seriesEnVigorMes.length <= 14,
           tooltip: true,
           secondaryAxisFormat: (value) => numberFormatter.format(Math.round(Number(value || 0))),
         }

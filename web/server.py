@@ -2810,9 +2810,13 @@ def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
 def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_only):
     empresa_id = str(empresa_id or "").strip()
     year = str(year or "").strip()
+    is_pg = db_is_postgres_enabled()
     if not year:
         try:
-            year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
+            if is_pg:
+                year = str(datetime.now().year)
+            else:
+                year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
         except Exception:
             year = str(datetime.now().year)
 
@@ -2836,8 +2840,14 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         estado_bucket_expr = "'en_vigor'"
         in_vigor_expr = "1=1"
     fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
-    year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
-    month_expr = f"COALESCE(STRFTIME('%Y-%m', {fecha_efecto_date}), STRFTIME('%Y-%m', s.created_at))"
+    if is_pg:
+        efecto_as_date = f"CAST({fecha_efecto_date} AS DATE)"
+        created_as_date = "CAST(s.created_at AS DATE)"
+        year_expr = f"COALESCE(TO_CHAR({efecto_as_date}, 'YYYY'), TO_CHAR({created_as_date}, 'YYYY'))"
+        month_expr = f"COALESCE(TO_CHAR({efecto_as_date}, 'YYYY-MM'), TO_CHAR({created_as_date}, 'YYYY-MM'))"
+    else:
+        year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
+        month_expr = f"COALESCE(STRFTIME('%Y-%m', {fecha_efecto_date}), STRFTIME('%Y-%m', s.created_at))"
     compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
     exclude_sin_seguro = f"({compania_expr} != 'sin seguro')"
 
@@ -2968,8 +2978,12 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
     # Series adicionales para medir "entrada" de pólizas:
     # - Por mes de efecto (fecha_efecto)
     # - Por mes de creación (created_at)
-    effect_month_expr = f"STRFTIME('%Y-%m', {fecha_efecto_date})"
-    created_month_expr = "STRFTIME('%Y-%m', s.created_at)"
+    if is_pg:
+        effect_month_expr = f"TO_CHAR(CAST({fecha_efecto_date} AS DATE), 'YYYY-MM')"
+        created_month_expr = "TO_CHAR(CAST(s.created_at AS DATE), 'YYYY-MM')"
+    else:
+        effect_month_expr = f"STRFTIME('%Y-%m', {fecha_efecto_date})"
+        created_month_expr = "STRFTIME('%Y-%m', s.created_at)"
     effect_month_rows = conn.execute(
         f"""
         SELECT
@@ -3087,8 +3101,12 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
     ).fetchall()
 
     fecha_venc_date = seguro_date_sql("fecha_vencimiento", "s")
-    fecha_venc_eff = f"COALESCE({fecha_venc_date}, DATE({fecha_efecto_date}, '+1 year'))"
-    month_venc_expr = f"STRFTIME('%Y-%m', {fecha_venc_eff})"
+    if is_pg:
+        fecha_venc_eff = f"COALESCE(CAST({fecha_venc_date} AS DATE), (CAST({fecha_efecto_date} AS DATE) + INTERVAL '1 year')::date)"
+        month_venc_expr = f"TO_CHAR(CAST({fecha_venc_eff} AS DATE), 'YYYY-MM')"
+    else:
+        fecha_venc_eff = f"COALESCE({fecha_venc_date}, DATE({fecha_efecto_date}, '+1 year'))"
+        month_venc_expr = f"STRFTIME('%Y-%m', {fecha_venc_eff})"
     renov_series = conn.execute(
         f"""
         SELECT
