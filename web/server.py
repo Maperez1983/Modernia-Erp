@@ -30077,6 +30077,38 @@ def ensure_tables(db_path):
             _migration_mark(conn, "service_first_clientes_v1")
     except Exception:
         pass
+    # === Service-first (inmobiliaria) ===
+    # Aislar Inmuebles/Operaciones por workspace sin depender de empresa.
+    try:
+        if not _migration_done(conn, "service_first_inmo_v1"):
+            for t in ["inmuebles", "captaciones", "operaciones_inmobiliarias", "demandas", "visitas"]:
+                try:
+                    ensure_column(conn, t, "workspace_id", "workspace_id TEXT")
+                except Exception:
+                    pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_inmuebles_ws_created ON inmuebles (workspace_id, created_at)")
+            except Exception:
+                pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_operaciones_ws_created ON operaciones_inmobiliarias (workspace_id, created_at)")
+            except Exception:
+                pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_demandas_ws_created ON demandas (workspace_id, created_at)")
+            except Exception:
+                pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_visitas_ws_fecha ON visitas (workspace_id, fecha)")
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            _migration_mark(conn, "service_first_inmo_v1")
+    except Exception:
+        pass
     # Clientes: atributo de captación/recomendación (distinto de "responsable").
     # `schema.sql` solo crea tablas; en instalaciones existentes añadimos columnas en best-effort.
     try:
@@ -46378,8 +46410,24 @@ class Handler(BaseHTTPRequestHandler):
                     session_tmp = getattr(self, "auth_session", None) or self._current_session()
                     if session_tmp and (not workspace_actor_is_privileged(conn, session_tmp)):
                         eid = str(payload.get("empresa_id") or "").strip()
-                        # Service-first: acciones (agenda) se acotan por workspace_id+servicio, no por empresa_id.
-                        skip_empresa_enforce = parsed.path in {"/api/acciones", "/api/acciones_update", "/api/acciones_delete"} and str(payload.get("workspace_id") or "").strip()
+                        # Service-first: estos endpoints se acotan por workspace_id (no por empresa_id).
+                        skip_empresa_enforce = (
+                            str(payload.get("workspace_id") or "").strip()
+                            and parsed.path
+                            in {
+                                "/api/acciones",
+                                "/api/acciones_update",
+                                "/api/acciones_delete",
+                                "/api/inmueble_update",
+                                "/api/inmueble_delete",
+                                "/api/captaciones",
+                                "/api/captaciones_update",
+                                "/api/compraventas_close",
+                                "/api/captacion_update",
+                                "/api/captacion_delete",
+                                "/api/captacion_convert",
+                            }
+                        )
                         if eid and not skip_empresa_enforce:
                             ok, err = enforce_empresa_membership(conn, session_tmp, eid, write=True)
                             if not ok:
@@ -46845,6 +46893,39 @@ class Handler(BaseHTTPRequestHandler):
                         "SELECT id FROM empresas WHERE id = ? LIMIT 1",
                         (platform_eid,),
                     ).fetchone()
+        # Service-first (Inmobiliaria): en modo tenant, los endpoints de inmuebles/captaciones/demandas/visitas
+        # deben depender de workspace+servicio. Por legacy, muchas tablas aún requieren `empresa_id NOT NULL`,
+        # así que usamos una empresa técnica única (Verifika2) cuando no viene empresa explícita.
+        if (not empresa) and isinstance(payload, dict):
+            try:
+                ws_id = str(payload.get("workspace_id") or "").strip()
+            except Exception:
+                ws_id = ""
+            if ws_id and (
+                str(parsed.path or "").startswith("/api/capt")
+                or str(parsed.path or "").startswith("/api/inmueble")
+                or str(parsed.path or "").startswith("/api/demandas")
+                or str(parsed.path or "").startswith("/api/visitas")
+                or str(parsed.path or "").startswith("/api/compraventas")
+            ):
+                try:
+                    session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                    if session_tmp:
+                        ok, err = enforce_workspace_membership(conn, session_tmp, ws_id, write=True)
+                        if not ok:
+                            json_response(self, {"error": err or "No autorizado"}, status=403)
+                            return
+                except Exception:
+                    pass
+                try:
+                    platform_eid = get_platform_empresa_id(conn)
+                    if platform_eid:
+                        empresa = conn.execute(
+                            "SELECT id FROM empresas WHERE id = ? LIMIT 1",
+                            (platform_eid,),
+                        ).fetchone()
+                except Exception:
+                    empresa = None
         if (not empresa_scope_exempt) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
@@ -60919,10 +61000,43 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            row = conn.execute(
-                "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
-                (record_id, empresa["id"]),
-            ).fetchone()
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            op_cols = table_columns(conn, "operaciones_inmobiliarias") or set()
+            if ws_id:
+                try:
+                    session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                except Exception:
+                    session_tmp = None
+                if session_tmp:
+                    ok, err = enforce_workspace_membership(conn, session_tmp, ws_id, write=True)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
+                if "workspace_id" in op_cols:
+                    row = conn.execute(
+                        "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                        (record_id, ws_id),
+                    ).fetchone()
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if not empresa_ids:
+                        row = None
+                    else:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        row = conn.execute(
+                            f"SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id IN ({placeholders_ws}) LIMIT 1",
+                            [record_id, *empresa_ids],
+                        ).fetchone()
+            else:
+                empresa_id_fk = (empresa["id"] if empresa else None) or get_platform_empresa_id(conn) or ""
+                row = conn.execute(
+                    "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (record_id, empresa_id_fk),
+                ).fetchone()
             if not row:
                 json_response(self, {"error": "Compraventa no encontrada"}, status=404)
                 return
@@ -60934,13 +61048,22 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
+            if ws_id and "workspace_id" in op_cols:
+                try:
+                    conn.execute(
+                        "UPDATE operaciones_inmobiliarias SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
+                        (ws_id, now, record_id),
+                    )
+                except Exception:
+                    pass
 
             inmueble_id = str(row["inmueble_id"] or "").strip()
             if not inmueble_id:
                 try:
+                    empresa_id_fk = (empresa["id"] if empresa else None) or get_platform_empresa_id(conn) or ""
                     inmueble_id = ensure_inmueble_for_compraventa(
                         conn,
-                        empresa["id"],
+                        empresa_id_fk,
                         {
                             "direccion": row["direccion"],
                             "referencia_catastral": row["referencia_catastral"],
@@ -60955,6 +61078,16 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except Exception:
                     inmueble_id = ""
+            if inmueble_id and ws_id:
+                inm_cols = table_columns(conn, "inmuebles") or set()
+                if "workspace_id" in inm_cols:
+                    try:
+                        conn.execute(
+                            "UPDATE inmuebles SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
+                            (ws_id, now, inmueble_id),
+                        )
+                    except Exception:
+                        pass
 
             if inmueble_id:
                 try:
@@ -61202,6 +61335,7 @@ class Handler(BaseHTTPRequestHandler):
 
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
+                ws_id = str(payload.get("workspace_id") or "").strip()
                 etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
                 conn.execute(
                     """
@@ -61288,6 +61422,16 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+                if ws_id:
+                    try:
+                        inm_cols = table_columns(conn, "inmuebles") or set()
+                        if "workspace_id" in inm_cols:
+                            conn.execute(
+                                "UPDATE inmuebles SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
+                                (ws_id, now, inmueble_id),
+                            )
+                    except Exception:
+                        pass
                 conn.execute(
                     """
                     INSERT INTO captaciones (
@@ -61371,6 +61515,16 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+                if ws_id:
+                    try:
+                        cap_cols = table_columns(conn, "captaciones") or set()
+                        if "workspace_id" in cap_cols:
+                            conn.execute(
+                                "UPDATE captaciones SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
+                                (ws_id, now, captacion_id),
+                            )
+                    except Exception:
+                        pass
                 if created_by_value:
                     try:
                         ensure_column(conn, "inmuebles", "created_by", "created_by TEXT")
@@ -62368,6 +62522,13 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             try:
                 prev_inmueble = conn.execute(
                     "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
@@ -62444,6 +62605,13 @@ class Handler(BaseHTTPRequestHandler):
                 "valoracion_json",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
+            # Service-first: si la tabla soporta workspace_id, lo persistimos.
+            try:
+                inm_cols = table_columns(conn, "inmuebles") or set()
+                if workspace_id and "workspace_id" in inm_cols:
+                    updates["workspace_id"] = workspace_id
+            except Exception:
+                pass
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -62647,6 +62815,13 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             target_empresa_id = empresa["id"] if empresa else None
             if not target_empresa_id:
                 row = conn.execute(
@@ -62655,7 +62830,22 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 target_empresa_id = row["empresa_id"] if row and row["empresa_id"] else None
             inmueble = None
-            if target_empresa_id:
+            if workspace_id:
+                inm_cols = table_columns(conn, "inmuebles") or set()
+                if "workspace_id" in inm_cols:
+                    inmueble = conn.execute(
+                        "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                        (inmueble_id, workspace_id),
+                    ).fetchone()
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        inmueble = conn.execute(
+                            f"SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND empresa_id IN ({placeholders_ws}) LIMIT 1",
+                            [inmueble_id, *empresa_ids],
+                        ).fetchone()
+            elif target_empresa_id:
                 inmueble = conn.execute(
                     "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
                     (inmueble_id, target_empresa_id),
@@ -63099,6 +63289,7 @@ class Handler(BaseHTTPRequestHandler):
             audit("inmueble_docs", doc_id, "Subir documento", usuario=payload.get("usuario"))
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         elif parsed.path == "/api/demandas":
+            ws_id = str(payload.get("workspace_id") or "").strip()
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
@@ -63112,80 +63303,119 @@ class Handler(BaseHTTPRequestHandler):
                         "email": payload.get("cliente_email"),
                     },
                 )
+            d_cols = table_columns(conn, "demandas") or set()
+            has_ws = "workspace_id" in d_cols
+            cols = [
+                "id",
+                "empresa_id",
+                "cliente_id",
+            ] + (["workspace_id"] if has_ws else []) + [
+                "focalizacion",
+                "pedido",
+                "tipo",
+                "zona",
+                "tipologia",
+                "subtipologia",
+                "precio_max",
+                "m2_min",
+                "habitaciones_min",
+                "banos_min",
+                "estado",
+                "fase",
+                "prioridad",
+                "motivo",
+                "agencia_insercion",
+                "origen",
+                "pedido_web",
+                "anuncio_mi_cartera",
+                "presentacion_servicio",
+                "fecha_insercion",
+                "motivo_ultimo_contacto",
+                "fecha_ultimo_contacto_interno",
+                "fecha_prox_act_cita",
+                "fecha_ultima_cita_venta_red",
+                "estado_contacto",
+                "responsable",
+                "notas",
+                "created_at",
+                "updated_at",
+            ]
+            placeholders = ", ".join(["?"] * (len(cols) - 2) + ["datetime(?)", "datetime(?)"])
+            values = [
+                os.urandom(16).hex(),
+                empresa["id"],
+                cliente_id,
+            ] + ([ws_id] if has_ws else []) + [
+                payload.get("focalizacion"),
+                payload.get("pedido"),
+                payload.get("tipo"),
+                payload.get("zona"),
+                payload.get("tipologia"),
+                payload.get("subtipologia"),
+                parse_optional_float(payload.get("precio_max")),
+                parse_optional_float(payload.get("m2_min")),
+                parse_optional_int(payload.get("habitaciones_min")),
+                parse_optional_int(payload.get("banos_min")),
+                payload.get("estado"),
+                payload.get("fase"),
+                payload.get("prioridad"),
+                payload.get("motivo"),
+                payload.get("agencia_insercion"),
+                payload.get("origen"),
+                parse_boolish(payload.get("pedido_web")),
+                parse_boolish(payload.get("anuncio_mi_cartera")),
+                parse_boolish(payload.get("presentacion_servicio")),
+                payload.get("fecha_insercion"),
+                payload.get("motivo_ultimo_contacto"),
+                payload.get("fecha_ultimo_contacto_interno"),
+                payload.get("fecha_prox_act_cita"),
+                payload.get("fecha_ultima_cita_venta_red"),
+                payload.get("estado_contacto"),
+                payload.get("responsable"),
+                payload.get("notas"),
+                now,
+                now,
+            ]
             conn.execute(
-                """
-                INSERT INTO demandas (
-                  id, empresa_id, cliente_id, focalizacion, pedido, tipo, zona, tipologia, subtipologia,
-                  precio_max, m2_min, habitaciones_min, banos_min,
-                  estado, fase, prioridad,
-                  motivo, agencia_insercion, origen,
-                  pedido_web, anuncio_mi_cartera, presentacion_servicio,
-                  fecha_insercion, motivo_ultimo_contacto, fecha_ultimo_contacto_interno, fecha_prox_act_cita, fecha_ultima_cita_venta_red,
-                  estado_contacto, responsable,
-                  notas,
-                  created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    os.urandom(16).hex(),
-                    empresa["id"],
-                    cliente_id,
-                    payload.get("focalizacion"),
-                    payload.get("pedido"),
-                    payload.get("tipo"),
-                    payload.get("zona"),
-                    payload.get("tipologia"),
-                    payload.get("subtipologia"),
-                    parse_optional_float(payload.get("precio_max")),
-                    parse_optional_float(payload.get("m2_min")),
-                    parse_optional_int(payload.get("habitaciones_min")),
-                    parse_optional_int(payload.get("banos_min")),
-                    payload.get("estado"),
-                    payload.get("fase"),
-                    payload.get("prioridad"),
-                    payload.get("motivo"),
-                    payload.get("agencia_insercion"),
-                    payload.get("origen"),
-                    parse_boolish(payload.get("pedido_web")),
-                    parse_boolish(payload.get("anuncio_mi_cartera")),
-                    parse_boolish(payload.get("presentacion_servicio")),
-                    payload.get("fecha_insercion"),
-                    payload.get("motivo_ultimo_contacto"),
-                    payload.get("fecha_ultimo_contacto_interno"),
-                    payload.get("fecha_prox_act_cita"),
-                    payload.get("fecha_ultima_cita_venta_red"),
-                    payload.get("estado_contacto"),
-                    payload.get("responsable"),
-                    payload.get("notas"),
-                    now,
-                    now,
-                ),
+                f"INSERT INTO demandas ({', '.join(cols)}) VALUES ({placeholders})",
+                values,
             )
         elif parsed.path == "/api/visitas":
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            v_cols = table_columns(conn, "visitas") or set()
+            has_ws = "workspace_id" in v_cols
+            cols = [
+                "id",
+                "empresa_id",
+            ] + (["workspace_id"] if has_ws else []) + [
+                "inmueble_id",
+                "demanda_id",
+                "fecha",
+                "hora",
+                "estado",
+                "asesor",
+                "notas",
+                "created_at",
+                "updated_at",
+            ]
+            placeholders = ", ".join(["?"] * (len(cols) - 2) + ["datetime(?)", "datetime(?)"])
+            values = [
+                os.urandom(16).hex(),
+                empresa["id"],
+            ] + ([ws_id] if has_ws else []) + [
+                payload.get("inmueble_id"),
+                payload.get("demanda_id"),
+                payload.get("fecha"),
+                payload.get("hora"),
+                payload.get("estado"),
+                payload.get("asesor"),
+                payload.get("notas"),
+                now,
+                now,
+            ]
             conn.execute(
-                """
-                INSERT INTO visitas (
-                  id, empresa_id, inmueble_id, demanda_id, fecha, hora, estado,
-                  asesor, notas, created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    os.urandom(16).hex(),
-                    empresa["id"],
-                    payload.get("inmueble_id"),
-                    payload.get("demanda_id"),
-                    payload.get("fecha"),
-                    payload.get("hora"),
-                    payload.get("estado"),
-                    payload.get("asesor"),
-                    payload.get("notas"),
-                    now,
-                    now,
-                ),
+                f"INSERT INTO visitas ({', '.join(cols)}) VALUES ({placeholders})",
+                values,
             )
         elif parsed.path == "/api/clientes":
             nombre = payload.get("nombre")
@@ -72566,19 +72796,42 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/inmuebles":
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             q = params.get("q", [""])[0].strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            where = ["i.empresa_id = ?"]
-            values = [empresa_id]
+            # Service-first: en tenant se filtra por workspace_id; en legacy, por empresa_id.
+            inm_cols = table_columns(conn, "inmuebles") or set()
+            where = []
+            values = []
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                if "workspace_id" in inm_cols:
+                    where.append("COALESCE(i.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        json_response(self, {"rows": []})
+                        return
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.append(f"i.empresa_id IN ({placeholders_ws})")
+                    values.extend(empresa_ids)
+            else:
+                if not empresa_id:
+                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                    return
+                where.append("i.empresa_id = ?")
+                values.append(empresa_id)
             if q:
                 where.append(
                     "(i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR c.nombre LIKE ?)"
                 )
                 values.extend([f"%{q}%"] * 6)
-            where_clause = " AND ".join(where)
+            where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
                 SELECT
@@ -72644,24 +72897,63 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/compraventas":
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             record_id = (params.get("id", [""])[0] or "").strip()
             q = params.get("q", [""])[0].strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            op_cols = table_columns(conn, "operaciones_inmobiliarias") or set()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            elif not empresa_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             if record_id:
-                row = conn.execute(
-                    "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
-                    (record_id, empresa_id),
-                ).fetchone()
+                if workspace_id and "workspace_id" in op_cols:
+                    row = conn.execute(
+                        "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                        (record_id, workspace_id),
+                    ).fetchone()
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        row = None
+                    else:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        row = conn.execute(
+                            f"SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id IN ({placeholders_ws}) LIMIT 1",
+                            [record_id, *empresa_ids],
+                        ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
+                        (record_id, empresa_id),
+                    ).fetchone()
                 if not row:
                     json_response(self, {"error": "Compraventa no encontrada"}, status=404)
                     return
                 json_response(self, {"row": dict(row)})
                 return
-            where = ["empresa_id = ?", "LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'"]
-            values = [empresa_id]
+            where = ["LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'"]
+            values = []
+            if workspace_id:
+                if "workspace_id" in op_cols:
+                    where.insert(0, "COALESCE(workspace_id, '') = ?")
+                    values.insert(0, workspace_id)
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        json_response(self, {"rows": [], "kpis": {"total": 0, "cerradas": 0, "ticket_medio": None, "dias_medios": None}})
+                        return
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.insert(0, f"empresa_id IN ({placeholders_ws})")
+                    values = [*empresa_ids, *values]
+            else:
+                where.insert(0, "empresa_id = ?")
+                values.insert(0, empresa_id)
             if q:
                 where.append(
                     "("
@@ -72720,17 +73012,19 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
+            # KPIs: mismo scope que listado.
+            kpis_where = " AND ".join(where)
             kpis_row = conn.execute(
-                """
+                f"""
                 SELECT
                   COUNT(*) AS total,
                   COUNT(CASE WHEN TRIM(COALESCE(fecha_escritura, '')) <> '' THEN 1 END) AS cerradas,
                   ROUND(AVG(CASE WHEN precio_escritura > 0 THEN precio_escritura END), 2) AS ticket_medio,
                   ROUND(AVG(CASE WHEN dias_hasta_venta > 0 THEN dias_hasta_venta END), 1) AS dias_medios
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id = ? AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                WHERE {kpis_where}
                 """,
-                (empresa_id,),
+                values,
             ).fetchone()
             json_response(
                 self,
@@ -73684,10 +73978,38 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/demandas":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            d_cols = table_columns(conn, "demandas") or set()
+            where = []
+            values = []
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                if "workspace_id" in d_cols:
+                    where.append("COALESCE(d.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if not empresa_ids:
+                        json_response(self, {"rows": [], "limit": 0, "offset": 0, "returned": 0, "truncated": False})
+                        return
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.append(f"d.empresa_id IN ({placeholders_ws})")
+                    values.extend(empresa_ids)
+            else:
+                if not empresa_id:
+                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                    return
+                where.append("d.empresa_id = ?")
+                values.append(empresa_id)
             limit = params.get("limit", [""])[0]
             offset = params.get("offset", [""])[0]
             try:
@@ -73706,19 +74028,20 @@ class Handler(BaseHTTPRequestHandler):
                 offset_val = 0
             if offset_val > 100000:
                 offset_val = 100000
+            where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
-                """
-               SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
+                f"""
+                SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
                        d.habitaciones_min, d.banos_min, d.estado, d.prioridad,
                        d.cliente_id,
                        c.nombre AS cliente
                 FROM demandas d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE d.empresa_id = ?
+                WHERE {where_clause}
                 ORDER BY d.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (empresa_id, limit_val, offset_val),
+                (*values, limit_val, offset_val),
             ).fetchall()
             payload = {
                 "rows": [dict(r) for r in rows],
@@ -73731,13 +74054,39 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/visitas":
-            empresa_id = params.get("empresa_id", [""])[0]
-            inmueble_id = params.get("inmueble_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            where = ["v.empresa_id = ?"]
-            values = [empresa_id]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            inmueble_id = (params.get("inmueble_id", [""])[0] or "").strip()
+            v_cols = table_columns(conn, "visitas") or set()
+            where = []
+            values = []
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                if "workspace_id" in v_cols:
+                    where.append("COALESCE(v.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                else:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if not empresa_ids:
+                        json_response(self, {"rows": []})
+                        return
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.append(f"v.empresa_id IN ({placeholders_ws})")
+                    values.extend(empresa_ids)
+            else:
+                if not empresa_id:
+                    json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                    return
+                where.append("v.empresa_id = ?")
+                values.append(empresa_id)
             if inmueble_id:
                 where.append("v.inmueble_id = ?")
                 values.append(inmueble_id)

@@ -22469,8 +22469,8 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
 };
 
 const createCrmCaptacionQuick = async (payload = {}) => {
-  const empresaNombre = String(resolveCrmInmoEmpresaNombre?.() || "").trim();
-  if (!empresaNombre) {
+  const empresaNombre = String(resolveCrmInmoEmpresaNombre?.() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY || "").trim();
+  if (!empresaNombre && !isTenantWorkspaceMode()) {
     throw new Error("Sin empresa Inmobiliaria.");
   }
   const direccion = String(payload?.direccion || "").trim();
@@ -22482,6 +22482,10 @@ const createCrmCaptacionQuick = async (payload = {}) => {
     etapa: "Inmueble",
     direccion,
   };
+  if (isTenantWorkspaceMode()) {
+    body.workspace_id = String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+    body.workspace_company_id = String(state.currentWorkspaceCompanyWsId || "").trim();
+  }
   [
     "poblacion",
     "provincia",
@@ -32202,16 +32206,23 @@ const populateClientesSelect = (selectEl, selectedId = "") => {
   }
 };
 
-const loadDemandasList = (empresaId) => {
-  if (!empresaId) {
+const loadDemandasList = (empresaId = "") => {
+  const params = new URLSearchParams({ limit: "500", offset: "0" });
+  const resolvedEmpresaId = String(empresaId || "").trim();
+  try {
+    if (isTenantWorkspaceMode()) {
+      const ws =
+        String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+      if (ws) params.set("workspace_id", ws);
+    }
+  } catch (e) {}
+  if (resolvedEmpresaId) {
+    params.set("empresa_id", resolvedEmpresaId);
+  }
+  if (!params.get("workspace_id") && !params.get("empresa_id")) {
     state.demandasList = [];
     return Promise.resolve([]);
   }
-  const params = new URLSearchParams({
-    empresa_id: String(empresaId || "").trim(),
-    limit: "500",
-    offset: "0",
-  });
   return api(`/api/demandas?${params.toString()}`)
     .then((data) => {
       state.demandasList = data.rows || [];
@@ -46620,12 +46631,25 @@ const renderCrmInmueblesCatalog = (rows = []) => {
   });
 };
 
+const resolveInmoScopeParams = () => {
+  try {
+    if (isTenantWorkspaceMode()) {
+      const ws =
+        String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+      return ws ? { workspace_id: ws } : {};
+    }
+  } catch (e) {}
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) return null;
+  return { empresa_id: empresa.id };
+};
+
 const loadCrmInmuebles = () => {
   if (!crmInmueblesTable && !crmInmueblesTableMirror) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope) {
     [crmInmueblesTable, crmInmueblesTableMirror].filter(Boolean).forEach((target) => {
       target.innerHTML = "<p class='muted'>Sin empresa.</p>";
     });
@@ -46676,7 +46700,7 @@ const loadCrmInmuebles = () => {
     crmInmuebleEstadoFilterMirror.value = estadoFilter;
   }
   persistEstadoFilter(estadoFilter);
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams(scope || {});
   if (q) {
     params.set("q", q);
   }
@@ -46974,25 +46998,24 @@ const renderCrmMapaInmuebles = (rows = []) => {
 
 const loadCrmMapaInmuebles = ({ force = false } = {}) => {
   if (!crmMapaInmueblesList) return;
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.empresa_id && !scope.workspace_id)) {
     crmMapaInmueblesList.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (crmMapaInmueblesInfo) crmMapaInmueblesInfo.textContent = "";
     renderMapPreview(crmMapaInmueblesMap, null, null, "");
     return;
   }
-  const empresaId = String(empresa.id || "").trim();
-  const shouldFetch =
-    force || !cachedCrmMapaInmuebles.length || cachedCrmMapaInmueblesEmpresaId !== empresaId;
+  const scopeKey = String(scope.workspace_id || scope.empresa_id || "").trim();
+  const shouldFetch = force || !cachedCrmMapaInmuebles.length || cachedCrmMapaInmueblesEmpresaId !== scopeKey;
   if (!shouldFetch) {
     renderCrmMapaInmuebles(cachedCrmMapaInmuebles);
     return;
   }
   crmMapaInmueblesList.innerHTML = "<p class='muted'>Cargando mapa...</p>";
-  api(`/api/inmuebles?empresa_id=${encodeURIComponent(empresaId)}`)
+  api(`/api/inmuebles?${new URLSearchParams(scope).toString()}`)
     .then((data) => {
       const rows = Array.isArray(data?.rows) ? data.rows : [];
-      cachedCrmMapaInmueblesEmpresaId = empresaId;
+      cachedCrmMapaInmueblesEmpresaId = scopeKey;
       cachedCrmMapaInmuebles = rows;
       renderCrmMapaInmuebles(rows);
     })
@@ -47005,21 +47028,22 @@ const loadCrmMapaInmuebles = ({ force = false } = {}) => {
 
 const loadCrmRelacionesCruce = ({ force = false } = {}) => {
   if (!crmRelacionesTable) return;
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.empresa_id && !scope.workspace_id)) {
     crmRelacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (crmRelacionesInfo) crmRelacionesInfo.textContent = "";
     return;
   }
-  const empresaId = String(empresa.id || "").trim();
+  const empresaId = String(scope.empresa_id || "").trim();
   crmRelacionesTable.innerHTML = "<p class='muted'>Calculando relaciones...</p>";
   const demandasParams = new URLSearchParams({
-    empresa_id: String(empresaId || "").trim(),
+    ...(scope.workspace_id ? { workspace_id: String(scope.workspace_id || "").trim() } : {}),
+    ...(empresaId ? { empresa_id: String(empresaId || "").trim() } : {}),
     limit: "2000",
     offset: "0",
   });
 	  Promise.all([
-	    api(`/api/inmuebles?empresa_id=${encodeURIComponent(empresaId)}`).catch(() => ({ rows: [] })),
+	    api(`/api/inmuebles?${new URLSearchParams(scope).toString()}`).catch(() => ({ rows: [] })),
 	    api(`/api/demandas?${demandasParams.toString()}`).catch(() => ({ rows: [] })),
 	  ])
     .then(([inmoData, demData]) => {
@@ -47274,12 +47298,12 @@ const loadCrmCompraventas = () => {
   if (!crmCompraventasTable) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.empresa_id && !scope.workspace_id)) {
     crmCompraventasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams(scope || {});
   const q = crmCompraventaSearch ? crmCompraventaSearch.value.trim() : "";
   if (q) {
     params.set("q", q);
@@ -51575,11 +51599,23 @@ const loadInmuebleDemandas = (inmuebleId) => {
   });
 };
 
-const loadInmuebleVisitas = (inmuebleId, empresaId) => {
-  if (!inmuebleVisitasTable || !inmuebleId || !empresaId) {
+const loadInmuebleVisitas = (inmuebleId, empresaId = "") => {
+  if (!inmuebleVisitasTable || !inmuebleId) {
     return;
   }
-  api(`/api/visitas?empresa_id=${empresaId}&inmueble_id=${inmuebleId}`)
+  const params = new URLSearchParams({
+    inmueble_id: String(inmuebleId || "").trim(),
+  });
+  const resolvedEmpresaId = String(empresaId || "").trim();
+  try {
+    if (isTenantWorkspaceMode()) {
+      const ws =
+        String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+      if (ws) params.set("workspace_id", ws);
+    }
+  } catch (e) {}
+  if (resolvedEmpresaId) params.set("empresa_id", resolvedEmpresaId);
+  api(`/api/visitas?${params.toString()}`)
     .then((data) => {
       const rows = data.rows || [];
     if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
@@ -52046,8 +52082,16 @@ const buildTimelineDetailsSummary = (details) => {
   return String(raw || "").trim().slice(0, 180);
 };
 
-const loadInmuebleActividad = (inmuebleId, empresaId) => {
-  if (!inmuebleActividadTable || !inmuebleId || !empresaId) {
+const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
+  if (!inmuebleActividadTable || !inmuebleId) {
+    return;
+  }
+  const scope = (() => {
+    if (scopeOrEmpresaId && typeof scopeOrEmpresaId === "object") return scopeOrEmpresaId;
+    if (String(scopeOrEmpresaId || "").trim()) return { empresa_id: String(scopeOrEmpresaId || "").trim() };
+    return resolveInmoScopeParams() || {};
+  })();
+  if (!scope || (!scope.empresa_id && !scope.workspace_id)) {
     return;
   }
   const prettyEstado = (value) => {
@@ -52056,11 +52100,22 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
     if (key === "completada") return "Realizada";
     return value || "-";
   };
-  const accionesReq = api(`/api/acciones?servicio=inmobiliaria&empresa_id=${empresaId}&inmueble_id=${inmuebleId}`).catch((error) => ({
+  const accionesParams = new URLSearchParams({
+    servicio: "inmobiliaria",
+    inmueble_id: String(inmuebleId || "").trim(),
+    ...(scope.workspace_id ? { workspace_id: String(scope.workspace_id || "").trim() } : {}),
+    ...(scope.empresa_id ? { empresa_id: String(scope.empresa_id || "").trim() } : {}),
+  });
+  const accionesReq = api(`/api/acciones?${accionesParams.toString()}`).catch((error) => ({
     rows: [],
     _error: error,
   }));
-  const visitasReq = api(`/api/visitas?empresa_id=${empresaId}&inmueble_id=${inmuebleId}`).catch((error) => ({
+  const visitasParams = new URLSearchParams({
+    inmueble_id: String(inmuebleId || "").trim(),
+    ...(scope.workspace_id ? { workspace_id: String(scope.workspace_id || "").trim() } : {}),
+    ...(scope.empresa_id ? { empresa_id: String(scope.empresa_id || "").trim() } : {}),
+  });
+  const visitasReq = api(`/api/visitas?${visitasParams.toString()}`).catch((error) => ({
     rows: [],
     _error: error,
   }));
@@ -74421,6 +74476,14 @@ if (inmuebleDeleteBtn) {
       body: JSON.stringify({
         inmueble_id: state.currentInmuebleId,
         usuario: getCurrentUser(),
+        ...(isTenantWorkspaceMode()
+          ? {
+              workspace_id: String(
+                new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || ""
+              ).trim(),
+              workspace_company_id: String(state.currentWorkspaceCompanyWsId || "").trim(),
+            }
+          : {}),
       }),
     })
       .then((res) => res.json())
@@ -76657,13 +76720,8 @@ if (inmuebleDemandaForm) {
     }
     const formData = new FormData(inmuebleDemandaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
-    fetch("/api/demandas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
+    apiPost("/api/demandas", payload)
       .then((data) => {
         if (data.error) {
           if (inmuebleDemandaStatus) {
@@ -76678,8 +76736,9 @@ if (inmuebleDemandaForm) {
         if (state.currentInmuebleId) {
           loadInmuebleDemandas(state.currentInmuebleId);
         }
+        const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        loadDemandasList(empresa ? empresa.id : "").then(() => {
+        loadDemandasList(scope?.empresa_id || (empresa ? empresa.id : "")).then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
         });
       })
@@ -76699,14 +76758,9 @@ if (inmuebleVisitaForm) {
     }
     const formData = new FormData(inmuebleVisitaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
     payload.inmueble_id = state.currentInmuebleId;
-    fetch("/api/visitas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/visitas", payload)
       .then((data) => {
         if (data.error) {
           if (inmuebleVisitaStatus) {
@@ -76718,9 +76772,11 @@ if (inmuebleVisitaForm) {
           inmuebleVisitaStatus.textContent = "Guardada.";
         }
         inmuebleVisitaForm.reset();
+        const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        if (state.currentInmuebleId && empresa) {
-          loadInmuebleVisitas(state.currentInmuebleId, empresa.id);
+        const empresaId = scope?.empresa_id || (empresa ? empresa.id : "");
+        if (state.currentInmuebleId && empresaId) {
+          loadInmuebleVisitas(state.currentInmuebleId, empresaId);
         }
       })
       .catch(() => {
@@ -76801,8 +76857,16 @@ if (inmuebleActividadForm) {
       payload,
       resolveClienteFromInput(inmuebleActividadClienteInput, inmuebleActividadClienteId)
     );
-    payload.empresa_id = resolveCurrentInmuebleEmpresaId() || resolveCrmInmoEmpresaId();
-    payload.empresa_nombre = resolveCurrentInmuebleEmpresaNombre() || resolveCrmInmoEmpresaNombre();
+    if (isTenantWorkspaceMode()) {
+      payload.workspace_id =
+        String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+      if (!payload.workspace_company_id) {
+        payload.workspace_company_id = String(state.currentWorkspaceCompanyWsId || "").trim();
+      }
+    } else {
+      payload.empresa_id = resolveCurrentInmuebleEmpresaId() || resolveCrmInmoEmpresaId();
+      payload.empresa_nombre = resolveCurrentInmuebleEmpresaNombre() || resolveCrmInmoEmpresaNombre();
+    }
     payload.servicio = "inmobiliaria";
     payload.inmueble_id = state.currentInmuebleId;
     fetch("/api/acciones", {
@@ -78326,13 +78390,8 @@ if (demandaForm) {
     }
     const formData = new FormData(demandaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
-    fetch("/api/demandas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
+    apiPost("/api/demandas", payload)
       .then((data) => {
         if (data.error) {
           if (demandaFormStatus) {
@@ -78345,8 +78404,9 @@ if (demandaForm) {
         }
         demandaForm.reset();
         loadCrmDemandas();
+        const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        loadDemandasList(empresa ? empresa.id : "").then(() => {
+        loadDemandasList(scope?.empresa_id || (empresa ? empresa.id : "")).then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
           if (state.currentInmuebleId) {
             loadInmuebleDemandas(state.currentInmuebleId);
@@ -78392,13 +78452,8 @@ if (visitaForm) {
     }
     const formData = new FormData(visitaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
-    fetch("/api/visitas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
+    apiPost("/api/visitas", payload)
       .then((data) => {
         if (data.error) {
           if (visitaFormStatus) {
