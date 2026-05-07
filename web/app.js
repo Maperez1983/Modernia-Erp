@@ -735,6 +735,10 @@ const buildPhotoSrc = (photoUrl = "") => {
   const raw = String(photoUrl || "").trim();
   if (!raw) return "";
   if (raw.startsWith("data:image/")) return raw;
+  if (raw.startsWith("s3://")) {
+    const key = raw.slice(5).replace(/^\/+/, "").trim();
+    return key ? `/api/s3_redirect?key=${encodeURIComponent(key)}` : "";
+  }
   if (raw.startsWith("/api/s3_redirect?key=")) return raw;
   const key = extractS3KeyFromUrl(raw);
   if (key) return `/api/s3_redirect?key=${encodeURIComponent(key)}`;
@@ -10346,7 +10350,7 @@ const renderWorkspaceCompanies = (rows = []) => {
           const empresaId = String(empresa?.id || "").trim();
           const checked = enabled.has(empresaId);
           const isDefault = empresaId && empresaId === pickDefault;
-          const logo = String(empresa?.logo_url || "").trim();
+          const logo = buildPhotoSrc(String(empresa?.logo_url || "").trim());
           return `
           <div class="crm-mini-row" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
             <label style="display:flex;align-items:center;gap:10px">
