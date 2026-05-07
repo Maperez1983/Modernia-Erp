@@ -208,6 +208,13 @@ function attachEmpresaIdForServiceRequest(url, payload) {
       }
     }
   } catch (e) {}
+  // En modo tenant, preferimos enviar `workspace_id/workspace_company_id` y dejar que el backend
+  // derive `empresa_id` legacy cuando sea necesario (evita mezclar IDs).
+  try {
+    if (isTenantWorkspaceMode()) {
+      return out;
+    }
+  } catch (e) {}
   if (out.empresa_id) return out;
   const path = String(url || "").split("?")[0] || "";
   const hasCliente = Boolean(String(out.cliente_id || "").trim());
@@ -6428,22 +6435,11 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const raw = state.currentWorkspaceDetail || {};
   const companiesV2 = Array.isArray(raw?.companies_v2) ? raw.companies_v2 : [];
   const legacy = Array.isArray(raw?.companies) ? raw.companies : [];
-  const companies =
-    companiesV2.length
-      ? companiesV2.map((row) => {
-          const legacyId = String(row?.legacy_empresa_id || "").trim();
-          return {
-            ...row,
-            // `workspace_company_id` sirve para editar/archivar dentro del workspace (nuevo modelo).
-            workspace_company_id: row?.id,
-            // Compat: en el resto del sistema seguimos usando `empresa_id` legacy.
-            id: legacyId || row?.id,
-          };
-        })
-      : legacy;
+  const companies = companiesV2.length ? companiesV2 : legacy;
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
     state.currentWorkspaceCompanyId = "";
     state.currentWorkspaceCompanyName = "";
+    state.currentWorkspaceCompanyWsId = "";
     renderWorkspaceCompanySwitcher([]);
     renderWorkspaceCompanies(companies);
     renderWorkspaceCompanyScopedData();
@@ -6466,9 +6462,10 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
     companies.find((row) => String(row.id || "") === String(companyId || ""))
     || companies[0]
     || null;
-  state.currentWorkspaceCompanyId = selected?.id || "";
+  // En platform (admin), soporta tanto legacy (`companies`) como v2 (`companies_v2`).
+  state.currentWorkspaceCompanyWsId = selected?.legacy_empresa_id ? String(selected?.id || "") : "";
+  state.currentWorkspaceCompanyId = selected?.legacy_empresa_id ? String(selected?.legacy_empresa_id || "") : (selected?.id || "");
   state.currentWorkspaceCompanyName = selected?.nombre || "";
-  state.currentWorkspaceCompanyWsId = selected?.workspace_company_id || "";
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
   renderWorkspaceCompanyScopedData();
@@ -20721,24 +20718,23 @@ const loadWorkspaceDetail = async (workspaceId) => {
   // Usamos `id` para evitar ambigüedad entre slugs legacy (modernia/verifika2) y nombres rebrandeados.
   state.currentWorkspaceTarget = String(detail.workspace?.id || workspaceId || "").trim() || String(workspaceId || "").trim();
   syncHoldingUrlParams();
-  const companies = (() => {
-    const companiesV2 = Array.isArray(detail?.companies_v2) ? detail.companies_v2 : [];
-    const legacy = Array.isArray(detail?.companies) ? detail.companies : [];
-    if (!companiesV2.length) return legacy;
-    return companiesV2.map((row) => {
-      const legacyId = String(row?.legacy_empresa_id || "").trim();
-      return {
-        ...row,
-        workspace_company_id: row?.id,
-        id: legacyId || row?.id,
-      };
-    });
-  })();
+  const companiesV2 = Array.isArray(detail?.companies_v2) ? detail.companies_v2 : [];
+  const companiesLegacy = Array.isArray(detail?.companies) ? detail.companies : [];
+  const companies = companiesV2.length ? companiesV2 : companiesLegacy;
   const tenantOperationalMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
-  const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
-  state.currentWorkspaceCompanyId = tenantOperationalMode ? "" : (companyMatch?.id || companies[0]?.id || "");
-  state.currentWorkspaceCompanyName = tenantOperationalMode ? "" : (companyMatch?.nombre || companies[0]?.nombre || "");
-  state.currentWorkspaceCompanyWsId = tenantOperationalMode ? "" : (companyMatch?.workspace_company_id || companies[0]?.workspace_company_id || "");
+  const companyMatch = companies.find((row) => {
+    const rowWsId = String(row?.id || "").trim();
+    const rowLegacyId = String(row?.legacy_empresa_id || "").trim();
+    const wantedLegacy = String(state.currentWorkspaceCompanyId || "").trim();
+    const wantedWs = String(state.currentWorkspaceCompanyWsId || "").trim();
+    if (wantedWs && rowWsId && rowWsId === wantedWs) return true;
+    if (wantedLegacy && rowLegacyId && rowLegacyId === wantedLegacy) return true;
+    return false;
+  });
+  const picked = companyMatch || companies[0] || null;
+  state.currentWorkspaceCompanyName = tenantOperationalMode ? "" : (picked?.nombre || "");
+  state.currentWorkspaceCompanyWsId = tenantOperationalMode ? "" : (companiesV2.length ? String(picked?.id || "") : "");
+  state.currentWorkspaceCompanyId = tenantOperationalMode ? "" : (companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || ""));
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
@@ -21482,7 +21478,12 @@ const getClientesContextServiceParam = () => {
 const resolveEmpresaById = (empresaId) => {
   const id = String(empresaId || "").trim();
   if (!id) return null;
-  return state.empresas.find((e) => e.id === id) || null;
+  const direct = state.empresas.find((e) => String(e.id || "").trim() === id) || null;
+  if (direct) return direct;
+  // Compat fase 6: si `state.empresas` contiene `workspace_companies` (v2),
+  // permitimos resolver también por `legacy_empresa_id`.
+  const legacy = state.empresas.find((e) => String(e.legacy_empresa_id || "").trim() === id) || null;
+  return legacy || null;
 };
 
 const SERVICE_COMPANY_STORAGE = {
@@ -23415,7 +23416,10 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     alert("No se pudo abrir Gestoría: no hay empresa seleccionada/disponible.");
     return;
   }
-  openCompany(empresa.nombre, { allowRestricted: true });
+  // Fase 6: en tenant no usamos el "contexto global de empresa" (evita depender de `empresas` global).
+  if (!isTenantWorkspaceMode()) {
+    openCompany(empresa.nombre, { allowRestricted: true });
+  }
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
   setTab(tab);
@@ -23504,7 +23508,7 @@ const openSegurosCrm = () => {
   })();
   if (!userCanAccessService("seguros")) return;
   if (isTenantWorkspaceMode()) {
-    const companies = state.currentWorkspaceDetail?.companies || [];
+    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
       alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
       return;
@@ -23520,7 +23524,7 @@ const openSegurosCrm = () => {
   }
   const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmSegurosEmpresaId = empresa.id;
   setStoredServiceCompanyId("seguros", empresa.id);
   setTab("seguros-crm");
@@ -23571,7 +23575,7 @@ const openFinCrm = () => {
   })();
   if (!userCanAccessService("financiaciones")) return;
   if (isTenantWorkspaceMode()) {
-    const companies = state.currentWorkspaceDetail?.companies || [];
+    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (!Array.isArray(companies) || !companies.length) {
       alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
       return;
@@ -23587,7 +23591,7 @@ const openFinCrm = () => {
   }
   const empresa = resolveCrmFinEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmFinEmpresaId = empresa.id;
   setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab("fin-crm");
@@ -23629,7 +23633,7 @@ const openFinServiceTab = (targetTab = "fin-crm") => {
   if (!userCanAccessService("financiaciones")) return;
   const empresa = resolveCrmFinEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmFinEmpresaId = empresa.id;
   setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab(targetTab);
@@ -55344,7 +55348,7 @@ const openGestoriaCrmWithFilters = ({
   if (!userCanAccessService("gestoria")) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
@@ -55394,7 +55398,7 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
   if (!userCanAccessService("gestoria")) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
@@ -55416,7 +55420,7 @@ const openGestoriaRentaCampaign = () => {
   if (!userCanAccessService("gestoria")) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
+  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
