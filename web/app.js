@@ -29082,6 +29082,8 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const groupWidth = chartWidth / Math.max(1, labels.length);
   const barSets = datasets.filter((set) => set.type !== "line");
   const barWidth = Math.max(6, (groupWidth - 18) / Math.max(1, barSets.length));
+  const showZeroBars = Boolean(options.showZeroBars);
+  const zeroBarHeight = Math.max(2, Number(options.zeroBarHeight || 2));
   const getTextColorForBar = (color) => {
     const value = String(color || "").trim();
     const hex = value.startsWith("#") ? value.slice(1) : "";
@@ -29096,15 +29098,19 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   labels.forEach((label, i) => {
     const xBase = padding.left + i * groupWidth;
     barSets.forEach((dataset, j) => {
-      const value = dataset.values[i];
-      const barHeight = (Math.abs(value) / maxValue) * chartHeight;
+      const value = Number(dataset.values[i] ?? 0) || 0;
+      let barHeight = (Math.abs(value) / maxValue) * chartHeight;
+      const isZero = Math.abs(value) < 1e-9;
+      if (showZeroBars && isZero) {
+        barHeight = Math.max(barHeight || 0, zeroBarHeight);
+      }
       const x = xBase + 5 + j * barWidth;
       const y = height - padding.bottom - barHeight;
       const barColor =
         (dataset.colors && dataset.colors[i]) ||
         dataset.color ||
         (j % 2 === 0 ? theme.gold : theme.ink);
-      ctx.fillStyle = barColor;
+      ctx.fillStyle = (showZeroBars && isZero) ? safeHexWithAlpha(barColor, 0.22) : barColor;
       fillRoundedRect(ctx, x, y, barWidth, barHeight, Math.min(10, barWidth / 2));
       if (interactive) {
         hitAreas.push({
@@ -40609,7 +40615,7 @@ const renderFincasDashboard = (empresaId) => {
         fincasConversionChart,
         ["Presupuestos", "Contratadas", "En vigor", "Rechazadas"],
         [
-	          {
+		          {
             label: `Embudo ${current.year || effectiveSelectedYear}`,
             values: [
               Number(current.presupuesto || 0),
@@ -40617,11 +40623,11 @@ const renderFincasDashboard = (empresaId) => {
               Number(current.en_vigor || 0),
               Number(current.rechazada || 0),
             ],
-	            color: "#0B1D33",
-	            format: (value) => numberFormatter.format(value),
-	          },
+		            color: "#0B1D33",
+		            format: (value) => numberFormatter.format(value),
+		          },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        { legend: false, showValues: true, tooltip: true, showZeroBars: true, zeroBarHeight: 2 }
       );
 
       const topComisionCompanias = comisionCompanias.slice(0, 8);
@@ -40635,15 +40641,15 @@ const renderFincasDashboard = (empresaId) => {
         fincasComisionCompaniaChart,
         comisionCompaniaLabels,
         [
-	          {
-	            label: "Comisionado",
-	            values: comisionCompaniaValues,
-	            color: "#0B1D33",
-	            colors: comisionCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-	            format: (value) => euroFormatter.format(value),
-	          },
+		          {
+		            label: "Comisionado",
+		            values: comisionCompaniaValues,
+		            color: "#0B1D33",
+		            colors: comisionCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+		            format: (value) => euroFormatter.format(value),
+		          },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        { legend: false, showValues: false, tooltip: true }
       );
 
       const topComisionRamos = comisionRamos.slice(0, 8);
@@ -40657,15 +40663,15 @@ const renderFincasDashboard = (empresaId) => {
         fincasComisionRamoChart,
         comisionRamoLabels,
         [
-	          {
-	            label: "Comisionado",
-	            values: comisionRamoValues,
-	            color: "#F2C14E",
-	            colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-	            format: (value) => euroFormatter.format(value),
-	          },
+		          {
+		            label: "Comisionado",
+		            values: comisionRamoValues,
+		            color: "#F2C14E",
+		            colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+		            format: (value) => euroFormatter.format(value),
+		          },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        { legend: false, showValues: false, tooltip: true }
       );
 
       const primaCompanias = (data.prima_companias || []).slice(0, 8);
@@ -40687,7 +40693,7 @@ const renderFincasDashboard = (empresaId) => {
             format: (value) => euroFormatter.format(value),
           },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        { legend: false, showValues: false, tooltip: true }
       );
 
       const primaRamos = (data.prima_ramos || []).slice(0, 8);
@@ -40709,7 +40715,7 @@ const renderFincasDashboard = (empresaId) => {
             format: (value) => euroFormatter.format(value),
           },
         ],
-        { legend: false, showValues: true, tooltip: true }
+        { legend: false, showValues: false, tooltip: true }
       );
 
       const renovSeries = data.renovaciones_anulaciones_mes || [];
