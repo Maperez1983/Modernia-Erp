@@ -119,6 +119,27 @@ const sanitizeApiUrl = (value) => {
 };
 
 const api = async (path) => {
+  // Fase 5: en modo tenant, evita depender de `empresa_id` global y adjunta `workspace_id`/`workspace_company_id`
+  // a llamadas GET que aún van por querystring.
+  try {
+    if (isTenantWorkspaceMode() && typeof path === "string" && path.startsWith("/api/")) {
+      const skip = new Set(["/api/health", "/api/me"]);
+      const base = String(path.split("?")[0] || "");
+      if (!skip.has(base)) {
+        const u = new URL(path, window.location.origin);
+        const qs = u.searchParams;
+        if (!qs.get("workspace_id")) {
+          const ws = String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+          if (ws) qs.set("workspace_id", ws);
+        }
+        if (!qs.get("workspace_company_id")) {
+          const wcid = String(state.currentWorkspaceCompanyWsId || "").trim();
+          if (wcid) qs.set("workspace_company_id", wcid);
+        }
+        path = u.pathname + (qs.toString() ? `?${qs.toString()}` : "");
+      }
+    }
+  } catch (e) {}
   const maxAttempts = 3;
   const retryableStatuses = new Set([502, 503, 504]);
   let lastError = null;
@@ -174,6 +195,19 @@ const api = async (path) => {
 
 function attachEmpresaIdForServiceRequest(url, payload) {
   const out = payload && typeof payload === "object" ? { ...payload } : {};
+  // Fase 5: en modo tenant (workspace), adjuntamos siempre contexto para evitar fugas al modo global
+  // y para que el backend pueda validar pertenencia (aunque el endpoint use empresa_id legacy).
+  try {
+    if (isTenantWorkspaceMode()) {
+      if (!out.workspace_id) {
+        const params = new URLSearchParams(window.location.search || "");
+        out.workspace_id = String(params.get("workspace") || state.currentWorkspaceId || "").trim();
+      }
+      if (!out.workspace_company_id) {
+        out.workspace_company_id = String(state.currentWorkspaceCompanyWsId || "").trim();
+      }
+    }
+  } catch (e) {}
   if (out.empresa_id) return out;
   const path = String(url || "").split("?")[0] || "";
   const hasCliente = Boolean(String(out.cliente_id || "").trim());

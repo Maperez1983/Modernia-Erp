@@ -46167,6 +46167,19 @@ class Handler(BaseHTTPRequestHandler):
                     inferred = infer_empresa_id_for_payload(conn, payload)
                     if inferred:
                         payload["empresa_id"] = inferred
+                # Fase 5: Si ya tenemos empresa_id (inferida o enviada), para usuarios no superadmin
+                # exigimos pertenencia a un workspace vinculado a esa empresa.
+                try:
+                    session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                    if session_tmp and (not workspace_actor_is_privileged(conn, session_tmp)):
+                        eid = str(payload.get("empresa_id") or "").strip()
+                        if eid:
+                            ok, err = enforce_empresa_membership(conn, session_tmp, eid, write=True)
+                            if not ok:
+                                json_response(self, {"error": err or "No autorizado"}, status=403)
+                                return
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -65372,6 +65385,18 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     if eid_res:
                         params["empresa_id"] = [eid_res]
+            except Exception:
+                pass
+            # Fase 5: Aislamiento definitivo aunque el cliente mande solo empresa_id legacy.
+            # Si el usuario no es superadmin, exigimos pertenencia a algún workspace vinculado a esa empresa.
+            try:
+                if not workspace_actor_is_privileged(conn, session):
+                    eid = (params.get("empresa_id", [""])[0] or "").strip()
+                    if eid:
+                        ok, err = enforce_empresa_membership(conn, session, eid, write=False)
+                        if not ok:
+                            json_response(self, {"error": err or "No autorizado"}, status=403)
+                            return
             except Exception:
                 pass
 
