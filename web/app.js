@@ -3377,6 +3377,7 @@ const inmuebleTecnoEmailBtn = document.getElementById("inmuebleTecnoEmailBtn");
 const inmuebleTecnoPosBtn = document.getElementById("inmuebleTecnoPosBtn");
 const inmuebleTecnoPrintBtn = document.getElementById("inmuebleTecnoPrintBtn");
 const inmuebleTecnoPrintMenu = document.getElementById("inmuebleTecnoPrintMenu");
+const inmuebleTecnoActions = document.getElementById("inmuebleTecnoActions");
 const inmuebleTecnoCampaignBtn = document.getElementById("inmuebleTecnoCampaignBtn");
 const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValoracionBtn");
   const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
@@ -29671,10 +29672,12 @@ const refreshInmuebleVisitSheetButton = () => {
   const isEncargo = status === "encargo";
   const isNoticia = status === "noticia";
   const isAlquiler = status === "alquiler";
-  // Nota de encargo: solo disponible en fase Encargo (evita confusión en Noticia).
-  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !isEncargo);
-  // Documentación de visita/venta solo cuando ya es Encargo.
-  inmuebleVisitaPdfBtn.classList.toggle("hidden", !isEncargo);
+  // Nota de encargo: disponible en Noticia o Encargo (el backend también lo permite).
+  const allowEncargoDocs = isEncargo || isNoticia;
+  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !allowEncargoDocs);
+  // Hoja de visita / documentación base: disponible en Noticia o Encargo (se usa para visitas).
+  inmuebleVisitaPdfBtn.classList.toggle("hidden", !allowEncargoDocs);
+  // Documentación de venta: solo cuando ya es Encargo.
   inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !isEncargo);
   inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !isEncargo);
   inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !isAlquiler);
@@ -51414,14 +51417,19 @@ const openInmuebleDetail = (id, originView = "") => {
 	      if (inmuebleEstadoInfo) {
 	        inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
 	      }
-	      refreshCurrentInmuebleProfile();
-	      try {
-	        renderInmuebleValoracionTab(inmueble || {});
-	      } catch (e) {}
-	      refreshInmuebleVisitSheetButton();
-	      loadInmuebleDemandas(id);
-	      loadInmuebleCompradores(id);
-	      loadInmuebleVisitas(id, empresaId);
+      refreshCurrentInmuebleProfile();
+      try {
+        renderInmuebleValoracionTab(inmueble || {});
+      } catch (e) {}
+      try {
+        if (inmuebleTecnoActions) {
+          inmuebleTecnoActions.classList.remove("hidden");
+        }
+      } catch (e) {}
+      refreshInmuebleVisitSheetButton();
+      loadInmuebleDemandas(id);
+      loadInmuebleCompradores(id);
+      loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
       loadInmuebleDocs(id);
       if (crmWorkspaceShell) {
