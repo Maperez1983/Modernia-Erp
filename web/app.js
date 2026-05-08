@@ -25498,32 +25498,24 @@ const handleRoute = () => {
       UI?.refreshContext(state);
       return;
     }
-    if (params.has("holding")) {
-      const mode = (params.get("mode") || "platform").toLowerCase() === "tenant" ? "tenant" : "platform";
-      const requestedView = (params.get("view") || "").trim();
-      const requestedEngine = (params.get("engine") || "").trim();
-      const requestedRrhh = (params.get("rrhh") || "").trim();
-      const requestedPersona = (params.get("persona") || "").trim();
-      try {
-        debugLog("route: holding", `mode=${mode} workspace=${params.get("workspace") || ""} view=${requestedView || ""}`);
-      } catch (e) {}
-      openHolding({
-        mode,
-        workspace: params.get("workspace") || "",
-        view: requestedView || (mode === "tenant" ? "overview" : "overview"),
-        engine: requestedEngine || "",
-        rrhh: requestedRrhh || "",
-        persona: requestedPersona || "",
-      });
-      UI?.refreshContext(state);
-      return;
-    }
-    if (params.has("clientes")) {
-      openClientesModule();
-      UI?.refreshContext(state);
-      return;
-    }
+    // Importante: si viene `holding=1&mode=tenant&workspace=...&crm=...` queremos entrar al CRM directamente
+    // (no quedarnos en la pantalla de selección de vistas del holding).
     if (params.has("crm")) {
+      try {
+        ensureTenantParams(params);
+      } catch (e) {}
+      try {
+        if (params.get("holding") === "1" && String(params.get("mode") || "").toLowerCase() === "tenant") {
+          const ws = String(params.get("workspace") || "").trim();
+          if (ws) {
+            state.currentWorkspaceEntryMode = "tenant";
+            state.currentWorkspaceTarget = ws;
+            state.currentWorkspaceId = ws;
+            // Best-effort: precargar detalle del workspace para defaults/matriz, sin bloquear navegación.
+            loadWorkspaceCentral?.().catch?.(() => {});
+          }
+        }
+      } catch (e) {}
       const crm = params.get("crm");
       if (crm === "inmo") {
         openCrmInmobiliario();
@@ -25579,6 +25571,31 @@ const handleRoute = () => {
         UI?.refreshContext(state);
         return;
       }
+    }
+    if (params.has("holding")) {
+      const mode = (params.get("mode") || "platform").toLowerCase() === "tenant" ? "tenant" : "platform";
+      const requestedView = (params.get("view") || "").trim();
+      const requestedEngine = (params.get("engine") || "").trim();
+      const requestedRrhh = (params.get("rrhh") || "").trim();
+      const requestedPersona = (params.get("persona") || "").trim();
+      try {
+        debugLog("route: holding", `mode=${mode} workspace=${params.get("workspace") || ""} view=${requestedView || ""}`);
+      } catch (e) {}
+      openHolding({
+        mode,
+        workspace: params.get("workspace") || "",
+        view: requestedView || (mode === "tenant" ? "overview" : "overview"),
+        engine: requestedEngine || "",
+        rrhh: requestedRrhh || "",
+        persona: requestedPersona || "",
+      });
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("clientes")) {
+      openClientesModule();
+      UI?.refreshContext(state);
+      return;
     }
     if (params.has("cliente")) {
       const id = params.get("cliente");
