@@ -3187,6 +3187,7 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 				const crmRelacionesInfo = document.getElementById("crmRelacionesInfo");
 			const crmViewVisitas = document.getElementById("crmViewVisitas");
 			const crmViewAgenda = document.getElementById("crmViewAgenda");
+			const crmViewDashboard = document.getElementById("crmViewDashboard");
 			const crmAgendaAz = document.getElementById("crmAgendaAz");
 			const crmAgendaPrintBtn = document.getElementById("crmAgendaPrintBtn");
 			const crmAgendaViewSeg = document.getElementById("crmAgendaViewSeg");
@@ -35291,6 +35292,7 @@ const updateEstudioAltaTabs = () => {
 		  "resumen",
 		  "clientes",
 		  "dashboard",
+		  "analisis",
 		  "captaciones",
 		  "inmuebles",
 		  "mapa_inmuebles",
@@ -35332,24 +35334,25 @@ const updateEstudioAltaTabs = () => {
 
 			  const viewMap = {
 				  resumen: crmViewResumen,
+				  dashboard: crmViewDashboard,
+				  analisis: crmViewAnalisis,
 				  clientes: crmViewClientes,
-				  dashboard: crmViewAnalisis,
 				  captaciones: crmViewCaptaciones,
 				  inmuebles: crmViewInmuebles,
 				  mapa_inmuebles: crmViewMapaInmuebles,
-			  alquileres: crmViewAlquileres,
-			  compraventas: crmViewCompraventas,
-		    demandas: crmViewDemandas,
-		    relaciones: crmViewRelaciones,
-		    visitas: crmViewVisitas,
-		    agenda: crmViewAgenda,
-		    informadores: crmViewInformadores,
-		    edificios: crmViewEdificios,
-		    legal: crmViewLegal,
-		    seguros: crmViewSeguros,
-		    fin: crmViewFin,
-		    gestoria: crmViewGestoria,
-		  };
+				  alquileres: crmViewAlquileres,
+				  compraventas: crmViewCompraventas,
+				  demandas: crmViewDemandas,
+				  relaciones: crmViewRelaciones,
+				  visitas: crmViewVisitas,
+				  agenda: crmViewAgenda,
+				  informadores: crmViewInformadores,
+				  edificios: crmViewEdificios,
+				  legal: crmViewLegal,
+				  seguros: crmViewSeguros,
+				  fin: crmViewFin,
+				  gestoria: crmViewGestoria,
+			  };
   Object.entries(viewMap).forEach(([key, node]) => {
     if (node) {
       node.classList.toggle("hidden", key !== nextView);
@@ -35379,7 +35382,6 @@ const updateEstudioAltaTabs = () => {
 	} else if (nextView === "clientes") {
 	  loadCrmClientes();
 	} else if (nextView === "resumen") {
-	  renderCrmInicioInmoDashboard();
 	  loadCrmCaptaciones();
 	  window.setTimeout(() => loadCrmInmuebles(), 120);
 	  window.setTimeout(() => loadCrmCompraventas(), 240);
@@ -35387,6 +35389,8 @@ const updateEstudioAltaTabs = () => {
 	  window.setTimeout(() => loadCrmVisitas(), 480);
 	  window.setTimeout(() => loadCrmAgenda(), 600);
 	} else if (nextView === "dashboard") {
+	  renderCrmInicioInmoDashboard({ force: true });
+	} else if (nextView === "analisis") {
 	  renderCrmResumenDashboard();
 	} else if (nextView === "inmuebles") {
 	  loadCrmInmuebles();
@@ -44927,6 +44931,12 @@ const renderCrmInicioInmoDashboard = ({ force = false } = {}) => {
   const empresa = resolveCrmInmoEmpresa();
   const empresaId = String(state.crmInmoEmpresaId || empresa?.id || "").trim();
 
+  if (!crmInicioDashYear.options || crmInicioDashYear.options.length === 0) {
+    const y = String(new Date().getFullYear());
+    crmInicioDashYear.innerHTML = "";
+    crmInicioDashYear.appendChild(createOption(y, y));
+    crmInicioDashYear.value = y;
+  }
   const desiredYear = String(crmInicioDashYear.value || "").trim() || String(new Date().getFullYear());
   const qs = new URLSearchParams();
   if (workspaceId) qs.set("workspace_id", workspaceId);
