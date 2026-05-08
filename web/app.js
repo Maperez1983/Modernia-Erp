@@ -44164,11 +44164,32 @@ const renderCrmMiniCards = (container, items = []) => {
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
       if (item.etapa) attrs.push(`data-etapa="${escapeHtml(item.etapa)}"`);
-      const href = item.inmuebleId
-        ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
-        : item.captacionId
-          ? `/?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
-          : "";
+      const href = (() => {
+        const inmuebleId = String(item.inmuebleId || "").trim();
+        const captacionId = String(item.captacionId || "").trim();
+        if (!inmuebleId && !captacionId) return "";
+        try {
+          const params = new URLSearchParams(window.location.search || "");
+          ensureTenantParams(params);
+          params.set("crm", "inmo");
+          params.delete("tab");
+          params.delete("empresa");
+          params.delete("clientes");
+          params.delete("cliente");
+          params.delete("poliza");
+          if (inmuebleId) {
+            params.set("inmueble", inmuebleId);
+            params.delete("captacion");
+          } else {
+            params.set("captacion", captacionId);
+            params.delete("inmueble");
+          }
+          return `/?${params.toString()}`;
+        } catch (e) {
+          if (inmuebleId) return `/?crm=inmo&inmueble=${encodeURIComponent(inmuebleId)}`;
+          return `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
+        }
+      })();
       const tag = href ? "a" : "div";
       const hrefAttr = href ? ` href="${escapeHtml(href)}"` : "";
       return `
