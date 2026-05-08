@@ -22385,8 +22385,8 @@ const setCrmClienteModalOpen = (open = false) => {
 	};
 
 const createCrmClienteQuick = async (payload = {}, opts = {}) => {
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa?.id) {
+  const scope = resolveInmoScopeParams() || {};
+  if (!scope.workspace_id && !scope.empresa_id && !isTenantWorkspaceMode()) {
     throw new Error("Sin empresa Inmobiliaria.");
   }
   const preferExisting = opts?.preferExisting !== false;
@@ -43200,7 +43200,7 @@ const runCurrentInmuebleConversion = (destino) => {
     });
 };
 
-let cachedCrmClientesEmpresaId = "";
+let cachedCrmClientesScopeKey = "";
 let crmClientesReloadTimer = null;
 
 const buildCrmClientesDenseTableNode = (rows = []) => {
@@ -43315,19 +43315,19 @@ const scheduleCrmClientesReload = ({ force = false } = {}) => {
 
 const loadCrmClientes = async ({ force = false } = {}) => {
   if (!crmClientesTable) return;
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.workspace_id && !scope.empresa_id)) {
     crmClientesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (crmClientesInfo) crmClientesInfo.textContent = "";
     return;
   }
-  const empresaId = String(empresa.id || "").trim();
-  const shouldFetch = force || !cachedCrmClientes.length || cachedCrmClientesEmpresaId !== empresaId;
+  const scopeKey = scope.workspace_id ? `ws:${scope.workspace_id}` : `empresa:${scope.empresa_id}`;
+  const shouldFetch = force || !cachedCrmClientes.length || cachedCrmClientesScopeKey !== scopeKey;
   if (shouldFetch) {
     const params = new URLSearchParams({
       include_id: "1",
       limit: "500",
-      empresa_id: empresaId,
+      ...scope,
       servicio: "inmobiliaria",
     });
     const data = await api(`/api/clientes?${params.toString()}`).catch(() => null);
@@ -43337,7 +43337,7 @@ const loadCrmClientes = async ({ force = false } = {}) => {
       return;
     }
     cachedCrmClientes = data.rows.map((row) => buildRowMap(row, data.columns));
-    cachedCrmClientesEmpresaId = empresaId;
+    cachedCrmClientesScopeKey = scopeKey;
   }
 
   const filterKey = String(crmClientesFilter?.value || "recientes").trim().toLowerCase();
@@ -43782,14 +43782,14 @@ const loadCrmAlquileres = () => {
   if (!crmAlquileresTable) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.workspace_id && !scope.empresa_id)) {
     crmAlquileresTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
   const params = new URLSearchParams({
     tabla: "alquileres",
-    empresa_id: empresa.id,
+    ...scope,
     include_id: "1",
   });
   const q = crmAlquilerSearch?.value?.trim() || "";
@@ -47706,8 +47706,8 @@ const syncCrmDemandasBulkActions = () => {
 };
 
 const runCrmDemandasBulkMove = async ({ fase }) => {
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) return;
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.workspace_id && !scope.empresa_id)) return;
   const ids = getCrmDemandasSelectedIds();
   if (!ids.length) {
     alert("Selecciona al menos un pedido.");
@@ -47719,7 +47719,7 @@ const runCrmDemandasBulkMove = async ({ fase }) => {
   try {
     await postJsonWithDbRetry(
       "/api/demandas_update",
-      { empresa_id: empresa.id, ids, fase, usuario: getCurrentUser() },
+      { ...scope, ids, fase, usuario: getCurrentUser() },
       { maxRetries: 7, baseDelayMs: 300 }
     );
     loadCrmDemandas();
@@ -47734,8 +47734,8 @@ const loadCrmDemandas = () => {
   if (!crmDemandasTable) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.workspace_id && !scope.empresa_id)) {
     crmDemandasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
@@ -47921,7 +47921,7 @@ const loadCrmDemandas = () => {
 		    crmDemandasTable.appendChild(table);
 		    syncCrmDemandasBulkActions();
 		  };
-		  const params = new URLSearchParams({ empresa_id: empresa.id });
+		  const params = new URLSearchParams(scope || {});
 		  api(`/api/demandas?${params.toString()}`)
 		    .then((data) => {
 			    const rows = data.rows || [];
@@ -48174,12 +48174,12 @@ const loadCrmVisitas = () => {
   if (!crmVisitasTable) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope || (!scope.workspace_id && !scope.empresa_id)) {
     crmVisitasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams(scope || {});
   api(`/api/visitas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     cachedCrmVisitas = rows;

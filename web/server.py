@@ -33358,6 +33358,23 @@ def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: 
     cols = table_columns(conn, table_name) or set()
     if ws_id:
         if "workspace_id" in cols:
+            # Compat: en muchos datos legacy workspace_id está vacío. En tenant no queremos
+            # “perder” esos registros si pertenecen a una empresa del workspace.
+            if "empresa_id" in cols:
+                empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
+                if not empresa_ids:
+                    try:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    except Exception:
+                        empresa_ids = []
+                if empresa_ids:
+                    placeholders = ",".join(["?"] * len(empresa_ids))
+                    return (
+                        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' AND {alias}.empresa_id IN ({placeholders})))",
+                        [ws_id, *list(empresa_ids)],
+                    )
             return (f"COALESCE({alias}.workspace_id, '') = ?", [ws_id])
         if "empresa_id" in cols:
             empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
@@ -73072,10 +73089,31 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if record_id:
                 if workspace_id and "workspace_id" in op_cols:
-                    row = conn.execute(
-                        "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
-                        (record_id, workspace_id),
-                    ).fetchone()
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        row = conn.execute(
+                            f"""
+                            SELECT *
+                            FROM operaciones_inmobiliarias
+                            WHERE id = ?
+                              AND (
+                                COALESCE(workspace_id, '') = ?
+                                OR (COALESCE(workspace_id, '') = '' AND empresa_id IN ({placeholders_ws}))
+                              )
+                            LIMIT 1
+                            """,
+                            [record_id, workspace_id, *empresa_ids],
+                        ).fetchone()
+                    else:
+                        row = conn.execute(
+                            "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                            (record_id, workspace_id),
+                        ).fetchone()
                 elif workspace_id:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
@@ -73100,12 +73138,28 @@ class Handler(BaseHTTPRequestHandler):
             values = []
             if workspace_id:
                 if "workspace_id" in op_cols:
-                    where.insert(0, "COALESCE(workspace_id, '') = ?")
-                    values.insert(0, workspace_id)
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.insert(
+                            0,
+                            f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND empresa_id IN ({placeholders_ws})))",
+                        )
+                        values = [workspace_id, *empresa_ids, *values]
+                    else:
+                        where.insert(0, "COALESCE(workspace_id, '') = ?")
+                        values.insert(0, workspace_id)
                 else:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
-                        json_response(self, {"rows": [], "kpis": {"total": 0, "cerradas": 0, "ticket_medio": None, "dias_medios": None}})
+                        json_response(
+                            self,
+                            {"rows": [], "kpis": {"total": 0, "cerradas": 0, "ticket_medio": None, "dias_medios": None}},
+                        )
                         return
                     placeholders_ws = ",".join(["?"] * len(empresa_ids))
                     where.insert(0, f"empresa_id IN ({placeholders_ws})")
@@ -74148,15 +74202,23 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                if not empresa_ids:
+                    platform_eid = get_platform_empresa_id(conn)
+                    if platform_eid:
+                        empresa_ids = [platform_eid]
                 if "workspace_id" in d_cols:
-                    where.append("COALESCE(d.workspace_id, '') = ?")
-                    values.append(workspace_id)
+                    if empresa_ids and "empresa_id" in d_cols:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.append(
+                            f"(COALESCE(d.workspace_id, '') = ? OR (COALESCE(d.workspace_id, '') = '' AND d.empresa_id IN ({placeholders_ws})))"
+                        )
+                        values.append(workspace_id)
+                        values.extend(empresa_ids)
+                    else:
+                        where.append("COALESCE(d.workspace_id, '') = ?")
+                        values.append(workspace_id)
                 else:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if not empresa_ids:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
                     if not empresa_ids:
                         json_response(self, {"rows": [], "limit": 0, "offset": 0, "returned": 0, "truncated": False})
                         return
@@ -74225,15 +74287,23 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                if not empresa_ids:
+                    platform_eid = get_platform_empresa_id(conn)
+                    if platform_eid:
+                        empresa_ids = [platform_eid]
                 if "workspace_id" in v_cols:
-                    where.append("COALESCE(v.workspace_id, '') = ?")
-                    values.append(workspace_id)
+                    if empresa_ids and "empresa_id" in v_cols:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.append(
+                            f"(COALESCE(v.workspace_id, '') = ? OR (COALESCE(v.workspace_id, '') = '' AND v.empresa_id IN ({placeholders_ws})))"
+                        )
+                        values.append(workspace_id)
+                        values.extend(empresa_ids)
+                    else:
+                        where.append("COALESCE(v.workspace_id, '') = ?")
+                        values.append(workspace_id)
                 else:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if not empresa_ids:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
                     if not empresa_ids:
                         json_response(self, {"rows": []})
                         return
