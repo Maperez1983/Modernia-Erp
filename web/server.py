@@ -70043,18 +70043,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/seguros_recibos":
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             q = (params.get("q", [""])[0] or "").strip().lower()
             estado = (params.get("estado", [""])[0] or "").strip().lower()
             date_from = (params.get("from", [""])[0] or "").strip()
             date_to = (params.get("to", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            if not empresa_id and not workspace_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
-            where = ["r.empresa_id = ?"]
-            values = [empresa_id]
+            scope_clause, scope_values = build_service_scope_filter(conn, "seguros_recibos", "r", workspace_id, empresa_id)
+            where = [scope_clause]
+            values = list(scope_values)
             if seguro_id:
                 where.append("r.seguro_id = ?")
                 values.append(seguro_id)
@@ -70152,15 +70160,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/seguros_siniestros":
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             q = (params.get("q", [""])[0] or "").strip().lower()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            if not empresa_id and not workspace_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
-            where = ["si.empresa_id = ?"]
-            values = [empresa_id]
+            scope_clause, scope_values = build_service_scope_filter(conn, "seguros_siniestros", "si", workspace_id, empresa_id)
+            where = [scope_clause]
+            values = list(scope_values)
             if seguro_id:
                 where.append("si.seguro_id = ?")
                 values.append(seguro_id)
@@ -70202,18 +70218,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/seguros_recibos_summary":
-            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             q = (params.get("q", [""])[0] or "").strip().lower()
             estado = (params.get("estado", [""])[0] or "").strip().lower()
             date_from = (params.get("from", [""])[0] or "").strip()
             date_to = (params.get("to", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            if not empresa_id and not workspace_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
-            where = ["r.empresa_id = ?"]
-            values = [empresa_id]
+            scope_clause, scope_values = build_service_scope_filter(conn, "seguros_recibos", "r", workspace_id, empresa_id)
+            where = [scope_clause]
+            values = list(scope_values)
             if seguro_id:
                 where.append("r.seguro_id = ?")
                 values.append(seguro_id)
