@@ -3754,6 +3754,39 @@
 	                  <div id="crmWorkspace">
 					              <div id="crmViewResumen" class="crm-workspace-view">
 					                <div class="crm-home-grid tc-home-grid">
+					                  <div class="tc-home-span">
+					                    <div class="tc-listview tc-home-panel" id="crmInicioDashboardPanel" aria-label="Dashboard inmobiliaria">
+					                      <div class="tc-listhead">
+					                        <div class="tc-listleft">
+					                          <strong class="tc-title">Dashboard</strong>
+					                          <div class="muted" style="margin-top:2px;">KPIs y gráficos del negocio (Inmobiliaria).</div>
+					                        </div>
+					                        <div class="tc-listright" style="display:flex;gap:8px;align-items:center;">
+					                          <label class="muted" style="font-weight:700;">Año</label>
+					                          <select id="crmInicioDashYear" style="min-width:110px;"></select>
+					                        </div>
+					                      </div>
+					                      <div class="grid dashboard-kpis" id="crmInicioDashboardKpis"></div>
+					                      <div class="grid dashboard-charts">
+					                        <div class="chart-card">
+					                          <h4>Ventas por responsable</h4>
+					                          <canvas id="crmInicioVentasResponsableChart" style="width:100%;height:260px;"></canvas>
+					                        </div>
+					                        <div class="chart-card">
+					                          <h4>Facturado por responsable</h4>
+					                          <canvas id="crmInicioFacturadoResponsableChart" style="width:100%;height:260px;"></canvas>
+					                        </div>
+					                        <div class="chart-card">
+					                          <h4>Encargos por responsable</h4>
+					                          <canvas id="crmInicioEncargosResponsableChart" style="width:100%;height:260px;"></canvas>
+					                        </div>
+					                        <div class="chart-card">
+					                          <h4>Tiempo de venta por año</h4>
+					                          <canvas id="crmInicioTiempoVentaChart" style="width:100%;height:260px;"></canvas>
+					                        </div>
+					                      </div>
+					                    </div>
+					                  </div>
 					                  <div class="crm-home-left">
 					                    <div class="tc-listview tc-home-panel" aria-label="Accesos directos">
 					                      <div class="tc-listhead">

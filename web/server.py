@@ -77789,6 +77789,262 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, payload)
             return
 
+        if path == "/api/inmo_inicio_dashboard":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            year_param = (params.get("year", [""])[0] or "").strip()
+            year_default = str(datetime.now().year)
+            year_str = year_param if (year_param.isdigit() and len(year_param) == 4) else year_default
+            try:
+                year_int = int(year_str)
+            except Exception:
+                year_int = int(datetime.now().year)
+                year_str = str(year_int)
+
+            empresa_ids = [empresa_id] if empresa_id else []
+            if not empresa_ids:
+                if not workspace_id:
+                    json_response(self, {"error": "workspace_id requerido si no hay empresa_id"}, status=400)
+                    return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            empresa_ids = [str(eid or "").strip() for eid in (empresa_ids or []) if str(eid or "").strip()]
+            if not empresa_ids:
+                json_response(self, {"error": "No hay empresas en el scope"}, status=400)
+                return
+
+            placeholders = ",".join(["?"] * len(empresa_ids))
+
+            def _q_all(sql, args):
+                try:
+                    return conn.execute(sql, args).fetchall()
+                except Exception:
+                    return []
+
+            def _q_one(sql, args):
+                try:
+                    return conn.execute(sql, args).fetchone()
+                except Exception:
+                    return None
+
+            resp_expr_ops = "COALESCE(NULLIF(responsable_gestion, ''), NULLIF(agente, ''), 'Sin responsable')"
+            resp_expr_caps = "COALESCE(NULLIF(responsable, ''), NULLIF(asesor, ''), 'Sin responsable')"
+            resp_expr_mov = "COALESCE(NULLIF(asesor, ''), 'Sin responsable')"
+
+            ventas_total_row = _q_one(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                  AND anio = ?
+                """,
+                empresa_ids + [year_int],
+            )
+            ventas_total = int(row_value(ventas_total_row, "total") or 0) if ventas_total_row else 0
+
+            ventas_by_resp = _q_all(
+                f"""
+                SELECT {resp_expr_ops} AS responsable, COUNT(*) AS total
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                  AND anio = ?
+                GROUP BY {resp_expr_ops}
+                ORDER BY total DESC, responsable COLLATE NOCASE ASC
+                """,
+                empresa_ids + [year_int],
+            )
+
+            facturado_total_row = _q_one(
+                f"""
+                SELECT ROUND(SUM(COALESCE(comision, 0)), 2) AS total
+                FROM movimientos
+                WHERE empresa_id IN ({placeholders})
+                  AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                  AND anio = ?
+                """,
+                empresa_ids + [year_int],
+            )
+            facturado_total = float(row_value(facturado_total_row, "total") or 0) if facturado_total_row else 0.0
+
+            facturado_by_resp = _q_all(
+                f"""
+                SELECT {resp_expr_mov} AS responsable, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
+                FROM movimientos
+                WHERE empresa_id IN ({placeholders})
+                  AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                  AND anio = ?
+                GROUP BY {resp_expr_mov}
+                ORDER BY total DESC, responsable COLLATE NOCASE ASC
+                """,
+                empresa_ids + [year_int],
+            )
+
+            gastos_total_row = _q_one(
+                f"""
+                SELECT ROUND(SUM(ABS(COALESCE(comision, 0))), 2) AS total
+                FROM movimientos
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo, '')) = 'gasto'
+                  AND anio = ?
+                """,
+                empresa_ids + [year_int],
+            )
+            gastos_total = float(row_value(gastos_total_row, "total") or 0) if gastos_total_row else 0.0
+
+            adquisiciones_row = _q_one(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM captaciones
+                WHERE empresa_id IN ({placeholders})
+                  AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
+                """,
+                empresa_ids + [year_str],
+            )
+            adquisiciones_total = int(row_value(adquisiciones_row, "total") or 0) if adquisiciones_row else 0
+
+            encargos_row = _q_one(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM captaciones
+                WHERE empresa_id IN ({placeholders})
+                  AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
+                  AND LOWER(COALESCE(etapa, '')) = 'encargo'
+                """,
+                empresa_ids + [year_str],
+            )
+            encargos_total = int(row_value(encargos_row, "total") or 0) if encargos_row else 0
+
+            encargos_by_resp = _q_all(
+                f"""
+                SELECT {resp_expr_caps} AS responsable, COUNT(*) AS total
+                FROM captaciones
+                WHERE empresa_id IN ({placeholders})
+                  AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
+                  AND LOWER(COALESCE(etapa, '')) = 'encargo'
+                GROUP BY {resp_expr_caps}
+                ORDER BY total DESC, responsable COLLATE NOCASE ASC
+                """,
+                empresa_ids + [year_str],
+            )
+
+            propuestas_row = _q_one(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                  AND anio = ?
+                  AND (
+                    COALESCE(NULLIF(fecha_propuesta, ''), '') <> ''
+                    OR COALESCE(precio_propuesta, 0) > 0
+                  )
+                """,
+                empresa_ids + [year_int],
+            )
+            propuestas_total = int(row_value(propuestas_row, "total") or 0) if propuestas_row else 0
+
+            citas_row = _q_one(
+                f"""
+                SELECT SUM(COALESCE(num_visitas, 0)) AS total
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                  AND anio = ?
+                """,
+                empresa_ids + [year_int],
+            )
+            citas_total = int(row_value(citas_row, "total") or 0) if citas_row else 0
+
+            def _safe_div(n, d):
+                try:
+                    n = float(n or 0)
+                    d = float(d or 0)
+                except Exception:
+                    return 0.0
+                if d <= 0:
+                    return 0.0
+                return n / d
+
+            ratio_adq_encargo = _safe_div(encargos_total, adquisiciones_total)
+            ratio_cita_propuesta = _safe_div(citas_total, propuestas_total)
+            rentabilidad = facturado_total - gastos_total
+            margen = _safe_div(rentabilidad, facturado_total)
+
+            # Serie de tiempos de venta (avg + mediana) por año.
+            dias_rows = _q_all(
+                f"""
+                SELECT anio AS year, dias_hasta_venta AS dias
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                  AND anio IS NOT NULL
+                  AND COALESCE(dias_hasta_venta, 0) > 0
+                """,
+                empresa_ids,
+            )
+            dias_by_year = {}
+            for r in dias_rows or []:
+                y = row_value(r, "year") or row_value(r, 0) or ""
+                d = row_value(r, "dias") or row_value(r, 1) or ""
+                try:
+                    y = int(y)
+                    d = float(d)
+                except Exception:
+                    continue
+                if d <= 0:
+                    continue
+                dias_by_year.setdefault(y, []).append(d)
+
+            def _median(values):
+                vals = sorted([v for v in (values or []) if isinstance(v, (int, float))])
+                if not vals:
+                    return 0.0
+                mid = len(vals) // 2
+                if len(vals) % 2 == 1:
+                    return float(vals[mid])
+                return float((vals[mid - 1] + vals[mid]) / 2.0)
+
+            years_available = sorted(dias_by_year.keys())
+            tiempo_venta_series = []
+            for y in years_available:
+                vals = dias_by_year.get(y) or []
+                avg = float(sum(vals) / len(vals)) if vals else 0.0
+                med = _median(vals)
+                tiempo_venta_series.append({"year": str(y), "avg_dias": round(avg, 1), "median_dias": round(med, 1)})
+
+            vals_selected = dias_by_year.get(year_int) or []
+            tiempo_avg = round(float(sum(vals_selected) / len(vals_selected)), 1) if vals_selected else 0.0
+            tiempo_med = round(_median(vals_selected), 1) if vals_selected else 0.0
+
+            payload = {
+                "mode": "inmo_inicio",
+                "year": year_str,
+                "kpis": {
+                    "facturado": round(facturado_total, 2),
+                    "gastos": round(gastos_total, 2),
+                    "rentabilidad": round(rentabilidad, 2),
+                    "margen": round(margen, 4),
+                    "ventas": ventas_total,
+                    "adquisiciones": adquisiciones_total,
+                    "encargos": encargos_total,
+                    "ratio_adquisicion_encargo": round(ratio_adq_encargo, 4),
+                    "citas_venta": citas_total,
+                    "propuestas": propuestas_total,
+                    "ratio_cita_propuesta": round(ratio_cita_propuesta, 4),
+                    "tiempo_venta_avg_dias": tiempo_avg,
+                    "tiempo_venta_median_dias": tiempo_med,
+                },
+                "series": {
+                    "ventas_por_responsable": [dict(r) for r in (ventas_by_resp or [])],
+                    "facturado_por_responsable": [dict(r) for r in (facturado_by_resp or [])],
+                    "encargos_por_responsable": [dict(r) for r in (encargos_by_resp or [])],
+                    "tiempo_venta_por_anio": tiempo_venta_series,
+                },
+            }
+            json_response(self, payload)
+            return
+
         if path == "/api/crm_resumen_ytd":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             if not empresa_id:

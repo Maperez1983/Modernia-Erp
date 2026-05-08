@@ -5631,6 +5631,10 @@ body.tc-resizing {
   align-items: start;
 }
 
+#crmSection .tc-home-span {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 980px) {
   #crmSection .tc-home-grid {
     grid-template-columns: 1fr;

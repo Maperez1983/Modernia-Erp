@@ -3139,6 +3139,12 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmInicioMapaBtn = document.getElementById("crmInicioMapaBtn");
 		const crmInicioPanelBtn = document.getElementById("crmInicioPanelBtn");
 		const crmInicioAgendaBtn = document.getElementById("crmInicioAgendaBtn");
+		const crmInicioDashYear = document.getElementById("crmInicioDashYear");
+		const crmInicioDashboardKpis = document.getElementById("crmInicioDashboardKpis");
+		const crmInicioVentasResponsableChart = document.getElementById("crmInicioVentasResponsableChart");
+		const crmInicioFacturadoResponsableChart = document.getElementById("crmInicioFacturadoResponsableChart");
+		const crmInicioEncargosResponsableChart = document.getElementById("crmInicioEncargosResponsableChart");
+		const crmInicioTiempoVentaChart = document.getElementById("crmInicioTiempoVentaChart");
 			const crmQuickSearchCard = document.getElementById("crmQuickSearchCard");
 			const crmViewClientes = document.getElementById("crmViewClientes");
 		const crmClientesFilter = document.getElementById("crmClientesFilter");
@@ -35372,10 +35378,18 @@ const updateEstudioAltaTabs = () => {
 	  loadCrmCaptaciones();
 	} else if (nextView === "clientes") {
 	  loadCrmClientes();
-		} else if (nextView === "dashboard") {
-		  renderCrmResumenDashboard();
-		  } else if (nextView === "inmuebles") {
-			  loadCrmInmuebles();
+	} else if (nextView === "resumen") {
+	  renderCrmInicioInmoDashboard();
+	  loadCrmCaptaciones();
+	  window.setTimeout(() => loadCrmInmuebles(), 120);
+	  window.setTimeout(() => loadCrmCompraventas(), 240);
+	  window.setTimeout(() => loadCrmDemandas(), 360);
+	  window.setTimeout(() => loadCrmVisitas(), 480);
+	  window.setTimeout(() => loadCrmAgenda(), 600);
+	} else if (nextView === "dashboard") {
+	  renderCrmResumenDashboard();
+	} else if (nextView === "inmuebles") {
+	  loadCrmInmuebles();
 		} else if (nextView === "mapa_inmuebles") {
 		  loadCrmMapaInmuebles();
 	  } else if (nextView === "alquileres") {
@@ -44899,6 +44913,206 @@ const renderCrmInicioBoard = (pipelineItems = []) => {
     }
     crmInicioBoard.appendChild(col);
   });
+};
+
+let lastCrmInicioDashboardKey = "";
+let lastCrmInicioDashboardPayload = null;
+
+const renderCrmInicioInmoDashboard = ({ force = false } = {}) => {
+  if (!crmInicioDashboardKpis || !crmInicioDashYear) return;
+  const vertical = resolveCrmTecnocloudVertical();
+  if (vertical !== "inmo") return;
+
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const empresa = resolveCrmInmoEmpresa();
+  const empresaId = String(state.crmInmoEmpresaId || empresa?.id || "").trim();
+
+  const desiredYear = String(crmInicioDashYear.value || "").trim() || String(new Date().getFullYear());
+  const qs = new URLSearchParams();
+  if (workspaceId) qs.set("workspace_id", workspaceId);
+  else if (empresaId) qs.set("empresa_id", empresaId);
+  qs.set("year", desiredYear);
+
+  const cacheKey = `${workspaceId || empresaId}:${desiredYear}`;
+  if (!force && cacheKey && cacheKey === lastCrmInicioDashboardKey && lastCrmInicioDashboardPayload) {
+    return;
+  }
+
+  const ensureYearOptions = () => {
+    const current = String(crmInicioDashYear.value || "").trim() || String(new Date().getFullYear());
+    api("/api/years")
+      .then((res) => {
+        const years = (res?.years || [])
+          .map((y) => String(y || "").trim())
+          .filter((y) => /^\d{4}$/.test(y))
+          .sort();
+        const list = Array.from(new Set(years));
+        const fallback = String(new Date().getFullYear());
+        const finalYears = list.length ? list.slice(-10) : [fallback];
+        crmInicioDashYear.innerHTML = "";
+        finalYears.forEach((y) => crmInicioDashYear.appendChild(createOption(y, y)));
+        crmInicioDashYear.value = finalYears.includes(current) ? current : finalYears[finalYears.length - 1];
+      })
+      .catch(() => {
+        if (!String(crmInicioDashYear.value || "").trim()) {
+          const y = String(new Date().getFullYear());
+          crmInicioDashYear.innerHTML = "";
+          crmInicioDashYear.appendChild(createOption(y, y));
+          crmInicioDashYear.value = y;
+        }
+      });
+  };
+
+  if (crmInicioDashYear.dataset.bound !== "1") {
+    crmInicioDashYear.dataset.bound = "1";
+    ensureYearOptions();
+    crmInicioDashYear.addEventListener("change", () => renderCrmInicioInmoDashboard({ force: true }));
+  }
+
+  crmInicioDashboardKpis.innerHTML = "<p class='muted'>Cargando dashboard…</p>";
+
+  api(`/api/inmo_inicio_dashboard?${qs.toString()}`)
+    .then((payload) => {
+      lastCrmInicioDashboardKey = cacheKey;
+      lastCrmInicioDashboardPayload = payload;
+
+      const year = String(payload?.year || desiredYear || "").trim() || desiredYear;
+      const kpis = payload?.kpis || {};
+      const fmtPct = (value, digits = 1) => `${(Number(value || 0) * 100).toFixed(digits)}%`;
+      const fmtRatio = (value, digits = 2) => Number(value || 0).toFixed(digits);
+
+      const addKpi = ({ title, value, note }) => {
+        const el = document.createElement("div");
+        el.className = "card kpi-card";
+        el.innerHTML = `
+          <h3>${escapeHtml(title)}</h3>
+          <div class="kpi-value">${escapeHtml(value)}</div>
+          <div class="muted">${escapeHtml(note || "")}</div>
+        `;
+        crmInicioDashboardKpis.appendChild(el);
+      };
+
+      crmInicioDashboardKpis.innerHTML = "";
+      addKpi({
+        title: `Facturado ${year}`,
+        value: euroFormatter.format(Number(kpis.facturado || 0)),
+        note: "Comisión ganada (movimientos · COMPRAVENTA).",
+      });
+      addKpi({
+        title: `Gastos ${year}`,
+        value: euroFormatter.format(Number(kpis.gastos || 0)),
+        note: "Movimientos marcados como gasto.",
+      });
+      addKpi({
+        title: `Rentabilidad ${year}`,
+        value: euroFormatter.format(Number(kpis.rentabilidad || 0)),
+        note: `Margen: ${fmtPct(kpis.margen, 1)}`,
+      });
+      addKpi({
+        title: `Ventas ${year}`,
+        value: numberFormatter.format(Number(kpis.ventas || 0)),
+        note: "Operaciones de compraventa.",
+      });
+      addKpi({
+        title: `Encargos ${year}`,
+        value: numberFormatter.format(Number(kpis.encargos || 0)),
+        note: `Ratio adq→enc: ${fmtPct(kpis.ratio_adquisicion_encargo, 1)}`,
+      });
+      addKpi({
+        title: `Citas/Propuesta ${year}`,
+        value: fmtRatio(kpis.ratio_cita_propuesta, 2),
+        note: `${numberFormatter.format(Number(kpis.citas_venta || 0))} citas · ${numberFormatter.format(Number(kpis.propuestas || 0))} propuestas`,
+      });
+      addKpi({
+        title: `Tiempo venta ${year}`,
+        value:
+          Number(kpis.tiempo_venta_avg_dias || 0) > 0
+            ? `${Number(kpis.tiempo_venta_avg_dias || 0).toFixed(1)} días`
+            : "-",
+        note:
+          Number(kpis.tiempo_venta_median_dias || 0) > 0
+            ? `Mediana: ${Number(kpis.tiempo_venta_median_dias || 0).toFixed(1)} días`
+            : "Sin dato suficiente.",
+      });
+
+      const series = payload?.series || {};
+
+      const drawCanvasEmpty = (canvas, text = "Sin datos.") => {
+        if (!canvas) return;
+        const ctx = prepareCanvas(canvas);
+        const width = canvas.getBoundingClientRect().width;
+        const height = canvas.getBoundingClientRect().height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = getCssVar(canvas, "--chart-bg", "rgba(255,255,255,0.92)");
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = getCssVar(canvas, "--chart-muted", "rgba(11, 29, 51, 0.56)");
+        ctx.font = `700 12px ${getCssVar(canvas, "--font-ui", "system-ui, sans-serif")}`;
+        ctx.fillText(String(text || "Sin datos."), 16, 28);
+      };
+
+      const drawRespChart = (canvas, items, { label, color, format } = {}) => {
+        if (!canvas) return;
+        const rows = Array.isArray(items) ? items : [];
+        if (!rows.length) {
+          drawCanvasEmpty(canvas);
+          return;
+        }
+        const labels = rows.map((r) => String(r?.responsable || "Sin responsable"));
+        const values = rows.map((r) => Number(r?.total || 0) || 0);
+        drawBarChart(
+          canvas,
+          labels,
+          [
+            {
+              label: label || "",
+              values,
+              color: color || "#d7b04c",
+              format: format || ((v) => numberFormatter.format(v)),
+            },
+          ],
+          { legend: false, showValues: true }
+        );
+      };
+
+      drawRespChart(crmInicioVentasResponsableChart, series.ventas_por_responsable, {
+        label: "Ventas",
+        color: "#cca33c",
+        format: (v) => numberFormatter.format(v),
+      });
+      drawRespChart(crmInicioFacturadoResponsableChart, series.facturado_por_responsable, {
+        label: "Facturado",
+        color: "#d7b04c",
+        format: (v) => euroFormatter.format(v),
+      });
+      drawRespChart(crmInicioEncargosResponsableChart, series.encargos_por_responsable, {
+        label: "Encargos",
+        color: "#334155",
+        format: (v) => numberFormatter.format(v),
+      });
+
+      if (crmInicioTiempoVentaChart) {
+        const rows = Array.isArray(series.tiempo_venta_por_anio) ? series.tiempo_venta_por_anio : [];
+        if (!rows.length) {
+          drawCanvasEmpty(crmInicioTiempoVentaChart);
+        } else {
+          const labels = rows.map((r) => String(r?.year || ""));
+          const avg = rows.map((r) => Number(r?.avg_dias || 0) || 0);
+          const med = rows.map((r) => Number(r?.median_dias || 0) || 0);
+          drawBarChart(
+            crmInicioTiempoVentaChart,
+            labels,
+            [
+              { label: "Media (días)", values: avg, color: "#cca33c", format: (v) => `${Number(v || 0).toFixed(0)}d` },
+              { label: "Mediana (días)", values: med, color: "#334155", format: (v) => `${Number(v || 0).toFixed(0)}d` },
+            ],
+            { legend: true, showValues: false }
+          );
+        }
+      }
+    })
+    .catch(() => {
+      crmInicioDashboardKpis.innerHTML = "<p class='muted'>No se pudo cargar el dashboard.</p>";
+    });
 };
 
 const renderCrmResumenDashboard = () => {
