@@ -2575,6 +2575,7 @@ const gestoriaClienteKpiDocs = document.getElementById("gestoriaClienteKpiDocs")
 const gestoriaClienteAlerts = document.getElementById("gestoriaClienteAlerts");
 const gestoriaClienteFacturasTable = document.getElementById("gestoriaClienteFacturasTable");
 const gestoriaClienteFacturasInfo = document.getElementById("gestoriaClienteFacturasInfo");
+const gestoriaClienteFacturasExcelLink = document.getElementById("gestoriaClienteFacturasExcelLink");
 const gestoriaClienteAsientosTable = document.getElementById("gestoriaClienteAsientosTable");
 const gestoriaClienteAsientosInfo = document.getElementById("gestoriaClienteAsientosInfo");
 const gestoriaClienteLibrosTabs = document.getElementById("gestoriaClienteLibrosTabs");
@@ -61874,7 +61875,19 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
     gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
     if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
     if (gestoriaClienteAsientosInfo) gestoriaClienteAsientosInfo.textContent = "";
+    if (gestoriaClienteFacturasExcelLink) {
+      gestoriaClienteFacturasExcelLink.classList.add("hidden");
+      gestoriaClienteFacturasExcelLink.removeAttribute("href");
+    }
     return;
+  }
+  if (gestoriaClienteFacturasExcelLink) {
+    const wsId = String(state.currentWorkspaceId || "").trim();
+    const href = wsId
+      ? `/api/gestoria_excel_plantilla?workspace_id=${encodeURIComponent(wsId)}&cliente_id=${encodeURIComponent(clienteId)}`
+      : `/api/gestoria_excel_plantilla?cliente_id=${encodeURIComponent(clienteId)}`;
+    gestoriaClienteFacturasExcelLink.href = href;
+    gestoriaClienteFacturasExcelLink.classList.remove("hidden");
   }
   const qs = new URLSearchParams({ cliente_id: clienteId });
   Promise.all([
