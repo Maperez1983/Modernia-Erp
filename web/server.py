@@ -78002,15 +78002,22 @@ class Handler(BaseHTTPRequestHandler):
             )
             propuestas_total = int(row_value(propuestas_row, "total") or 0) if propuestas_row else 0
 
+            # Citas de venta: salen de la Agenda (tabla `acciones`), no de `num_visitas`.
             citas_row = _q_one(
                 f"""
-                SELECT SUM(COALESCE(num_visitas, 0)) AS total
-                FROM operaciones_inmobiliarias
+                SELECT COUNT(*) AS total
+                FROM acciones
                 WHERE empresa_id IN ({placeholders})
-                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                  AND anio = ?
+                  AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
+                  AND fecha IS NOT NULL
+                  AND length(fecha) >= 4
+                  AND substr(fecha, 1, 4) = ?
+                  AND (
+                    LOWER(COALESCE(tipo, '')) LIKE 'cita%'
+                    OR LOWER(COALESCE(tipo, '')) IN ('post-aceptación', 'post-aceptacion', 'estudio financiero', 'personal')
+                  )
                 """,
-                empresa_ids + [year_int],
+                empresa_ids + [year_str],
             )
             citas_total = int(row_value(citas_row, "total") or 0) if citas_row else 0
 
@@ -78029,30 +78036,52 @@ class Handler(BaseHTTPRequestHandler):
             rentabilidad = facturado_total - gastos_total
             margen = _safe_div(rentabilidad, facturado_total)
 
-            # Serie de tiempos de venta (avg + mediana) por año.
-            dias_rows = _q_all(
+            # Tiempo de venta (por encargo): fecha_encargo -> fecha_cierre (escritura/operación/contrato).
+            # No dependemos de `dias_hasta_venta` porque a veces no está relleno.
+            encargo_rows = _q_all(
                 f"""
-                SELECT anio AS year, dias_hasta_venta AS dias
+                SELECT
+                  anio AS year,
+                  fecha_encargo,
+                  COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, '')) AS fecha_cierre
                 FROM operaciones_inmobiliarias
                 WHERE empresa_id IN ({placeholders})
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio IS NOT NULL
-                  AND COALESCE(dias_hasta_venta, 0) > 0
+                  AND COALESCE(NULLIF(fecha_encargo, ''), '') <> ''
+                  AND COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, '')) IS NOT NULL
+                  AND TRIM(COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, ''))) <> ''
                 """,
                 empresa_ids,
             )
+
+            def _parse_date(value):
+                raw = str(value or "").strip()
+                if not raw:
+                    return None
+                raw = raw[:10]
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        return datetime.strptime(raw, fmt)
+                    except Exception:
+                        continue
+                return None
+
             dias_by_year = {}
-            for r in dias_rows or []:
+            for r in encargo_rows or []:
                 y = row_value(r, "year") or row_value(r, 0) or ""
-                d = row_value(r, "dias") or row_value(r, 1) or ""
                 try:
                     y = int(y)
-                    d = float(d)
                 except Exception:
                     continue
-                if d <= 0:
+                fe = _parse_date(row_value(r, "fecha_encargo") or row_value(r, 1) or "")
+                fc = _parse_date(row_value(r, "fecha_cierre") or row_value(r, 2) or "")
+                if not fe or not fc:
                     continue
-                dias_by_year.setdefault(y, []).append(d)
+                diff = (fc - fe).days
+                if diff <= 0:
+                    continue
+                dias_by_year.setdefault(y, []).append(float(diff))
 
             def _median(values):
                 vals = sorted([v for v in (values or []) if isinstance(v, (int, float))])

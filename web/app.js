@@ -45030,9 +45030,9 @@ const renderCrmInicioInmoDashboard = ({ force = false } = {}) => {
         note: `Ratio adq→enc: ${fmtPct(kpis.ratio_adquisicion_encargo, 1)}`,
       });
       addKpi({
-        title: `Citas/Propuesta ${year}`,
+        title: `Citas por propuesta ${year}`,
         value: fmtRatio(kpis.ratio_cita_propuesta, 2),
-        note: `${numberFormatter.format(Number(kpis.citas_venta || 0))} citas · ${numberFormatter.format(Number(kpis.propuestas || 0))} propuestas`,
+        note: `${numberFormatter.format(Number(kpis.citas_venta || 0))} citas (Agenda) · ${numberFormatter.format(Number(kpis.propuestas || 0))} propuestas`,
       });
       addKpi({
         title: `Tiempo venta ${year}`,
