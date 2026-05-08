@@ -45007,12 +45007,12 @@ const renderCrmInicioInmoDashboard = ({ force = false } = {}) => {
       addKpi({
         title: `Facturado ${year}`,
         value: euroFormatter.format(Number(kpis.facturado || 0)),
-        note: "Comisión ganada (movimientos · COMPRAVENTA).",
+        note: `Comisión ganada: ventas ${euroFormatter.format(Number(kpis.facturado_ventas || 0))} · alquiler ${euroFormatter.format(Number(kpis.facturado_alquileres || 0))}`,
       });
       addKpi({
         title: `Gastos ${year}`,
         value: euroFormatter.format(Number(kpis.gastos || 0)),
-        note: "Movimientos marcados como gasto.",
+        note: "Provisional (pendiente de cargador de facturas y nóminas).",
       });
       addKpi({
         title: `Rentabilidad ${year}`,

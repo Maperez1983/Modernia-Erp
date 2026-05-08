@@ -77855,30 +77855,88 @@ class Handler(BaseHTTPRequestHandler):
                 empresa_ids + [year_int],
             )
 
-            facturado_total_row = _q_one(
+            # Facturado = comisión real Inmobiliaria:
+            # - Ventas: honorarios de operaciones cerradas (por año).
+            # - Alquileres: importe_comision (por fecha, año).
+            facturado_ventas_row = _q_one(
                 f"""
-                SELECT ROUND(SUM(COALESCE(comision, 0)), 2) AS total
-                FROM movimientos
+                SELECT ROUND(SUM(COALESCE(honorarios, 0)), 2) AS total
+                FROM operaciones_inmobiliarias
                 WHERE empresa_id IN ({placeholders})
-                  AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
+                  AND (
+                    (fecha_escritura IS NOT NULL AND TRIM(fecha_escritura) <> '')
+                    OR COALESCE(precio_escritura, 0) > 0
+                  )
                 """,
                 empresa_ids + [year_int],
             )
-            facturado_total = float(row_value(facturado_total_row, "total") or 0) if facturado_total_row else 0.0
+            facturado_ventas = float(row_value(facturado_ventas_row, "total") or 0) if facturado_ventas_row else 0.0
 
-            facturado_by_resp = _q_all(
+            facturado_ventas_by_resp = _q_all(
                 f"""
-                SELECT {resp_expr_mov} AS responsable, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
-                FROM movimientos
+                SELECT {resp_expr_ops} AS responsable, ROUND(SUM(COALESCE(honorarios, 0)), 2) AS total
+                FROM operaciones_inmobiliarias
                 WHERE empresa_id IN ({placeholders})
-                  AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
-                GROUP BY {resp_expr_mov}
+                  AND (
+                    (fecha_escritura IS NOT NULL AND TRIM(fecha_escritura) <> '')
+                    OR COALESCE(precio_escritura, 0) > 0
+                  )
+                GROUP BY {resp_expr_ops}
                 ORDER BY total DESC, responsable COLLATE NOCASE ASC
                 """,
                 empresa_ids + [year_int],
             )
+
+            resp_expr_alq = "COALESCE(NULLIF(agente, ''), 'Sin responsable')"
+            facturado_alquileres_row = _q_one(
+                f"""
+                SELECT ROUND(SUM(COALESCE(importe_comision, 0)), 2) AS total
+                FROM alquileres
+                WHERE empresa_id IN ({placeholders})
+                  AND fecha IS NOT NULL
+                  AND length(fecha) >= 4
+                  AND substr(fecha, 1, 4) = ?
+                """,
+                empresa_ids + [year_str],
+            )
+            facturado_alquileres = (
+                float(row_value(facturado_alquileres_row, "total") or 0) if facturado_alquileres_row else 0.0
+            )
+
+            facturado_alquileres_by_resp = _q_all(
+                f"""
+                SELECT {resp_expr_alq} AS responsable, ROUND(SUM(COALESCE(importe_comision, 0)), 2) AS total
+                FROM alquileres
+                WHERE empresa_id IN ({placeholders})
+                  AND fecha IS NOT NULL
+                  AND length(fecha) >= 4
+                  AND substr(fecha, 1, 4) = ?
+                GROUP BY {resp_expr_alq}
+                ORDER BY total DESC, responsable COLLATE NOCASE ASC
+                """,
+                empresa_ids + [year_str],
+            )
+
+            def _merge_series(rows_a, rows_b):
+                merged = {}
+                for r in (rows_a or []):
+                    key = str(row_value(r, "responsable") or row_value(r, 0) or "").strip() or "Sin responsable"
+                    val = float(row_value(r, "total") or row_value(r, 1) or 0) if r is not None else 0.0
+                    merged[key] = (merged.get(key, 0.0) or 0.0) + val
+                for r in (rows_b or []):
+                    key = str(row_value(r, "responsable") or row_value(r, 0) or "").strip() or "Sin responsable"
+                    val = float(row_value(r, "total") or row_value(r, 1) or 0) if r is not None else 0.0
+                    merged[key] = (merged.get(key, 0.0) or 0.0) + val
+                out = [{"responsable": k, "total": round(v, 2)} for k, v in merged.items()]
+                out.sort(key=lambda item: (-float(item.get("total") or 0), str(item.get("responsable") or "").lower()))
+                return out
+
+            facturado_total = round(facturado_ventas + facturado_alquileres, 2)
+            facturado_by_resp = _merge_series(facturado_ventas_by_resp, facturado_alquileres_by_resp)
 
             gastos_total_row = _q_one(
                 f"""
@@ -78022,6 +78080,8 @@ class Handler(BaseHTTPRequestHandler):
                 "year": year_str,
                 "kpis": {
                     "facturado": round(facturado_total, 2),
+                    "facturado_ventas": round(facturado_ventas, 2),
+                    "facturado_alquileres": round(facturado_alquileres, 2),
                     "gastos": round(gastos_total, 2),
                     "rentabilidad": round(rentabilidad, 2),
                     "margen": round(margen, 4),
