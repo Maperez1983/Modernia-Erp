@@ -2455,6 +2455,10 @@ const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSecti
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
 const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
+const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardPaneModelos");
+const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
+const gestoriaDashboardPaneContabilidad = document.getElementById("gestoriaDashboardPaneContabilidad");
+const gestoriaDashboardPaneDocumentos = document.getElementById("gestoriaDashboardPaneDocumentos");
 const gestoriaDashServiciosPaneAnalytics = document.getElementById("gestoriaDashServiciosPaneAnalytics");
 const gestoriaDashServiciosPaneRentas = document.getElementById("gestoriaDashServiciosPaneRentas");
 const gestoriaDashServiciosPaneAlertas = document.getElementById("gestoriaDashServiciosPaneAlertas");
@@ -54051,6 +54055,10 @@ const normalizeGestoriaDashboardView = (viewKey = "") => {
   if (raw === "trafico") return "trafico";
   if (raw === "expedientes") return "expedientes";
   if (raw === "tasaciones") return "tasaciones";
+  if (raw === "modelos") return "modelos";
+  if (raw === "gestiones") return "gestiones";
+  if (raw === "contabilidad" || raw === "conta") return "contabilidad";
+  if (raw === "documentos" || raw === "docs") return "documentos";
   return "general";
 };
 
@@ -54074,10 +54082,23 @@ const setGestoriaDashboardView = (viewKey = "general") => {
 
   const isGeneral = key === "general";
   if (gestoriaDashboardPaneGeneral) gestoriaDashboardPaneGeneral.classList.toggle("hidden", !isGeneral);
-  if (gestoriaDashboardPaneServicios) gestoriaDashboardPaneServicios.classList.toggle("hidden", isGeneral);
 
-  const isServicio =
-    key === "servicios" || key === "herencias" || key === "trafico" || key === "expedientes" || key === "tasaciones";
+  const isServiciosPane =
+    key === "servicios" ||
+    key === "herencias" ||
+    key === "trafico" ||
+    key === "expedientes" ||
+    key === "tasaciones" ||
+    key === "rentas" ||
+    key === "alertas";
+  if (gestoriaDashboardPaneServicios) gestoriaDashboardPaneServicios.classList.toggle("hidden", !isServiciosPane);
+
+  if (gestoriaDashboardPaneModelos) gestoriaDashboardPaneModelos.classList.toggle("hidden", key !== "modelos");
+  if (gestoriaDashboardPaneGestiones) gestoriaDashboardPaneGestiones.classList.toggle("hidden", key !== "gestiones");
+  if (gestoriaDashboardPaneContabilidad) gestoriaDashboardPaneContabilidad.classList.toggle("hidden", key !== "contabilidad");
+  if (gestoriaDashboardPaneDocumentos) gestoriaDashboardPaneDocumentos.classList.toggle("hidden", key !== "documentos");
+
+  const isServicio = key === "servicios" || key === "herencias" || key === "trafico" || key === "expedientes" || key === "tasaciones";
   if (gestoriaDashServiciosHead) gestoriaDashServiciosHead.classList.toggle("hidden", !isServicio);
   if (gestoriaDashServiciosPaneAnalytics) gestoriaDashServiciosPaneAnalytics.classList.toggle("hidden", !isServicio);
   if (gestoriaDashServiciosPaneRentas) gestoriaDashServiciosPaneRentas.classList.toggle("hidden", key !== "rentas");
@@ -54096,6 +54117,10 @@ const setGestoriaDashboardView = (viewKey = "general") => {
 
   if (key === "rentas") loadGestoriaRentaDashboard().catch(() => {});
   if (isServicio) loadGestoriaDashboardServicios({ key }).catch(() => {});
+  if (key === "modelos") loadGestoriaDashboardModelos({ force: true }).catch(() => {});
+  if (key === "gestiones") loadGestoriaDashboardGestiones({ force: true }).catch(() => {});
+  if (key === "contabilidad") loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
+  if (key === "documentos") loadGestoriaDashboardDocumentos({ force: true }).catch(() => {});
 };
 
 const ensureGestoriaDashRentaEjercicioOptions = (selected = "") => {
