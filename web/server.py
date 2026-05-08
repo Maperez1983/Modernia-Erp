@@ -1289,6 +1289,32 @@ def infer_empresa_id_for_payload(conn, payload):
                 return str(row[0] or "").strip()
     return ""
 
+
+def resolve_empresa_ids_for_request(conn, *, empresa_id="", workspace_id=""):
+    """
+    Compat: muchos endpoints legacy iban acotados por `empresa_id` y devolvían 400 si faltaba.
+    En modo tenant preferimos scoping por `workspace_id`; cuando el endpoint aún no está migrado
+    a workspace-first, devolvemos la lista de empresas vinculadas al workspace.
+
+    Devuelve una lista (posiblemente vacía) de empresa_ids a usar en filtros SQL.
+    """
+    eid = str(empresa_id or "").strip()
+    if eid:
+        return [eid]
+    ws = str(workspace_id or "").strip()
+    if not ws:
+        return []
+    try:
+        ids = fetch_workspace_company_ids(conn, ws)
+    except Exception:
+        ids = []
+    out = []
+    for item in ids or []:
+        val = str(item or "").strip()
+        if val:
+            out.append(val)
+    return out
+
 # Defaults elegidos para mantener el comportamiento anterior de autoselección en UI.
 WORKSPACE_SERVICE_COMPANY_DEFAULTS = {
     "inmobiliaria": "Estudio Velazquez 2012 SL",
@@ -69280,18 +69306,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/fin_asesoramientos":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             q = params.get("q", [""])[0].strip().lower()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"rows": []})
                 return
+            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM asesoramientos_financiacion
-                WHERE empresa_id = ?
+                WHERE empresa_id IN ({placeholders})
                 ORDER BY created_at DESC
                 """,
-                (empresa_id,),
+                tuple(empresa_ids),
             ).fetchall()
             data = []
             for row in rows:
@@ -69321,11 +69350,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/fin_hipotecas_estudio":
             empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"rows": []})
                 return
+            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                   h.id,
                   h.cliente,
@@ -69343,13 +69375,13 @@ class Handler(BaseHTTPRequestHandler):
                   h.created_at
                 FROM hipotecas h
                 LEFT JOIN clientes c ON c.id = h.cliente_id
-                WHERE h.empresa_id = ?
+                WHERE h.empresa_id IN ({placeholders})
                   AND LOWER(TRIM(COALESCE(h.estado, ''))) IN ('encargo', 'encargado', 'encargada')
                   AND (h.fecha_firma IS NULL OR TRIM(COALESCE(h.fecha_firma, '')) = '')
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(h.fecha_encargo, '')), ''), h.updated_at, h.created_at) DESC
                 LIMIT 500
                 """,
-                (empresa_id,),
+                tuple(empresa_ids),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -69921,11 +69953,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_data_quality":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             limit = params.get("limit", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"ok": True, "rows": [], "summary": {"total": 0}})
                 return
+            # Compat: el análisis está diseñado por empresa. En workspace agregamos por "primera empresa" para no bloquear.
+            empresa_id = empresa_ids[0]
             try:
                 limit_val = int(str(limit or "").strip() or "3000")
             except Exception:
@@ -69945,10 +69981,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_insights":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"ok": True, "payload": {}, "rows": []})
                 return
+            empresa_id = empresa_ids[0]
             in_vigor_expr = in_vigor_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
@@ -70478,17 +70517,23 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_recibos_export":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             seguro_id = params.get("seguro_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             q = (params.get("q", [""])[0] or "").strip().lower()
             estado = (params.get("estado", [""])[0] or "").strip().lower()
             date_from = (params.get("from", [""])[0] or "").strip()
             date_to = (params.get("to", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"ok": True, "rows": [], "export": ""})
                 return
-            where = ["r.empresa_id = ?"]
-            values = [empresa_id]
+            if len(empresa_ids) == 1:
+                where = ["r.empresa_id = ?"]
+                values = [empresa_ids[0]]
+            else:
+                where = [f"r.empresa_id IN ({','.join(['?'] * len(empresa_ids))})"]
+                values = list(empresa_ids)
             if seguro_id:
                 where.append("r.seguro_id = ?")
                 values.append(seguro_id)
@@ -70674,9 +70719,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_compliance_kpis":
             empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"ok": True, "kpis": {"total": 0}})
                 return
+            empresa_id = empresa_ids[0]
             uploaded_clause = uploaded_policy_filter()
             total = conn.execute(
                 f"SELECT COUNT(*) total FROM seguros WHERE empresa_id = ? AND ({uploaded_clause})",
@@ -71401,136 +71449,142 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
-        if path == "/api/gestoria_libros":
-            empresa_id = params.get("empresa_id", [""])[0]
-            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
-            desde = (params.get("desde", [""])[0] or "").strip()
-            hasta = (params.get("hasta", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if path == "/api/gestoria_libros":
+                empresa_id = params.get("empresa_id", [""])[0]
+                workspace_id = params.get("workspace_id", [""])[0]
+                cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+                desde = (params.get("desde", [""])[0] or "").strip()
+                hasta = (params.get("hasta", [""])[0] or "").strip()
+                empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+                if not empresa_ids:
+                    json_response(self, {"diario": [], "mayor": [], "iva_compras": [], "iva_ventas": []})
+                    return
+                placeholders = ",".join(["?"] * len(empresa_ids))
+                date_clause = ""
+                values = list(empresa_ids)
+                if cliente_id:
+                    date_clause += " AND a.cliente_id = ?"
+                    values.append(cliente_id)
+                if desde:
+                    date_clause += " AND a.fecha >= ?"
+                    values.append(desde)
+                if hasta:
+                    date_clause += " AND a.fecha <= ?"
+                    values.append(hasta)
+                diario = conn.execute(
+                    f"""
+                    SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                           l.cuenta, l.descripcion, l.debe, l.haber,
+                           l.impuesto_tipo, l.impuesto_pct,
+                           COALESCE(t.nombre, '') AS tercero,
+                           COALESCE(t.nif, '') AS tercero_nif,
+                           COALESCE(f.numero, '') AS factura_numero,
+                           COALESCE(f.fecha_emision, '') AS factura_fecha,
+                           COALESCE(f.total, 0) AS factura_total,
+                           COALESCE(f.tipo, '') AS tipo_factura
+                    FROM gestoria_asientos a
+                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                    LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                    LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                    WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                    ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                    """,
+                    values,
+                ).fetchall()
+                mayor = conn.execute(
+                    f"""
+                    SELECT l.cuenta,
+                           ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
+                           ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
+                           ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                    FROM gestoria_asientos a
+                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                    WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                    GROUP BY l.cuenta
+                    ORDER BY l.cuenta ASC
+                    """,
+                    values,
+                ).fetchall()
+                iva_values = list(empresa_ids)
+                iva_clause = ""
+                if desde:
+                    iva_clause += " AND f.fecha_emision >= ?"
+                    iva_values.append(desde)
+                if hasta:
+                    iva_clause += " AND f.fecha_emision <= ?"
+                    iva_values.append(hasta)
+                iva_compras = conn.execute(
+                    f"""
+                    SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                           f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                    FROM gestoria_facturas f
+                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                    WHERE f.empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(f.tipo, '')) = 'compra'
+                      {iva_clause}
+                    ORDER BY f.fecha_emision ASC, f.created_at ASC
+                    """,
+                    iva_values,
+                ).fetchall()
+                iva_ventas = conn.execute(
+                    f"""
+                    SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                           f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                    FROM gestoria_facturas f
+                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                    WHERE f.empresa_id IN ({placeholders})
+                      AND LOWER(COALESCE(f.tipo, '')) = 'venta'
+                      {iva_clause}
+                    ORDER BY f.fecha_emision ASC, f.created_at ASC
+                    """,
+                    iva_values,
+                ).fetchall()
+                json_response(
+                    self,
+                    {
+                        "diario": [dict(r) for r in diario],
+                        "mayor": [dict(r) for r in mayor],
+                        "iva_compras": [dict(r) for r in iva_compras],
+                        "iva_ventas": [dict(r) for r in iva_ventas],
+                    },
+                )
                 return
-            date_clause = ""
-            values = [empresa_id]
-            if cliente_id:
-                date_clause += " AND a.cliente_id = ?"
-                values.append(cliente_id)
-            if desde:
-                date_clause += " AND a.fecha >= ?"
-                values.append(desde)
-            if hasta:
-                date_clause += " AND a.fecha <= ?"
-                values.append(hasta)
-            diario = conn.execute(
-                f"""
-                SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
-                       l.cuenta, l.descripcion, l.debe, l.haber,
-                       l.impuesto_tipo, l.impuesto_pct,
-                       COALESCE(t.nombre, '') AS tercero,
-                       COALESCE(t.nif, '') AS tercero_nif,
-                       COALESCE(f.numero, '') AS factura_numero,
-                       COALESCE(f.fecha_emision, '') AS factura_fecha,
-                       COALESCE(f.total, 0) AS factura_total,
-                       COALESCE(f.tipo, '') AS tipo_factura
-                FROM gestoria_asientos a
-                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
-                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                WHERE a.empresa_id = ? {date_clause}
-                ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
-                """,
-                values,
-            ).fetchall()
-            mayor = conn.execute(
-                f"""
-                SELECT l.cuenta,
-                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
-                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
-                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
-                FROM gestoria_asientos a
-                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                WHERE a.empresa_id = ? {date_clause}
-                GROUP BY l.cuenta
-                ORDER BY l.cuenta ASC
-                """,
-                values,
-            ).fetchall()
-            iva_values = [empresa_id]
-            iva_clause = ""
-            if desde:
-                iva_clause += " AND f.fecha_emision >= ?"
-                iva_values.append(desde)
-            if hasta:
-                iva_clause += " AND f.fecha_emision <= ?"
-                iva_values.append(hasta)
-            iva_compras = conn.execute(
-                f"""
-                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
-                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
-                FROM gestoria_facturas f
-                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-                WHERE f.empresa_id = ?
-                  AND LOWER(COALESCE(f.tipo, '')) = 'compra'
-                  {iva_clause}
-                ORDER BY f.fecha_emision ASC, f.created_at ASC
-                """,
-                iva_values,
-            ).fetchall()
-            iva_ventas = conn.execute(
-                f"""
-                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
-                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
-                FROM gestoria_facturas f
-                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-                WHERE f.empresa_id = ?
-                  AND LOWER(COALESCE(f.tipo, '')) = 'venta'
-                  {iva_clause}
-                ORDER BY f.fecha_emision ASC, f.created_at ASC
-                """,
-                iva_values,
-            ).fetchall()
-            json_response(
-                self,
-                {
-                    "diario": [dict(r) for r in diario],
-                    "mayor": [dict(r) for r in mayor],
-                    "iva_compras": [dict(r) for r in iva_compras],
-                    "iva_ventas": [dict(r) for r in iva_ventas],
-                },
-            )
-            return
 
-        if path == "/api/gestoria_excel_plantilla":
-            empresa_id = params.get("empresa_id", [""])[0]
-            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            if not cliente_id:
-                json_response(self, {"error": "cliente_id requerido"}, status=400)
-                return
-            if not OPENPYXL_AVAILABLE:
-                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
-                return
-            diario = conn.execute(
-                """
-                SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
-                       l.cuenta, l.descripcion, l.debe, l.haber,
-                       l.impuesto_tipo, l.impuesto_pct,
-                       COALESCE(t.nombre, '') AS tercero,
-                       COALESCE(t.nif, '') AS tercero_nif,
-                       COALESCE(f.numero, '') AS factura_numero,
-                       COALESCE(f.fecha_emision, '') AS factura_fecha,
-                       COALESCE(f.total, 0) AS factura_total,
-                       COALESCE(f.tipo, '') AS tipo_factura
-                FROM gestoria_asientos a
-                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
-                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                WHERE a.empresa_id = ? AND a.cliente_id = ?
-                ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
-                """,
-                (empresa_id, cliente_id),
-            ).fetchall()
+            if path == "/api/gestoria_excel_plantilla":
+                empresa_id = params.get("empresa_id", [""])[0]
+                workspace_id = params.get("workspace_id", [""])[0]
+                cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+                empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+                if not empresa_ids:
+                    json_response(self, {"error": "Sin empresas en el workspace", "rows": []}, status=200)
+                    return
+                if not cliente_id:
+                    json_response(self, {"error": "cliente_id requerido"}, status=400)
+                    return
+                if not OPENPYXL_AVAILABLE:
+                    json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                    return
+                placeholders = ",".join(["?"] * len(empresa_ids))
+                diario = conn.execute(
+                    f"""
+                    SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                           l.cuenta, l.descripcion, l.debe, l.haber,
+                           l.impuesto_tipo, l.impuesto_pct,
+                           COALESCE(t.nombre, '') AS tercero,
+                           COALESCE(t.nif, '') AS tercero_nif,
+                           COALESCE(f.numero, '') AS factura_numero,
+                           COALESCE(f.fecha_emision, '') AS factura_fecha,
+                           COALESCE(f.total, 0) AS factura_total,
+                           COALESCE(f.tipo, '') AS tipo_factura
+                    FROM gestoria_asientos a
+                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                    LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                    LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                    WHERE a.empresa_id IN ({placeholders}) AND a.cliente_id = ?
+                    ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                    """,
+                    tuple(list(empresa_ids) + [cliente_id]),
+                ).fetchall()
             grouped = {}
             for row in diario:
                 key = str(row["asiento_id"] or "").strip() or f"{row['fecha'] or ''}-{row['referencia'] or ''}"
@@ -71797,10 +71851,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/renta_quick_pending":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit_raw = params.get("limit", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"rows": [], "limit": 0})
                 return
             try:
                 limit_val = int(limit_raw or 30)
@@ -71808,12 +71864,12 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = 30
             limit_val = max(1, min(limit_val, 200))
             where = [
-                "d.empresa_id = ?",
+                f"d.empresa_id IN ({','.join(['?'] * len(empresa_ids))})",
                 "d.referencia_tipo = 'renta'",
                 "(d.cliente_id IS NULL OR TRIM(COALESCE(d.cliente_id,'')) = '')",
                 "LOWER(COALESCE(d.referencia_id,'')) LIKE 'renta-pendiente-%'",
             ]
-            values = [empresa_id]
+            values = list(empresa_ids)
             if usuario:
                 where.append("a.usuario = ?")
                 values.append(usuario)
@@ -74440,9 +74496,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipoteca_dashboard":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             requested_year = (params.get("year", [""])[0] or "").strip()
+            if not empresa_id and workspace_id:
+                empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+                if empresa_ids:
+                    # Compat: dashboard legacy funciona por empresa. En modo workspace usamos la primera para no bloquear.
+                    empresa_id = empresa_ids[0]
             if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
             now_ts = time.time()
             cache_key = (
@@ -75470,11 +75532,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/fincas_stats":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             year = params.get("year", [""])[0]
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"kpis": {"facturado": 0, "gastos": 0, "clientes_empresas": 0, "comunidades": 0, "autonomos": 0, "polizas_vigor": 0}})
                 return
+            empresa_id = empresa_ids[0]
             if not year:
                 year = conn.execute(
                     "SELECT strftime('%Y','now','localtime') AS y"

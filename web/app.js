@@ -63545,9 +63545,14 @@ const renderGestoriaRentaDetail = (entry = {}) => {
           const empresa = resolveCrmGestoriaEmpresa();
           const empresaId = String(empresa?.id || "").trim();
           const empresaNombre = String(empresa?.nombre || "").trim();
-          if (!empresaId) throw new Error("empresa_id requerido");
-          if (!empresaNombre) throw new Error("empresa_nombre requerido");
+          let workspaceId = "";
+          try {
+            workspaceId = String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+          } catch (e) {
+            workspaceId = String(state.currentWorkspaceId || "").trim();
+          }
           const resp = await apiPost("/api/renta_entry_ocr_reprocess", {
+            workspace_id: workspaceId,
             empresa_id: empresaId,
             empresa_nombre: empresaNombre,
             cliente_id: state.currentClienteId,
