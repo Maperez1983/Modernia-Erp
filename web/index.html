@@ -487,20 +487,23 @@
               </div>
             </div>
 			            <div id="workspaceEngineTabs" class="workspace-engine-nav">
-			              <div class="muted" style="margin:0 0 8px 2px;">Operativa</div>
-			              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documentos</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas (OCR)</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
+			              <div class="tabs" id="workspaceEngineGroupTabs" style="margin-bottom:10px;">
+			                <button type="button" class="tab active" data-workspace-engine-group="operativa">Operativa</button>
+			                <button type="button" class="tab" data-workspace-engine-group="admin">Administración</button>
+			                <button type="button" class="tab" data-workspace-engine-group="avanzado">Avanzado</button>
+			              </div>
 
-			              <div class="muted" style="margin:12px 0 8px 2px;">Administración</div>
-			              <button type="button" class="tab" data-workspace-engine-tab="contabilidad">Contabilidad</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">RRHH (Horario)</button>
+			              <button type="button" class="tab active" data-workspace-engine-tab="documental" data-workspace-engine-group-item="operativa">Documentos</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas" data-workspace-engine-group-item="operativa">Facturas (OCR)</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente" data-workspace-engine-group-item="operativa">Portal cliente</button>
 
-			              <div class="muted" style="margin:12px 0 8px 2px;">Avanzado</div>
-			              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="simuladores">Simuladores</button>
-			              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="contabilidad" data-workspace-engine-group-item="admin">Contabilidad</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="facturacion" data-workspace-engine-group-item="admin">Presupuestos</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="registro_horario" data-workspace-engine-group-item="admin">RRHH (Horario)</button>
+
+			              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones" data-workspace-engine-group-item="avanzado">Automatizaciones</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="simuladores" data-workspace-engine-group-item="avanzado">Simuladores</button>
+			              <button type="button" class="tab" data-workspace-engine-tab="copilot" data-workspace-engine-group-item="avanzado">Copilot</button>
 			            </div>
             <div class="form-actions">
               <button type="button" id="workspaceMotoresBackBtn" class="secondary ghost">Volver al workspace</button>

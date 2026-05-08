@@ -1919,6 +1919,11 @@ const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
 const workspaceEngineTabs = document.getElementById("workspaceEngineTabs");
+const workspaceEngineGroupTabs = document.getElementById("workspaceEngineGroupTabs");
+const workspaceEngineGroupButtons = workspaceEngineGroupTabs
+  ? Array.from(workspaceEngineGroupTabs.querySelectorAll("[data-workspace-engine-group]"))
+  : [];
+const workspaceEngineGroupItems = Array.from(document.querySelectorAll("[data-workspace-engine-group-item]"));
 const workspaceTenantTabs = document.getElementById("workspaceTenantTabs");
 const workspaceTenantContext = document.getElementById("workspaceTenantContext");
 const workspaceMotoresBackBtn = document.getElementById("workspaceMotoresBackBtn");
@@ -6734,6 +6739,45 @@ const normalizeWorkspaceEngineKey = (value = "") => {
   return "documental";
 };
 
+const normalizeWorkspaceEngineGroupKey = (value = "") => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["operativa", "admin", "avanzado"].includes(key)) return key;
+  return "operativa";
+};
+
+const inferWorkspaceEngineGroupForEngine = (engineKey = "") => {
+  const key = normalizeSimple(engineKey || "");
+  if (["documental", "facturas_recibidas", "portal_cliente"].includes(key)) return "operativa";
+  if (["contabilidad", "facturacion", "registro_horario"].includes(key)) return "admin";
+  return "avanzado";
+};
+
+const setWorkspaceEngineGroup = (group = "operativa", { persist = true } = {}) => {
+  const normalized = normalizeWorkspaceEngineGroupKey(group);
+  state.currentWorkspaceEngineGroup = normalized;
+  if (persist) {
+    try {
+      localStorage.setItem("crm.workspaceEngineGroup", normalized);
+    } catch (e) {}
+  }
+  if (workspaceEngineGroupButtons?.length) {
+    workspaceEngineGroupButtons.forEach((btn) => {
+      btn.classList.toggle(
+        "active",
+        normalizeWorkspaceEngineGroupKey(btn.dataset.workspaceEngineGroup || "") === normalized
+      );
+    });
+  }
+  if (workspaceEngineGroupItems?.length) {
+    workspaceEngineGroupItems.forEach((btn) => {
+      const itemGroup = normalizeWorkspaceEngineGroupKey(btn.dataset.workspaceEngineGroupItem || "");
+      const hidden = itemGroup !== normalized;
+      btn.classList.toggle("hidden", hidden);
+      btn.hidden = hidden;
+    });
+  }
+};
+
 const syncWorkspaceEngineTabsVisibility = () => {
   if (!isTenantWorkspaceMode()) return;
   if (!Array.isArray(workspaceEngineButtons) || !workspaceEngineButtons.length) return;
@@ -6755,6 +6799,25 @@ const syncWorkspaceEngineTabsVisibility = () => {
   if (desired && enabledSet.has(desired)) return;
   if (firstVisible) {
     setWorkspaceEngineView(firstVisible);
+  }
+};
+
+const ensureWorkspaceEngineGroupBoot = () => {
+  if (!workspaceEngineGroupTabs) return;
+  try {
+    const desired = normalizeWorkspaceEngineGroupKey(
+      state.currentWorkspaceEngineGroup
+        || localStorage.getItem("crm.workspaceEngineGroup")
+        || inferWorkspaceEngineGroupForEngine(state.currentWorkspaceEngineView || "documental")
+    );
+    setWorkspaceEngineGroup(desired, { persist: false });
+  } catch (e) {}
+  if (workspaceEngineGroupButtons?.length) {
+    workspaceEngineGroupButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setWorkspaceEngineGroup(btn.dataset.workspaceEngineGroup || "operativa", { persist: true });
+      });
+    });
   }
 };
 
@@ -7397,6 +7460,10 @@ const ensureIrpfSimulators = () => {
 const setWorkspaceEngineView = (engine = "documental") => {
   const normalized = normalizeWorkspaceEngineKey(engine);
   state.currentWorkspaceEngineView = normalized;
+  // Al entrar por deep-link, selecciona automáticamente el grupo adecuado.
+  try {
+    setWorkspaceEngineGroup(inferWorkspaceEngineGroupForEngine(normalized), { persist: true });
+  } catch (e) {}
   // Asegura que "Motores" sea la vista activa cuando se selecciona un engine
   // (evita mezclas visuales si el estado estaba en otra vista).
   if (normalizeSimple(state.currentWorkspaceView || "") !== "motores") {
@@ -7506,6 +7573,7 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     setWorkspaceTenantSection(state.currentWorkspaceTenantSection || desired, { persist: false });
   }
   if (normalized === "motores") {
+    ensureWorkspaceEngineGroupBoot();
     setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
   }
   if (normalized === "rrhh") {
