@@ -21372,14 +21372,9 @@ const openCompany = (empresaName, options = {}) => {
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
     if (isTenantWorkspaceMode()) {
-      // En modo tenant, no bloqueamos la navegación por falta de empresas: usamos un placeholder.
-      // La empresa real se puede crear/vincular después, pero el CRM debe seguir funcionando.
-      state.empresas = [{ id: "", nombre: "Verifika2" }];
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Verifika2"));
-        empresaSelect.value = "";
-      }
+      // En modo tenant, la plataforma no puede depender de "empresa" para operar.
+      // Evitamos bloquear el routing con un alert que aparece en cascada al navegar por servicios.
+      return;
     }
     if (!state.empresas.length) {
       api("/api/empresas")
@@ -21971,16 +21966,9 @@ const openCrmInmobiliario = () => {
     loadUsuarios().catch(() => {});
   }
   if (isTenantWorkspaceMode()) {
-    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
-    if (!Array.isArray(companies) || !companies.length) {
-      // Modo tenant: no forzamos empresa; usamos placeholder.
-      state.empresas = [{ id: "", nombre: "Verifika2" }];
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Verifika2"));
-        empresaSelect.value = "";
-      }
-    } else {
+    const companies =
+      (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
+    if (Array.isArray(companies) && companies.length) {
       state.empresas = companies;
       if (empresaSelect) {
         empresaSelect.innerHTML = "";
@@ -22003,15 +21991,25 @@ const openCrmInmobiliario = () => {
     return;
   }
   const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  if (!empresa && !isTenantWorkspaceMode()) {
     alert("No hay empresas disponibles para abrir el CRM inmobiliario.");
     return;
   }
-  // Asegura contexto de empresa (necesario para endpoints que requieren empresa_nombre).
-  openCompany(empresa.nombre, { allowRestricted: true });
-  syncCrmInmoBrand(empresa.nombre);
-  state.crmInmoEmpresaId = empresa.id;
-  setStoredServiceCompanyId("inmobiliaria", empresa.id);
+  if (!isTenantWorkspaceMode() && empresa) {
+    // Asegura contexto de empresa (necesario para endpoints legacy que requieren empresa_nombre).
+    openCompany(empresa.nombre, { allowRestricted: true });
+  } else {
+    // Tenant: abrir CRM sin depender de empresa.
+    try {
+      if (homeSection) homeSection.classList.add("hidden");
+      if (explorerSection) explorerSection.classList.remove("hidden");
+      setModule("empresas");
+      setPage("empresa");
+    } catch (e) {}
+  }
+  syncCrmInmoBrand(empresa?.nombre || "");
+  state.crmInmoEmpresaId = empresa?.id || "";
+  setStoredServiceCompanyId("inmobiliaria", empresa?.id || "");
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
@@ -23494,15 +23492,9 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     loadUsuarios().catch(() => {});
   }
   if (isTenantWorkspaceMode()) {
-    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
-    if (!Array.isArray(companies) || !companies.length) {
-      state.empresas = [{ id: "", nombre: "Verifika2" }];
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Verifika2"));
-        empresaSelect.value = "";
-      }
-    } else {
+    const companies =
+      (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
+    if (Array.isArray(companies) && companies.length) {
       state.empresas = companies;
       if (empresaSelect) {
         empresaSelect.innerHTML = "";
@@ -23514,17 +23506,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     }
   }
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    // En modo tenant NO intentamos caer a /api/empresas global (mezcla datos y confunde al usuario).
-    if (isTenantWorkspaceMode()) {
-      try {
-        setUiToast(
-          "Gestoría: falta empresa activa",
-          "Selecciona/activa una empresa del workspace en Workspaces → Empresas."
-        );
-      } catch (e) {}
-      return;
-    }
+  if (!empresa && !isTenantWorkspaceMode()) {
     if (canRetryEmpresas) {
       // En modo global, reintenta cargando empresas.
       api("/api/empresas")
@@ -23546,12 +23528,21 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     alert("No se pudo abrir Gestoría: no hay empresa seleccionada/disponible.");
     return;
   }
-  // Fase 6: en tenant no usamos el "contexto global de empresa" (evita depender de `empresas` global).
   if (!isTenantWorkspaceMode()) {
     openCompany(empresa.nombre, { allowRestricted: true });
+    state.crmGestoriaEmpresaId = empresa.id;
+    setStoredServiceCompanyId("gestoria", empresa.id);
+  } else {
+    // Tenant: abrir Gestoría sin depender de empresa.
+    try {
+      if (homeSection) homeSection.classList.add("hidden");
+      if (explorerSection) explorerSection.classList.remove("hidden");
+      setModule("empresas");
+      setPage("empresa");
+    } catch (e) {}
+    state.crmGestoriaEmpresaId = empresa?.id || "";
+    setStoredServiceCompanyId("gestoria", empresa?.id || "");
   }
-  state.crmGestoriaEmpresaId = empresa.id;
-  setStoredServiceCompanyId("gestoria", empresa.id);
   setTab(tab);
   try {
     const currentParams = new URLSearchParams(window.location.search);
@@ -23606,7 +23597,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     return;
   }
   if (targetTab === "gestoria-agenda") {
-    loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", empresa?.id || "", gestoriaAgendaTable, gestoriaAgendaInfo);
     return;
   }
   if (targetTab === "gestoria-fact") {
@@ -23638,15 +23629,9 @@ const openSegurosCrm = () => {
   })();
   if (!userCanAccessService("seguros")) return;
   if (isTenantWorkspaceMode()) {
-    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
-    if (!Array.isArray(companies) || !companies.length) {
-      state.empresas = [{ id: "", nombre: "Verifika2" }];
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Verifika2"));
-        empresaSelect.value = "";
-      }
-    } else {
+    const companies =
+      (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
+    if (Array.isArray(companies) && companies.length) {
       state.empresas = companies;
       if (empresaSelect) {
         empresaSelect.innerHTML = "";
@@ -23658,10 +23643,21 @@ const openSegurosCrm = () => {
     }
   }
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) return;
-  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmSegurosEmpresaId = empresa.id;
-  setStoredServiceCompanyId("seguros", empresa.id);
+  if (!empresa && !isTenantWorkspaceMode()) return;
+  if (!isTenantWorkspaceMode()) {
+    openCompany(empresa.nombre, { allowRestricted: true });
+    state.crmSegurosEmpresaId = empresa.id;
+    setStoredServiceCompanyId("seguros", empresa.id);
+  } else {
+    try {
+      if (homeSection) homeSection.classList.add("hidden");
+      if (explorerSection) explorerSection.classList.remove("hidden");
+      setModule("empresas");
+      setPage("empresa");
+    } catch (e) {}
+    state.crmSegurosEmpresaId = empresa?.id || "";
+    setStoredServiceCompanyId("seguros", empresa?.id || "");
+  }
   setTab("seguros-crm");
   try {
     const currentParams = new URLSearchParams(window.location.search);
@@ -23710,15 +23706,9 @@ const openFinCrm = () => {
   })();
   if (!userCanAccessService("financiaciones")) return;
   if (isTenantWorkspaceMode()) {
-    const companies = (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
-    if (!Array.isArray(companies) || !companies.length) {
-      state.empresas = [{ id: "", nombre: "Verifika2" }];
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Verifika2"));
-        empresaSelect.value = "";
-      }
-    } else {
+    const companies =
+      (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
+    if (Array.isArray(companies) && companies.length) {
       state.empresas = companies;
       if (empresaSelect) {
         empresaSelect.innerHTML = "";
@@ -23730,10 +23720,21 @@ const openFinCrm = () => {
     }
   }
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa) return;
-  if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmFinEmpresaId = empresa.id;
-  setStoredServiceCompanyId("financiaciones", empresa.id);
+  if (!empresa && !isTenantWorkspaceMode()) return;
+  if (!isTenantWorkspaceMode()) {
+    openCompany(empresa.nombre, { allowRestricted: true });
+    state.crmFinEmpresaId = empresa.id;
+    setStoredServiceCompanyId("financiaciones", empresa.id);
+  } else {
+    try {
+      if (homeSection) homeSection.classList.add("hidden");
+      if (explorerSection) explorerSection.classList.remove("hidden");
+      setModule("empresas");
+      setPage("empresa");
+    } catch (e) {}
+    state.crmFinEmpresaId = empresa?.id || "";
+    setStoredServiceCompanyId("financiaciones", empresa?.id || "");
+  }
   setTab("fin-crm");
   // Anti-mezcla: el detalle de inmueble es exclusivo de Inmobiliaria.
   try {
