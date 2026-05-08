@@ -21743,7 +21743,7 @@ const syncCrmTecnocloudVerticalNav = () => {
           : new Set([
               "resumen",
               "clientes",
-              "analisis",
+	              "dashboard",
               "captaciones",
               "inmuebles",
               "mapa_inmuebles",
@@ -21757,11 +21757,11 @@ const syncCrmTecnocloudVerticalNav = () => {
               "edificios",
               "legal",
             ]);
-  if (forcedCrm === "inmo" || forcedCrm === "inmobiliaria") {
-    ["resumen", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach((k) =>
-      allowedViews.add(k)
-    );
-  }
+	  if (forcedCrm === "inmo" || forcedCrm === "inmobiliaria") {
+	    ["resumen", "dashboard", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach((k) =>
+	      allowedViews.add(k)
+	    );
+	  }
 
   const applyToRoot = (root) => {
     if (!root) return;
@@ -35280,15 +35280,15 @@ const updateEstudioAltaTabs = () => {
   });
 };
 
-const setCrmWorkspaceView = (view = "resumen") => {
-	const allowed = new Set([
-	  "resumen",
-	  "clientes",
-	  "analisis",
-	  "captaciones",
-	  "inmuebles",
-	  "mapa_inmuebles",
-	  "alquileres",
+	const setCrmWorkspaceView = (view = "resumen") => {
+		const allowed = new Set([
+		  "resumen",
+		  "clientes",
+		  "dashboard",
+		  "captaciones",
+		  "inmuebles",
+		  "mapa_inmuebles",
+		  "alquileres",
 		  "compraventas",
 	    "demandas",
 	    "relaciones",
@@ -35324,13 +35324,13 @@ const setCrmWorkspaceView = (view = "resumen") => {
     });
   }
 
-		  const viewMap = {
-			  resumen: crmViewResumen,
-			  clientes: crmViewClientes,
-			  analisis: crmViewAnalisis,
-			  captaciones: crmViewCaptaciones,
-			  inmuebles: crmViewInmuebles,
-			  mapa_inmuebles: crmViewMapaInmuebles,
+			  const viewMap = {
+				  resumen: crmViewResumen,
+				  clientes: crmViewClientes,
+				  dashboard: crmViewAnalisis,
+				  captaciones: crmViewCaptaciones,
+				  inmuebles: crmViewInmuebles,
+				  mapa_inmuebles: crmViewMapaInmuebles,
 			  alquileres: crmViewAlquileres,
 			  compraventas: crmViewCompraventas,
 		    demandas: crmViewDemandas,
@@ -35372,10 +35372,10 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  loadCrmCaptaciones();
 	} else if (nextView === "clientes") {
 	  loadCrmClientes();
-	} else if (nextView === "analisis") {
-	  renderCrmResumenDashboard();
-	  } else if (nextView === "inmuebles") {
-		  loadCrmInmuebles();
+		} else if (nextView === "dashboard") {
+		  renderCrmResumenDashboard();
+		  } else if (nextView === "inmuebles") {
+			  loadCrmInmuebles();
 		} else if (nextView === "mapa_inmuebles") {
 		  loadCrmMapaInmuebles();
 	  } else if (nextView === "alquileres") {
@@ -43557,14 +43557,14 @@ const loadCrmCaptaciones = () => {
   if (!crmCaptacionesTable) {
     return;
   }
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const scope = resolveInmoScopeParams();
+  if (!scope) {
     crmCaptacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
   const params = new URLSearchParams({
     tabla: "captaciones",
-    empresa_id: empresa.id,
+    ...scope,
   });
   params.set("include_id", "1");
   const q = String(state.crmGlobalSearch || "").trim();
@@ -45521,8 +45521,8 @@ const renderCrmResumenDashboard = () => {
       renderCrmActionList(
         crmHomePanelObjetivos,
         [
-          { title: "Informe análisis de datos", summary: "KPIs y embudo comercial.", crmView: "analisis" },
-          { title: "Objetivos", summary: "Revisar metas por asesor/agencia.", crmView: "analisis" },
+          { title: "Dashboard", summary: "KPIs y embudo comercial.", crmView: "dashboard" },
+          { title: "Objetivos", summary: "Revisar metas por asesor/agencia.", crmView: "dashboard" },
         ],
         "Sin objetivos configurados."
       );
@@ -46671,12 +46671,11 @@ const renderCrmInmueblesCatalog = (rows = []) => {
 };
 
 const resolveInmoScopeParams = () => {
+  // Preferimos siempre `workspace_id` cuando esté disponible (aunque la URL haya perdido `holding/mode`),
+  // porque los servicios CRM deben funcionar por workspace en tenant.
   try {
-    if (isTenantWorkspaceMode()) {
-      const ws =
-        String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
-      return ws ? { workspace_id: ws } : {};
-    }
+    const ws = String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
+    if (ws) return { workspace_id: ws };
   } catch (e) {}
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa) return null;
@@ -69098,13 +69097,13 @@ if (crmInicioContactarBtn) {
 
 if (crmInicioObjetivosBtn) {
   crmInicioObjetivosBtn.addEventListener("click", () => {
-    setCrmWorkspaceView("analisis");
+    setCrmWorkspaceView("dashboard");
   });
 }
 
 if (crmInicioPanelBtn) {
   crmInicioPanelBtn.addEventListener("click", () => {
-    setCrmWorkspaceView("analisis");
+    setCrmWorkspaceView("dashboard");
   });
 }
 

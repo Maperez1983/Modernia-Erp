@@ -72954,11 +72954,25 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                if not empresa_ids:
+                    platform_eid = get_platform_empresa_id(conn)
+                    if platform_eid:
+                        empresa_ids = [platform_eid]
                 if "workspace_id" in inm_cols:
-                    where.append("COALESCE(i.workspace_id, '') = ?")
-                    values.append(workspace_id)
+                    # Compat: muchos registros legacy aún no tienen workspace_id. En modo tenant
+                    # incluimos también los que pertenecen a empresas del workspace.
+                    if empresa_ids and "empresa_id" in inm_cols:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.append(
+                            f"(COALESCE(i.workspace_id, '') = ? OR (COALESCE(i.workspace_id, '') = '' AND i.empresa_id IN ({placeholders_ws})))"
+                        )
+                        values.append(workspace_id)
+                        values.extend(empresa_ids)
+                    else:
+                        where.append("COALESCE(i.workspace_id, '') = ?")
+                        values.append(workspace_id)
                 else:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
                         json_response(self, {"rows": []})
                         return
@@ -78175,8 +78189,27 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
                 if "workspace_id" in columns:
-                    where.append("COALESCE(t.workspace_id, '') = ?")
-                    values.append(workspace_id)
+                    # Compat: registros legacy pueden tener workspace_id NULL. En tenant
+                    # permitimos también los que pertenezcan a empresas del workspace.
+                    if "empresa_id" in columns:
+                        empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                        if not empresa_ids:
+                            platform_eid = get_platform_empresa_id(conn)
+                            if platform_eid:
+                                empresa_ids = [platform_eid]
+                        if empresa_ids:
+                            placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                            where.append(
+                                f"(COALESCE(t.workspace_id, '') = ? OR (COALESCE(t.workspace_id, '') = '' AND t.empresa_id IN ({placeholders_ws})))"
+                            )
+                            values.append(workspace_id)
+                            values.extend(empresa_ids)
+                        else:
+                            where.append("COALESCE(t.workspace_id, '') = ?")
+                            values.append(workspace_id)
+                    else:
+                        where.append("COALESCE(t.workspace_id, '') = ?")
+                        values.append(workspace_id)
                 elif "empresa_id" in columns:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
