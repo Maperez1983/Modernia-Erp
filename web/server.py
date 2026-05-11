@@ -36868,7 +36868,9 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
     """
     try:
         ws_id = str(workspace_id or "").strip()
-        if not ws_id or not session or workspace_session_is_privileged(session):
+        # Nota: aunque el usuario sea privilegiado (admin), esta función es segura porque solo crea/vincula
+        # una ficha "self" para el `user_id` autenticado.
+        if not ws_id or not session:
             return ""
         user_id = str(session.get("user_id") or "").strip()
         if not user_id:
@@ -52957,23 +52959,23 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            # Hardening: para usuarios no privilegiados, si `persona_id` falta o viene incorrecta,
-            # resolvemos SIEMPRE la ficha propia y fichamos sobre ella (nunca sobre terceros).
-            if session and not workspace_session_is_privileged(session):
-                user_id = str(session.get("user_id") or "").strip()
-                if not user_id:
-                    json_response(self, {"error": "No autorizado"}, status=403)
-                    return
-                if not persona_id:
-                    persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
-                    if not persona_id:
-                        persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
-                if not persona_id:
-                    json_response(self, {"error": "No tienes ficha de registro horario vinculada"}, status=403)
-                    return
-            if not persona_id:
-                json_response(self, {"error": "persona_id requerido"}, status=400)
+            # Modo "self" por defecto: este endpoint se usa para fichar desde la app.
+            # Incluso si el usuario es admin, por defecto ficha sobre su propia persona.
+            # (Para fichar por terceros existiría otro endpoint/flujo explícito.)
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
                 return
+            user_id = str(session.get("user_id") or "").strip()
+            if not user_id:
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
+            if not own_persona_id:
+                own_persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
+            if not own_persona_id:
+                json_response(self, {"error": "No tienes ficha de registro horario vinculada"}, status=403)
+                return
+            persona_id = own_persona_id
             persona_row = conn.execute(
                 """
                 SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
@@ -52986,141 +52988,15 @@ class Handler(BaseHTTPRequestHandler):
             if not persona_row:
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
-            if session and not workspace_session_is_privileged(session):
-                user_id = str(session.get("user_id") or "").strip()
+            # Consistencia: si por cualquier motivo la persona resuelta no está vinculada al usuario, no permitimos fichar.
+            # (Este caso debería ser raro: ensure_workspace_persona_for_self() ya vincula usuario_id.)
+            try:
                 bound_user_id = str(persona_row["usuario_id"] or "").strip()
-                if not user_id:
-                    json_response(self, {"error": "No autorizado"}, status=403)
-                    return
-                if bound_user_id and bound_user_id != user_id:
-                    # Si el usuario ya tiene una ficha propia en ese workspace, ignoramos la persona_id enviada
-                    # (evita 403 por selección errónea en frontend) y fichamos sobre SU ficha.
-                    own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
-                    if own_persona_id and own_persona_id != persona_id:
-                        persona_id = own_persona_id
-                        persona_row = conn.execute(
-                            """
-                            SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
-                            FROM workspace_registro_personal
-                            WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
-                            LIMIT 1
-                            """,
-                            (workspace_id, persona_id),
-                        ).fetchone()
-                        bound_user_id = str(persona_row["usuario_id"] or "").strip() if persona_row else ""
-                    if not persona_row:
-                        json_response(self, {"error": "persona no encontrada"}, status=404)
-                        return
-                    if bound_user_id and bound_user_id == user_id:
-                        pass
-                    else:
-                        # Compat: en versiones anteriores `usuario_id` podía guardar `usuario`/email en lugar del id real.
-                        # Si coincide con el usuario autenticado, normalizamos el dato y permitimos fichar.
-                        is_self_compat = False
-                        try:
-                            if normalize_lookup_text(bound_user_id) == normalize_lookup_text(session.get("usuario") or ""):
-                                is_self_compat = True
-                        except Exception:
-                            pass
-                        try:
-                            if normalize_email(bound_user_id) and normalize_email(bound_user_id) == normalize_email(session.get("email") or ""):
-                                is_self_compat = True
-                        except Exception:
-                            pass
-                        if not is_self_compat:
-                            try:
-                                resolved = conn.execute(
-                                    """
-                                    SELECT id
-                                    FROM usuarios
-                                    WHERE id = ?
-                                       OR LOWER(TRIM(usuario)) = LOWER(TRIM(?))
-                                       OR LOWER(TRIM(email)) = LOWER(TRIM(?))
-                                    LIMIT 1
-                                    """,
-                                    (bound_user_id, bound_user_id, bound_user_id),
-                                ).fetchone()
-                            except Exception:
-                                resolved = None
-                        if resolved and str(row_value(resolved, "id") or row_value(resolved, 0) or "").strip() == user_id:
-                            is_self_compat = True
-                    if is_self_compat:
-                        now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
-                        try:
-                            conn.execute(
-                                """
-                                UPDATE workspace_registro_personal
-                                SET usuario_id = ?, usuario_manual = 1, updated_at = datetime(?)
-                                WHERE workspace_id = ? AND id = ?
-                                """,
-                                (user_id, now_fix, workspace_id, persona_id),
-                            )
-                            conn.commit()
-                            persona_row = dict(persona_row)
-                            persona_row["usuario_id"] = user_id
-                        except Exception:
-                            # Aunque falle la normalización, permitimos fichar para no bloquear al trabajador.
-                            pass
-                    else:
-                        json_response(self, {"error": "No autorizado"}, status=403)
-                        return
-                # Si llegamos aquí con usuario no privilegiado, y la persona sigue sin estar vinculada a este usuario,
-                # hacemos un último intento de "auto-curación" creando/vinculando la ficha propia y reintentando.
-                bound_user_id = str(persona_row["usuario_id"] or "").strip()
-                if user_id and bound_user_id and bound_user_id != user_id:
-                    try:
-                        own_persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
-                    except Exception:
-                        own_persona_id = ""
-                    if own_persona_id:
-                        persona_id = own_persona_id
-                        persona_row = conn.execute(
-                            """
-                            SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
-                            FROM workspace_registro_personal
-                            WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
-                            LIMIT 1
-                            """,
-                            (workspace_id, persona_id),
-                        ).fetchone()
-                        if persona_row and str(persona_row["usuario_id"] or "").strip() == user_id:
-                            pass
-                        else:
-                            json_response(self, {"error": "No autorizado"}, status=403)
-                            return
-                # Auto-vinculación: si la ficha personal no tiene usuario aún, vinculamos al usuario autenticado.
-                # Evita que usuarios legítimos no puedan fichar por falta de `usuario_id` en RRHH.
-                if not bound_user_id and user_id:
-                    try:
-                        collision = conn.execute(
-                            """
-                            SELECT id
-                            FROM workspace_registro_personal
-                            WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1 AND id != ?
-                            LIMIT 1
-                            """,
-                            (workspace_id, user_id, persona_id),
-                        ).fetchone()
-                    except Exception:
-                        collision = None
-                    if collision:
-                        json_response(self, {"error": "No autorizado"}, status=403)
-                        return
-                    now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
-                    try:
-                        conn.execute(
-                            """
-                            UPDATE workspace_registro_personal
-                            SET usuario_id = ?, usuario_manual = 1, updated_at = datetime(?)
-                            WHERE workspace_id = ? AND id = ?
-                            """,
-                            (user_id, now_fix, workspace_id, persona_id),
-                        )
-                        conn.commit()
-                        persona_row = dict(persona_row)
-                        persona_row["usuario_id"] = user_id
-                    except Exception:
-                        pass
+            except Exception:
+                bound_user_id = ""
+            if bound_user_id and bound_user_id != user_id:
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             empresa_id = str(persona_row["empresa_id"] or "").strip()
             if not empresa_id:
                 # Compat/self: si la ficha no tenía empresa, intentamos asignarla desde el tenant.
