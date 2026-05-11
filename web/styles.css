@@ -12332,3 +12332,20 @@ body.theme-operativa .pill {
   color: rgba(var(--ink-rgb), 0.94);
   border-color: rgba(var(--gold-rgb), 0.22);
 }
+
+/* Micro-feedback: resalta acciones sugeridas (ej. "Crear usuario" en miembros). */
+@keyframes appPulseOutline {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--gold-rgb), 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(var(--gold-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--gold-rgb), 0);
+  }
+}
+
+.pulse {
+  animation: appPulseOutline 0.9s ease-out 1;
+}

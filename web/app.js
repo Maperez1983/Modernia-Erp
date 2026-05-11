@@ -10646,6 +10646,11 @@ const renderWorkspaceMembers = (rows = []) => {
         </select>
       </label>
       <button type="button" id="workspaceMemberAddBtn" class="secondary">Añadir</button>
+      ${
+        canOpenAdmin
+          ? `<button type="button" id="workspaceMemberCreateUserBtn" class="secondary ghost" title="Crear usuario del sistema y luego asignarlo al workspace">Crear usuario</button>`
+          : ""
+      }
       <span id="workspaceMemberStatus" class="muted"></span>
     </div>
     <div class="workspace-chip-list">${listHtml || "<p class='muted'>Sin miembros asignados todavía.</p>"}</div>
@@ -10653,8 +10658,35 @@ const renderWorkspaceMembers = (rows = []) => {
   const loginInput = document.getElementById("workspaceMemberLogin");
   const roleSelect = document.getElementById("workspaceMemberRole");
   const addBtn = document.getElementById("workspaceMemberAddBtn");
+  const createBtn = document.getElementById("workspaceMemberCreateUserBtn");
   const status = document.getElementById("workspaceMemberStatus");
   const resetBtn = document.getElementById("workspaceMemberResetBtn");
+  if (createBtn) {
+    createBtn.addEventListener("click", () => {
+      // Nota: “Miembros” solo asigna usuarios existentes al workspace.
+      // Este botón abre el panel admin (Usuarios del sistema) y pre-rellena el login/email.
+      const raw = String(loginInput?.value || "").trim();
+      openAdmin();
+      try {
+        if (!raw) return;
+        const isEmail = raw.includes("@");
+        const userField = document.querySelector('#adminUserForm input[name="usuario"]');
+        const emailField = document.querySelector('#adminUserForm input[name="email"]');
+        if (isEmail) {
+          if (emailField) emailField.value = raw;
+          if (userField && !String(userField.value || "").trim()) {
+            userField.value = raw.split("@")[0] || "";
+          }
+        } else if (userField) {
+          userField.value = raw;
+        }
+        const statusEl = document.getElementById("adminUserStatus");
+        if (statusEl) {
+          statusEl.textContent = "Completa nombre/apellido/servicios y pulsa “Crear usuario”. Luego vuelve y añádelo como miembro.";
+        }
+      } catch (e) {}
+    });
+  }
   if (addBtn) {
     addBtn.addEventListener("click", async () => {
       const login = String(loginInput?.value || "").trim();
@@ -10674,7 +10706,18 @@ const renderWorkspaceMembers = (rows = []) => {
         state.currentWorkspaceMembers = members.rows || [];
         renderWorkspaceMembers(state.currentWorkspaceMembers);
       } catch (error) {
-        if (status) status.textContent = error?.message || "No se pudo añadir.";
+        const msg = error?.message || "No se pudo añadir.";
+        if (status) status.textContent = msg;
+        // Ayuda contextual: si no existe, empuja al flujo correcto.
+        if (canOpenAdmin && /no encontrado|usuario no encontrado|not found/i.test(String(msg))) {
+          try {
+            setTimeout(() => {
+              const btn = document.getElementById("workspaceMemberCreateUserBtn");
+              if (btn) btn.classList.add("pulse");
+              setTimeout(() => btn?.classList?.remove?.("pulse"), 1200);
+            }, 50);
+          } catch (_e) {}
+        }
       }
     });
   }
