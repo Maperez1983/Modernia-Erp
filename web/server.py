@@ -36860,6 +36860,24 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         return str(row[0] or "")
 
 
+def session_user_id(session):
+    """
+    Devuelve el id del usuario autenticado desde la sesión.
+    Compatible con sesiones legacy que puedan usar otra clave.
+    """
+    if not isinstance(session, dict):
+        return ""
+    for key in ("user_id", "id", "usuario_id", "uid"):
+        try:
+            val = session.get(key)
+        except Exception:
+            val = None
+        val = str(val or "").strip()
+        if val:
+            return val
+    return ""
+
+
 def ensure_workspace_persona_for_self(conn, workspace_id, session):
     """
     Garantiza que un usuario no privilegiado con `registro_horario_activo=1` tenga una ficha
@@ -45612,6 +45630,14 @@ class Handler(BaseHTTPRequestHandler):
                 (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or os.environ.get("COMMIT_SHA") or "")
                 .strip()
             )
+            if not commit:
+                # Fallback: firma del código en runtime (útil cuando el proveedor no expone el SHA).
+                try:
+                    if not getattr(Handler, "_code_sig", ""):
+                        with open(__file__, "rb") as fh:
+                            Handler._code_sig = hashlib.sha1(fh.read()).hexdigest()
+                except Exception:
+                    Handler._code_sig = ""
             db_source = "postgres_url" if (os.environ.get("POSTGRES_URL") or "").strip() else "database_url"
             db_host = ""
             try:
@@ -45632,6 +45658,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "backend": backend,
                     "commit": commit[:12] if commit else "",
+                    "code_sig": (getattr(Handler, "_code_sig", "") or "")[:12],
                     "started_at": getattr(Handler, "_started_at", ""),
                     "pid": os.getpid(),
                     "db_ready": bool(Handler._db_ready),
@@ -52965,9 +52992,15 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
-            user_id = str(session.get("user_id") or "").strip()
+            user_id = session_user_id(session)
             if not user_id:
-                json_response(self, {"error": "No autorizado"}, status=403)
+                # Diagnóstico mínimo: en algunos entornos legacy la sesión puede no incluir `user_id`.
+                # No devolvemos el contenido de la sesión, solo un indicador del problema.
+                try:
+                    session_keys = sorted([str(k) for k in (session.keys() if isinstance(session, dict) else [])])
+                except Exception:
+                    session_keys = []
+                json_response(self, {"error": "No autorizado", "detail": "no_user_id_in_session", "session_keys": session_keys[:12]}, status=403)
                 return
             own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
             if not own_persona_id:
@@ -52995,7 +53028,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 bound_user_id = ""
             if bound_user_id and bound_user_id != user_id:
-                json_response(self, {"error": "No autorizado"}, status=403)
+                json_response(
+                    self,
+                    {
+                        "error": "No autorizado",
+                        "detail": "persona_bound_to_different_user",
+                        "persona_id": str(persona_id or ""),
+                    },
+                    status=403,
+                )
                 return
             empresa_id = str(persona_row["empresa_id"] or "").strip()
             if not empresa_id:
