@@ -6761,6 +6761,17 @@ const inferWorkspaceEngineGroupForEngine = (engineKey = "") => {
   return "avanzado";
 };
 
+const normalizeWorkspaceModuleKey = (value = "") => {
+  const key = normalizeSimple(value || "");
+  if (!key) return "";
+  if (key === "portal" || key === "portalcliente" || key === "portal_cliente") return "portal_cliente";
+  if (key === "facturas" || key === "facturasocr" || key === "facturas_recibidas") return "facturas_recibidas";
+  if (key === "presupuestos") return "facturacion";
+  if (key === "conta") return "contabilidad";
+  if (key === "horario" || key === "registro" || key === "registrohorario") return "registro_horario";
+  return key;
+};
+
 const setWorkspaceEngineGroup = (group = "operativa", { persist = true } = {}) => {
   const normalized = normalizeWorkspaceEngineGroupKey(group);
   state.currentWorkspaceEngineGroup = normalized;
@@ -6790,7 +6801,7 @@ const setWorkspaceEngineGroup = (group = "operativa", { persist = true } = {}) =
 const syncWorkspaceEngineTabsVisibility = () => {
   if (!isTenantWorkspaceMode()) return;
   if (!Array.isArray(workspaceEngineButtons) || !workspaceEngineButtons.length) return;
-  const enabledSet = new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeSimple(key)));
+  const enabledSet = new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeWorkspaceModuleKey(key)));
   // Si no hay lista, no filtramos (modo compatible).
   if (!enabledSet.size) return;
 
@@ -6798,7 +6809,7 @@ const syncWorkspaceEngineTabsVisibility = () => {
   workspaceEngineButtons.forEach((button) => {
     const engineKey = normalizeSimple(button?.dataset?.workspaceEngineTab || "");
     if (!engineKey) return;
-    const isVisible = enabledSet.has(engineKey);
+    const isVisible = enabledSet.has(engineKey) || enabledSet.has(normalizeWorkspaceModuleKey(engineKey));
     button.classList.toggle("hidden", !isVisible);
     button.hidden = !isVisible;
     if (!firstVisible && isVisible) firstVisible = engineKey;
