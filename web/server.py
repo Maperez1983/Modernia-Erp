@@ -52922,8 +52922,56 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
                 if bound_user_id and bound_user_id != user_id:
-                    json_response(self, {"error": "No autorizado"}, status=403)
-                    return
+                    # Compat: en versiones anteriores `usuario_id` podía guardar `usuario`/email en lugar del id real.
+                    # Si coincide con el usuario autenticado, normalizamos el dato y permitimos fichar.
+                    is_self_compat = False
+                    try:
+                        if normalize_lookup_text(bound_user_id) == normalize_lookup_text(session.get("usuario") or ""):
+                            is_self_compat = True
+                    except Exception:
+                        pass
+                    try:
+                        if normalize_email(bound_user_id) and normalize_email(bound_user_id) == normalize_email(session.get("email") or ""):
+                            is_self_compat = True
+                    except Exception:
+                        pass
+                    if not is_self_compat:
+                        try:
+                            resolved = conn.execute(
+                                """
+                                SELECT id
+                                FROM usuarios
+                                WHERE id = ?
+                                   OR LOWER(TRIM(usuario)) = LOWER(TRIM(?))
+                                   OR LOWER(TRIM(email)) = LOWER(TRIM(?))
+                                LIMIT 1
+                                """,
+                                (bound_user_id, bound_user_id, bound_user_id),
+                            ).fetchone()
+                        except Exception:
+                            resolved = None
+                        if resolved and str(row_value(resolved, "id") or row_value(resolved, 0) or "").strip() == user_id:
+                            is_self_compat = True
+                    if is_self_compat:
+                        now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
+                        try:
+                            conn.execute(
+                                """
+                                UPDATE workspace_registro_personal
+                                SET usuario_id = ?, usuario_manual = 1, updated_at = datetime(?)
+                                WHERE workspace_id = ? AND id = ?
+                                """,
+                                (user_id, now_fix, workspace_id, persona_id),
+                            )
+                            conn.commit()
+                            persona_row = dict(persona_row)
+                            persona_row["usuario_id"] = user_id
+                        except Exception:
+                            # Aunque falle la normalización, permitimos fichar para no bloquear al trabajador.
+                            pass
+                    else:
+                        json_response(self, {"error": "No autorizado"}, status=403)
+                        return
                 # Auto-vinculación: si la ficha personal no tiene usuario aún, vinculamos al usuario autenticado.
                 # Evita que usuarios legítimos no puedan fichar por falta de `usuario_id` en RRHH.
                 if not bound_user_id and user_id:

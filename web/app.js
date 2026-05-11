@@ -6603,10 +6603,15 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceTimeSystemUsers(state.workspaceTimeUsers || []);
   if (timeEmployees.length) {
     let selected = timeEmployees[0];
-    const authUser = getAuthScopeUser();
-    if (authUser?.id && !isWorkspaceTimeManager()) {
-      const mine = timeEmployees.find((row) => String(row.usuario_id || "") === String(authUser.id));
-      if (mine) selected = mine;
+    if (!isWorkspaceTimeManager()) {
+      const ownId = resolveWorkspaceTimePersonaForAuthUser(timeEmployees);
+      if (ownId) {
+        const mine = timeEmployees.find((row) => String(row?.id || "") === String(ownId));
+        if (mine) selected = mine;
+      } else {
+        // No seleccionamos "otro" empleado por defecto si el usuario no está vinculado.
+        selected = null;
+      }
     }
     if (selected) {
       selectWorkspacePersona(selected);
@@ -18518,6 +18523,33 @@ const isWorkspaceTimeManager = () => {
   return canManageCurrentWorkspace();
 };
 
+// Resuelve la persona (RRHH) del usuario autenticado dentro del workspace.
+// Si no hay vínculo directo `usuario_id` → id, intenta heurísticas por email/usuario (solo si es único).
+const resolveWorkspaceTimePersonaForAuthUser = (rows = null) => {
+  const user = getAuthScopeUser();
+  if (!user?.id) return "";
+  const employees = Array.isArray(rows)
+    ? rows
+    : (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : []);
+  const uid = String(user.id || "").trim();
+  if (!uid) return "";
+  const preferred = employees.find((row) => Number(row?.usuario_manual || 0) === 1 && String(row?.usuario_id || "") === uid);
+  if (preferred?.id) return String(preferred.id || "").trim();
+  const direct = employees.find((row) => String(row?.usuario_id || "") === uid);
+  if (direct?.id) return String(direct.id || "").trim();
+  const email = String(user.email || "").trim().toLowerCase();
+  const usuario = String(user.usuario || "").trim().toLowerCase();
+  const candidates = employees.filter((row) => {
+    const rowEmail = String(row?.email || "").trim().toLowerCase();
+    const rowUsuario = String(row?.usuario || row?.login || "").trim().toLowerCase();
+    if (email && rowEmail && rowEmail === email) return true;
+    if (usuario && rowUsuario && rowUsuario === usuario) return true;
+    return false;
+  });
+  if (candidates.length === 1) return String(candidates[0]?.id || "").trim();
+  return "";
+};
+
 const applyWorkspaceTimeMode = () => {
   const layout = document.getElementById("workspaceTimeLayout");
   if (!layout) return;
@@ -18598,14 +18630,28 @@ const renderWorkspaceTimeSystemUsers = (rows = []) => {
 
 const renderWorkspaceTimeEmployeeList = (rows = []) => {
   if (!workspaceTimeEmployeeList) return;
-  if (!rows.length) {
+  const canEdit = isWorkspaceTimeManager();
+  let visibleRows = Array.isArray(rows) ? rows : [];
+  if (!canEdit) {
+    const ownId = resolveWorkspaceTimePersonaForAuthUser(visibleRows);
+    const own = ownId ? visibleRows.find((row) => String(row?.id || "") === String(ownId)) : null;
+    if (own) {
+      visibleRows = [own];
+    } else {
+      workspaceTimeEmployeeList.innerHTML = `
+        <p class='muted'>No tienes ficha de registro horario vinculada todavía.</p>
+        <p class='muted'>Pide a administración que te vincule (usuario ↔ trabajador) o completa tu email en RRHH para que el sistema lo detecte.</p>
+      `;
+      return;
+    }
+  }
+  if (!visibleRows.length) {
     workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin trabajadores activos todavía.</p>";
     return;
   }
-  const canEdit = isWorkspaceTimeManager();
   workspaceTimeEmployeeList.innerHTML = `
     <div class="workspace-time-cardstack">
-      ${rows
+      ${visibleRows
         .map(
           (row) => `
             <article class="workspace-time-card ${Number(row.activo || 0) === 1 ? "" : "muted"}" data-time-persona="${row.id}">
@@ -18633,7 +18679,7 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
   if (canEdit) {
     workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-edit]").forEach((button) => {
       button.addEventListener("click", () => {
-        const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
+        const record = visibleRows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
         if (record) {
           fillWorkspaceTimeEmployeeForm(record);
           openWorkspaceTimeEmployeeModal(`Editando: ${record.nombre || "trabajador"}`);
@@ -18643,7 +18689,7 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
   }
   workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-view]").forEach((button) => {
     button.addEventListener("click", () => {
-      const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeView || ""));
+      const record = visibleRows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeView || ""));
       if (record) selectWorkspacePersona(record);
       focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
     });
@@ -18663,6 +18709,13 @@ const fillWorkspaceAlertForm = (config = {}) => {
 };
 
 const selectWorkspacePersona = async (record) => {
+  if (!isWorkspaceTimeManager()) {
+    const ownId = resolveWorkspaceTimePersonaForAuthUser();
+    if (ownId && String(record?.id || "") !== String(ownId)) {
+      alert("No puedes fichar ni ver la ficha de otros trabajadores.");
+      return;
+    }
+  }
   state.workspaceTimeSelectedPersonaId = record.id || "";
   state.workspaceTimeSelectedPersona = record || null;
   if (workspaceTimeEmployeeForm && isWorkspaceTimeManager()) {

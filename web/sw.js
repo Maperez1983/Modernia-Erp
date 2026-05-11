@@ -17,7 +17,7 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=4",
   "/app-auth.js?v=14",
   "/app-routing.js?v=11",
-  "/app.js?v=760",
+  "/app.js?v=762",
   "/manifest.webmanifest?v=17",
   "/icons/catastro.png?v=28",
   "/assets/verifika2/verifika2_mark.svg",
