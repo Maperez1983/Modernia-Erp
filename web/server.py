@@ -40143,6 +40143,12 @@ def json_response(handler, data, status=200, cookies=None, extra_headers=None):
         handler.send_header("Access-Control-Allow-Credentials", "true")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    # Debug/trace: permite identificar la instancia que respondió (útil con múltiples réplicas detrás de proxy).
+    try:
+        handler.send_header("X-App-Pid", str(os.getpid()))
+        handler.send_header("X-App-Started-At", str(getattr(handler.__class__, "_started_at", "") or getattr(handler, "_started_at", "") or ""))
+    except Exception:
+        pass
     for key, value in (extra_headers or []):
         handler.send_header(key, value)
     for cookie_value in (cookies or []):
