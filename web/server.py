@@ -40068,6 +40068,34 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
+    def _resolve_cors_origin():
+        """
+        CORS hardening:
+        - Si la request trae `Origin` y coincide con nuestro `Host`, reflejamos ese origin y permitimos credenciales.
+        - En caso contrario, usamos `*` (sin credenciales).
+        Esto evita errores de Safari/WebKit cuando hace checks CORS incluso en algunos flows same-origin
+        y, a la vez, no abre la puerta a orígenes arbitrarios con cookies.
+        """
+        try:
+            origin = str(handler.headers.get("Origin") or "").strip()
+        except Exception:
+            origin = ""
+        if not origin:
+            return ("*", False)
+        try:
+            parsed = urllib.parse.urlparse(origin)
+            origin_host = (parsed.hostname or "").strip().lower()
+        except Exception:
+            origin_host = ""
+        try:
+            host_header = str(handler.headers.get("Host") or "").strip()
+            host_only = host_header.split(":")[0].strip().lower()
+        except Exception:
+            host_only = ""
+        if origin_host and host_only and origin_host == host_only:
+            return (origin, True)
+        return ("*", False)
+
     def _json_default(value):  # noqa: ANN001
         # Postgres puede devolver Decimal (NUMERIC/ROUND/AVG). JSON estándar no lo soporta.
         if isinstance(value, Decimal):
@@ -40089,7 +40117,10 @@ def json_response(handler, data, status=200, cookies=None, extra_headers=None):
 
     payload = json.dumps(data, ensure_ascii=False, default=_json_default).encode("utf-8")
     handler.send_response(status)
-    handler.send_header("Access-Control-Allow-Origin", "*")
+    cors_origin, cors_creds = _resolve_cors_origin()
+    handler.send_header("Access-Control-Allow-Origin", cors_origin)
+    if cors_creds:
+        handler.send_header("Access-Control-Allow-Credentials", "true")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
     for key, value in (extra_headers or []):
@@ -40119,7 +40150,30 @@ def json_response(handler, data, status=200, cookies=None, extra_headers=None):
 def binary_response(handler, data, content_type="application/octet-stream", filename=None, status=200):
     payload = data or b""
     handler.send_response(status)
-    handler.send_header("Access-Control-Allow-Origin", "*")
+    try:
+        cors_origin, cors_creds = (("*", False))
+        try:
+            origin = str(handler.headers.get("Origin") or "").strip()
+        except Exception:
+            origin = ""
+        if origin:
+            try:
+                parsed = urllib.parse.urlparse(origin)
+                origin_host = (parsed.hostname or "").strip().lower()
+            except Exception:
+                origin_host = ""
+            try:
+                host_header = str(handler.headers.get("Host") or "").strip()
+                host_only = host_header.split(":")[0].strip().lower()
+            except Exception:
+                host_only = ""
+            if origin_host and host_only and origin_host == host_only:
+                cors_origin, cors_creds = (origin, True)
+        handler.send_header("Access-Control-Allow-Origin", cors_origin)
+        if cors_creds:
+            handler.send_header("Access-Control-Allow-Credentials", "true")
+    except Exception:
+        handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
     handler.send_header("Content-Type", content_type)
