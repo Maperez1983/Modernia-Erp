@@ -53064,6 +53064,30 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         json_response(self, {"error": "No autorizado"}, status=403)
                         return
+                # Si llegamos aquí con usuario no privilegiado, y la persona sigue sin estar vinculada a este usuario,
+                # hacemos un último intento de "auto-curación" creando/vinculando la ficha propia y reintentando.
+                bound_user_id = str(persona_row["usuario_id"] or "").strip()
+                if user_id and bound_user_id and bound_user_id != user_id:
+                    try:
+                        own_persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
+                    except Exception:
+                        own_persona_id = ""
+                    if own_persona_id:
+                        persona_id = own_persona_id
+                        persona_row = conn.execute(
+                            """
+                            SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
+                            FROM workspace_registro_personal
+                            WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
+                            LIMIT 1
+                            """,
+                            (workspace_id, persona_id),
+                        ).fetchone()
+                        if persona_row and str(persona_row["usuario_id"] or "").strip() == user_id:
+                            pass
+                        else:
+                            json_response(self, {"error": "No autorizado"}, status=403)
+                            return
                 # Auto-vinculación: si la ficha personal no tiene usuario aún, vinculamos al usuario autenticado.
                 # Evita que usuarios legítimos no puedan fichar por falta de `usuario_id` en RRHH.
                 if not bound_user_id and user_id:
