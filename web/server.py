@@ -52917,9 +52917,46 @@ class Handler(BaseHTTPRequestHandler):
             session = getattr(self, "auth_session", None) or self._current_session()
             if session and not workspace_session_is_privileged(session):
                 user_id = str(session.get("user_id") or "").strip()
-                if not user_id or str(persona_row["usuario_id"] or "").strip() != user_id:
+                bound_user_id = str(persona_row["usuario_id"] or "").strip()
+                if not user_id:
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
+                if bound_user_id and bound_user_id != user_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                # Auto-vinculación: si la ficha personal no tiene usuario aún, vinculamos al usuario autenticado.
+                # Evita que usuarios legítimos no puedan fichar por falta de `usuario_id` en RRHH.
+                if not bound_user_id and user_id:
+                    try:
+                        collision = conn.execute(
+                            """
+                            SELECT id
+                            FROM workspace_registro_personal
+                            WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1 AND id != ?
+                            LIMIT 1
+                            """,
+                            (workspace_id, user_id, persona_id),
+                        ).fetchone()
+                    except Exception:
+                        collision = None
+                    if collision:
+                        json_response(self, {"error": "No autorizado"}, status=403)
+                        return
+                    now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
+                    try:
+                        conn.execute(
+                            """
+                            UPDATE workspace_registro_personal
+                            SET usuario_id = ?, usuario_manual = 1, updated_at = datetime(?)
+                            WHERE workspace_id = ? AND id = ?
+                            """,
+                            (user_id, now_fix, workspace_id, persona_id),
+                        )
+                        conn.commit()
+                        persona_row = dict(persona_row)
+                        persona_row["usuario_id"] = user_id
+                    except Exception:
+                        pass
             empresa_id = str(persona_row["empresa_id"] or "").strip()
             if not empresa_id:
                 # Compat/self: si la ficha no tenía empresa, intentamos asignarla desde el tenant.
