@@ -52899,8 +52899,26 @@ class Handler(BaseHTTPRequestHandler):
             geo_acc = _geo_float("acc")
             geo_source = str(geo.get("source") or "").strip() or None
             geo_has = 1 if (geo_lat is not None or geo_lon is not None or geo_acc is not None or geo_source) else 0
-            if not workspace_id or not persona_id:
-                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            # Hardening: para usuarios no privilegiados, si `persona_id` falta o viene incorrecta,
+            # resolvemos SIEMPRE la ficha propia y fichamos sobre ella (nunca sobre terceros).
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                if not user_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                if not persona_id:
+                    persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
+                    if not persona_id:
+                        persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
+                if not persona_id:
+                    json_response(self, {"error": "No tienes ficha de registro horario vinculada"}, status=403)
+                    return
+            if not persona_id:
+                json_response(self, {"error": "persona_id requerido"}, status=400)
                 return
             persona_row = conn.execute(
                 """
@@ -52914,7 +52932,6 @@ class Handler(BaseHTTPRequestHandler):
             if not persona_row:
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
-            session = getattr(self, "auth_session", None) or self._current_session()
             if session and not workspace_session_is_privileged(session):
                 user_id = str(session.get("user_id") or "").strip()
                 bound_user_id = str(persona_row["usuario_id"] or "").strip()
@@ -52922,34 +52939,55 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
                 if bound_user_id and bound_user_id != user_id:
-                    # Compat: en versiones anteriores `usuario_id` podía guardar `usuario`/email en lugar del id real.
-                    # Si coincide con el usuario autenticado, normalizamos el dato y permitimos fichar.
-                    is_self_compat = False
-                    try:
-                        if normalize_lookup_text(bound_user_id) == normalize_lookup_text(session.get("usuario") or ""):
-                            is_self_compat = True
-                    except Exception:
+                    # Si el usuario ya tiene una ficha propia en ese workspace, ignoramos la persona_id enviada
+                    # (evita 403 por selección errónea en frontend) y fichamos sobre SU ficha.
+                    own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
+                    if own_persona_id and own_persona_id != persona_id:
+                        persona_id = own_persona_id
+                        persona_row = conn.execute(
+                            """
+                            SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
+                            FROM workspace_registro_personal
+                            WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
+                            LIMIT 1
+                            """,
+                            (workspace_id, persona_id),
+                        ).fetchone()
+                        bound_user_id = str(persona_row["usuario_id"] or "").strip() if persona_row else ""
+                    if not persona_row:
+                        json_response(self, {"error": "persona no encontrada"}, status=404)
+                        return
+                    if bound_user_id and bound_user_id == user_id:
                         pass
-                    try:
-                        if normalize_email(bound_user_id) and normalize_email(bound_user_id) == normalize_email(session.get("email") or ""):
-                            is_self_compat = True
-                    except Exception:
-                        pass
-                    if not is_self_compat:
+                    else:
+                        # Compat: en versiones anteriores `usuario_id` podía guardar `usuario`/email en lugar del id real.
+                        # Si coincide con el usuario autenticado, normalizamos el dato y permitimos fichar.
+                        is_self_compat = False
                         try:
-                            resolved = conn.execute(
-                                """
-                                SELECT id
-                                FROM usuarios
-                                WHERE id = ?
-                                   OR LOWER(TRIM(usuario)) = LOWER(TRIM(?))
-                                   OR LOWER(TRIM(email)) = LOWER(TRIM(?))
-                                LIMIT 1
-                                """,
-                                (bound_user_id, bound_user_id, bound_user_id),
-                            ).fetchone()
+                            if normalize_lookup_text(bound_user_id) == normalize_lookup_text(session.get("usuario") or ""):
+                                is_self_compat = True
                         except Exception:
-                            resolved = None
+                            pass
+                        try:
+                            if normalize_email(bound_user_id) and normalize_email(bound_user_id) == normalize_email(session.get("email") or ""):
+                                is_self_compat = True
+                        except Exception:
+                            pass
+                        if not is_self_compat:
+                            try:
+                                resolved = conn.execute(
+                                    """
+                                    SELECT id
+                                    FROM usuarios
+                                    WHERE id = ?
+                                       OR LOWER(TRIM(usuario)) = LOWER(TRIM(?))
+                                       OR LOWER(TRIM(email)) = LOWER(TRIM(?))
+                                    LIMIT 1
+                                    """,
+                                    (bound_user_id, bound_user_id, bound_user_id),
+                                ).fetchone()
+                            except Exception:
+                                resolved = None
                         if resolved and str(row_value(resolved, "id") or row_value(resolved, 0) or "").strip() == user_id:
                             is_self_compat = True
                     if is_self_compat:
