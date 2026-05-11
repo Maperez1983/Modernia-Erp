@@ -46468,6 +46468,8 @@ class Handler(BaseHTTPRequestHandler):
         # Reduce fallos por falta de empresa_id: si viene `empresa_nombre` o `servicio`,
         # inferimos la empresa activa para escribir/consultar sin depender del selector UI.
         # Nota: no aplica a endpoints de administración de workspaces/empresas que deben ser explícitos.
+        # Importante: endpoints `workspace_*` (p.ej. registro horario) se acotan por `workspace_id`
+        # y validan permisos por workspace; no deben quedar bloqueados por esta inferencia/validación de empresa_id.
         if parsed.path not in {
             "/api/login",
             "/api/logout",
@@ -46484,6 +46486,16 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_create",
             "/api/empresa_update",
             "/api/empresa_delete",
+            "/api/workspace_registro_horario_toggle",
+            "/api/workspace_registro_horario",
+            "/api/workspace_registro_personal",
+            "/api/workspace_registro_personal_delete",
+            "/api/workspace_registro_usuario_toggle",
+            "/api/workspace_registro_notifications",
+            "/api/workspace_registro_alerts",
+            "/api/workspace_registro_periodo_lock",
+            "/api/workspace_kiosk_toggle",
+            "/api/workspace_kiosk_token",
         }:
             try:
                 if not str(payload.get("servicio") or "").strip():
@@ -53007,6 +53019,10 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     session_keys = []
                 json_response(self, {"error": "No autorizado", "detail": "no_user_id_in_session", "session_keys": session_keys[:12]}, status=403)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado", "detail": "no_workspace_membership"}, status=403)
                 return
             own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
             if not own_persona_id:
