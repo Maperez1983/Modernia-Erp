@@ -8845,7 +8845,11 @@ const findWorkspaceClientByLookup = (lookup = "", clienteId = "") => {
   if (!normalized) return null;
   return (state.workspaceClientOptions || []).find((row) => {
     const rowLabel = `${row.nombre || ""}${row.nif ? ` · ${row.nif}` : ""}`;
-    return normalizeSimple(rowLabel) === normalized || normalizeSimple(row.nombre || "") === normalized;
+    return (
+      normalizeSimple(rowLabel) === normalized
+      || normalizeSimple(row.nombre || "") === normalized
+      || normalizeSimple(row.nif || "") === normalized
+    );
   }) || null;
 };
 
@@ -73722,7 +73726,7 @@ if (workspaceBudgetForm) {
 const syncWorkspaceLookupField = async (inputEl, targetForm, targetFieldName) => {
   const value = inputEl?.value?.trim() || "";
   const hidden = targetForm?.querySelector(`[name="${targetFieldName}"]`);
-  const matched = state.workspaceClientOptionMap.get(value);
+  const matched = state.workspaceClientOptionMap.get(value) || findWorkspaceClientByLookup(value, "");
   if (hidden) hidden.value = matched?.id || "";
   if (value.length >= 2) {
     try {
