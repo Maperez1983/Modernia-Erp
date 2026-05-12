@@ -5001,6 +5001,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   state.actionModalEditId = "";
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalStatus) actionModalStatus.textContent = "";
+  // Reset fuerte: evita heredar cliente/tipo/etc si el usuario abre el creador tras editar otra cita.
   if (actionModalClienteInput) actionModalClienteInput.value = "";
   if (actionModalClienteId) actionModalClienteId.value = "";
   if (actionModalServicioSelect) {
@@ -5029,6 +5030,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   }
   if (actionModalResponsable) {
     populateActionModalResponsables(serviceValue || "gestoria");
+    actionModalResponsable.value = "";
   }
   if (state.actionModalContext) {
     const ctx = state.actionModalContext;
