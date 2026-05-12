@@ -48995,7 +48995,9 @@ const resolveCrmAgendaAmbitoLabel = (row = {}) => {
 
 const initCrmAgendaPrefsIfNeeded = () => {
   // Por defecto: agenda de EQUIPO (no solo la del usuario activo).
-  const DEFAULT_PRESET = "citas_7dias_equipo";
+  // Importante: por UX, la agenda no debe “vaciarse” al pasar de semana.
+  // Usamos un preset más amplio por defecto.
+  const DEFAULT_PRESET = "citas_equipo";
   if (!state.crmAgendaView) {
     let view = "list";
     let day = formatAgendaDate(new Date());
@@ -49014,7 +49016,11 @@ const initCrmAgendaPrefsIfNeeded = () => {
     try {
       const storedPreset = String(localStorage.getItem("crm.agenda.preset") || "").trim();
       // Migración suave: si existía el preset antiguo, pásalo a equipo.
-      if (storedPreset) preset = storedPreset === "citas_7dias" ? DEFAULT_PRESET : storedPreset;
+      if (storedPreset) {
+        if (storedPreset === "citas_7dias") preset = "citas_7dias_equipo";
+        else if (storedPreset === "citas_7dias_equipo") preset = DEFAULT_PRESET;
+        else preset = storedPreset;
+      }
     } catch (e) {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
@@ -49056,7 +49062,7 @@ const persistCrmAgendaPrefs = () => {
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
     localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
     if (crmAgendaPreset) {
-      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias_equipo"));
+      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_equipo"));
     }
   } catch (e) {}
 };
@@ -49937,7 +49943,7 @@ const applyCrmAgendaFilters = (rows = []) => {
   const qRaw = String(crmAgendaSearch?.value || "").trim();
   const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
   const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-  const presetRaw = normalizeSimple(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo") || "citas_7dias_equipo";
+  const presetRaw = normalizeSimple(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo") || "citas_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
   state.crmAgendaPreset = presetRaw;
@@ -50001,9 +50007,13 @@ const applyCrmAgendaFilters = (rows = []) => {
     if (!d) return false;
     const start = parseAgendaDate(anchorDayKey);
     if (!start) return false;
-    const end = new Date(start);
-    end.setDate(end.getDate() + Number(days || 0));
-    return d >= start && d <= end;
+    const span = Number(days || 0);
+    // Ventana simétrica: incluye días anteriores y posteriores al ancla.
+    const from = new Date(start);
+    from.setDate(from.getDate() - span);
+    const to = new Date(start);
+    to.setDate(to.getDate() + span);
+    return d >= from && d <= to;
   };
   const isCaducada = (row) => {
     const estado = normalizeSimple(row?.estado || "");
