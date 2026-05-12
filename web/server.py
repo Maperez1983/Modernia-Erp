@@ -69394,10 +69394,31 @@ class Handler(BaseHTTPRequestHandler):
             start = str(start or "").strip()
             end = str(end or "").strip()
             order = str(order or "").strip().lower()
-            # Service-first: si llega workspace_id, acotamos por workspace y NO dependemos de empresa_id.
+            # Service-first: si llega workspace_id, acotamos por workspace.
+            # Compat: si hay acciones legacy sin workspace_id, también las devolvemos si pertenecen
+            # a alguna empresa vinculada al workspace. Si no, al usuario le “desaparecen” citas antiguas.
             if workspace_id:
-                where.append("a.workspace_id = ?")
-                values.append(workspace_id)
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                empresa_ids = []
+                try:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                except Exception:
+                    empresa_ids = []
+                # Fallback: si no hay empresas vinculadas aún, al menos filtramos por workspace_id puro.
+                if empresa_ids:
+                    placeholders = ",".join(["?"] * len(empresa_ids))
+                    where.append(
+                        f"(COALESCE(a.workspace_id, '') = ? OR (COALESCE(a.workspace_id, '') = '' AND a.empresa_id IN ({placeholders})))"
+                    )
+                    values.append(workspace_id)
+                    values.extend(empresa_ids)
+                else:
+                    where.append("COALESCE(a.workspace_id, '') = ?")
+                    values.append(workspace_id)
             elif empresa_id:
                 where.append("a.empresa_id = ?")
                 values.append(empresa_id)
