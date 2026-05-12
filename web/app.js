@@ -49925,7 +49925,9 @@ const renderCrmAgendaWorkspace = () => {
   if (crmAgendaInfo) {
     const shown = filtered.length;
     const start = shown ? 1 : 0;
-    crmAgendaInfo.textContent = `desde ${start} a ${shown} de ${shown}`;
+    const total = all.length;
+    const anchor = String(state.crmAgendaAnchorDay || "").trim();
+    crmAgendaInfo.textContent = `mostrando ${shown}/${total}${anchor ? ` · ancla ${anchor}` : ""}`;
   }
 };
 
@@ -70418,6 +70420,13 @@ if (actionModalSave) {
       .then((data) => {
         if (actionModalStatus) actionModalStatus.textContent = "Guardado.";
         closeActionEditor();
+        // UX: si guardamos una cita en otra fecha distinta a la vista actual,
+        // anclamos la agenda a esa fecha para que el usuario la vea y no parezca que “desapareció”.
+        try {
+          if (service === "inmobiliaria" && payload?.fecha) {
+            state.crmAgendaAnchorDay = String(payload.fecha || "").trim() || state.crmAgendaAnchorDay;
+          }
+        } catch (e) {}
         loadAgendaGeneral();
         if (service === "inmobiliaria") {
           loadCrmAgenda();
