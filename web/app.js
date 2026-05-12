@@ -50109,9 +50109,11 @@ const loadCrmAgenda = () => {
     crmWorkspaceShell.classList.remove("hidden");
   }
   ensureCrmAgendaSelectors().catch(() => {});
-  const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
-    if (crmAgendaTable) crmAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const tenantMode = Boolean(isTenantWorkspaceMode && isTenantWorkspaceMode());
+  const workspaceId = tenantMode ? String(state.currentWorkspaceId || new URLSearchParams(window.location.search || "").get("workspace") || "").trim() : "";
+  const empresa = tenantMode ? null : resolveCrmInmoEmpresa();
+  if (!workspaceId && !empresa) {
+    if (crmAgendaTable) crmAgendaTable.innerHTML = "<p class='muted'>Sin workspace/empresa.</p>";
     if (crmAgendaCalendar) crmAgendaCalendar.innerHTML = "";
     return;
   }
@@ -50169,12 +50171,16 @@ const loadCrmAgenda = () => {
   }
 
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
     servicio: "inmobiliaria",
     // Agenda requiere más filas; usamos rango + limit alto.
     limit: "2000",
     order: "asc",
   });
+  if (workspaceId) {
+    params.set("workspace_id", workspaceId);
+  } else if (empresa?.id) {
+    params.set("empresa_id", empresa.id);
+  }
   if (rangeStart) params.set("start", fmt(rangeStart));
   if (rangeEnd) params.set("end", fmt(rangeEnd));
   api(`/api/acciones?${params.toString()}`).then((data) => {
@@ -50201,9 +50207,16 @@ const ensureCrmAgendaSelectors = async () => {
     populateClientesSelect(crmAgendaCliente);
   }
   if (crmAgendaInmueble) {
-    const empresa = resolveCrmInmoEmpresa();
-    if (!empresa) return;
-    const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresa.id, include_id: "1", limit: "400" });
+    const tenantMode = Boolean(isTenantWorkspaceMode && isTenantWorkspaceMode());
+    const workspaceId = tenantMode ? String(state.currentWorkspaceId || new URLSearchParams(window.location.search || "").get("workspace") || "").trim() : "";
+    const empresa = tenantMode ? null : resolveCrmInmoEmpresa();
+    if (!workspaceId && !empresa) return;
+    const params = new URLSearchParams({ tabla: "inmuebles", include_id: "1", limit: "400" });
+    if (workspaceId) {
+      params.set("workspace_id", workspaceId);
+    } else if (empresa?.id) {
+      params.set("empresa_id", empresa.id);
+    }
     const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
     crmAgendaInmueble.innerHTML = "";
     crmAgendaInmueble.appendChild(createOption("", "Selecciona inmueble"));
