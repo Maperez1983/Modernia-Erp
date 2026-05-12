@@ -4932,6 +4932,8 @@ const openActionEditor = (ev, context = null) => {
   currentActionEdit = ev;
   // Evita “contaminación”: el guardado debe decidir si es update/create por un id estable, no por un objeto mutable.
   state.actionModalEditId = String(ev?.id || "").trim();
+  // Snapshot defensivo: evita mutaciones accidentales del objeto referenciado en `lastAgendaEvents`.
+  state.actionModalEditSnapshot = ev ? JSON.parse(JSON.stringify(ev)) : null;
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalServicioSelect) {
     actionModalServicioSelect.disabled = Boolean(state.actionModalContext?.lock_service);
@@ -4999,6 +5001,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   void ensureActionModalClientesReady();
   currentActionEdit = null;
   state.actionModalEditId = "";
+  state.actionModalEditSnapshot = null;
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalStatus) actionModalStatus.textContent = "";
   // Reset fuerte: evita heredar cliente/tipo/etc si el usuario abre el creador tras editar otra cita.
@@ -5063,6 +5066,7 @@ const closeActionEditor = () => {
   if (actionModal) actionModal.classList.add("hidden");
   currentActionEdit = null;
   state.actionModalEditId = "";
+  state.actionModalEditSnapshot = null;
   state.actionModalContext = null;
   if (actionModalServicioSelect) actionModalServicioSelect.disabled = false;
   if (actionModalEstado) actionModalEstado.disabled = false;
@@ -70367,6 +70371,9 @@ if (actionModalSave) {
   actionModalSave.addEventListener("click", () => {
     if (actionModalStatus) actionModalStatus.textContent = "Guardando...";
     const editId = String(state.actionModalEditId || "").trim();
+    const editSnapshot = state.actionModalEditSnapshot && typeof state.actionModalEditSnapshot === "object"
+      ? state.actionModalEditSnapshot
+      : null;
     const serviceValue = actionModalServicioSelect ? actionModalServicioSelect.value : "";
     const service = serviceValue || "gestoria";
     if (!serviceValue) {
@@ -70384,14 +70391,14 @@ if (actionModalSave) {
     const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
     const payload = {
       id: editId || undefined,
-      fecha: actionModalFecha ? actionModalFecha.value : currentActionEdit?.dateKey,
-      hora: actionModalHora ? actionModalHora.value : currentActionEdit?.time,
-      hora_fin: actionModalHoraFin ? actionModalHoraFin.value : currentActionEdit?.timeEnd,
-      tipo: actionModalTipo ? actionModalTipo.value.trim() : currentActionEdit?.tipo,
-      responsable: actionModalResponsable ? actionModalResponsable.value : currentActionEdit?.responsable,
-      estado: actionModalEstado ? actionModalEstado.value : currentActionEdit?.estado,
-      notas: actionModalNotas ? actionModalNotas.value.trim() : currentActionEdit?.notas,
-      recordatorio_min: actionModalRecordatorio ? actionModalRecordatorio.value : currentActionEdit?.recordatorio_min,
+      fecha: actionModalFecha ? actionModalFecha.value : editSnapshot?.dateKey,
+      hora: actionModalHora ? actionModalHora.value : editSnapshot?.time,
+      hora_fin: actionModalHoraFin ? actionModalHoraFin.value : editSnapshot?.timeEnd,
+      tipo: actionModalTipo ? actionModalTipo.value.trim() : editSnapshot?.tipo,
+      responsable: actionModalResponsable ? actionModalResponsable.value : editSnapshot?.responsable,
+      estado: actionModalEstado ? actionModalEstado.value : editSnapshot?.estado,
+      notas: actionModalNotas ? actionModalNotas.value.trim() : editSnapshot?.notas,
+      recordatorio_min: actionModalRecordatorio ? actionModalRecordatorio.value : editSnapshot?.recordatorio_min,
       servicio: service,
       empresa_nombre: empresaNombre,
       cliente_id: clienteData.cliente_id,
