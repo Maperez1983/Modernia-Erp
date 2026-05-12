@@ -4930,6 +4930,8 @@ const openActionEditor = (ev, context = null) => {
   void ensureModalDataLoaded();
   void ensureActionModalClientesReady();
   currentActionEdit = ev;
+  // Evita “contaminación”: el guardado debe decidir si es update/create por un id estable, no por un objeto mutable.
+  state.actionModalEditId = String(ev?.id || "").trim();
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalServicioSelect) {
     actionModalServicioSelect.disabled = Boolean(state.actionModalContext?.lock_service);
@@ -4996,6 +4998,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   void ensureModalDataLoaded();
   void ensureActionModalClientesReady();
   currentActionEdit = null;
+  state.actionModalEditId = "";
   state.actionModalContext = context && typeof context === "object" ? context : null;
   if (actionModalStatus) actionModalStatus.textContent = "";
   if (actionModalClienteInput) actionModalClienteInput.value = "";
@@ -5057,6 +5060,7 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
 const closeActionEditor = () => {
   if (actionModal) actionModal.classList.add("hidden");
   currentActionEdit = null;
+  state.actionModalEditId = "";
   state.actionModalContext = null;
   if (actionModalServicioSelect) actionModalServicioSelect.disabled = false;
   if (actionModalEstado) actionModalEstado.disabled = false;
@@ -70360,6 +70364,7 @@ if (actionModalServicioSelect) {
 if (actionModalSave) {
   actionModalSave.addEventListener("click", () => {
     if (actionModalStatus) actionModalStatus.textContent = "Guardando...";
+    const editId = String(state.actionModalEditId || "").trim();
     const serviceValue = actionModalServicioSelect ? actionModalServicioSelect.value : "";
     const service = serviceValue || "gestoria";
     if (!serviceValue) {
@@ -70376,7 +70381,7 @@ if (actionModalSave) {
             : resolveCrmGestoriaEmpresaNombre();
     const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
     const payload = {
-      id: currentActionEdit ? currentActionEdit.id : undefined,
+      id: editId || undefined,
       fecha: actionModalFecha ? actionModalFecha.value : currentActionEdit?.dateKey,
       hora: actionModalHora ? actionModalHora.value : currentActionEdit?.time,
       hora_fin: actionModalHoraFin ? actionModalHoraFin.value : currentActionEdit?.timeEnd,
@@ -70433,7 +70438,7 @@ if (actionModalSave) {
       }
     }
     const conflict = lastAgendaEvents.find((ev) => {
-      if (currentActionEdit && ev.id === currentActionEdit.id) return false;
+      if (editId && ev.id === editId) return false;
       if (!ev.dateKey || !payload.fecha) return false;
       if (ev.dateKey !== payload.fecha) return false;
       if (!payload.hora || !ev.time) return false;
@@ -70455,7 +70460,7 @@ if (actionModalSave) {
     if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
       payload.workspace_id = state.currentWorkspaceId;
     }
-    const endpoint = currentActionEdit ? "/api/acciones_update" : "/api/acciones";
+    const endpoint = editId ? "/api/acciones_update" : "/api/acciones";
     apiPost(endpoint, payload)
       .then((data) => {
         if (actionModalStatus) actionModalStatus.textContent = "Guardado.";
