@@ -66155,7 +66155,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not workspace_actor_is_privileged(conn, session):
                     eid = (params.get("empresa_id", [""])[0] or "").strip()
-                    if eid:
+                    # Service-first: si llega workspace_id, el endpoint debe acotarse por workspace,
+                    # no por empresa legacy (evita que usuarios tenant sin selección de empresa vean 403).
+                    has_ws_scope = bool((params.get("workspace_id", [""])[0] or "").strip() or ws_id)
+                    if eid and not has_ws_scope:
                         ok, err = enforce_empresa_membership(conn, session, eid, write=False)
                         if not ok:
                             json_response(self, {"error": err or "No autorizado"}, status=403)
