@@ -49943,7 +49943,9 @@ const applyCrmAgendaFilters = (rows = []) => {
   const qRaw = String(crmAgendaSearch?.value || "").trim();
   const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
   const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-  const presetRaw = normalizeSimple(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo") || "citas_equipo";
+  // IMPORTANTE: no normalizar el preset aquí: los valores usan sufijo `_equipo` y underscores.
+  // Si lo normalizamos, se pierde el sufijo y la agenda filtra solo por usuario (parece que “desaparecen” citas del equipo).
+  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo").trim() || "citas_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
   state.crmAgendaPreset = presetRaw;
