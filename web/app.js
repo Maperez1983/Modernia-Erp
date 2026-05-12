@@ -4949,7 +4949,19 @@ const openActionEditor = (ev, context = null) => {
   if (actionModalFecha) actionModalFecha.value = ev.dateKey || "";
   if (actionModalHora) actionModalHora.value = ev.time || "";
   if (actionModalHoraFin) actionModalHoraFin.value = ev.timeEnd || "";
-  if (actionModalTipo) actionModalTipo.value = ev.tipo || "";
+  if (actionModalTipo) {
+    actionModalTipo.value = ev.tipo || "";
+    // Si el valor no existe en el <select>, el navegador puede conservar el anterior.
+    // Forzamos reset cuando no hay tipo.
+    if (!String(ev.tipo || "").trim()) {
+      try {
+        actionModalTipo.value = "";
+      } catch (e) {}
+      if (String(actionModalTipo.value || "").trim() && actionModalTipo.options && actionModalTipo.options.length) {
+        actionModalTipo.selectedIndex = 0;
+      }
+    }
+  }
   if (actionModalNotas) actionModalNotas.value = ev.notas || "";
   if (actionModalRecordatorio) {
     actionModalRecordatorio.value =
@@ -4999,7 +5011,13 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
     const defaultEnd = timeValue ? addMinutesToAgendaTime(timeValue, 60) : "";
     actionModalHoraFin.value = defaultEnd;
   }
-  if (actionModalTipo) actionModalTipo.value = "";
+  if (actionModalTipo) {
+    // Reset duro: algunos <select> mantienen el valor anterior si "" no existe como opción.
+    actionModalTipo.value = "";
+    if (String(actionModalTipo.value || "").trim() && actionModalTipo.options && actionModalTipo.options.length) {
+      actionModalTipo.selectedIndex = 0;
+    }
+  }
   if (actionModalNotas) actionModalNotas.value = "";
   if (actionModalRecordatorio) actionModalRecordatorio.value = "";
   if (actionModalEstado) actionModalEstado.value = "Pendiente";
@@ -5021,6 +5039,10 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
     const defaultTipo = String(ctx.default_tipo || "").trim();
     if (defaultTipo && actionModalTipo && !String(actionModalTipo.value || "").trim()) {
       actionModalTipo.value = defaultTipo;
+      // Si la opción no existe, no dejamos el valor anterior: mantenemos el reset.
+      if (String(actionModalTipo.value || "").trim() !== defaultTipo && actionModalTipo.options && actionModalTipo.options.length) {
+        actionModalTipo.selectedIndex = 0;
+      }
     }
   }
   if (actionModalResponsable) {
