@@ -53900,6 +53900,15 @@ const loadGestoriaCrm = async () => {
     q,
     include_id: "1",
   });
+  // En modo tenant/workspace, acotamos por workspace para evitar fugas y para incluir
+  // todas las empresas del workspace (no solo la seleccionada).
+  try {
+    if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
+      params.set("workspace_id", String(state.currentWorkspaceId || "").trim());
+      // Deja que el backend aplique el scope del workspace (multi-empresa).
+      params.delete("empresa_id");
+    }
+  } catch (e) {}
   if (tipo) {
     params.set("tipo", tipo);
   }
