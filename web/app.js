@@ -53936,8 +53936,8 @@ const loadGestoriaCrm = async () => {
   try {
     if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
       params.set("workspace_id", String(state.currentWorkspaceId || "").trim());
-      // Deja que el backend aplique el scope del workspace (multi-empresa).
-      params.delete("empresa_id");
+      // Mantiene `empresa_id` (legacy) como compat para migración: si falta vínculo en `workspace_companies`,
+      // el backend puede usar este id para no dejar el CRM vacío.
     }
   } catch (e) {}
   if (tipo) {

@@ -79242,6 +79242,11 @@ class Handler(BaseHTTPRequestHandler):
                     # permitimos también los que pertenezcan a empresas del workspace.
                     if "empresa_id" in columns:
                         empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                        # Compat: si el caller pasa empresa_id explícito (legacy), lo incluimos en el scope.
+                        # Esto evita listados vacíos durante la migración cuando aún no existe el vínculo
+                        # en `workspace_companies`, pero el usuario pertenece al workspace.
+                        if empresa_id and empresa_id not in empresa_ids:
+                            empresa_ids.append(empresa_id)
                         if not empresa_ids:
                             platform_eid = get_platform_empresa_id(conn)
                             if platform_eid:
