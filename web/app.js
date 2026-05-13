@@ -43183,6 +43183,13 @@ const queueInmuebleCitaPrefill = (prefill = null) => {
 
 const resetInmuebleActividadForm = () => {
   if (!inmuebleActividadForm) return;
+  // Importante: el motor `CRMUI` guarda borradores por `form.id`.
+  // Como esta ficha se reutiliza entre inmuebles, limpiamos el draft para evitar herencias.
+  try {
+    if (window.CRMUI?.clearDraft) {
+      window.CRMUI.clearDraft("inmuebleActividadForm");
+    }
+  } catch (e) {}
   try {
     inmuebleActividadForm.reset();
   } catch (e) {}
@@ -50904,6 +50911,17 @@ const setInmuebleTab = (tab) => {
     } catch (e) {}
   } else {
     restoreWorkspaceSimuladoresFromInmueble();
+  }
+
+  // Agenda: al cambiar de inmueble, la “Nueva actividad” no debe heredar valores.
+  if (key === "actividad") {
+    try {
+      const inmuebleId = String(state.currentInmuebleId || "").trim();
+      if (inmuebleId && state._lastActividadInmuebleId !== inmuebleId) {
+        resetInmuebleActividadForm();
+        state._lastActividadInmuebleId = inmuebleId;
+      }
+    } catch (e) {}
   }
 
   syncInmuebleTecnocloudSidebar(key);

@@ -26,3 +26,8 @@ web/* 2.js
 web/* 2.py
 web/* 2.css
 reports/
+
+# Node / Playwright (tests locales)
+node_modules/
+test-results/
+playwright-report/
