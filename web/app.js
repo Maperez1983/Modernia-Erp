@@ -8966,10 +8966,10 @@ const renderWorkspaceKpis = (summary = {}) => {
 };
 
 const renderWorkspaceHealth = (data = {}) => {
+  const companyLabel = getWorkspaceCompanyContextLabel();
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
     const summary = data.summary || {};
-    const companyLabel = getWorkspaceCompanyContextLabel();
     workspaceHealthScore.innerHTML = `
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
@@ -8980,51 +8980,77 @@ const renderWorkspaceHealth = (data = {}) => {
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
             ${numberFormatter.format(Number(summary.facturas || 0))} movimientos
           </div>
+          <div class="workspace-health-actions">
+            <button type="button" class="secondary ghost" data-workspace-health-jump="tenant" title="Abrir configuración">Config</button>
+            <button type="button" class="secondary ghost" data-workspace-health-jump="motores" title="Abrir módulos transversales">Motores</button>
+            <button type="button" class="secondary ghost" data-workspace-health-jump="operations" title="Ir a operativa">Operativa</button>
+          </div>
         </div>
       </div>
     `;
   }
   if (workspaceChecklist) {
     const items = Array.isArray(data.checklist) ? data.checklist : [];
+    const done = items.filter((i) => Number(i.done || 0) === 1).length;
     workspaceChecklist.innerHTML = items.length
       ? `
-          <div class="workspace-checklist">
-            ${items
-              .map(
-                (item) => `
-                  <div class="workspace-check-item${Number(item.done || 0) === 1 ? " is-done" : ""}">
-                    <strong>${item.label || "-"}</strong>
-                    <div class="muted">${item.hint || ""}</div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
+          <details class="workspace-fold" ${items.length <= 4 ? "open" : ""}>
+            <summary>Checklist (${done}/${items.length})</summary>
+            <div class="workspace-checklist">
+              ${items
+                .map(
+                  (item) => `
+                    <div class="workspace-check-item${Number(item.done || 0) === 1 ? " is-done" : ""}">
+                      <strong>${item.label || "-"}</strong>
+                      <div class="muted">${item.hint || ""}</div>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </details>
         `
       : "<p class='muted'>Sin checklist disponible.</p>";
   }
   if (workspaceModuleHealth) {
     const rows = Array.isArray(data.module_health) ? data.module_health : [];
+    const expanded = Boolean(state.workspaceModuleHealthExpanded);
+    const visibleRows = expanded ? rows : rows.slice(0, 7);
+    const enabledCount = rows.filter((r) => Number(r.enabled || 0) === 1).length;
     workspaceModuleHealth.innerHTML = rows.length
       ? `
-          <div class="workspace-module-health-list">
-            ${rows
-              .map(
-                (row) => `
-                  <div class="workspace-module-health-row status-${row.status || "disabled"}">
-                    <div>
-                      <strong>${row.nombre || row.key || "-"}</strong>
-                      <div class="muted">${row.metric_value || 0} ${row.metric_label || ""}</div>
+          <details class="workspace-fold" ${rows.length <= 7 ? "open" : ""}>
+            <summary>Módulos (${enabledCount} activos · ${rows.length} total)</summary>
+            <div class="workspace-module-health-list">
+              ${visibleRows
+                .map(
+                  (row) => `
+                    <div class="workspace-module-health-row status-${row.status || "disabled"}">
+                      <div>
+                        <strong>${row.nombre || row.key || "-"}</strong>
+                        <div class="muted">${row.metric_value || 0} ${row.metric_label || ""}</div>
+                      </div>
+                      <div class="workspace-module-health-meta">
+                        <span>${row.enabled ? (row.status || "activo") : "desactivado"}</span>
+                        <span>${row.next_step || ""}</span>
+                      </div>
                     </div>
-                    <div class="workspace-module-health-meta">
-                      <span>${row.enabled ? (row.status || "activo") : "desactivado"}</span>
-                      <span>${row.next_step || ""}</span>
+                  `
+                )
+                .join("")}
+            </div>
+            ${
+              rows.length > 7
+                ? `
+                    <div class="form-actions" style="justify-content:flex-start">
+                      <button type="button" class="secondary ghost" data-workspace-module-health-toggle="1">
+                        ${expanded ? "Ver menos" : `Ver todos (${rows.length})`}
+                      </button>
                     </div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
+                  `
+                : ""
+            }
+          </details>
         `
       : "<p class='muted'>Sin módulos evaluados.</p>";
   }
@@ -9068,6 +9094,30 @@ const renderWorkspaceHealth = (data = {}) => {
       });
     });
   }
+  // Wiring: acciones rápidas y toggle de módulos.
+  try {
+    if (workspaceHealthScore) {
+      workspaceHealthScore.querySelectorAll("[data-workspace-health-jump]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const target = String(btn.dataset.workspaceHealthJump || "").trim();
+          if (!target) return;
+          setWorkspaceView(target);
+          syncHoldingUrlParams?.();
+        });
+      });
+    }
+  } catch (e) {}
+  try {
+    if (workspaceModuleHealth) {
+      const toggleBtn = workspaceModuleHealth.querySelector("[data-workspace-module-health-toggle]");
+      if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+          state.workspaceModuleHealthExpanded = !Boolean(state.workspaceModuleHealthExpanded);
+          renderWorkspaceHealth(data);
+        });
+      }
+    }
+  } catch (e) {}
 };
 
 const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {

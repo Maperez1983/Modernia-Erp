@@ -12353,3 +12353,25 @@ body.theme-operativa .pill {
 .pulse {
   animation: appPulseOutline 0.9s ease-out 1;
 }
+
+/* Workspace overview: plegables para reducir saturación. */
+.workspace-fold {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-fold > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+.workspace-health-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
