@@ -73662,6 +73662,20 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     values,
                 ).fetchall()
+                if workspace_id and services:
+                    wanted = {normalize_service_key(s) for s in (services or []) if s}
+                    if wanted:
+                        def row_has_service(row):
+                            try:
+                                raw = row["servicios"]
+                            except Exception:
+                                try:
+                                    raw = row.get("servicios")  # type: ignore[attr-defined]
+                                except Exception:
+                                    raw = ""
+                            hay = normalizeSimple(raw or "")
+                            return any(w and w in hay for w in wanted)
+                        rows = [r for r in (rows or []) if row_has_service(r)]
             columns = [
                 "nombre",
                 "tipo_persona",
