@@ -49896,21 +49896,25 @@ const renderCrmAgendaCalendar = (rows = []) => {
 	    return placed;
 	  };
 
-	  const buildAgendaEventButton = (row, { className = "" } = {}) => {
-	    const btn = document.createElement("button");
-	    btn.type = "button";
-	    const tipoKey = resolveAgendaTipoKey(row?.tipo || row?.asunto || "");
-	    btn.className = `${className} tc-agenda-event--${tipoKey} tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`.trim();
-	    const asunto = String(row.asunto || row.tipo || "Cita").trim();
-	    const cliente = String(row.cliente || "").trim();
-	    const when = String(row.hora || "").trim() || "—";
-	    const responsable = String(row.responsable || "").trim();
-	    const meta = cliente || responsable;
-	    const badge = resolveAgendaTipoBadge(row?.tipo || row?.asunto || "");
-	    const colors = agendaColorVarsForResponsible(responsable);
-	    btn.style.setProperty("--tc-ev-bg", colors.bg);
-	    btn.style.setProperty("--tc-ev-border", colors.border);
-	    btn.innerHTML = `<div class="tc-agenda-event-time">${escapeHtml(when)}${badge ? ` <span class="tc-agenda-event-badge">${escapeHtml(badge)}</span>` : ""}</div><div class="tc-agenda-event-title">${escapeHtml(asunto)}</div>${meta ? `<div class="tc-agenda-event-meta">${escapeHtml(meta)}</div>` : ""}`;
+		  const buildAgendaEventButton = (row, { className = "" } = {}) => {
+		    const btn = document.createElement("button");
+		    btn.type = "button";
+		    const tipoKey = resolveAgendaTipoKey(row?.tipo || row?.asunto || "");
+		    btn.className = `${className} tc-agenda-event--${tipoKey} tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`.trim();
+		    const asunto = String(row.asunto || row.tipo || "Cita").trim();
+		    const cliente = String(row.cliente || "").trim();
+		    const when = String(row.hora || "").trim() || "—";
+		    const responsable = String(row.responsable || "").trim();
+		    const responsableLabel = responsable ? resolvePersonCanonicalLabel(responsable) : "";
+		    const metaParts = [];
+		    if (cliente) metaParts.push(cliente);
+		    if (responsableLabel) metaParts.push(responsableLabel);
+		    const meta = metaParts.join(" · ");
+		    const badge = resolveAgendaTipoBadge(row?.tipo || row?.asunto || "");
+		    const colors = agendaColorVarsForResponsible(responsable);
+		    btn.style.setProperty("--tc-ev-bg", colors.bg);
+		    btn.style.setProperty("--tc-ev-border", colors.border);
+		    btn.innerHTML = `<div class="tc-agenda-event-time">${escapeHtml(when)}${badge ? ` <span class="tc-agenda-event-badge">${escapeHtml(badge)}</span>` : ""}</div><div class="tc-agenda-event-title">${escapeHtml(asunto)}</div>${meta ? `<div class="tc-agenda-event-meta">${escapeHtml(meta)}</div>` : ""}`;
 	    btn.dataset.actionId = String(row?.id || "").trim();
 	    btn.addEventListener("click", () => {
 	      const id = String(btn.dataset.actionId || "").trim();
