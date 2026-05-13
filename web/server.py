@@ -46843,9 +46843,10 @@ class Handler(BaseHTTPRequestHandler):
                     session_tmp = getattr(self, "auth_session", None) or self._current_session()
                     if session_tmp and (not workspace_actor_is_privileged(conn, session_tmp)):
                         eid = str(payload.get("empresa_id") or "").strip()
+                        ws_id = str(payload.get("workspace_id") or "").strip()
                         # Service-first: estos endpoints se acotan por workspace_id (no por empresa_id).
                         skip_empresa_enforce = (
-                            str(payload.get("workspace_id") or "").strip()
+                            ws_id
                             and parsed.path
                             in {
                                 "/api/acciones",
@@ -46859,8 +46860,23 @@ class Handler(BaseHTTPRequestHandler):
                                 "/api/captacion_update",
                                 "/api/captacion_delete",
                                 "/api/captacion_convert",
+                                # Rentas/OCR: en modo tenant se controla por workspace_miembros.
+                                "/api/renta_quick_ocr",
+                                "/api/renta_quick_attach",
+                                "/api/renta_entry_ocr_reprocess",
+                                "/api/renta_quick_note",
                             }
                         )
+                        if ws_id and parsed.path in {
+                            "/api/renta_quick_ocr",
+                            "/api/renta_quick_attach",
+                            "/api/renta_entry_ocr_reprocess",
+                            "/api/renta_quick_note",
+                        }:
+                            ok, err = enforce_workspace_membership(conn, session_tmp, ws_id, write=True)
+                            if not ok:
+                                json_response(self, {"error": err or "No autorizado"}, status=403)
+                                return
                         if eid and not skip_empresa_enforce:
                             ok, err = enforce_empresa_membership(conn, session_tmp, eid, write=True)
                             if not ok:
