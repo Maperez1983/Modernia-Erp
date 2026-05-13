@@ -136,6 +136,20 @@ const api = async (path) => {
           const wcid = String(state.currentWorkspaceCompanyWsId || "").trim();
           if (wcid) qs.set("workspace_company_id", wcid);
         }
+        // Si el caller adjunta `empresa_id` en modo tenant, normalizamos a legacy id para endpoints legacy.
+        // Si no podemos resolver, preferimos confiar en el scope por `workspace_id` para no “vaciar” listados.
+        try {
+          const eidRaw = String(qs.get("empresa_id") || "").trim();
+          if (eidRaw && String(qs.get("workspace_id") || "").trim()) {
+            const resolved = resolveEmpresaById(eidRaw);
+            const legacy = resolveLegacyEmpresaId(resolved);
+            if (legacy) {
+              qs.set("empresa_id", legacy);
+            } else {
+              qs.delete("empresa_id");
+            }
+          }
+        } catch (e) {}
         path = u.pathname + (qs.toString() ? `?${qs.toString()}` : "");
       }
     }
