@@ -1137,6 +1137,26 @@ CREATE TABLE IF NOT EXISTS inmueble_docs (
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
 );
 
+-- Histórico de cierres (evita borrar y permite recuperar).
+CREATE TABLE IF NOT EXISTS inmueble_cierres (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  inmueble_id TEXT NOT NULL,
+  tipo TEXT NOT NULL, -- Vendido | Alquiler | Cerrado negativamente
+  fecha_cierre TEXT,
+  importe_final REAL,
+  numero_citas INTEGER,
+  notas TEXT,
+  usuario TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inmueble_cierres_inmueble
+ON inmueble_cierres (inmueble_id, created_at);
+
 CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
   id TEXT PRIMARY KEY,
   empresa_id TEXT NOT NULL,

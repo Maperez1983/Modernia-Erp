@@ -4624,6 +4624,7 @@
 	              <div class="form-actions">
 	                <span id="inmuebleSaveStatus" class="muted"></span>
 	                <button class="secondary" type="button" id="inmuebleManualSaveBtn">Guardar</button>
+	                <button class="secondary hidden" type="button" id="inmuebleArchivePendingBtn">Archivar pendientes</button>
 	                <button class="secondary" type="button" id="inmuebleFiscalWizardBtn">Simulador fiscal</button>
 	                <button class="secondary hidden" type="button" id="inmuebleVisitaPdfBtn">Hoja de visita PDF</button>
 	                <button class="secondary hidden" type="button" id="inmuebleVentaFichaPdfBtn">Ficha venta PDF</button>
@@ -4687,6 +4688,7 @@
                       <div class="form-actions">
                         <button class="secondary ghost" type="button" id="inmuebleGuidedBtn">Proceso guiado</button>
                         <button class="secondary" type="button" id="inmuebleGoEstadoBtn">Cambiar estado</button>
+                        <button class="secondary hidden" type="button" id="inmuebleEncargoCloseBtn">Cerrar encargo</button>
                       </div>
                     </div>
                     <div class="grid" id="inmuebleCaptacionGrid" data-layout="tecno"></div>
@@ -10890,6 +10892,48 @@
 		          <div class="modal-actions">
 		            <button type="button" class="secondary" id="inmuebleGenerarEncargoBtn">Generar hoja de encargo</button>
 		            <span class="muted" id="inmuebleGenerarEncargoStatus"></span>
+		          </div>
+		        </div>
+		      </div>
+		    </div>
+
+		    <div id="inmuebleEncargoCloseModal" class="modal hidden" aria-hidden="true">
+		      <div class="modal-content">
+		        <div class="modal-header">
+		          <h3 id="inmuebleEncargoCloseTitle">Cierre de encargo</h3>
+		          <button type="button" id="inmuebleEncargoCloseModalClose" class="ghost">✕</button>
+		        </div>
+		        <div class="modal-body">
+		          <p class="muted">Registra el cierre para dejar el encargo inactivo y guardar histórico.</p>
+		          <div class="form-grid">
+		            <label>
+		              Resultado
+		              <select id="inmuebleEncargoCloseTipo">
+		                <option>Vendido</option>
+		                <option>Alquiler</option>
+		                <option>Cerrado negativamente</option>
+		              </select>
+		            </label>
+		            <label>
+		              Fecha de cierre
+		              <input type="date" id="inmuebleEncargoCloseFecha" />
+		            </label>
+		            <label>
+		              Importe final
+		              <input type="number" step="0.01" id="inmuebleEncargoCloseImporte" placeholder="0,00" />
+		            </label>
+		            <label>
+		              Nº citas
+		              <input type="number" step="1" min="0" id="inmuebleEncargoCloseNumCitas" placeholder="0" />
+		            </label>
+		            <label class="span-2">
+		              Notas (opcional)
+		              <textarea id="inmuebleEncargoCloseNotas" rows="2" placeholder="Observaciones del cierre..."></textarea>
+		            </label>
+		          </div>
+		          <div class="modal-actions">
+		            <button type="button" class="secondary" id="inmuebleEncargoCloseSubmitBtn">Cerrar encargo</button>
+		            <span class="muted" id="inmuebleEncargoCloseStatus"></span>
 		          </div>
 		        </div>
 		      </div>

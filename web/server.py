@@ -21839,6 +21839,135 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         pass
 
 
+def archive_pending_inmueble_actions(conn, empresa_id, inmueble_id, now, usuario=None, reason=None):
+    empresa_id = str(empresa_id or "").strip()
+    inmueble_id = str(inmueble_id or "").strip()
+    if not empresa_id or not inmueble_id:
+        return 0
+    servicio = "inmobiliaria"
+    motivo = str(reason or "").strip() or "Archivado manual"
+    pending = conn.execute(
+        """
+        SELECT id
+        FROM acciones
+        WHERE empresa_id = ?
+          AND servicio = ?
+          AND inmueble_id = ?
+          AND LOWER(COALESCE(estado, '')) = 'pendiente'
+        """,
+        (empresa_id, servicio, inmueble_id),
+    ).fetchall()
+    if not pending:
+        return 0
+    conn.execute(
+        """
+        UPDATE acciones
+        SET
+          estado = 'Cancelada',
+          resultado_cierre = CASE
+            WHEN resultado_cierre IS NULL OR TRIM(resultado_cierre) = '' THEN ?
+            ELSE resultado_cierre
+          END,
+          updated_at = datetime(?)
+        WHERE empresa_id = ?
+          AND servicio = ?
+          AND inmueble_id = ?
+          AND LOWER(COALESCE(estado, '')) = 'pendiente'
+        """,
+        (motivo, now, empresa_id, servicio, inmueble_id),
+    )
+    audit_event(
+        conn,
+        empresa_id,
+        "inmueble",
+        inmueble_id,
+        "Archivar acciones pendientes",
+        usuario=usuario,
+        detalles={"archived": len(pending), "motivo": motivo},
+        now=now,
+    )
+    return len(pending)
+
+
+def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True):
+    empresa_id = str(empresa_id or "").strip()
+    inmueble_id = str(inmueble_id or "").strip()
+    if not empresa_id or not inmueble_id:
+        return {"ok": False, "error": "empresa_id e inmueble_id requeridos"}
+    tipo_norm = normalize_lookup_text(tipo or "").lower()
+    tipo_key = (
+        tipo_norm.replace("/", "_")
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("__", "_")
+        .strip("_")
+    )
+    tipo_label = {
+        "vendido": "Vendido",
+        "compraventa": "Vendido",
+        "alquiler": "Alquiler",
+        "cerrado_negativamente": "Cerrado negativamente",
+        "cerrado negativamente": "Cerrado negativamente",
+    }.get(tipo_key) or {
+        "vendido": "Vendido",
+        "alquiler": "Alquiler",
+        "cerrado negativamente": "Cerrado negativamente",
+    }.get(tipo_norm) or str(tipo or "").strip()
+    if tipo_label not in {"Vendido", "Alquiler", "Cerrado negativamente"}:
+        # fallback razonable por tipo_operacion
+        row = conn.execute("SELECT tipo_operacion FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+        op = normalize_lookup_text((row["tipo_operacion"] if row else "") or "")
+        tipo_label = "Alquiler" if op == "alquiler" else "Vendido"
+    cierre_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO inmueble_cierres (
+          id, empresa_id, inmueble_id, tipo, fecha_cierre, importe_final, numero_citas, notas, usuario, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            cierre_id,
+            empresa_id,
+            inmueble_id,
+            tipo_label,
+            str(fecha_cierre or "").strip() or None,
+            float(importe_final) if importe_final is not None else None,
+            int(numero_citas) if numero_citas is not None else None,
+            str(notas or "").strip() or None,
+            str(usuario or "").strip() or None,
+            now,
+            now,
+        ),
+    )
+    # Mueve la etapa del inmueble/captación.
+    sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
+    archived = 0
+    if archive_pending:
+        try:
+            archived = archive_pending_inmueble_actions(conn, empresa_id, inmueble_id, now, usuario=usuario, reason=f"Cierre {tipo_label}")
+        except Exception:
+            archived = 0
+    audit_event(
+        conn,
+        empresa_id,
+        "inmueble",
+        inmueble_id,
+        "Cierre de encargo",
+        usuario=usuario,
+        detalles={
+            "tipo": tipo_label,
+            "fecha_cierre": str(fecha_cierre or "").strip() or "",
+            "importe_final": float(importe_final) if importe_final is not None else None,
+            "numero_citas": int(numero_citas) if numero_citas is not None else None,
+            "archived": archived,
+        },
+        now=now,
+    )
+    return {"ok": True, "tipo": tipo_label, "archived": archived, "cierre_id": cierre_id}
+
+
 INMO_STAGE_CHECKLISTS = {
     "Inmueble": [
         "Alta básica de la ficha",
@@ -63292,6 +63421,79 @@ class Handler(BaseHTTPRequestHandler):
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+        elif parsed.path == "/api/inmueble_archive_pending_actions":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            archived = archive_pending_inmueble_actions(
+                conn,
+                inmueble["empresa_id"],
+                inmueble_id,
+                now,
+                usuario=payload.get("usuario"),
+                reason=payload.get("reason"),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "archived": archived})
+            return
+        elif parsed.path == "/api/inmueble_encargo_close":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            tipo = str(payload.get("tipo") or "").strip() or None
+            fecha_cierre = str(payload.get("fecha_cierre") or "").strip() or None
+            numero_citas = parse_optional_int(payload.get("numero_citas"))
+            importe_final = parse_money_value(payload.get("importe_final"))
+            notas = str(payload.get("notas") or "").strip() or None
+            result = close_inmueble_encargo_positive(
+                conn,
+                inmueble["empresa_id"],
+                inmueble_id,
+                now,
+                usuario=payload.get("usuario"),
+                fecha_cierre=fecha_cierre,
+                importe_final=importe_final,
+                numero_citas=numero_citas,
+                tipo=tipo,
+                notas=notas,
+                archive_pending=True,
+            )
+            if not result.get("ok"):
+                json_response(self, {"error": result.get("error") or "No se pudo cerrar"}, status=400)
+                return
+            conn.commit()
+            json_response(self, result)
+            return
         elif parsed.path == "/api/inmueble_servicios_update":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             servicios_raw = payload.get("servicios", [])
@@ -65635,18 +65837,38 @@ class Handler(BaseHTTPRequestHandler):
                 # Compat: aceptamos tanto el valor antiguo como los valores de la UI.
                 proposal_ok = resultado_norm in {"se realiza propuesta", "aprobada", "en negociacion", "en negociación"}
                 if proposal_ok:
-                    documento_tipo = str(
-                        updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
-                    ).strip() or "Propuesta de compra"
-                    buyer = conn.execute(
-                        "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
-                        (action_row["cliente_id"],),
-                    ).fetchone()
                     inmueble = conn.execute(
                         "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
                         (inmueble_id,),
                     ).fetchone()
-                    if inmueble:
+                    def _normalize_tipo_operacion(raw_value):
+                        raw = normalize_lookup_text(raw_value or "").lower()
+                        if raw in {"alquiler", "arrendamiento", "renta"}:
+                            return "alquiler"
+                        if "alquil" in raw or "arrend" in raw:
+                            return "alquiler"
+                        return "venta"
+
+                    tipo_operacion = _normalize_tipo_operacion(
+                        (inmueble["tipo_operacion"] if inmueble and "tipo_operacion" in inmueble.keys() else "")
+                        or (inmueble["estado"] if inmueble and "estado" in inmueble.keys() else "")
+                    )
+                    is_alquiler = tipo_operacion == "alquiler"
+                    default_documento = "Propuesta de alquiler" if is_alquiler else "Propuesta de compra"
+                    documento_tipo = str(
+                        updates.get("documento_tipo")
+                        if "documento_tipo" in updates
+                        else current["documento_tipo"] or default_documento
+                    ).strip() or default_documento
+
+                    # Venta: generamos PDF de negociación (plantilla promesa/compraventa) y creamos siguiente cita propietarios.
+                    # Alquiler: no generamos documentos de compraventa; movemos el inmueble a etapa Alquiler cuando se aprueba
+                    # (y se auto-crea acción "Formalizar contrato de alquiler" por etapa).
+                    if inmueble and not is_alquiler:
+                        buyer = conn.execute(
+                            "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                            (action_row["cliente_id"],),
+                        ).fetchone()
                         pdf_bytes = build_inmueble_negotiation_offer_pdf(
                             dict(empresa) if empresa else {},
                             dict(inmueble),
@@ -65665,28 +65887,30 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                             replace_existing=False,
                         )
-                    next_id = os.urandom(16).hex()
-                    conn.execute(
-                        """
-                        INSERT INTO acciones (
-                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-                          fecha, hora, tipo, responsable, estado, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '12:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                        next_id = os.urandom(16).hex()
+                        conn.execute(
+                            """
+                            INSERT INTO acciones (
+                              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                              fecha, hora, tipo, responsable, estado, created_at, updated_at
+                            ) VALUES (
+                              ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '12:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                            )
+                            """,
+                            (
+                                next_id,
+                                empresa["id"],
+                                action_row["cliente_id"],
+                                inmueble_id,
+                                action_row["cliente_nombre"],
+                                "Cita aceptación propietarios",
+                                action_row["responsable"],
+                                now,
+                                now,
+                            ),
                         )
-                        """,
-                        (
-                            next_id,
-                            empresa["id"],
-                            action_row["cliente_id"],
-                            inmueble_id,
-                            action_row["cliente_nombre"],
-                            "Cita aceptación propietarios",
-                            action_row["responsable"],
-                            now,
-                            now,
-                        ),
-                    )
+                    elif inmueble and is_alquiler and resultado_norm == "aprobada":
+                        sync_inmueble_stage_for_action(conn, inmueble_id, "alquiler", now)
             response_payload = {"ok": True}
             # Adjuntamos la acción actualizada normalizada para UI (evita “guardo y no se ve”).
             try:

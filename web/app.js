@@ -3373,6 +3373,7 @@ const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 	const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 	const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
+	const inmuebleArchivePendingBtn = document.getElementById("inmuebleArchivePendingBtn");
 	const inmuebleFiscalWizardBtn = document.getElementById("inmuebleFiscalWizardBtn");
 			const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
 			const inmuebleTabs = document.getElementById("inmuebleTabs");
@@ -3394,13 +3395,25 @@ const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValorac
   const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
   const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
   const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
-  const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
+const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
 		const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
 		const inmuebleTecnoSideUbicacionCard = document.getElementById("inmuebleTecnoSideUbicacion");
 		const inmuebleTecnoSideDemandasCard = document.getElementById("inmuebleTecnoSideDemandas");
 		const inmuebleTecnoSideActividadCard = document.getElementById("inmuebleTecnoSideActividad");
 		const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietario");
-		const inmuebleTecnoSideServiciosCard = document.getElementById("inmuebleTecnoSideServicios");
+const inmuebleTecnoSideServiciosCard = document.getElementById("inmuebleTecnoSideServicios");
+
+const inmuebleEncargoCloseBtn = document.getElementById("inmuebleEncargoCloseBtn");
+const inmuebleEncargoCloseModal = document.getElementById("inmuebleEncargoCloseModal");
+const inmuebleEncargoCloseModalClose = document.getElementById("inmuebleEncargoCloseModalClose");
+const inmuebleEncargoCloseTitle = document.getElementById("inmuebleEncargoCloseTitle");
+const inmuebleEncargoCloseTipo = document.getElementById("inmuebleEncargoCloseTipo");
+const inmuebleEncargoCloseFecha = document.getElementById("inmuebleEncargoCloseFecha");
+const inmuebleEncargoCloseImporte = document.getElementById("inmuebleEncargoCloseImporte");
+const inmuebleEncargoCloseNumCitas = document.getElementById("inmuebleEncargoCloseNumCitas");
+const inmuebleEncargoCloseNotas = document.getElementById("inmuebleEncargoCloseNotas");
+const inmuebleEncargoCloseSubmitBtn = document.getElementById("inmuebleEncargoCloseSubmitBtn");
+const inmuebleEncargoCloseStatus = document.getElementById("inmuebleEncargoCloseStatus");
 		const inmuebleTecnoSidePropietarioTitle = document.getElementById("inmuebleTecnoSidePropietarioTitle");
 		const inmuebleTecnoSidePropietarioSubtitle = document.getElementById("inmuebleTecnoSidePropietarioSubtitle");
 		const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
@@ -30483,6 +30496,7 @@ const saveInmuebleFields = async (updates = {}) => {
       }
     });
 	    refreshCurrentInmuebleHeader();
+	    syncInmuebleArchivePendingButton();
 	    setInmuebleSaveStatus("Guardado · cambios aplicados");
 	    loadCrmInmuebles();
 	    refreshCurrentInmuebleProfile();
@@ -30499,6 +30513,28 @@ const saveInmuebleFields = async (updates = {}) => {
 	    setInmuebleSaveStatus(error?.message || "Error al guardar.");
 	    return { error: error?.message || "Error al guardar." };
 	  }
+};
+
+const syncInmuebleArchivePendingButton = () => {
+  if (!inmuebleArchivePendingBtn) return;
+  const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const stage = resolveInmuebleMainEtapa(inmueble, captacion);
+  const enabled = Boolean(state.currentInmuebleId);
+  // Mostrar solo cuando el inmueble ya está en cierre positivo (Vendido/Alquiler) o cierre negativo.
+  const visible = ["Vendido", "Alquiler", "Cerrado negativamente"].includes(stage);
+  inmuebleArchivePendingBtn.classList.toggle("hidden", !visible);
+  inmuebleArchivePendingBtn.disabled = !enabled;
+};
+
+const syncInmuebleEncargoCloseButton = () => {
+  if (!inmuebleEncargoCloseBtn) return;
+  const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const stage = resolveInmuebleMainEtapa(inmueble, captacion);
+  const visible = stage === "Encargo";
+  inmuebleEncargoCloseBtn.classList.toggle("hidden", !visible);
+  inmuebleEncargoCloseBtn.disabled = !state.currentInmuebleId;
 };
 
 const saveInmuebleField = (field, value) => {
@@ -51691,6 +51727,8 @@ const openInmuebleDetail = (id, originView = "") => {
         updateTableVisibility();
       } catch (e) {}
       setInmuebleSaveStatus(getPendingInlineEditsCount() ? "Cambios pendientes" : "Sin cambios");
+      syncInmuebleArchivePendingButton();
+      syncInmuebleEncargoCloseButton();
       if (!hasPendingPrefill) {
         setInmuebleTab("datos");
       }
@@ -51794,6 +51832,145 @@ if (inmuebleManualSaveBtn) {
       setInmuebleSaveStatus(err?.message || "Error al guardar.");
     } finally {
       syncInmuebleManualSaveButton();
+      syncInmuebleArchivePendingButton();
+      syncInmuebleEncargoCloseButton();
+    }
+  });
+}
+
+if (inmuebleArchivePendingBtn) {
+  inmuebleArchivePendingBtn.addEventListener("click", async () => {
+    if (!state.currentInmuebleId) return;
+    const ok = confirm(
+      "¿Archivar todas las acciones pendientes de este inmueble?\n\nSe guardarán en histórico como Canceladas."
+    );
+    if (!ok) return;
+    inmuebleArchivePendingBtn.disabled = true;
+    setInmuebleSaveStatus("Archivando pendientes...");
+    try {
+      const payload = {
+        inmueble_id: state.currentInmuebleId,
+        reason: "Cierre/archivo manual",
+      };
+      const res = await postJsonWithDbRetry(
+        "/api/inmueble_archive_pending_actions",
+        payload,
+        { maxRetries: 4, baseDelayMs: 350, timeoutMs: 20000 }
+      );
+      if (res?.error) throw new Error(res.error);
+      const archived = Number(res?.archived || 0);
+      setInmuebleSaveStatus(archived ? `Archivadas ${archived} acciones pendientes.` : "No había acciones pendientes.");
+      try {
+        const empresaId = String(state.currentInmuebleContext?.inmueble?.empresa_id || "").trim();
+        if (empresaId) {
+          loadInmuebleActividad(state.currentInmuebleId, empresaId);
+          loadCrmAgenda();
+        }
+      } catch (e) {}
+    } catch (err) {
+      setInmuebleSaveStatus(err?.message || "No se pudo archivar.");
+    } finally {
+      syncInmuebleArchivePendingButton();
+    }
+  });
+}
+
+const openInmuebleEncargoCloseModal = () => {
+  if (!inmuebleEncargoCloseModal) return;
+  const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const stage = resolveInmuebleMainEtapa(inmueble, captacion);
+  if (stage !== "Encargo") {
+    alert("Este cierre solo está disponible en fase Encargo.");
+    return;
+  }
+  const op = normalizeSimple(inmueble.tipo_operacion || "");
+  const defaultTipo = op === "alquiler" ? "Alquiler" : "Vendido";
+  if (inmuebleEncargoCloseTipo) inmuebleEncargoCloseTipo.value = defaultTipo;
+  if (inmuebleEncargoCloseTitle) {
+    inmuebleEncargoCloseTitle.textContent = `Cierre de encargo · ${defaultTipo}`;
+  }
+  const today = new Date();
+  if (inmuebleEncargoCloseFecha) inmuebleEncargoCloseFecha.value = today.toISOString().slice(0, 10);
+  if (inmuebleEncargoCloseImporte) inmuebleEncargoCloseImporte.value = "";
+  if (inmuebleEncargoCloseNumCitas) inmuebleEncargoCloseNumCitas.value = "";
+  if (inmuebleEncargoCloseNotas) inmuebleEncargoCloseNotas.value = "";
+  if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = "";
+  inmuebleEncargoCloseModal.classList.remove("hidden");
+  inmuebleEncargoCloseModal.classList.add("open");
+  document.body.classList.add("modal-open");
+};
+
+const closeInmuebleEncargoCloseModal = () => {
+  if (!inmuebleEncargoCloseModal) return;
+  inmuebleEncargoCloseModal.classList.add("hidden");
+  inmuebleEncargoCloseModal.classList.remove("open");
+  document.body.classList.remove("modal-open");
+};
+
+if (inmuebleEncargoCloseModalClose) {
+  inmuebleEncargoCloseModalClose.addEventListener("click", () => closeInmuebleEncargoCloseModal());
+}
+if (inmuebleEncargoCloseModal) {
+  inmuebleEncargoCloseModal.addEventListener("click", (ev) => {
+    if (ev.target === inmuebleEncargoCloseModal) closeInmuebleEncargoCloseModal();
+  });
+}
+
+if (inmuebleEncargoCloseBtn) {
+  inmuebleEncargoCloseBtn.addEventListener("click", () => openInmuebleEncargoCloseModal());
+}
+
+if (inmuebleEncargoCloseTipo) {
+  inmuebleEncargoCloseTipo.addEventListener("change", () => {
+    if (inmuebleEncargoCloseTitle) {
+      inmuebleEncargoCloseTitle.textContent = `Cierre de encargo · ${inmuebleEncargoCloseTipo.value || ""}`;
+    }
+  });
+}
+
+if (inmuebleEncargoCloseSubmitBtn) {
+  inmuebleEncargoCloseSubmitBtn.addEventListener("click", async () => {
+    if (!state.currentInmuebleId) return;
+    const tipo = String(inmuebleEncargoCloseTipo?.value || "").trim();
+    const fecha = String(inmuebleEncargoCloseFecha?.value || "").trim();
+    const importe = String(inmuebleEncargoCloseImporte?.value || "").trim();
+    const numCitas = String(inmuebleEncargoCloseNumCitas?.value || "").trim();
+    const notas = String(inmuebleEncargoCloseNotas?.value || "").trim();
+    inmuebleEncargoCloseSubmitBtn.disabled = true;
+    if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = "Cerrando encargo...";
+    try {
+      const res = await postJsonWithDbRetry(
+        "/api/inmueble_encargo_close",
+        {
+          inmueble_id: state.currentInmuebleId,
+          tipo,
+          fecha_cierre: fecha,
+          importe_final: importe,
+          numero_citas: numCitas,
+          notas,
+        },
+        { maxRetries: 4, baseDelayMs: 350, timeoutMs: 20000 }
+      );
+      if (res?.error) throw new Error(res.error);
+      if (inmuebleEncargoCloseStatus) {
+        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Acciones archivadas: ${Number(res?.archived || 0)}.`;
+      }
+      closeInmuebleEncargoCloseModal();
+      // Refresca ficha y agenda.
+      try {
+        const empresaId = String(state.currentInmuebleContext?.inmueble?.empresa_id || "").trim();
+        if (empresaId) {
+          loadInmuebleDetail(state.currentInmuebleId, { keepTab: true });
+          loadCrmAgenda();
+        }
+      } catch (e) {}
+    } catch (err) {
+      if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = err?.message || "No se pudo cerrar.";
+    } finally {
+      inmuebleEncargoCloseSubmitBtn.disabled = false;
+      syncInmuebleArchivePendingButton();
+      syncInmuebleEncargoCloseButton();
     }
   });
 }
@@ -53417,26 +53594,43 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         followup: (payload) => {
           if (!["En negociación", "Aprobada", "Rechazada"].includes(payload.resultado_cierre)) return;
           if (payload.resultado_cierre === "Rechazada") return;
-        const docRaw = window.prompt(
-          "Documento a generar:\n1. Propuesta de compra\n2. Promesa de compra",
-          "1"
-        );
-        const docMap = { "1": "Propuesta de compra", "2": "Promesa de compra" };
-        payload.documento_tipo = docMap[String(docRaw || "").trim()] || "Propuesta de compra";
-        const amount = window.prompt("Importe de la propuesta/promesa", "");
+        const ctx = state.currentInmuebleContext || {};
+        const tipoOperacion =
+          state.currentInmuebleOperacionTipo
+          || resolveInmuebleTipoOperacion(ctx.inmueble || {}, ctx.captacion || {}, ctx.docs || []);
+        const isAlquiler = tipoOperacion === "alquiler";
+        const docPrompt = isAlquiler
+          ? "Documento a generar:\n1. Propuesta de alquiler\n2. Contrato privado de arrendamiento"
+          : "Documento a generar:\n1. Propuesta de compra\n2. Promesa de compra";
+        const docMap = isAlquiler
+          ? { "1": "Propuesta de alquiler", "2": "Contrato privado de arrendamiento" }
+          : { "1": "Propuesta de compra", "2": "Promesa de compra" };
+        const defaultDoc = isAlquiler ? "Propuesta de alquiler" : "Propuesta de compra";
+        const docRaw = window.prompt(docPrompt, "1");
+        payload.documento_tipo = docMap[String(docRaw || "").trim()] || defaultDoc;
+        const amountLabel = isAlquiler ? "Renta/importe de la propuesta (opcional)" : "Importe de la propuesta/promesa";
+        const amount = window.prompt(amountLabel, "");
         if (amount !== null && String(amount).trim()) {
           payload.importe_propuesta = String(amount).trim();
         }
         if (payload.resultado_cierre === "Aprobada") {
-          const fechaContrato = window.prompt("Fecha contrato privado (YYYY-MM-DD, opcional)", "");
+          const fechaContrato = window.prompt(
+            isAlquiler ? "Fecha contrato arrendamiento (YYYY-MM-DD, opcional)" : "Fecha contrato privado (YYYY-MM-DD, opcional)",
+            ""
+          );
           if (fechaContrato !== null && String(fechaContrato).trim()) {
             payload.fecha_contrato = String(fechaContrato).trim();
           }
-          const fechaEscritura = window.prompt("Fecha escritura pública (YYYY-MM-DD, opcional)", "");
-          if (fechaEscritura !== null && String(fechaEscritura).trim()) {
-            payload.fecha_escritura = String(fechaEscritura).trim();
+          if (!isAlquiler) {
+            const fechaEscritura = window.prompt("Fecha escritura pública (YYYY-MM-DD, opcional)", "");
+            if (fechaEscritura !== null && String(fechaEscritura).trim()) {
+              payload.fecha_escritura = String(fechaEscritura).trim();
+            }
+            payload.operacion_estado = "Contrato privado";
+          } else {
+            payload.operacion_estado = "Alquiler";
+            payload.estado_siguiente = "Alquiler";
           }
-          payload.operacion_estado = "Contrato privado";
         }
         },
       },
