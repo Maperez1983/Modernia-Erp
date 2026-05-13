@@ -64795,13 +64795,13 @@ class Handler(BaseHTTPRequestHandler):
                       ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
-                    (
-                        doc_id,
-                        empresa["id"],
-                        cliente_id,
-                        f"renta-{ejercicio}-{entry_id}",
-                        doc_nombre,
-                        doc_tipo,
+                        (
+                            doc_id,
+                            empresa_id,
+                            cliente_id,
+                            f"renta-{ejercicio}-{entry_id}",
+                            doc_nombre,
+                            doc_tipo,
                         presentacion_fecha,
                         estado_presentacion,
                         doc_notas,
