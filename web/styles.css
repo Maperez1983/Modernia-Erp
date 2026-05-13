@@ -5584,14 +5584,15 @@ body.tc-resizing {
   background: rgba(212, 175, 55, 0.18);
   border: 1px solid rgba(212, 175, 55, 0.25);
   font-size: 18px;
+  color: rgba(var(--ink-rgb), 0.92);
 }
 
 #crmSection .crm-insert-ico svg,
 #crmOverlayPortal .crm-insert-ico svg {
   width: 18px;
   height: 18px;
-  stroke: rgba(var(--ink-rgb), 0.92);
-  fill: none;
+  stroke: currentColor;
+  fill: currentColor;
 }
 
 #crmSection .crm-insert-label,
