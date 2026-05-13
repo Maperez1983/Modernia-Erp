@@ -35699,6 +35699,16 @@ const updateEstudioAltaTabs = () => {
     }
   });
 
+  // Anti-mezcla: al cambiar de pestaña del CRM, nunca debe quedarse “pegada”
+  // la ficha de inmueble encima del listado (p.ej. al ir a Clientes).
+  // La ficha solo se muestra cuando el usuario abre un inmueble explícitamente.
+  try {
+    if (nextView !== "inmueble_ficha") {
+      if (inmuebleDetail) inmuebleDetail.classList.add("hidden");
+      if (crmWorkspaceShell) crmWorkspaceShell.classList.remove("hidden");
+    }
+  } catch (e) {}
+
   setCrmQuickNewOpen(false);
   setCrmRecentOpen(false);
   setCrmGlobalSearchResultsOpen(false);
