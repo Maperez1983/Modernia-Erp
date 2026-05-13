@@ -48917,6 +48917,9 @@ const openCrmAgendaEditModal = (row) => {
       if (statusEl) statusEl.textContent = "Guardando...";
       const formData = new FormData(form);
       const payload = Object.fromEntries(formData.entries());
+      // Guardrail: el modal debe actualizar SIEMPRE la fila que se abrió.
+      // Evita cualquier contaminación por valores previos del DOM.
+      payload.id = String(rowSnapshot.id || "").trim();
       payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
       payload.servicio = "inmobiliaria";
       try {
@@ -69939,6 +69942,9 @@ if (crmAgendaForm) {
     if (crmAgendaStatus) crmAgendaStatus.textContent = "Guardando...";
     const formData = new FormData(crmAgendaForm);
     const payload = Object.fromEntries(formData.entries());
+    // Guardrail: creación de actividad/cita nunca debe mandar `id`.
+    // Si por cualquier bug del DOM apareciera, podría provocar un update accidental en otros flujos.
+    if ("id" in payload) delete payload.id;
     payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     payload.servicio = "inmobiliaria";
     fetch("/api/acciones", {
