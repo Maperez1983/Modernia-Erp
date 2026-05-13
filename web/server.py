@@ -3756,6 +3756,11 @@ def normalize_lookup_text(value):
     return text
 
 
+def normalizeSimple(value):
+    """Compat: older codepaths used normalizeSimple."""
+    return normalize_lookup_text(value)
+
+
 def normalize_action_key(value):
     if not value:
         return ""
@@ -29859,6 +29864,16 @@ def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="se
 
 
 def get_db(db_path):
+    # Tests/offline tools often pass ":memory:" or a Path to force sqlite even
+    # when DATABASE_URL is present in the environment.
+    try:
+        from pathlib import Path as _Path
+
+        if db_path == ":memory:" or isinstance(db_path, _Path):
+            return open_sqlite_conn(db_path, with_row_factory=True)
+    except Exception:
+        if db_path == ":memory:":
+            return open_sqlite_conn(db_path, with_row_factory=True)
     if db_is_postgres_enabled():
         return open_postgres_conn(with_row_factory=True)
     return open_sqlite_conn(db_path, with_row_factory=True)
