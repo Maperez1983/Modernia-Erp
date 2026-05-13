@@ -35609,6 +35609,7 @@ const updateEstudioAltaTabs = () => {
 		  "analisis",
 		  "captaciones",
 		  "inmuebles",
+		  "inmueble_ficha",
 		  "mapa_inmuebles",
 		  "alquileres",
 		  "compraventas",
@@ -35628,8 +35629,12 @@ const updateEstudioAltaTabs = () => {
     nextView = "resumen";
   }
   const vertical = resolveCrmTecnocloudVertical();
-  if (vertical === "seguros") nextView = "seguros";
-  if (vertical === "fin") nextView = "fin";
+  // En "ficha inmueble" no forzamos vertical: se trata de una vista modal/página
+  // que debe poder abrirse desde cualquier lista (agenda, inmuebles, etc.).
+  if (nextView !== "inmueble_ficha") {
+    if (vertical === "seguros") nextView = "seguros";
+    if (vertical === "fin") nextView = "fin";
+  }
   state.crmWorkspaceView = nextView;
   syncCrmLegalAvailability();
   syncCrmTecnocloudChrome();
@@ -35679,13 +35684,19 @@ const updateEstudioAltaTabs = () => {
   syncCrmGlobalSearchUi(nextView);
   syncCrmGlobalSearchTargetValue(nextView);
 
-  // Si veníamos de la ficha del inmueble (panel aparte), al cambiar de vista CRM
-  // debe cerrarse SIEMPRE; si no, se queda “debajo” de la Agenda u otras vistas.
-  if (inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
-    inmuebleDetail.classList.add("hidden");
-  }
-  if (crmWorkspaceShell) {
-    crmWorkspaceShell.classList.remove("hidden");
+  // Vista "ficha" separada: lista oculta, ficha visible (no desplegable debajo).
+  if (nextView === "inmueble_ficha") {
+    if (crmWorkspaceShell) crmWorkspaceShell.classList.add("hidden");
+    if (inmuebleDetail) inmuebleDetail.classList.remove("hidden");
+  } else {
+    // Si veníamos de la ficha del inmueble (panel aparte), al cambiar de vista CRM
+    // debe cerrarse SIEMPRE; si no, se queda “debajo” de la Agenda u otras vistas.
+    if (inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
+      inmuebleDetail.classList.add("hidden");
+    }
+    if (crmWorkspaceShell) {
+      crmWorkspaceShell.classList.remove("hidden");
+    }
   }
   try {
     updateTableVisibility();
@@ -51689,9 +51700,8 @@ const openInmuebleDetail = (id, originView = "") => {
   state.currentInmueble = null;
   state.currentInmuebleContext = null;
   setInmuebleSaveStatus("Cargando ficha...");
-  // Feedback inmediato: si falla la carga, el usuario debe ver la ficha y el error.
-  if (crmWorkspaceShell) crmWorkspaceShell.classList.add("hidden");
-  inmuebleDetail.classList.remove("hidden");
+  // Feedback inmediato: abrir la ficha como vista separada (no desplegable bajo la lista).
+  setCrmWorkspaceView("inmueble_ficha");
   try {
     updateTableVisibility();
   } catch (e) {}
@@ -51868,10 +51878,6 @@ const openInmuebleDetail = (id, originView = "") => {
       loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
       loadInmuebleDocs(id);
-      if (crmWorkspaceShell) {
-        crmWorkspaceShell.classList.add("hidden");
-      }
-      inmuebleDetail.classList.remove("hidden");
       try {
         updateTableVisibility();
       } catch (e) {}
