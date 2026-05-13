@@ -228,19 +228,19 @@ function attachEmpresaIdForServiceRequest(url, payload) {
   };
 
   if (path.startsWith("/api/gestoria_") || path === "/api/cliente_gestoria_update" || path === "/api/gestoria_update") {
-    setEmpresa(resolveCrmGestoriaEmpresa()?.id);
+    setEmpresa(resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa()));
     return out;
   }
   if (path.startsWith("/api/seguros_") || path === "/api/seguros" || path === "/api/seguros_update") {
-    setEmpresa(resolveCrmSegurosEmpresa()?.id);
+    setEmpresa(resolveLegacyEmpresaId(resolveCrmSegurosEmpresa()));
     return out;
   }
   if (path.startsWith("/api/hipotecas") || path.startsWith("/api/fin_") || path.startsWith("/api/financiaciones")) {
-    setEmpresa(resolveCrmFinEmpresa()?.id);
+    setEmpresa(resolveLegacyEmpresaId(resolveCrmFinEmpresa()));
     return out;
   }
   if (path.startsWith("/api/inmo_") || path.startsWith("/api/inmuebles") || path.startsWith("/api/crm_")) {
-    setEmpresa(resolveCrmInmoEmpresa()?.id);
+    setEmpresa(resolveLegacyEmpresaId(resolveCrmInmoEmpresa()));
     return out;
   }
   return out;
@@ -22694,7 +22694,7 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
 		  "/api/clientes_link",
 		  {
 		    cliente_id: clienteId,
-		    ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : { empresa_id: empresa.id }),
+		    ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : { empresa_id: resolveLegacyEmpresaId(empresa) }),
 		    servicio: "Inmobiliaria",
 		    captado_por_user_id: captado_por_user_id || undefined,
 		    procedencia_canal: procedencia_canal || undefined,
@@ -28801,12 +28801,13 @@ const persistGestoriaTrabajoTipo = async (payload = {}) => {
 
 const deleteGestoriaTrabajoTipo = async (id) => {
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa?.id) throw new Error("Sin empresa.");
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) throw new Error("Sin empresa.");
   const usuario = getCurrentUser();
   const res = await fetch("/api/gestoria_trabajo_tipos_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, empresa_id: empresa.id, empresa_nombre: empresa.nombre || "", usuario }),
+    body: JSON.stringify({ id, empresa_id: empresaId, empresa_nombre: empresa.nombre || "", usuario }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -32729,7 +32730,7 @@ const loadAllSegurosForContabilidad = async () => {
   try {
     const params = new URLSearchParams({
       tabla: "seguros",
-      empresa_id: empresa.id,
+      empresa_id: resolveLegacyEmpresaId(empresa),
       include_id: "1",
     });
     const data = await api(`/api/tabla?${params.toString()}`);
@@ -32762,9 +32763,8 @@ const loadClientesForSegurosContabilidad = async () => {
   }
   const empresa = resolveCrmSegurosEmpresa();
   const params = new URLSearchParams({ servicio: "seguros" });
-  if (empresa?.id) {
-    params.set("empresa_id", empresa.id);
-  }
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (empresaId) params.set("empresa_id", empresaId);
   try {
     const rows = await api(`/api/clientes_list?${params.toString()}`);
     const list = Array.isArray(rows) ? rows : [];
@@ -33099,7 +33099,7 @@ const loadSegurosContabilidad = () => {
   }
   const q = segurosContabilidadSearch ? segurosContabilidadSearch.value.trim() : "";
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: resolveLegacyEmpresaId(empresa),
     seguros_only: "1",
     q,
   });
@@ -33477,7 +33477,7 @@ const loadGestoriaContaQueue = () => {
     gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa) });
   if (gestoriaContaQueueFilter && gestoriaContaQueueFilter.value) {
     params.set("estado", gestoriaContaQueueFilter.value);
   }
@@ -33648,7 +33648,7 @@ const loadGestoriaModelosOverview = () => {
     gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id, scope: "proximos" });
+  const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa), scope: "proximos" });
   api(`/api/gestoria_modelos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
@@ -36273,7 +36273,8 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     return;
   }
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     hipotecaBdtInfo.textContent = "";
     if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
@@ -36290,7 +36291,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
   if (
     !forceRefresh &&
     state.hipotecaBdtCache &&
-    state.hipotecaBdtCache.empresaId === empresa.id &&
+    state.hipotecaBdtCache.empresaId === empresaId &&
     state.hipotecaBdtCache.q === qApi &&
     isFreshCache
   ) {
@@ -36304,7 +36305,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     return;
   }
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     q: qApi,
     limit: "1000",
     include_json: "1",
@@ -36314,7 +36315,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       const columns = data.columns || [];
       const rows = data.rows || [];
       state.hipotecaBdtCache = {
-        empresaId: empresa.id,
+        empresaId,
         q: qApi,
         data: { columns, rows },
         ts: Date.now(),
@@ -38202,7 +38203,8 @@ const updateHipotecaRegistroDatalist = async (panel) => {
   const list = panel.querySelector("#hipotecaRegistroList");
   if (!list) return;
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) return;
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return;
 
   const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
   const municipio =
@@ -38213,7 +38215,7 @@ const updateHipotecaRegistroDatalist = async (panel) => {
     String(getNestedValue(clienteInmueble, "inmueble.provincia") || "").trim() ||
     String(panel.querySelector('[data-json="liquidacion_json"][data-path="comprador.provincia"]')?.value || "").trim();
 
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: empresaId });
   if (municipio) params.set("municipio", municipio);
   if (provincia) params.set("provincia", provincia);
 
@@ -38247,7 +38249,8 @@ const updateHipotecaNotariasDatalist = async (panel) => {
   if (!list) return;
   const empresa = resolveCrmFinEmpresa();
   const params = new URLSearchParams();
-  if (empresa?.id) params.set("empresa_id", empresa.id);
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (empresaId) params.set("empresa_id", empresaId);
   params.set("provincia", "Málaga");
 
   let items = [];
@@ -38345,10 +38348,11 @@ const fetchHipotecaRowById = async (recordId) => {
   const id = String(recordId || "").trim();
   if (!id) return null;
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa) return null;
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return null;
   try {
     const params = new URLSearchParams({
-      empresa_id: empresa.id,
+      empresa_id: empresaId,
       id,
       include_json: "1",
       limit: "1",
@@ -38381,8 +38385,9 @@ const openHipotecaFichaPrint = (recordId, section = "") => {
 
 const downloadHipotecasFirmadasExcel = () => {
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) return;
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return;
+  const params = new URLSearchParams({ empresa_id: empresaId });
   const year = String(hipotecaBdtExportYear?.value || "").trim();
   if (year) params.set("year", year);
   const url = `/api/hipotecas_firmadas_excel?${params.toString()}`;
@@ -39416,13 +39421,14 @@ const vincularHipotecaSeleccionada = async () => {
       clienteId = await createClienteForHipoteca(nombreCliente, row, columns);
       wasNew = true;
     }
-    await linkFinanciacionServiceToCliente(clienteId, empresa.id);
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    await linkFinanciacionServiceToCliente(clienteId, empresaId);
     const clienteNombrePersistido = String(existing?.nombre || nombreCliente || "").trim();
     await postJsonWithDbRetry(
       "/api/hipotecas_update",
       {
         id: selectedId,
-        empresa_id: empresa.id,
+        empresa_id: empresaId,
         empresa_nombre: empresa.nombre,
         cliente_id: clienteId,
         cliente: clienteNombrePersistido,
@@ -39718,7 +39724,8 @@ const loadHipotecaDashboard = () => {
     return;
   }
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     hipotecaDashboardKpis.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     if (hipotecaDashboardInfo) hipotecaDashboardInfo.textContent = "";
     return;
@@ -39726,7 +39733,7 @@ const loadHipotecaDashboard = () => {
   if (hipotecaDashboardInfo) {
     hipotecaDashboardInfo.textContent = "Cargando dashboard...";
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: empresaId });
   if (hipotecaDashboardYearSelect?.value) {
     params.set("year", hipotecaDashboardYearSelect.value);
   }
@@ -39988,8 +39995,9 @@ const loadHipotecaDashboard = () => {
 const loadHipotecaContabilidadHipotecas = async () => {
   if (!hipotecaContabilidadHipoteca) return [];
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) return [];
-  const data = await api(`/api/hipoteca_bdt?empresa_id=${empresa.id}&limit=1000`);
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return [];
+  const data = await api(`/api/hipoteca_bdt?empresa_id=${encodeURIComponent(empresaId)}&limit=1000`);
   const columns = data?.columns || [];
   const rows = rowsToObjectsByColumns(columns, data?.rows || []);
   hipotecaContabilidadHipoteca.innerHTML = "";
@@ -40030,14 +40038,15 @@ const loadHipotecaContabilidadHipotecas = async () => {
 const loadHipotecaContabilidad = () => {
   if (!hipotecaContabilidadTable || !hipotecaContabilidadInfo) return;
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     hipotecaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     hipotecaContabilidadInfo.textContent = "";
     return;
   }
   const q = hipotecaContabilidadSearch ? hipotecaContabilidadSearch.value.trim() : "";
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     hipotecas_only: "1",
     q,
     limit: q ? "100" : "10",
@@ -40219,9 +40228,8 @@ const setHipotecaAltaView = (view) => {
   }
   if (next === "agenda") {
     const empresa = resolveCrmFinEmpresa();
-    if (empresa?.id) {
-      loadFinWorkflowActions(empresa.id);
-    }
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (empresaId) loadFinWorkflowActions(empresaId);
   }
   if (next === "contabilidad") {
     loadHipotecaContabilidadHipotecas().catch(() => {});
@@ -42117,13 +42125,16 @@ const autoLinkCurrentUserServices = async (clienteId) => {
     const companyName = SERVICE_COMPANY_MAP[label];
     const empresa = empresaFromMatrix || state.empresas.find((e) => e.nombre === companyName);
     if (!empresa) return;
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (!empresaId) return;
     requests.push(
       fetch("/api/clientes_link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: clienteId,
-          empresa_id: empresa.id,
+          empresa_id: empresaId,
+          ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : {}),
           servicio: label,
           estado: "Activo",
           fecha_inicio: new Date().toISOString().slice(0, 10),
@@ -42340,15 +42351,16 @@ const loadSegurosRenewalAlertForUser = () => {
     return Promise.resolve();
   }
   const empresa = resolveCrmSegurosEmpresa();
+  const empresaId = resolveLegacyEmpresaId(empresa);
   const responsable = String(getCurrentUser() || "").trim();
-  if (!empresa || !responsable) {
+  if (!empresaId || !responsable) {
     segurosRenewalAlert.classList.add("hidden");
     segurosRenewalAlert.textContent = "";
     return Promise.resolve();
   }
 
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     days_ahead: "30",
     days_past: "0",
     limit: "250",
@@ -42617,9 +42629,8 @@ const renderTable = (data, options = {}) => {
             }
             loadTable();
             const empresa = resolveCrmFinEmpresa();
-            if (empresa) {
-              renderFinDashboard(empresa.id);
-            }
+            const empresaId = resolveLegacyEmpresaId(empresa);
+            if (empresaId) renderFinDashboard(empresaId);
           });
       });
       actions.appendChild(signBtn);
@@ -44894,7 +44905,8 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
   if (!crmResumenYtdBoard || !crmResumenYtdKpis) return;
   if (crmViewResumen && crmViewResumen.classList.contains("hidden")) return;
   const empresa = resolveCrmInmoEmpresa();
-  if (!empresa?.id) return;
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return;
   hydrateCrmResumenYtdControls();
 
   const authUser = getAuthScopeUser();
@@ -44909,7 +44921,7 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
 
   const year = String(state.crmResumenYtdYear || new Date().getFullYear());
   const responsable = isPrivileged ? String(state.crmResumenYtdResponsable || "") : "";
-  const key = `${empresa.id}::${year}::${responsable}::${isPrivileged ? "1" : "0"}`;
+  const key = `${empresaId}::${year}::${responsable}::${isPrivileged ? "1" : "0"}`;
   if (!force && crmResumenYtdLastData && crmResumenYtdInFlightKey === "" && crmResumenYtdLastData.__key === key) {
     // Ya renderizado.
     return;
@@ -44917,7 +44929,7 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
   if (crmResumenYtdInFlightKey === key) return;
   crmResumenYtdInFlightKey = key;
 
-  const params = new URLSearchParams({ empresa_id: empresa.id, year });
+  const params = new URLSearchParams({ empresa_id: empresaId, year });
   if (responsable) params.set("responsable", responsable);
   try {
     const data = await api(`/api/crm_resumen_ytd?${params.toString()}`);
@@ -47228,8 +47240,9 @@ const resolveInmoScopeParams = () => {
     if (ws) return { workspace_id: ws };
   } catch (e) {}
   const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) return null;
-  return { empresa_id: empresa.id };
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return null;
+  return { empresa_id: empresaId };
 };
 
 const loadCrmInmuebles = () => {
@@ -48219,8 +48232,9 @@ const openCompraventaEditor = async (recordId) => {
   goToEstudioAlta("compraventa");
   try {
     const empresa = resolveCrmInmoEmpresa();
-    if (!empresa) throw new Error("Sin empresa inmobiliaria.");
-    const params = new URLSearchParams({ empresa_id: empresa.id, id: String(recordId || "").trim() });
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (!empresaId) throw new Error("Sin empresa inmobiliaria.");
+    const params = new URLSearchParams({ empresa_id: empresaId, id: String(recordId || "").trim() });
     const data = await api(`/api/compraventas?${params.toString()}`);
     if (!data?.row) throw new Error(data?.error || "Compraventa no encontrada.");
     fillCompraventaForm(data.row);
@@ -50340,8 +50354,9 @@ const loadCrmAgenda = () => {
   });
   if (workspaceId) {
     params.set("workspace_id", workspaceId);
-  } else if (empresa?.id) {
-    params.set("empresa_id", empresa.id);
+  } else {
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (empresaId) params.set("empresa_id", empresaId);
   }
   if (rangeStart) params.set("start", fmt(rangeStart));
   if (rangeEnd) params.set("end", fmt(rangeEnd));
@@ -50376,8 +50391,9 @@ const ensureCrmAgendaSelectors = async () => {
     const params = new URLSearchParams({ tabla: "inmuebles", include_id: "1", limit: "400" });
     if (workspaceId) {
       params.set("workspace_id", workspaceId);
-    } else if (empresa?.id) {
-      params.set("empresa_id", empresa.id);
+    } else {
+      const empresaId = resolveLegacyEmpresaId(empresa);
+      if (empresaId) params.set("empresa_id", empresaId);
     }
     const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
     crmAgendaInmueble.innerHTML = "";
@@ -50463,11 +50479,12 @@ const loadCrmInformadores = async () => {
 const loadCrmEdificios = async () => {
   if (!crmEdificiosTable) return;
   const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     crmEdificiosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresa.id, include_id: "1", limit: "600" });
+  const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresaId, include_id: "1", limit: "600" });
   const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
   if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) {
     crmEdificiosTable.innerHTML = "<p class='muted'>No se pudieron cargar los inmuebles.</p>";
@@ -50572,7 +50589,8 @@ const renderVisitaSelects = () => {
 const openDemandaDetail = (id) => {
   if (!demandaDetail) return;
   const empresa = resolveCrmInmoEmpresa();
-  if (!empresa) return;
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return;
   try {
     const key = String(id || "").trim();
     const row = (Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : []).find((item) => String(item?.id || "").trim() === key);
@@ -50584,7 +50602,7 @@ const openDemandaDetail = (id) => {
       meta: [row?.tipo || "", row?.estado || ""].filter(Boolean).join(" · "),
     });
   } catch (e) {}
-  api(`/api/matching?empresa_id=${empresa.id}&demanda_id=${id}`).then((data) => {
+  api(`/api/matching?empresa_id=${encodeURIComponent(empresaId)}&demanda_id=${encodeURIComponent(id)}`).then((data) => {
     if (demandaTitle) {
       demandaTitle.textContent = "Matching de demanda";
     }
@@ -51536,7 +51554,7 @@ const openInmueblePersonasModal = async () => {
     const params = new URLSearchParams({
       include_id: "1",
       limit: "900",
-      empresa_id: String(empresa.id || "").trim(),
+      empresa_id: resolveLegacyEmpresaId(empresa),
       servicio: "inmobiliaria",
     });
     const data = await api(`/api/clientes?${params.toString()}`);
@@ -54524,8 +54542,7 @@ const resolveGestoriaDashboardEmpresaId = () => {
   const scoped = String(state.gestoriaScopeEmpresaId || "").trim();
   if (scoped) return scoped;
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa?.id) return "";
-  return String(empresa.id || "").trim();
+  return resolveLegacyEmpresaId(empresa);
 };
 
 const setGestoriaDashboardView = (viewKey = "general") => {
@@ -54739,7 +54756,7 @@ const loadGestoriaDashboardGestiones = async ({ force = false } = {}) => {
   const estadoFiltro = String(gestoriaDashTrabajosEstado?.value || "").trim().toLowerCase();
   const qs = new URLSearchParams();
   if (workspaceId) qs.set("workspace_id", workspaceId);
-  else qs.set("empresa_id", String(empresa.id || "").trim());
+  else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
   if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
 
   if (gestoriaDashTrabajosEstado && gestoriaDashTrabajosEstado.dataset.bound !== "1") {
@@ -55953,7 +55970,7 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   try {
     const qs = new URLSearchParams({ ejercicio: String(ejercicio || "") });
     if (workspaceId) qs.set("workspace_id", workspaceId);
-    else qs.set("empresa_id", String(empresa.id || "").trim());
+    else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
     if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
@@ -56010,7 +56027,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
   const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
-  const expectedKey = scopeEmpresaId || String(empresa.id || "").trim();
+  const expectedKey = scopeEmpresaId || resolveLegacyEmpresaId(empresa);
   if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
     renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: renderKey });
     return;
@@ -56021,7 +56038,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   try {
     const qs = new URLSearchParams();
     if (workspaceId) qs.set("workspace_id", workspaceId);
-    else qs.set("empresa_id", String(empresa.id || "").trim());
+    else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
     if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
@@ -56070,7 +56087,7 @@ const loadGestoriaDashboard = () => {
   const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
   const qsBase = new URLSearchParams();
   if (workspaceId) qsBase.set("workspace_id", workspaceId);
-  else qsBase.set("empresa_id", String(empresa.id || "").trim());
+  else qsBase.set("empresa_id", resolveLegacyEmpresaId(empresa));
   if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
@@ -56104,7 +56121,7 @@ const loadGestoriaDashboard = () => {
     renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
     renderGestoriaDashGeneralProductividad(data.productividad || {});
     try {
-      const expectedKey = scopeEmpresaId || String(empresa.id || "").trim();
+      const expectedKey = scopeEmpresaId || resolveLegacyEmpresaId(empresa);
       state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
     } catch {}
     if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {
@@ -56670,7 +56687,7 @@ const loadSegurosCrm = () => {
   const q = segurosCrmSearch ? segurosCrmSearch.value.trim() : "";
   const params = new URLSearchParams({
     tabla: "seguros",
-    empresa_id: empresa.id,
+    empresa_id: resolveLegacyEmpresaId(empresa),
     q,
   });
   params.set("include_id", "1");
@@ -56760,22 +56777,23 @@ const loadSegurosCrm = () => {
     renderSegurosUpdateSelect(data);
     renderSegurosChecklistSelect(data);
     renderSegurosAiSelect(data);
-    loadSegurosOportunidades(empresa.id);
-    loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    loadSegurosOportunidades(empresaId);
+    loadAcciones("seguros", empresaId, segurosAgendaTable, segurosAgendaInfo);
     loadSegurosOfertas();
     loadSegurosReferidos();
     loadSegurosCampanas();
     loadSegurosComisiones();
-    loadSegurosInsights(empresa.id);
+    loadSegurosInsights(empresaId);
     loadSegurosAlertas();
     loadSegurosKpis();
     loadSegurosDataQuality();
     renderSegurosRamosDashboard();
     populateSegurosOperationalSelects();
     loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
-    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosComplianceKpis(empresaId);
     loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
-    loadSegurosReclamaciones(empresa.id);
+    loadSegurosReclamaciones(empresaId);
     loadSegurosRecibos();
     loadSegurosSiniestros();
     hydrateSegurosRecibosFormSelects().catch(() => {});
@@ -56988,7 +57006,7 @@ const loadSegurosKpis = () => {
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
   };
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa) });
   // KPIs deben reflejar toda la cartera (en vigor, vencimientos, primas),
   // independientemente de si el PDF está enlazado.
   params.set("uploaded_only", "0");
@@ -57104,7 +57122,8 @@ const renderSegurosDataQuality = (payload) => {
 const loadSegurosDataQuality = ({ force = false } = {}) => {
   if (!segurosDataQuality) return;
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     segurosDataQuality.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
@@ -57113,7 +57132,7 @@ const loadSegurosDataQuality = ({ force = false } = {}) => {
   } else {
     segurosDataQuality.innerHTML = "<p class='muted'>Cargando calidad del dato…</p>";
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id, uploaded_only: "0", limit: "8000" });
+  const params = new URLSearchParams({ empresa_id: empresaId, uploaded_only: "0", limit: "8000" });
   api(`/api/seguros_data_quality?${params.toString()}`)
     .then((data) => {
       state.segurosDataQualityCache = data || {};
@@ -58157,7 +58176,7 @@ const loadSegurosRecibos = () => {
     if (segurosRecibosAlerts) segurosRecibosAlerts.innerHTML = "";
     return;
   }
-  const params = buildSegurosRecibosParams(empresa.id);
+  const params = buildSegurosRecibosParams(resolveLegacyEmpresaId(empresa));
   Promise.allSettled([
     api(`/api/seguros_recibos?${params.toString()}`),
     api(`/api/seguros_recibos_summary?${params.toString()}`),
@@ -58303,13 +58322,14 @@ const SEGUROS_SINIESTROS_WORKFLOW = [
 const loadSegurosSiniestros = () => {
   if (!segurosSiniestrosTable) return;
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     segurosSiniestrosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (segurosSiniestrosInfo) segurosSiniestrosInfo.textContent = "";
     return;
   }
   const q = segurosSiniestrosSearch ? segurosSiniestrosSearch.value.trim() : "";
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: empresaId });
   if (q) params.set("q", q);
   api(`/api/seguros_siniestros?${params.toString()}`)
     .then((data) => {
@@ -58414,13 +58434,14 @@ const loadSegurosSiniestros = () => {
 const loadSegurosAlertas = () => {
   if (!segurosAlertasList) return;
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     segurosAlertasList.innerHTML = "<p class='muted'>Sin empresa.</p>";
     state.segurosRenovarPendientesIds = [];
     populateSegurosOperationalSelects();
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const params = new URLSearchParams({ empresa_id: empresaId });
   api(`/api/seguros_alertas?${params.toString()}`).then((data) => {
     const items = data.items || [];
     state.segurosRenovarPendientesIds = items
@@ -58693,7 +58714,8 @@ const renderSegurosRenovacionesTable = (items = []) => {
 const loadSegurosRenovacionesQueue = () => {
   if (!segurosRenovacionesTable || !segurosRenovacionesInfo) return;
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     segurosRenovacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     segurosRenovacionesInfo.textContent = "";
     return;
@@ -58704,7 +58726,7 @@ const loadSegurosRenovacionesQueue = () => {
   const responsable = String(segurosRenovacionesResponsable?.value || "").trim();
   const q = String(segurosRenovacionesSearch?.value || "").trim();
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     days_ahead: String(Number.isFinite(daysAhead) ? daysAhead : 45),
     days_past: String(Number.isFinite(daysPast) ? daysPast : 0),
     limit: "250",
@@ -60116,19 +60138,20 @@ const createClienteFromOcr = async (type, fields) => {
 
 const ensureSegurosBdtData = async (forceRefresh = false) => {
   const empresa = resolveCrmSegurosEmpresa();
-  if (!empresa) return null;
-  if (!forceRefresh && state.segurosBdtCache && state.segurosBdtCache.empresaId === empresa.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return null;
+  if (!forceRefresh && state.segurosBdtCache && state.segurosBdtCache.empresaId === empresaId) {
     return state.segurosBdtCache.data;
   }
   const params = new URLSearchParams({
     tabla: "seguros",
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     include_id: "1",
     limit: "1000",
   });
   const data = await api(`/api/tabla?${params.toString()}`);
   if (data?.error) return data;
-  state.segurosBdtCache = { empresaId: empresa.id, data, ts: Date.now() };
+  state.segurosBdtCache = { empresaId, data, ts: Date.now() };
   return data;
 };
 
@@ -60694,7 +60717,8 @@ const openSegurosPresupuestoEdit = (columns, row) => {
 
 const loadFinCrm = () => {
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     if (finCrmTable) {
       finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     }
@@ -60702,7 +60726,7 @@ const loadFinCrm = () => {
   }
   loadFinInmobiliarias();
   populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
-  loadFinAsesoramientos(empresa.id);
+  loadFinAsesoramientos(empresaId);
   bindMoneyInputs(finAsesoramientoForm);
   bindIngresosConjuntos(finAsesoramientoForm);
   bindLoanToggles(finAsesoramientoForm);
@@ -60711,7 +60735,8 @@ const loadFinCrm = () => {
 const loadFinHipotecasRegistradas = () => {
   if (!finCrmTable || !finCrmInfo) return;
   const empresa = resolveCrmFinEmpresa();
-  if (!empresa?.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     finCrmInfo.textContent = "";
     return;
@@ -60720,7 +60745,7 @@ const loadFinHipotecasRegistradas = () => {
   const q = finCrmSearch ? finCrmSearch.value.trim() : "";
   const params = new URLSearchParams({
     tabla: "hipotecas",
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     q,
   });
   api(`/api/tabla?${params.toString()}`).then((data) => {
@@ -61088,7 +61113,8 @@ const loadFinAsesoramientos = (empresaId) => {
           await createRecommendedFinAction();
           setHipotecaAltaView("agenda");
           const empresa = resolveCrmFinEmpresa();
-          if (empresa?.id) loadFinWorkflowActions(empresa.id);
+          const empresaId = resolveLegacyEmpresaId(empresa);
+          if (empresaId) loadFinWorkflowActions(empresaId);
         } catch (error) {
           window.alert(error.message || "No se pudo crear la siguiente tarea.");
         }
@@ -61134,9 +61160,8 @@ const selectFinHipoteca = (row) => {
   state.finSelectedHipotecaId = row?.id || "";
   renderFinSelectedHipoteca();
   const empresa = resolveCrmFinEmpresa();
-  if (empresa?.id) {
-    loadFinHipotecaActions(empresa.id);
-  }
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (empresaId) loadFinHipotecaActions(empresaId);
 };
 
 const renderFinSelectedHipoteca = () => {
@@ -61187,21 +61212,20 @@ const renderFinSelectedHipoteca = () => {
       select.addEventListener("change", async () => {
       try {
         const empresa = resolveCrmFinEmpresa();
+        const empresaId = resolveLegacyEmpresaId(empresa);
         await fetch("/api/hipotecas_update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: row.id,
             estado: select.value,
-            empresa_id: empresa?.id || "",
+            empresa_id: empresaId,
             empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
           }),
         }).then((res) => res.json()).then((data) => {
           if (data?.error) throw new Error(data.error);
         });
-        if (empresa?.id) {
-          await loadFinHipotecasEstudio(empresa.id);
-        }
+        if (empresaId) await loadFinHipotecasEstudio(empresaId);
       } catch (error) {
         window.alert(error.message || "No se pudo actualizar el estado.");
         select.value = estado;
@@ -61769,9 +61793,8 @@ const selectFinAsesoramiento = (row) => {
   syncFinAgendaContext();
   finSimRenderLinkedAsesoramiento();
   const empresa = resolveCrmFinEmpresa();
-  if (empresa?.id && (state.hipotecaAltaView || "dashboard") === "agenda") {
-    loadFinWorkflowActions(empresa.id);
-  }
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (empresaId && (state.hipotecaAltaView || "dashboard") === "agenda") loadFinWorkflowActions(empresaId);
   renderFinStageBoard(state.finAsesoramientosRows || []);
 };
 
@@ -62327,14 +62350,15 @@ const loadGestoriaDocs = (clienteId) => {
 const loadGestoriaClienteAgenda = (clienteId) => {
   if (!gestoriaClienteAgendaTable || !gestoriaClienteAgendaInfo) return;
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
     gestoriaClienteAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
   gestoriaClienteAgendaTable.dataset.service = "gestoria";
   const params = new URLSearchParams({
     servicio: "gestoria",
-    empresa_id: empresa.id,
+    empresa_id: empresaId,
     cliente_id: clienteId,
   });
   api(`/api/acciones?${params.toString()}`).then((data) => {
@@ -62982,8 +63006,9 @@ const buildPlantillaConversorRows = (diario = []) => {
 const loadGestoriaClienteLibros = (clienteId) => {
   if (!clienteId || !gestoriaClienteLibroDiarioTable) return;
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) return;
-  const qs = new URLSearchParams({ empresa_id: empresa.id, cliente_id: clienteId });
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) return;
+  const qs = new URLSearchParams({ empresa_id: empresaId, cliente_id: clienteId });
   api(`/api/gestoria_libros?${qs.toString()}`)
     .then((data) => {
       const diario = data.diario || [];
@@ -63542,14 +63567,15 @@ const createGestoriaRentaCampaign = async () => {
   }
   try {
     const empresa = resolveCrmGestoriaEmpresa();
-    if (!empresa?.id) throw new Error("Selecciona empresa de Gestoría.");
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (!empresaId) throw new Error("Selecciona empresa de Gestoría.");
     const { entryId, renta_detalles } = buildRentaDetallesPayloadWithNewEntry(row, ejercicio);
     const res = await fetch("/api/cliente_gestoria_update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         cliente_id: state.currentClienteId,
-        empresa_id: empresa.id,
+        empresa_id: empresaId,
         mod_renta: 1,
         renta_detalles,
       }),
@@ -63759,7 +63785,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
         try {
           await postJsonWithDbRetry("/api/clientes_link", {
             cliente_id: clienteId,
-            empresa_id: empresa.id,
+            empresa_id: resolveLegacyEmpresaId(empresa),
             servicio: "Gestoría",
             captado_por_user_id: procedencia?.captado_por_user_id || undefined,
             procedencia_canal: procedencia?.procedencia_canal || undefined,
@@ -63771,7 +63797,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
         try {
           await apiPost("/api/cliente_gestoria_update", {
             cliente_id: clienteId,
-            empresa_id: empresa.id,
+            empresa_id: resolveLegacyEmpresaId(empresa),
             tipo_cliente: "Cliente Renta",
             mod_renta: 1,
           });
@@ -65353,7 +65379,7 @@ const loadGestoriaFact = () => {
   const servicio = String(gestoriaBudgetsServicioFilter?.value || "gestoria").trim().toLowerCase();
   const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: resolveLegacyEmpresaId(empresa),
     limit: "120",
   });
   if (servicio && servicio !== "all") params.set("servicio", servicio);
@@ -70788,7 +70814,7 @@ if (actionModalSave) {
         if (service === "inmobiliaria") {
           const inmId =
             String(payload.inmueble_id || state.currentInmuebleId || "").trim();
-          const empresaId = resolveCrmInmoEmpresaId();
+          const empresaId = resolveLegacyEmpresaId(resolveCrmInmoEmpresa());
           if (inmId && empresaId) {
             loadInmuebleActividad(inmId, empresaId);
           }
@@ -70796,14 +70822,16 @@ if (actionModalSave) {
         const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
         const fin = resolveCrmFinEmpresa();
         if (fincas) {
-          loadAcciones("gestoria", fincas.id, gestoriaAgendaTable, gestoriaAgendaInfo);
-          loadAcciones("seguros", fincas.id, segurosAgendaTable, segurosAgendaInfo);
+          const fincasId = resolveLegacyEmpresaId(fincas);
+          loadAcciones("gestoria", fincasId, gestoriaAgendaTable, gestoriaAgendaInfo);
+          loadAcciones("seguros", fincasId, segurosAgendaTable, segurosAgendaInfo);
         }
         if (fin) {
-          loadAcciones("financiaciones", fin.id, finAgendaTable, finAgendaInfo);
-          loadFinWorkflowActions(fin.id);
+          const finId = resolveLegacyEmpresaId(fin);
+          loadAcciones("financiaciones", finId, finAgendaTable, finAgendaInfo);
+          loadFinWorkflowActions(finId);
           if (payload.related_tipo === "hipoteca" && payload.related_id) {
-            loadFinHipotecaActions(fin.id);
+            loadFinHipotecaActions(finId);
           }
         }
         if (state.currentClienteId) {
@@ -70976,8 +71004,9 @@ if (segurosRecibosTo) {
 if (segurosRecibosExportBtn) {
   segurosRecibosExportBtn.addEventListener("click", () => {
     const empresa = resolveCrmSegurosEmpresa();
-    if (!empresa?.id) return;
-    const params = new URLSearchParams({ empresa_id: empresa.id });
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (!empresaId) return;
+    const params = new URLSearchParams({ empresa_id: empresaId });
     const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
     const estado = segurosRecibosEstadoFilter ? String(segurosRecibosEstadoFilter.value || "").trim() : "";
     const dateFrom = segurosRecibosFrom ? String(segurosRecibosFrom.value || "").trim() : "";
@@ -71187,7 +71216,7 @@ if (segurosPolizaAccionForm) {
     if (segurosPolizaAccionStatus) segurosPolizaAccionStatus.textContent = "Acción aplicada.";
     loadSegurosCrm();
     loadSegurosEventos(id);
-    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosComplianceKpis(resolveLegacyEmpresaId(empresa));
   });
 }
 
@@ -71224,7 +71253,7 @@ if (segurosIpidForm) {
       return;
     }
     if (segurosIpidStatus) segurosIpidStatus.textContent = "IPID registrado.";
-    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosComplianceKpis(resolveLegacyEmpresaId(empresa));
     loadSegurosEventos(seguroId);
   });
 }
@@ -71259,8 +71288,9 @@ if (segurosReclamacionForm) {
     }
     if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = "Reclamación creada.";
     if (segurosReclamacionForm) segurosReclamacionForm.reset();
-    loadSegurosReclamaciones(empresa.id);
-    loadSegurosComplianceKpis(empresa.id);
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    loadSegurosReclamaciones(empresaId);
+    loadSegurosComplianceKpis(empresaId);
     loadSegurosEventos(seguroId);
   });
 }
@@ -71564,7 +71594,7 @@ if (segurosRecibosForm) {
     }
     const formData = new FormData(segurosRecibosForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_id = empresa.id;
+    payload.empresa_id = resolveLegacyEmpresaId(empresa);
     payload.cliente_id = segurosRecibosCliente ? segurosRecibosCliente.value : payload.cliente_id;
     payload.seguro_id = segurosRecibosPoliza ? segurosRecibosPoliza.value : payload.seguro_id;
     const resp = await postJsonWithDbRetry("/api/seguros_recibos", payload).catch((err) => ({
@@ -71651,7 +71681,7 @@ if (segurosSiniestrosForm) {
     }
     const formData = new FormData(segurosSiniestrosForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_id = empresa.id;
+    payload.empresa_id = resolveLegacyEmpresaId(empresa);
     payload.cliente_id = segurosSiniestrosCliente ? segurosSiniestrosCliente.value : payload.cliente_id;
     payload.seguro_id = segurosSiniestrosPoliza ? segurosSiniestrosPoliza.value : payload.seguro_id;
     const resp = await postJsonWithDbRetry("/api/seguros_siniestros", payload).catch((err) => ({
@@ -74894,7 +74924,7 @@ if (gestoriaBudgetQuickForm) {
 	      const payload = {
 	        id: "",
 	        workspace_id: workspaceId,
-	        empresa_id: empresa.id,
+	        empresa_id: resolveLegacyEmpresaId(empresa),
 	        servicio: "gestoria",
         titulo,
         estado: values.estado || "Borrador",
@@ -76729,7 +76759,8 @@ if (finAsesoramientosSearch) {
   finAsesoramientosSearch.addEventListener("input", () => {
     scheduleSave("fin-asesoramientos-search", () => {
       const empresa = resolveCrmFinEmpresa();
-      if (empresa) loadFinAsesoramientos(empresa.id);
+      const empresaId = resolveLegacyEmpresaId(empresa);
+      if (empresaId) loadFinAsesoramientos(empresaId);
     }, 250);
   });
 }
@@ -76803,7 +76834,8 @@ if (clienteGestoriaForm) {
     const formData = new FormData(clienteGestoriaForm);
     const payload = Object.fromEntries(formData.entries());
     const empresa = resolveCrmGestoriaEmpresa();
-    if (empresa?.id) payload.empresa_id = empresa.id;
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (empresaId) payload.empresa_id = empresaId;
     const checkboxFields = [
       "mod_fiscal",
       "mod_laboral",
@@ -77607,7 +77639,7 @@ if (inmuebleDemandaForm) {
         }
         const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        loadDemandasList(scope?.empresa_id || (empresa ? empresa.id : "")).then(() => {
+        loadDemandasList(scope?.empresa_id || resolveLegacyEmpresaId(empresa)).then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
         });
       })
@@ -77643,7 +77675,7 @@ if (inmuebleVisitaForm) {
         inmuebleVisitaForm.reset();
         const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        const empresaId = scope?.empresa_id || (empresa ? empresa.id : "");
+        const empresaId = scope?.empresa_id || resolveLegacyEmpresaId(empresa);
         if (state.currentInmuebleId && empresaId) {
           loadInmuebleVisitas(state.currentInmuebleId, empresaId);
         }
@@ -77765,9 +77797,8 @@ if (inmuebleActividadForm) {
           // Reset “duro” para evitar herencias (Safari + selects dinámicos).
           resetInmuebleActividadForm();
           const empresa = resolveCrmInmoEmpresa();
-          if (empresa) {
-            loadInmuebleActividad(state.currentInmuebleId, empresa.id);
-          }
+          const empresaId = resolveLegacyEmpresaId(empresa);
+          if (empresaId) loadInmuebleActividad(state.currentInmuebleId, empresaId);
           try {
             loadCrmCaptaciones();
             loadCrmInmuebles();
@@ -78321,14 +78352,15 @@ if (gestoriaClienteLibroExcelBtn) {
   gestoriaClienteLibroExcelBtn.addEventListener("click", async () => {
     const clienteId = String(state.currentClienteId || "").trim();
     const empresa = resolveCrmGestoriaEmpresa();
-    if (!clienteId || !empresa?.id) {
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (!clienteId || !empresaId) {
       if (gestoriaClienteLibroExcelStatus) {
         gestoriaClienteLibroExcelStatus.textContent = "Cliente o empresa no disponible.";
       }
       return;
     }
     try {
-      const qs = new URLSearchParams({ empresa_id: empresa.id, cliente_id: clienteId });
+      const qs = new URLSearchParams({ empresa_id: empresaId, cliente_id: clienteId });
       const resp = await fetch(`/api/gestoria_excel_plantilla?${qs.toString()}`, {
         credentials: "same-origin",
       });
@@ -78638,7 +78670,7 @@ if (segurosAgendaForm) {
           segurosAgendaStatus.textContent = "Guardado.";
         }
         segurosAgendaForm.reset();
-        loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
+        loadAcciones("seguros", resolveLegacyEmpresaId(empresa), segurosAgendaTable, segurosAgendaInfo);
       })
       .catch(() => {
         if (segurosAgendaStatus) {
@@ -78721,7 +78753,7 @@ if (segurosCadenciaForm) {
         }
       }
       if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Cadencia creada.";
-      loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
+      loadAcciones("seguros", resolveLegacyEmpresaId(empresa), segurosAgendaTable, segurosAgendaInfo);
       segurosCadenciaForm.reset();
     } catch (e) {
       if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = e?.message || "No se pudo crear la cadencia.";
@@ -78762,9 +78794,8 @@ if (finAgendaForm) {
         finAgendaForm.reset();
         syncFinAgendaContext();
         const empresa = resolveCrmFinEmpresa();
-        if (empresa) {
-          loadFinWorkflowActions(empresa.id);
-        }
+        const empresaId = resolveLegacyEmpresaId(empresa);
+        if (empresaId) loadFinWorkflowActions(empresaId);
       })
       .catch(() => {
         if (finAgendaStatus) {
@@ -78784,7 +78815,8 @@ if (finCreateRecommendedAction) {
       await createRecommendedFinAction();
       setHipotecaAltaView("agenda");
       const empresa = resolveCrmFinEmpresa();
-      if (empresa?.id) loadFinWorkflowActions(empresa.id);
+      const empresaId = resolveLegacyEmpresaId(empresa);
+      if (empresaId) loadFinWorkflowActions(empresaId);
     } catch (error) {
       window.alert(error.message || "No se pudo crear la tarea recomendada.");
     }
@@ -78836,7 +78868,8 @@ if (finSimCalculate) {
 if (finHipotecasEstudioRefresh) {
   finHipotecasEstudioRefresh.addEventListener("click", () => {
     const empresa = resolveCrmFinEmpresa();
-    if (empresa?.id) loadFinHipotecasEstudio(empresa.id);
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    if (empresaId) loadFinHipotecasEstudio(empresaId);
   });
 }
 
@@ -79275,7 +79308,7 @@ if (demandaForm) {
         loadCrmDemandas();
         const scope = resolveInmoScopeParams() || {};
         const empresa = resolveCrmInmoEmpresa();
-        loadDemandasList(scope?.empresa_id || (empresa ? empresa.id : "")).then(() => {
+        loadDemandasList(scope?.empresa_id || resolveLegacyEmpresaId(empresa)).then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
           if (state.currentInmuebleId) {
             loadInmuebleDemandas(state.currentInmuebleId);

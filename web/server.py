@@ -47289,41 +47289,35 @@ class Handler(BaseHTTPRequestHandler):
             ensure_usuarios_schema(conn)
             conn.commit()
 
-        # Tenant hardening: en modo workspace (payload.workspace_id), muchos endpoints legacy siguen
-        # usando `empresa["id"]` aunque el lookup por `empresa_nombre` no aplica. Resolvemos un
-        # `empresa_id` mínimo (legacy) y construimos un objeto `empresa` para evitar 500s.
+        # Tenant hardening: en modo workspace (payload.workspace_id / payload.workspace_company_id),
+        # muchos endpoints legacy siguen usando `empresa["id"]` aunque el lookup por `empresa_nombre`
+        # no aplica. Resolvemos un `empresa_id` mínimo (legacy) y construimos un objeto `empresa`
+        # para evitar 500s y mezclas de IDs entre `workspace_companies` y `empresas`.
         if empresa is None and isinstance(payload, dict):
             path_value = str(parsed.path or "")
-            is_gestoria_like = (
-                path_value.startswith("/api/gestoria")
-                or path_value.startswith("/api/renta_")
-                or path_value.startswith("/api/cliente_gestoria")
-                or path_value.startswith("/api/gestoria_renta_")
-                or path_value in {"/api/gestoria_update"}
-            )
-            if is_gestoria_like:
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            wc_id = str(payload.get("workspace_company_id") or "").strip()
+            # Solo aplica a endpoints legacy (no /api/workspace_*) y cuando el request viene con señal tenant.
+            if (ws_id or wc_id) and not path_value.startswith("/api/workspace_"):
                 session_tmp = getattr(self, "auth_session", None) or self._current_session()
                 eid = str(payload.get("empresa_id") or "").strip()
-                if not eid:
-                    ws_id = str(payload.get("workspace_id") or "").strip()
-                    wc_id = str(payload.get("workspace_company_id") or "").strip()
-                    if ws_id:
-                        try:
-                            eid_res, _wc, err2 = resolve_empresa_id_for_request(
-                                conn,
-                                session_tmp,
-                                workspace_id=ws_id,
-                                empresa_id="",
-                                workspace_company_id=wc_id,
-                                write=True,
-                            )
-                        except Exception:
-                            eid_res, err2 = "", ""
-                        if err2:
-                            json_response(self, {"error": err2 or "No autorizado"}, status=403)
-                            return
-                        if eid_res:
-                            eid = eid_res
+                if not eid and ws_id:
+                    try:
+                        eid_res, _wc, err2 = resolve_empresa_id_for_request(
+                            conn,
+                            session_tmp,
+                            workspace_id=ws_id,
+                            empresa_id="",
+                            workspace_company_id=wc_id,
+                            write=True,
+                        )
+                    except Exception:
+                        eid_res, err2 = "", ""
+                    if err2:
+                        json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                        return
+                    if eid_res:
+                        eid = eid_res
                 if not eid:
                     try:
                         inferred = infer_empresa_id_for_payload(conn, payload)
