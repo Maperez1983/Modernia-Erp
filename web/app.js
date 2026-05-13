@@ -63912,6 +63912,11 @@ const submitGestoriaRentaQuick = async () => {
 	        || rawLower.includes("502 · /api/s3_presign");
 	      const looksLikeCors =
 	        key === "loadfailed"
+	        || key.replace(/[^a-z0-9]+/g, "") === "failedtofetch"
+	        || rawLower.includes("failed to fetch")
+	        || rawLower.includes("networkerror")
+	        || rawLower.includes("err_failed")
+	        || rawLower.includes("err_failed")  // compat: chrome net::ERR_FAILED
 	        || rawLower.includes("cors")
 	        || rawLower.includes("bloqueo")
 	        || looksLikePresignGateway;
