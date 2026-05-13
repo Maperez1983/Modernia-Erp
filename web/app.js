@@ -21737,6 +21737,11 @@ const resolveEmpresaById = (empresaId) => {
   return legacy || null;
 };
 
+// En modo tenant/v2, `empresa.id` puede ser el id de `workspace_companies` y no el legacy `empresas.id`.
+// Para endpoints legacy que esperan `empresa_id`, usamos siempre el id legacy si está disponible.
+const resolveLegacyEmpresaId = (empresa) =>
+  String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+
 const SERVICE_COMPANY_STORAGE = {
   inmobiliaria: "crm.serviceCompany.inmobiliaria",
   seguros: "crm.serviceCompany.seguros",
@@ -23767,8 +23772,9 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
   }
   if (!isTenantWorkspaceMode()) {
     openCompany(empresa.nombre, { allowRestricted: true });
-    state.crmGestoriaEmpresaId = empresa.id;
-    setStoredServiceCompanyId("gestoria", empresa.id);
+    const legacyId = resolveLegacyEmpresaId(empresa);
+    state.crmGestoriaEmpresaId = legacyId;
+    setStoredServiceCompanyId("gestoria", legacyId);
   } else {
     // Tenant: abrir Gestoría sin depender de empresa.
     try {
@@ -23777,8 +23783,9 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
       setModule("empresas");
       setPage("empresa");
     } catch (e) {}
-    state.crmGestoriaEmpresaId = empresa?.id || "";
-    setStoredServiceCompanyId("gestoria", empresa?.id || "");
+    const legacyId = resolveLegacyEmpresaId(empresa);
+    state.crmGestoriaEmpresaId = legacyId;
+    setStoredServiceCompanyId("gestoria", legacyId);
   }
   setTab(tab);
   try {
@@ -28703,19 +28710,20 @@ const ensureGestoriaTrabajoCategorySelects = () => {
 const loadGestoriaTrabajoTipos = async ({ force = false } = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return [];
+  const empresaId = resolveLegacyEmpresaId(empresa);
   const cacheAge = Date.now() - Number(state.gestoriaTrabajoTiposCache?.ts || 0);
   if (
     !force
     && state.gestoriaTrabajoTiposCache
-    && String(state.gestoriaTrabajoTiposCache.empresaId || "") === String(empresa.id || "")
+    && String(state.gestoriaTrabajoTiposCache.empresaId || "") === String(empresaId || "")
     && cacheAge >= 0
     && cacheAge < 60000
   ) {
     return state.gestoriaTrabajoTiposCache.rows || [];
   }
-  const data = await api(`/api/gestoria_trabajo_tipos?empresa_id=${encodeURIComponent(empresa.id)}`).catch(() => ({ rows: [] }));
+  const data = await api(`/api/gestoria_trabajo_tipos?empresa_id=${encodeURIComponent(empresaId)}`).catch(() => ({ rows: [] }));
   const rows = Array.isArray(data?.rows) ? data.rows : [];
-  state.gestoriaTrabajoTiposCache = { empresaId: empresa.id, rows, ts: Date.now() };
+  state.gestoriaTrabajoTiposCache = { empresaId, rows, ts: Date.now() };
   return rows;
 };
 
@@ -28778,12 +28786,13 @@ const bindGestoriaTipoDefaults = (selectEl, handler) => {
 
 const persistGestoriaTrabajoTipo = async (payload = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa?.id) throw new Error("Sin empresa.");
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) throw new Error("Sin empresa.");
   const usuario = getCurrentUser();
   const res = await fetch("/api/gestoria_trabajo_tipos_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, empresa_id: empresa.id, empresa_nombre: empresa.nombre || "", usuario }),
+    body: JSON.stringify({ ...payload, empresa_id: empresaId, empresa_nombre: empresa.nombre || "", usuario }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.error) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -32928,7 +32937,8 @@ const loadGestoriaContabilidad = () => {
     gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  api(`/api/gestoria_contabilidad?empresa_id=${empresa.id}`).then(async (data) => {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`).then(async (data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin anotaciones contables.</p>";
@@ -33569,7 +33579,7 @@ const loadGestoriaTrabajosOverview = () => {
       });
     })
     .catch(() => {});
-  fetchGestoriaTrabajosForDashboard(empresa.id).then((data) => {
+  fetchGestoriaTrabajosForDashboard(resolveLegacyEmpresaId(empresa)).then((data) => {
     let rows = data.rows || [];
     const tipoFilterRaw = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
     const tipoFilter = normalizeGestoriaTrabajoCategory(tipoFilterRaw);
@@ -33690,7 +33700,7 @@ const loadGestoriaPipeline = () => {
     return;
   }
   ensureGestoriaTrabajoCategorySelects();
-  fetchGestoriaTrabajosForDashboard(empresa.id).then((data) => {
+  fetchGestoriaTrabajosForDashboard(resolveLegacyEmpresaId(empresa)).then((data) => {
     const rows = data.rows || [];
     const servicioRaw = gestoriaPipelineServicio ? gestoriaPipelineServicio.value.trim() : "";
     const servicio = normalizeGestoriaTrabajoCategory(servicioRaw);
@@ -33787,7 +33797,8 @@ const loadGestoriaDocsRecent = () => {
     gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  api(`/api/gestoria_docs?empresa_id=${empresa.id}&limit=30`).then((data) => {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  api(`/api/gestoria_docs?empresa_id=${encodeURIComponent(empresaId)}&limit=30`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin documentos recientes.</p>";
@@ -33856,7 +33867,8 @@ const loadGestoriaAuditoria = () => {
     gestoriaAuditTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  api(`/api/auditoria?empresa_id=${empresa.id}&limit=50`)
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  api(`/api/auditoria?empresa_id=${encodeURIComponent(empresaId)}&limit=50`)
     .then((data) => {
       const rows = data.rows || [];
       if (!rows.length) {
@@ -53786,9 +53798,10 @@ const loadGestoriaCrm = async () => {
   const limit = gestoriaCrmLimit ? gestoriaCrmLimit.value : "50";
   const noFilters = !rawQuery && !estado && !tipo && !subtipo;
   const isFullWithoutFilters = noFilters && state.gestoriaCrmFull;
+  const empresaLegacyId = resolveLegacyEmpresaId(empresa);
   const params = new URLSearchParams({
     tabla: "gestoria",
-    empresa_id: empresa.id,
+    empresa_id: empresaLegacyId,
     q,
     include_id: "1",
   });
@@ -53820,7 +53833,7 @@ const loadGestoriaCrm = async () => {
     const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
     if (
       state.gestoriaRentaCardsCache &&
-      state.gestoriaRentaCardsCache.empresaId === empresa.id &&
+      state.gestoriaRentaCardsCache.empresaId === empresaLegacyId &&
       String(state.gestoriaRentaCardsCache.estado || "") === String(estado || "") &&
       String(state.gestoriaRentaCardsCache.ejercicio || "") === String(ejercicio || "") &&
       isFreshCache &&
@@ -53839,11 +53852,11 @@ const loadGestoriaCrm = async () => {
       if (gestoriaCrmToggleView) {
         gestoriaCrmToggleView.classList.add("hidden");
       }
-      loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+      loadAcciones("gestoria", empresaLegacyId, gestoriaAgendaTable, gestoriaAgendaInfo);
       return;
     }
     const rentaParams = new URLSearchParams({
-      empresa_id: String(empresa.legacy_empresa_id || empresa.id || "").trim(),
+      empresa_id: empresaLegacyId,
       q: hasSearch ? String(effectiveQuery || "").trim() : "",
       estado,
       // Rendimiento: sin búsqueda cargamos dataset moderado; con búsqueda pedimos resultados filtrados.
@@ -53889,7 +53902,7 @@ const loadGestoriaCrm = async () => {
     const totalHint = Array.isArray(rentaData.rows) ? rentaData.rows.length : 0;
     if (hasSearch) {
       state.gestoriaRentaCardsSearchCache = {
-        empresaId: empresa.id,
+        empresaId: empresaLegacyId,
         estado: String(estado || ""),
         ejercicio: String(ejercicio || ""),
         q: String(searchKey || ""),
@@ -53899,7 +53912,7 @@ const loadGestoriaCrm = async () => {
       };
     } else {
       state.gestoriaRentaCardsCache = {
-        empresaId: empresa.id,
+        empresaId: empresaLegacyId,
         estado: String(estado || ""),
         ejercicio: String(ejercicio || ""),
         rows: rentaRows,
@@ -53923,7 +53936,7 @@ const loadGestoriaCrm = async () => {
     if (gestoriaCrmToggleView) {
       gestoriaCrmToggleView.classList.add("hidden");
     }
-    loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", empresaLegacyId, gestoriaAgendaTable, gestoriaAgendaInfo);
     return;
   }
   let data = await api(`/api/tabla?${params.toString()}`);
@@ -54131,7 +54144,7 @@ const loadGestoriaCrm = async () => {
     if (!gestoriaCrmInfo.textContent) {
       gestoriaCrmInfo.textContent = `Mostrando ${rows.length} clientes de gestoría.`;
     }
-    loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     const showFull = state.gestoriaCrmFull === true;
     if (gestoriaCrmTable) gestoriaCrmTable.classList.toggle("hidden", !showFull);
     if (gestoriaCrmSummary) gestoriaCrmSummary.classList.toggle("hidden", showFull);
@@ -56378,8 +56391,9 @@ const openGestoriaCrmWithFilters = ({
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmGestoriaEmpresaId = empresa.id;
-  setStoredServiceCompanyId("gestoria", empresa.id);
+  const legacyId = resolveLegacyEmpresaId(empresa);
+  state.crmGestoriaEmpresaId = legacyId;
+  setStoredServiceCompanyId("gestoria", legacyId);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -56428,8 +56442,9 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmGestoriaEmpresaId = empresa.id;
-  setStoredServiceCompanyId("gestoria", empresa.id);
+  const legacyId = resolveLegacyEmpresaId(empresa);
+  state.crmGestoriaEmpresaId = legacyId;
+  setStoredServiceCompanyId("gestoria", legacyId);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -56450,8 +56465,9 @@ const openGestoriaRentaCampaign = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmGestoriaEmpresaId = empresa.id;
-  setStoredServiceCompanyId("gestoria", empresa.id);
+  const legacyId = resolveLegacyEmpresaId(empresa);
+  state.crmGestoriaEmpresaId = legacyId;
+  setStoredServiceCompanyId("gestoria", legacyId);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -60305,7 +60321,7 @@ const loadGestoriaBdt = async () => {
   }
   gestoriaBdtInfo.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ tabla: "gestoria", empresa_id: empresa.id });
+    const params = new URLSearchParams({ tabla: "gestoria", empresa_id: resolveLegacyEmpresaId(empresa) });
     const data = await api(`/api/tabla?${params}`);
     if (data?.error) {
       gestoriaBdtTable.innerHTML = `<p class='muted'>${data.error}</p>`;
@@ -62348,8 +62364,9 @@ const loadGestoriaClienteDashboard = (clienteId) => {
   const modelosReq = api(`/api/gestoria_modelos?cliente_id=${clienteId}`);
   const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${clienteId}`);
   const docsReq = api(`/api/gestoria_docs?cliente_id=${clienteId}`);
+  const empresaId = resolveLegacyEmpresaId(empresa);
   const accionesReq = api(
-    `/api/acciones?servicio=gestoria&empresa_id=${empresa.id}&cliente_id=${clienteId}`
+    `/api/acciones?servicio=gestoria&empresa_id=${encodeURIComponent(empresaId)}&cliente_id=${clienteId}`
   );
   Promise.all([modelosReq, trabajosReq, docsReq, accionesReq]).then(
     ([modelosData, trabajosData, docsData, accionesData]) => {
@@ -62736,14 +62753,15 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
 const loadGestoriaClienteImportador = (clienteId) => {
   if (!gestoriaImportLotesTable) return;
   const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
-  if (!clienteId || !empresa?.id) {
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!clienteId || !empresaId) {
     gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
     fillGestoriaImportSelectedLoteMeta(null);
     renderGestoriaImportDocsTable([]);
     return;
   }
-  api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresa.id)}`)
+  api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresaId)}`)
     .then((data) => {
       renderGestoriaImportLotesTable(clienteId, data.rows || []);
     })
@@ -68053,7 +68071,7 @@ const closeClienteDetail = () => {
         loadGestoriaContaQueue();
       } else if (returnTab === "gestoria-agenda") {
         const empresa = resolveCrmGestoriaEmpresa();
-        if (empresa) loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+        if (empresa) loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
       } else if (returnTab === "gestoria-fact") {
         loadGestoriaFact();
       }
@@ -68716,7 +68734,7 @@ viewTabs.addEventListener("click", (event) => {
   if (currentTab === "gestoria-agenda") {
     const empresa = resolveCrmGestoriaEmpresa();
     if (empresa) {
-      loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+      loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     }
     updateTableVisibility();
     return;
@@ -78035,7 +78053,7 @@ if (gestoriaAgendaForm) {
           gestoriaAgendaStatus.textContent = "Guardado.";
         }
         gestoriaAgendaForm.reset();
-        loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+        loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
       })
       .catch(() => {
         if (gestoriaAgendaStatus) {
