@@ -29755,6 +29755,7 @@ def ensure_financiacion_asesoramiento_from_inmo(
 
 TABLES = [
     "movimientos",
+    "clientes",
     "seguros",
     "gestoria",
     "captaciones",
@@ -29767,6 +29768,20 @@ TABLES = [
     "inversores",
     "inversure_operaciones",
 ]
+
+def sql_group_concat(expr: str, sep: str = " | ", *, distinct: bool = False) -> str:
+    """
+    Compat helper: SQLite usa GROUP_CONCAT; Postgres usa STRING_AGG.
+    `expr` debe ser una expresión SQL ya saneada/constante (no input de usuario).
+    """
+    safe_sep = str(sep or " | ").replace("'", "''")
+    if db_is_postgres_enabled():
+        distinct_sql = "DISTINCT " if distinct else ""
+        # Nota: en Postgres, expr puede ser no-texto; casteamos para evitar errores.
+        return f"STRING_AGG({distinct_sql}({expr})::text, '{safe_sep}')"
+    if distinct:
+        return f"GROUP_CONCAT(DISTINCT {expr}, '{safe_sep}')"
+    return f"GROUP_CONCAT({expr}, '{safe_sep}')"
 
 def row_value(row, key, default=None):
     if row is None:
@@ -73490,6 +73505,9 @@ class Handler(BaseHTTPRequestHandler):
             if limit_param.isdigit():
                 limit_clause = f"LIMIT {int(limit_param)}"
             is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            empresas_agg = sql_group_concat("e.nombre", " | ")
+            servicios_agg = sql_group_concat("ce.servicio", " | ")
+            seguros_servicios_agg = sql_group_concat("COALESCE(NULLIF(ce.servicio, ''), 'seguros')", " | ")
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
@@ -73539,8 +73557,8 @@ class Handler(BaseHTTPRequestHandler):
                       c.codigo_postal,
                       c.poblacion,
                       c.provincia,
-                      GROUP_CONCAT(e.nombre, ' | ') AS empresas,
-                      GROUP_CONCAT(COALESCE(NULLIF(ce.servicio, ''), 'seguros'), ' | ') AS servicios
+	                      {empresas_agg} AS empresas,
+	                      {seguros_servicios_agg} AS servicios
                     FROM clientes c
                     JOIN seguros s ON s.cliente_id = c.id
                     LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = s.empresa_id
@@ -73630,8 +73648,8 @@ class Handler(BaseHTTPRequestHandler):
                       c.codigo_postal,
                       c.poblacion,
                       c.provincia,
-                      GROUP_CONCAT(e.nombre, ' | ') AS empresas,
-                      GROUP_CONCAT(ce.servicio, ' | ') AS servicios
+	                      {empresas_agg} AS empresas,
+	                      {servicios_agg} AS servicios
                     FROM clientes c
                     {join_clause}
                     LEFT JOIN empresas e ON e.id = ce.empresa_id
