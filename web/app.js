@@ -22162,14 +22162,18 @@ const syncCrmTecnocloudVerticalNav = () => {
   } catch (e) {}
 
   const showInmoChrome = vertical === "inmo" || vertical === "gestoria" || vertical === "fin" || vertical === "seguros";
+  const showInmoRecents = vertical === "inmo";
   const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
   const isNarrow = viewportW > 0 && viewportW <= 820;
   // Evitar duplicidad: solo un punto de entrada para "+ Nuevo".
   if (crmTopNewBtn) crmTopNewBtn.classList.toggle("hidden", !showInmoChrome || isNarrow);
   if (crmQuickNewBtn) crmQuickNewBtn.classList.toggle("hidden", !showInmoChrome || !isNarrow);
-  if (crmRecentBtn) crmRecentBtn.classList.toggle("hidden", !showInmoChrome);
+  if (crmRecentBtn) crmRecentBtn.classList.toggle("hidden", !showInmoRecents);
   if (!showInmoChrome) {
     setCrmQuickNewOpen(false);
+    setCrmRecentOpen(false);
+  }
+  if (!showInmoRecents) {
     setCrmRecentOpen(false);
   }
   syncCrmInsertOptionsForVertical(vertical);

@@ -6598,10 +6598,12 @@ body.tc-resizing {
 #crmSection .crm-recent-item strong {
   display: block;
   font-size: 13px;
+  color: rgba(var(--ink-rgb), 0.92);
 }
 
 #crmSection .crm-recent-item .muted {
   font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.72);
 }
 
 body.crm-context-inmo #inmuebleDetail > .section-head {
