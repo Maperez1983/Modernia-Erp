@@ -47122,6 +47122,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         empresa_nombre = payload.get("empresa_nombre")
+        # Importante: `empresa` se asigna condicionalmente (p.ej. solo si viene `empresa_nombre`).
+        # En modo tenant/workspace puede venir vacío; inicializamos para evitar UnboundLocalError.
+        empresa = None
         path_value = str(parsed.path or "")
         payload_workspace_id = str(payload.get("workspace_id") or "").strip() if isinstance(payload, dict) else ""
         empresa_scope_exempt = (
