@@ -65059,6 +65059,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         elif parsed.path == "/api/renta_quick_attach":
+            session = getattr(self, "auth_session", None) or self._current_session()
             cliente_id = str(payload.get("cliente_id") or "").strip()
             ejercicio = str(payload.get("ejercicio") or "").strip()
             estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
@@ -65069,6 +65070,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not doc_key and not doc_url:
                 json_response(self, {"error": "doc_key/doc_url requerido"}, status=400)
+                return
+            # Tenant compat: en modo workspace, `empresa` puede ser None (empresa_nombre no aplica).
+            # Usamos `empresa_id` si viene (o lo resolvemos desde workspace_id/workspace_company_id).
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                ws_id = str(payload.get("workspace_id") or "").strip()
+                wc_id = str(payload.get("workspace_company_id") or "").strip()
+                if ws_id:
+                    try:
+                        eid_res, _wc, err2 = resolve_empresa_id_for_request(
+                            conn,
+                            session,
+                            workspace_id=ws_id,
+                            empresa_id="",
+                            workspace_company_id=wc_id,
+                            write=True,
+                        )
+                    except Exception:
+                        eid_res, err2 = "", ""
+                    if err2:
+                        json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                        return
+                    if eid_res:
+                        empresa_id = eid_res
+            if not empresa_id:
+                platform_eid = get_platform_empresa_id(conn)
+                if platform_eid:
+                    empresa_id = platform_eid
+            if not empresa_id:
+                json_response(self, {"error": "No se pudo resolver empresa_id"}, status=400)
                 return
             cg_row = conn.execute(
                 "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
@@ -65161,7 +65192,7 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (
                             doc_id,
-                            empresa["id"],
+                            empresa_id,
                             cliente_id,
                             f"renta-{ejercicio}-{entry_id}",
                             doc_nombre,
@@ -65189,7 +65220,7 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (
                         doc_id,
-                        empresa["id"],
+                        empresa_id,
                         cliente_id,
                         f"renta-{ejercicio}-{entry_id}",
                         doc_nombre,
