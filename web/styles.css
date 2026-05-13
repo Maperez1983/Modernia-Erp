@@ -5363,6 +5363,14 @@ body.tc-resizing {
   font-size: 12px;
 }
 
+body.theme-operativa #crmSection .crm-global-results .crm-global-item strong {
+  color: rgba(var(--ink-rgb), 0.96);
+}
+
+body.theme-operativa #crmSection .crm-global-results .crm-global-item .muted {
+  color: rgba(var(--ink-rgb), 0.78);
+}
+
 #crmSection .crm-global-results .crm-global-pill {
   font-family: var(--font-ui);
   font-size: 11px;
