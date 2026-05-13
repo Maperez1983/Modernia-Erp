@@ -1811,16 +1811,19 @@ body.crm-fin #companySummary {
 }
 
 .workspace-company-chip-title {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: flex-start;
-  justify-content: space-between;
+  min-width: 0;
 }
 
 .workspace-company-name {
   font-weight: 800;
   color: var(--ink);
   line-height: 1.15;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .workspace-company-tags {
@@ -1828,6 +1831,32 @@ body.crm-fin #companySummary {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.workspace-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 700;
+  border: 1px solid rgba(11, 29, 51, 0.14);
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--ink-rgb), 0.82);
+  white-space: nowrap;
+}
+
+.workspace-tag.ok {
+  border-color: rgba(60, 110, 113, 0.24);
+  background: rgba(60, 110, 113, 0.08);
+  color: rgba(var(--ink-rgb), 0.9);
+}
+
+.workspace-tag.muted {
+  opacity: 0.85;
 }
 
 .workspace-company-chip-meta {
