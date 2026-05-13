@@ -47390,7 +47390,7 @@ const loadCrmInmuebles = () => {
     const allRows = data.rows || [];
     cachedCrmInmuebles = allRows;
     const az = String(state.crmAz?.inmuebles || "").trim().toUpperCase();
-	    const presetKey = normalizeSimple(crmInmueblesPreset?.value || "inmuebles_recientes");
+	    const presetKey = normalizeSimple(crmInmueblesPreset?.value || "inmuebles");
 	    const presetFiltered = (() => {
 	      // Tecnocloud: selector de vistas (Inmuebles recientes / Inmuebles / Noticias / Encargos).
 	      const stage = (row) => normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
