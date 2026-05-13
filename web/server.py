@@ -73592,28 +73592,32 @@ class Handler(BaseHTTPRequestHandler):
                     if not ok:
                         json_response(self, {"error": err or "No autorizado"}, status=403)
                         return
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if not empresa_ids:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
-                    # Scope tenant: clientes del workspace o (legacy) clientes vinculados a empresas del workspace.
-                    scope_parts = []
-                    c_cols = table_columns(conn, "clientes") or set()
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        # Incluye legacy: datos atados a empresas del workspace (aunque no exista `workspace_id`).
-                        scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
-                        values.extend(empresa_ids)
-                        if "empresa_id" in c_cols:
-                            scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
-                            # Repetimos parámetros: el mismo set de placeholders se usa dos veces.
-                            values.extend(empresa_ids)
-                    if scope_parts:
-                        where.insert(0, f"({' OR '.join(scope_parts)})")
+                    # Aislamiento por workspace: si `clientes_empresas` tiene `workspace_id`,
+                    # lo usamos SIEMPRE (evita fugas entre workspaces aunque compartan empresa).
+                    if "workspace_id" in ce_cols:
+                        where.insert(0, "COALESCE(ce.workspace_id, '') = ?")
+                        values.insert(0, workspace_id)
                     else:
-                        json_response(self, {"columns": [], "rows": []})
-                        return
+                        # Fallback legacy (sin workspace_id): restringimos por empresas del workspace.
+                        empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                        if not empresa_ids:
+                            platform_eid = get_platform_empresa_id(conn)
+                            if platform_eid:
+                                empresa_ids = [platform_eid]
+                        scope_parts = []
+                        c_cols = table_columns(conn, "clientes") or set()
+                        if empresa_ids:
+                            placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                            scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                            values.extend(empresa_ids)
+                            if "empresa_id" in c_cols:
+                                scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
+                                values.extend(empresa_ids)
+                        if scope_parts:
+                            where.insert(0, f"({' OR '.join(scope_parts)})")
+                        else:
+                            json_response(self, {"columns": [], "rows": []})
+                            return
                 elif empresa_id:
                     where.append("ce.empresa_id = ?")
                     values.append(empresa_id)
