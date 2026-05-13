@@ -77717,8 +77717,8 @@ if (inmuebleActividadForm) {
           inmuebleActividadStatus.textContent = (data.error ? `${data.error}${extra}` : `Guardado.${extra}`).trim();
         }
         if (!data.error) {
-          inmuebleActividadForm.reset();
-          syncInmuebleWorkflowForm();
+          // Reset “duro” para evitar herencias (Safari + selects dinámicos).
+          resetInmuebleActividadForm();
           const empresa = resolveCrmInmoEmpresa();
           if (empresa) {
             loadInmuebleActividad(state.currentInmuebleId, empresa.id);
