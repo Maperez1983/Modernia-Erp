@@ -21749,18 +21749,65 @@ const SERVICE_COMPANY_STORAGE = {
   financiaciones: "crm.serviceCompany.financiaciones",
 };
 
+const getWorkspaceIdForStorage = () => {
+  try {
+    if (!isTenantWorkspaceMode()) return "";
+  } catch {
+    return "";
+  }
+  try {
+    const direct = String(state.currentWorkspaceId || "").trim();
+    if (direct) return direct;
+  } catch (e) {}
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const fromUrl = String(params.get("workspace") || "").trim();
+    if (fromUrl) return fromUrl;
+  } catch (e) {}
+  try {
+    const stored = String(localStorage.getItem("crm.currentWorkspaceId") || "").trim();
+    return stored;
+  } catch (e) {}
+  return "";
+};
+
+const getServiceCompanyStorageKey = (serviceKey = "") => {
+  const base = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+  if (!base) return "";
+  const wsId = getWorkspaceIdForStorage();
+  if (!wsId) return base;
+  // Evita fugas entre workspaces: separa selección de empresa por workspace.
+  return `${base}.${wsId}`;
+};
+
 const getStoredServiceCompanyId = (serviceKey = "") => {
-  const key = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+  const key = getServiceCompanyStorageKey(serviceKey);
   if (!key) return "";
   try {
-    return String(localStorage.getItem(key) || "").trim();
+    const scoped = String(localStorage.getItem(key) || "").trim();
+    if (scoped) return scoped;
+    // Migración suave: si venimos de modo global o de una versión sin scoping,
+    // usamos el valor anterior SOLO si existe en el workspace actual.
+    const legacyKey = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+    if (!legacyKey) return "";
+    const legacyValue = String(localStorage.getItem(legacyKey) || "").trim();
+    if (!legacyValue) return "";
+    try {
+      if (!resolveEmpresaById(legacyValue)) return "";
+    } catch (e) {
+      return "";
+    }
+    try {
+      localStorage.setItem(key, legacyValue);
+    } catch (e) {}
+    return legacyValue;
   } catch {
     return "";
   }
 };
 
 const setStoredServiceCompanyId = (serviceKey = "", empresaId = "") => {
-  const key = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+  const key = getServiceCompanyStorageKey(serviceKey);
   if (!key) return;
   try {
     const id = String(empresaId || "").trim();
