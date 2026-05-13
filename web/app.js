@@ -41553,7 +41553,9 @@ const loadClientesList = () => {
 
 // Lista completa de clientes (sin filtrar por servicio) para selectores globales (p. ej. "Cliente relacionado").
 const loadClientesAllList = () => {
-  return api("/api/clientes_list").then((data) => {
+  // Seguridad multi-servicio: no cargamos "todos los clientes" sin filtro de servicio.
+  // En el futuro, cuando exista el permiso explícito, podremos habilitar una opción controlada.
+  return loadClientesList().then((data) => {
     const list = Array.isArray(data) ? data : [];
     list.sort((a, b) => {
       const nameA = normalizeNombre(formatNombreCliente(a.nombre));

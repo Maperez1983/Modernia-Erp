@@ -69321,7 +69321,14 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            # Multi-servicio: por defecto NO devolvemos clientes globales a usuarios no privilegiados.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            allowed = self._auth_allowed_services()
             normalized_services = [normalize_service_key(s) for s in services]
+            if (not normalized_services) and allowed:
+                normalized_services = sorted(list(allowed))
+            if allowed and normalized_services:
+                normalized_services = [s for s in normalized_services if s in allowed]
             is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
@@ -69360,11 +69367,11 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
                 json_response(self, [dict(r) for r in rows])
                 return
-            if services:
-                placeholders = ",".join(["?"] * len(services))
+            if normalized_services:
+                placeholders = ",".join(["?"] * len(normalized_services))
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
                 where_parts = [f"LOWER(ce.servicio) IN ({placeholders})"]
-                values = list(services)
+                values = list(normalized_services)
                 if workspace_id and "workspace_id" in ce_cols:
                     where_parts.append("COALESCE(ce.workspace_id, '') = ?")
                     values.append(workspace_id)
@@ -69604,6 +69611,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/clientes_by_nif":
             nif = params.get("nif", [""])[0]
             limit = params.get("limit", ["6"])[0]
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            # Multi-servicio: por defecto NO devolvemos clientes globales a usuarios no privilegiados.
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                allowed = self._auth_allowed_services()
+            except Exception:
+                session, allowed = None, None
+            normalized_services = [normalize_service_key(s) for s in services]
+            if (not normalized_services) and allowed:
+                normalized_services = sorted(list(allowed))
+            if allowed and normalized_services:
+                normalized_services = [s for s in normalized_services if s in allowed]
             nif_norm = re.sub(r"[^0-9A-Za-z]", "", str(nif or "").upper().strip())
             try:
                 limit_val = max(1, min(25, int(limit)))
@@ -69612,16 +69633,45 @@ class Handler(BaseHTTPRequestHandler):
             if not nif_norm:
                 json_response(self, {"rows": []})
                 return
-            rows = conn.execute(
-                """
-                SELECT id, nombre, nif, telefono, email
-                FROM clientes
-                WHERE REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?
-                ORDER BY updated_at DESC, created_at DESC
-                LIMIT ?
-                """,
-                (nif_norm, limit_val),
-            ).fetchall()
+            if normalized_services:
+                placeholders = ",".join(["?"] * len(normalized_services))
+                where = [f"LOWER(ce.servicio) IN ({placeholders})"]
+                values = list(normalized_services)
+                ce_cols = table_columns(conn, "clientes_empresas") or set()
+                if workspace_id and "workspace_id" in ce_cols:
+                    where.append("COALESCE(ce.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        values.extend(empresa_ids)
+                where.append("REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', '') = ?")
+                values.append(nif_norm)
+                values.append(limit_val)
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT c.id, c.nombre, c.nif, c.telefono, c.email
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE {' AND '.join(where)}
+                    ORDER BY c.updated_at DESC, c.created_at DESC
+                    LIMIT ?
+                    """,
+                    values,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, nombre, nif, telefono, email
+                    FROM clientes
+                    WHERE REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (nif_norm, limit_val),
+                ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
@@ -73425,7 +73475,14 @@ class Handler(BaseHTTPRequestHandler):
             services = parse_services_param(servicio)
             source = (params.get("source", [""])[0] or "").strip().lower()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            # Multi-servicio: por defecto NO devolvemos clientes globales a usuarios no privilegiados.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            allowed = self._auth_allowed_services()
             normalized_services = [normalize_service_key(s) for s in services]
+            if (not normalized_services) and allowed:
+                normalized_services = sorted(list(allowed))
+            if allowed and normalized_services:
+                normalized_services = [s for s in normalized_services if s in allowed]
             include_id = params.get("include_id", [""])[0] == "1"
             limit_param = params.get("limit", [""])[0].strip()
             select_id = "c.id, " if include_id else ""
