@@ -36921,6 +36921,120 @@ def infer_workspace_id_for_empresa(conn, session, empresa_id):
     return "", candidates
 
 
+def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
+    """
+    Devuelve el listado de usuarios para `/api/usuarios`, aplicando scoping por workspace.
+
+    - Usuarios no privilegiados: nunca ven el directorio global. Se limita al workspace indicado
+      o, si no se indica, a los workspaces en los que el usuario es miembro. No incluye emails.
+    - Usuarios privilegiados: puede ver el global, pero si el frontend envía workspace_id se filtra
+      al directorio de ese workspace para evitar mezclar tenants. Incluye emails.
+    """
+    if not conn or not session:
+        return []
+    ws_id = str(workspace_id or "").strip()
+    uid = str((session or {}).get("user_id") or "").strip()
+
+    if not privileged:
+        scope_ws_ids = []
+        if ws_id:
+            ok, err = enforce_workspace_membership(conn, session, ws_id)
+            if not ok:
+                raise PermissionError(err or "No autorizado")
+            scope_ws_ids = [ws_id]
+        elif uid:
+            try:
+                ws_rows = conn.execute(
+                    "SELECT DISTINCT workspace_id FROM workspace_miembros WHERE usuario_id = ?",
+                    (uid,),
+                ).fetchall()
+                scope_ws_ids = [
+                    str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip() for r in (ws_rows or [])
+                ]
+                scope_ws_ids = [w for w in scope_ws_ids if w]
+            except Exception:
+                scope_ws_ids = []
+
+        if scope_ws_ids:
+            placeholders = ",".join(["?"] * len(scope_ws_ids))
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT
+                       u.id, u.nombre, u.apellido, u.usuario, u.servicio, u.rol, u.activo,
+                       COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
+                FROM usuarios u
+                JOIN workspace_miembros mem ON mem.usuario_id = u.id
+                WHERE mem.workspace_id IN ({placeholders})
+                  AND COALESCE(u.activo, 1) = 1
+                ORDER BY u.nombre, u.apellido
+                """,
+                tuple(scope_ws_ids),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        if uid:
+            rows = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, servicio, rol, activo,
+                       COALESCE(registro_horario_activo, 0) AS registro_horario_activo
+                FROM usuarios
+                WHERE id = ? AND COALESCE(activo, 1) = 1
+                LIMIT 1
+                """,
+                (uid,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        return []
+
+    # Privileged
+    if ws_id:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT
+                   u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+                   COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
+            FROM usuarios u
+            JOIN workspace_miembros mem ON mem.usuario_id = u.id
+            WHERE mem.workspace_id = ?
+            ORDER BY u.nombre, u.apellido
+            """,
+            (ws_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # Si no se especifica workspace_id, evitamos devolver el directorio global: acotamos
+    # a los workspaces en los que el actor es miembro (evita mezclar tenants).
+    scope_ws_ids = []
+    if uid:
+        try:
+            ws_rows = conn.execute(
+                "SELECT DISTINCT workspace_id FROM workspace_miembros WHERE usuario_id = ?",
+                (uid,),
+            ).fetchall()
+            scope_ws_ids = [
+                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip() for r in (ws_rows or [])
+            ]
+            scope_ws_ids = [w for w in scope_ws_ids if w]
+        except Exception:
+            scope_ws_ids = []
+    if not scope_ws_ids:
+        return []
+    placeholders = ",".join(["?"] * len(scope_ws_ids))
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT
+               u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+               COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
+        FROM usuarios u
+        JOIN workspace_miembros mem ON mem.usuario_id = u.id
+        WHERE mem.workspace_id IN ({placeholders})
+        ORDER BY u.nombre, u.apellido
+        """,
+        tuple(scope_ws_ids),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id):
     """
     En el modelo v2, la empresa operativa vive en `workspace_companies` (por workspace).
@@ -69389,6 +69503,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_renta_cards":
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
+            if workspace_company_id and workspace_id and not empresa_id:
+                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
@@ -69422,6 +69539,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_renta_dashboard":
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
+            if workspace_company_id and workspace_id and not empresa_id:
+                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
@@ -69462,6 +69582,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_renta_export":
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
+            if workspace_company_id and workspace_id and not empresa_id:
+                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
@@ -72189,29 +72312,13 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"rows": []}, status=401)
                 return
             is_privileged = bool(workspace_actor_is_privileged(conn, session))
-            if not is_privileged:
-                # Necesario para operativa (p.ej. seleccionar "Responsable" en CRM Inmobiliaria).
-                # No devolvemos emails a usuarios no privilegiados.
-                rows = conn.execute(
-                    """
-                    SELECT id, nombre, apellido, usuario, servicio, rol, activo,
-                           COALESCE(registro_horario_activo, 0) AS registro_horario_activo
-                    FROM usuarios
-                    WHERE COALESCE(activo, 1) = 1
-                    ORDER BY nombre, apellido
-                    """
-                ).fetchall()
-                json_response(self, {"rows": [dict(r) for r in rows]})
+            workspace_id = (params.get("workspace_id", [""])[0] if params else "").strip()
+            try:
+                rows = fetch_api_usuarios(conn, session, workspace_id=workspace_id, privileged=is_privileged)
+            except PermissionError as e:
+                json_response(self, {"error": str(e) or "No autorizado"}, status=403)
                 return
-            rows = conn.execute(
-                """
-                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
-                       COALESCE(registro_horario_activo, 0) AS registro_horario_activo
-                FROM usuarios
-                ORDER BY nombre, apellido
-                """
-            ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            json_response(self, {"rows": rows})
             return
 
         if path == "/api/auditoria":
@@ -72257,6 +72364,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/renta_quick_pending":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
+            workspace_company_id = params.get("workspace_company_id", [""])[0]
+            if workspace_company_id and workspace_id and not str(empresa_id or "").strip():
+                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
             usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit_raw = params.get("limit", [""])[0]
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
@@ -78933,6 +79043,28 @@ class Handler(BaseHTTPRequestHandler):
 
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            workspace_company_id = (params.get("workspace_company_id", [""])[0] or "").strip()
+            # Compat tenant/v2: a veces el front envía `empresa_id` con el id v2 de `workspace_companies`.
+            # Para no romper listados legacy (tabla, dashboard, etc.), resolvemos al `legacy_empresa_id`.
+            if workspace_company_id and workspace_id and not empresa_id:
+                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+            if empresa_id and not workspace_id and not workspace_company_id:
+                try:
+                    ensure_workspace_core_tables(conn)
+                    row = conn.execute(
+                        """
+                        SELECT legacy_empresa_id
+                        FROM workspace_companies
+                        WHERE id = ?
+                        LIMIT 1
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                    legacy = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
+                    if legacy:
+                        empresa_id = legacy
+                except Exception:
+                    pass
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             year_filter = params.get("year", [""])[0].strip()

@@ -20904,7 +20904,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   let canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
   // Necesario para selects (Responsable/Asesor) en CRMs verticales.
   // El endpoint filtra lo sensible (emails) para usuarios no privilegiados.
-  await safeWorkspaceApi("/api/usuarios", { rows: authUser ? [authUser] : [] }).then((data) => {
+  await safeWorkspaceApi(`/api/usuarios?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: authUser ? [authUser] : [] }).then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     state.usersList = rows.length ? rows : authUser ? [authUser] : [];
     populateResponsableSelects();
@@ -53789,7 +53789,7 @@ const loadGestoriaCrm = async () => {
       return;
     }
     const rentaParams = new URLSearchParams({
-      empresa_id: empresa.id,
+      empresa_id: String(empresa.legacy_empresa_id || empresa.id || "").trim(),
       q: hasSearch ? String(effectiveQuery || "").trim() : "",
       estado,
       // Rendimiento: sin búsqueda cargamos dataset moderado; con búsqueda pedimos resultados filtrados.
@@ -63160,7 +63160,7 @@ const loadGestoriaRentaQuickPendientes = async () => {
   }
   const usuario = String(gestoriaRentaQuickPendingUser?.value || "").trim();
   const params = new URLSearchParams({
-    empresa_id: empresa.id,
+    empresa_id: String(empresa.legacy_empresa_id || empresa.id || "").trim(),
     limit: "30",
   });
   if (usuario) params.set("usuario", usuario);
@@ -68012,8 +68012,10 @@ const loadTable = () => {
     window.setTimeout(() => loadCrmCompraventas(), 200);
     return;
   }
-  const empresaId = empresaSelect.value || "";
-  const selectedCompany = state.currentEmpresaName || state.empresas.find((e) => e.id === empresaId)?.nombre;
+  const empresaUiId = empresaSelect.value || "";
+  const empresaObj = resolveEmpresaById(empresaUiId);
+  const empresaId = String((empresaObj && (empresaObj.legacy_empresa_id || empresaObj.id)) || empresaUiId || "").trim();
+  const selectedCompany = state.currentEmpresaName || empresaObj?.nombre || state.empresas.find((e) => e.id === empresaUiId)?.nombre;
   let tabla = tablaSelect.value || state.tablas.find((t) => t !== "movimientos");
   if (currentTab === "operativa" && tabla === "movimientos") {
     tabla = state.tablas.find((t) => t !== "movimientos");
@@ -68067,7 +68069,7 @@ const loadTable = () => {
       const baseText = `Mostrando ${data.rows.length} filas de ${TABLE_LABELS[tabla] || tabla}.`;
       tableInfo.textContent = baseText;
       tableInfo.dataset.baseText = baseText;
-      const empresaName = state.empresas.find((e) => e.id === empresaId)?.nombre;
+      const empresaName = empresaObj?.nombre || state.empresas.find((e) => e.id === empresaUiId)?.nombre;
       if (currentTab === "operativa") {
         renderDashboard(empresaName, empresaId);
       }
