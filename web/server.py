@@ -73582,7 +73582,7 @@ class Handler(BaseHTTPRequestHandler):
                     # El front sigue pasando `servicio` para rotular/ordenar.
                     if not workspace_id:
                         where.append(service_filter)
-                    values.extend(services)
+                        values.extend(services)
                 empresa_id = str(empresa_id or "").strip()
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
                 empresa_ids = []
