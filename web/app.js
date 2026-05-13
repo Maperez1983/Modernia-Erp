@@ -22117,8 +22117,9 @@ const syncCrmTecnocloudVerticalNav = () => {
     crmLightningSidebar.classList.toggle("hidden", !(isInmo || isGestoria || vertical === "fin" || vertical === "seguros"));
   }
   if (typeof inmuebleDetail !== "undefined" && inmuebleDetail) {
-    // No mezclar pantallas: el detalle de inmueble es exclusivo de Inmobiliaria.
-    inmuebleDetail.classList.toggle("hidden", !isInmo);
+    // No mezclar pantallas: el detalle de inmueble solo debe verse en la vista dedicada.
+    const showFicha = isInmo && String(state.crmWorkspaceView || "") === "inmueble_ficha";
+    inmuebleDetail.classList.toggle("hidden", !showFicha);
   }
 
 	  // Topbar: alterna módulos Inmobiliaria vs Gestoría.
