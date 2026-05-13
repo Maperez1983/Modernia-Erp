@@ -4921,7 +4921,7 @@ body.tc-resizing {
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent;
-  gap: 10px;
+  gap: 6px;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs::-webkit-scrollbar {
@@ -4948,7 +4948,7 @@ body.tc-resizing {
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
   flex: 1 1 auto;
   min-width: 0;
@@ -4960,11 +4960,12 @@ body.tc-resizing {
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn {
   border-radius: 999px;
-  padding: 10px 16px;
+  padding: 7px 12px;
   border: 1px solid rgba(15, 23, 42, 0.14);
   background: linear-gradient(135deg, rgba(var(--gold-rgb), 0.95), rgba(var(--gold-rgb), 0.80));
   color: rgba(var(--ink-rgb), 0.92);
   font-weight: 800;
+  font-size: 12px;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs #crmTopNewBtn:hover {
@@ -4974,14 +4975,14 @@ body.tc-resizing {
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
   position: relative;
-  width: 82px;
-  height: 68px;
+  width: 68px;
+  height: 58px;
   display: grid;
   justify-items: center;
   align-content: center;
-  gap: 5px;
-  padding: 8px 7px;
-  border-radius: 16px;
+  gap: 4px;
+  padding: 6px 6px;
+  border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.14);
   background: linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.74));
   color: rgba(var(--ink-rgb), 0.94);
@@ -5019,31 +5020,32 @@ body.tc-resizing {
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   stroke: currentColor;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-label {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.2px;
   line-height: 1.05;
+  text-transform: uppercase;
 }
 
 @media (min-width: 980px) {
   /* En escritorio: módulos en una sola línea (si no caben, scroll horizontal). */
   #crmSection .crm-workspace-tabs.crm-lightning-tabs {
     flex-wrap: nowrap;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
   }
   #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
