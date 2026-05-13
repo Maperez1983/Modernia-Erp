@@ -43169,12 +43169,64 @@ const queueInmuebleCitaPrefill = (prefill = null) => {
   state.pendingInmuebleCitaPrefill = prefill;
 };
 
+const resetInmuebleActividadForm = () => {
+  if (!inmuebleActividadForm) return;
+  try {
+    inmuebleActividadForm.reset();
+  } catch (e) {}
+
+  // `form.reset()` puede no limpiar selects dinámicos (p.ej. responsable)
+  // ni evitar “herencias” si el DOM no tiene defaultSelected marcado.
+  try {
+    if (inmuebleActividadClienteInput) inmuebleActividadClienteInput.value = "";
+    if (inmuebleActividadClienteId) inmuebleActividadClienteId.value = "";
+  } catch (e) {}
+
+  try {
+    const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+    if (tipoSelect) {
+      tipoSelect.value = "Llamada";
+      if (tipoSelect.value !== "Llamada") {
+        tipoSelect.value = tipoSelect.options?.[0]?.value || "";
+      }
+    }
+    const estadoSelect = inmuebleActividadForm.querySelector('select[name="estado"]');
+    if (estadoSelect) {
+      estadoSelect.value = "Pendiente";
+      if (estadoSelect.value !== "Pendiente") {
+        estadoSelect.value = estadoSelect.options?.[0]?.value || "";
+      }
+    }
+    const responsableSelect = inmuebleActividadForm.querySelector('select[name="responsable"]');
+    if (responsableSelect) {
+      responsableSelect.value = "";
+      if (responsableSelect.value) {
+        responsableSelect.value = "";
+      }
+    }
+    const modalidadSelect = inmuebleActividadForm.querySelector('select[name="modalidad_contacto"]');
+    if (modalidadSelect) modalidadSelect.value = "";
+    const horaInput = inmuebleActividadForm.querySelector('input[name="hora"]');
+    const horaFinInput = inmuebleActividadForm.querySelector('input[name="hora_fin"]');
+    if (horaInput) horaInput.value = "";
+    if (horaFinInput) horaFinInput.value = "";
+  } catch (e) {}
+
+  try {
+    syncInmuebleWorkflowForm();
+  } catch (e) {}
+
+  if (inmuebleActividadStatus) inmuebleActividadStatus.textContent = "";
+};
+
 const applyPendingInmuebleCitaPrefill = () => {
   const prefill = state.pendingInmuebleCitaPrefill;
   if (!prefill) return;
   state.pendingInmuebleCitaPrefill = null;
   setInmuebleTab("actividad");
   if (!inmuebleActividadForm) return;
+  // Importante: evita que una pre-carga “herede” datos de la ficha anterior.
+  resetInmuebleActividadForm();
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const fechaInput = inmuebleActividadForm.querySelector('input[name="fecha"]');
   const horaInput = inmuebleActividadForm.querySelector('input[name="hora"]');
@@ -51551,6 +51603,8 @@ const openInmuebleDetail = (id, originView = "") => {
   if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
   setInmuebleTab("datos");
+  // Evita que “Nueva actividad” herede datos del inmueble anterior.
+  resetInmuebleActividadForm();
   window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
   Promise.all([
     api(`/api/inmueble?id=${id}`),
