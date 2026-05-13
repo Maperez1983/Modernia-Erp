@@ -73604,9 +73604,11 @@ class Handler(BaseHTTPRequestHandler):
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
                         # Incluye legacy: datos atados a empresas del workspace (aunque no exista `workspace_id`).
                         scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        values.extend(empresa_ids)
                         if "empresa_id" in c_cols:
                             scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
-                        values.extend(empresa_ids)
+                            # Repetimos parámetros: el mismo set de placeholders se usa dos veces.
+                            values.extend(empresa_ids)
                     if scope_parts:
                         where.insert(0, f"({' OR '.join(scope_parts)})")
                     else:
