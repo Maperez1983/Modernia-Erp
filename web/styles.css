@@ -7572,6 +7572,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: #fffdf8;
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
