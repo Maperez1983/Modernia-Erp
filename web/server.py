@@ -47289,6 +47289,57 @@ class Handler(BaseHTTPRequestHandler):
             ensure_usuarios_schema(conn)
             conn.commit()
 
+        # Tenant hardening: en modo workspace (payload.workspace_id), muchos endpoints legacy siguen
+        # usando `empresa["id"]` aunque el lookup por `empresa_nombre` no aplica. Resolvemos un
+        # `empresa_id` mínimo (legacy) y construimos un objeto `empresa` para evitar 500s.
+        if empresa is None and isinstance(payload, dict):
+            path_value = str(parsed.path or "")
+            is_gestoria_like = (
+                path_value.startswith("/api/gestoria")
+                or path_value.startswith("/api/renta_")
+                or path_value.startswith("/api/cliente_gestoria")
+                or path_value.startswith("/api/gestoria_renta_")
+                or path_value in {"/api/gestoria_update"}
+            )
+            if is_gestoria_like:
+                session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                eid = str(payload.get("empresa_id") or "").strip()
+                if not eid:
+                    ws_id = str(payload.get("workspace_id") or "").strip()
+                    wc_id = str(payload.get("workspace_company_id") or "").strip()
+                    if ws_id:
+                        try:
+                            eid_res, _wc, err2 = resolve_empresa_id_for_request(
+                                conn,
+                                session_tmp,
+                                workspace_id=ws_id,
+                                empresa_id="",
+                                workspace_company_id=wc_id,
+                                write=True,
+                            )
+                        except Exception:
+                            eid_res, err2 = "", ""
+                        if err2:
+                            json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                            return
+                        if eid_res:
+                            eid = eid_res
+                if not eid:
+                    try:
+                        inferred = infer_empresa_id_for_payload(conn, payload)
+                    except Exception:
+                        inferred = ""
+                    if inferred:
+                        eid = str(inferred or "").strip()
+                if not eid:
+                    try:
+                        eid = str(get_platform_empresa_id(conn) or "").strip()
+                    except Exception:
+                        eid = ""
+                if eid:
+                    payload["empresa_id"] = eid
+                    empresa = {"id": eid}
+
         # Enforce tenant isolation for workspace write endpoints too (when enabled).
         # Centralizado para no depender de checks individuales.
         if WORKSPACE_MEMBERSHIP_ENFORCE and isinstance(payload, dict) and str(parsed.path or "").startswith("/api/workspace_"):
