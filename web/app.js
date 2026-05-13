@@ -51722,6 +51722,21 @@ const openInmuebleDetail = (id, originView = "") => {
   setInmuebleSaveStatus("Cargando ficha...");
   // Feedback inmediato: abrir la ficha como vista separada (no desplegable bajo la lista).
   setCrmWorkspaceView("inmueble_ficha");
+  // Deep-link: la ficha debe vivir en su URL propia para que Back/Reload funcionen.
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    ensureTenantParams(params);
+    params.set("crm", "inmo");
+    params.delete("empresa");
+    params.delete("captacion");
+    if (String(params.get("inmueble") || "") !== String(id || "")) {
+      params.set("inmueble", String(id || "").trim());
+      setUrlParams(params);
+    } else {
+      // Evita apilar history entries redundantes al abrir desde un deep-link ya correcto.
+      setUrlParams(params, { replace: true });
+    }
+  } catch (e) {}
   try {
     updateTableVisibility();
   } catch (e) {}
@@ -75432,6 +75447,16 @@ if (inmuebleBackBtn) {
     setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
     state.currentInmuebleOriginView = "inmuebles";
+    // Limpia el deep-link del inmueble (volvemos al CRM, no a la ficha).
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      ensureTenantParams(params);
+      if (params.get("crm") === "inmo") {
+        params.delete("inmueble");
+        params.delete("captacion");
+        setUrlParams(params);
+      }
+    } catch (e) {}
     // Si el usuario estaba creando un inmueble y abrió una ficha para comprobar duplicado, reabrimos el alta con su borrador.
     maybeReturnToCrmCaptacionCreate();
     maybeReturnToCrmClienteCreate();
