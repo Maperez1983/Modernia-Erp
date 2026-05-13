@@ -73498,21 +73498,45 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 where = []
                 values = []
+                service_filter = None
                 if services:
                     placeholders = ",".join(["?"] * len(services))
-                    where.append(f"LOWER(ce.servicio) IN ({placeholders})")
+                    service_filter = f"LOWER(ce.servicio) IN ({placeholders})"
+                    # Nota: en modo tenant (workspace_id) no forzamos el filtro por servicio,
+                    # para no “perder” clientes legacy sin vínculo en clientes_empresas.
+                    # El front sigue pasando `servicio` para rotular/ordenar.
+                    if not workspace_id:
+                        where.append(service_filter)
                     values.extend(services)
                 empresa_id = str(empresa_id or "").strip()
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
-                if workspace_id and "workspace_id" in ce_cols:
-                    where.append("COALESCE(ce.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                empresa_ids = []
+                if workspace_id:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if not empresa_ids:
+                        platform_eid = get_platform_empresa_id(conn)
+                        if platform_eid:
+                            empresa_ids = [platform_eid]
+                    # Scope tenant: clientes del workspace o (legacy) clientes vinculados a empresas del workspace.
+                    scope_parts = []
+                    c_cols = table_columns(conn, "clientes") or set()
                     if empresa_ids:
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        # Incluye legacy: datos atados a empresas del workspace (aunque no exista `workspace_id`).
+                        scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        if "empresa_id" in c_cols:
+                            scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
                         values.extend(empresa_ids)
+                    if scope_parts:
+                        where.insert(0, f"({' OR '.join(scope_parts)})")
+                    else:
+                        json_response(self, {"columns": [], "rows": []})
+                        return
                 elif empresa_id:
                     where.append("ce.empresa_id = ?")
                     values.append(empresa_id)
@@ -73525,16 +73549,16 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("c.estado = ?")
                     values.append(estado)
                 where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-                join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
-                if workspace_id:
-                    # Además del vínculo servicio, permitimos clientes "standalone" creados dentro del workspace.
-                    c_cols = table_columns(conn, "clientes") or set()
-                    if "workspace_id" in c_cols:
-                        where_clause = (
-                            f"WHERE (COALESCE(c.workspace_id, '') = ?)"
-                            + (f" AND {' AND '.join(where)}" if where else "")
-                        )
-                        values = [workspace_id, *values]
+                # En tenant siempre LEFT JOIN para no perder clientes sin vínculo en clientes_empresas.
+                join_clause = (
+                    "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
+                    if workspace_id
+                    else (
+                        "JOIN clientes_empresas ce ON ce.cliente_id = c.id"
+                        if services
+                        else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
+                    )
+                )
                 rows = conn.execute(
                     f"""
                     SELECT
