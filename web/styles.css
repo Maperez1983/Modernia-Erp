@@ -4975,8 +4975,9 @@ body.tc-resizing {
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
   position: relative;
-  width: 68px;
-  height: 58px;
+  width: auto;
+  min-width: 56px;
+  height: 54px;
   display: grid;
   justify-items: center;
   align-content: center;
@@ -4986,6 +4987,8 @@ body.tc-resizing {
   border: 1px solid rgba(15, 23, 42, 0.14);
   background: linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.74));
   color: rgba(var(--ink-rgb), 0.94);
+  flex: 0 1 auto;
+  max-width: 96px;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-notify-badge {
@@ -5039,17 +5042,57 @@ body.tc-resizing {
   letter-spacing: 0.2px;
   line-height: 1.05;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 @media (min-width: 980px) {
-  /* En escritorio: módulos en una sola línea (si no caben, scroll horizontal). */
+  /* En escritorio: módulos en una sola línea sin “perderse” fuera de pantalla. */
   #crmSection .crm-workspace-tabs.crm-lightning-tabs {
     flex-wrap: nowrap;
-    overflow-x: hidden;
+    overflow-x: visible;
     overflow-y: hidden;
   }
+  /* La fila de módulos debe encajar SIEMPRE en el ancho disponible (sin scroll y sin recortes).
+     Usamos grid para repartir el espacio entre todas las cards visibles. */
   #crmSection .crm-workspace-tabs.crm-lightning-tabs .crm-top-modules {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(44px, 1fr);
+    align-items: stretch;
+    gap: 6px;
+    overflow: visible;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.tc-module {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: 54px;
+    padding: 6px 4px;
+  }
+
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico {
+    width: 20px;
+    height: 20px;
+  }
+
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-ico svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Permite que el texto se comprima sin forzar ancho extra (evita “mandarlo a la derecha”). */
+  #crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-label {
+    white-space: normal;
+    text-wrap: balance;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 8px;
+    line-height: 1.05;
   }
 }
 
