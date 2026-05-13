@@ -43843,6 +43843,14 @@ const loadCrmClientes = async ({ force = false } = {}) => {
   const filterKey = String(crmClientesFilter?.value || "recientes").trim().toLowerCase();
   const qRaw = String(crmClientesSearch?.value || "").trim();
   const all = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+  // En Inmobiliaria queremos, por defecto, la cartera del servicio. En tenant el backend
+  // puede devolver más clientes por compat legacy (sin vínculos en `clientes_empresas`).
+  // Filtramos aquí para que el listado sea “Inmobiliaria” (y no el total del workspace).
+  const allInmo = all.filter((row) => {
+    const servicios = normalizeSimple(row?.servicios || "");
+    if (!servicios) return false;
+    return servicios.includes("inmobiliaria") || servicios.includes("inmo");
+  });
 
   const matchQuery = createAdvancedSearchMatcher(qRaw, {
     text: (row) =>
@@ -43914,7 +43922,7 @@ const loadCrmClientes = async ({ force = false } = {}) => {
   };
 
   const az = String(state.crmAz?.clientes || "").trim().toUpperCase();
-  const filtered = applyPresetFilter(all)
+  const filtered = applyPresetFilter(allInmo)
     .filter(byQuery)
     .filter((row) => matchTcAz(az, row.nombre || row.email || row.telefono || ""));
 
