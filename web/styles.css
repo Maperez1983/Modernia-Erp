@@ -11345,6 +11345,14 @@ body.theme-operativa .agenda-day {
   box-shadow: 0 12px 28px rgba(16, 33, 43, 0.06);
 }
 
+body.theme-operativa .crm-recent-item strong {
+  color: rgba(var(--ink-rgb), 0.96);
+}
+
+body.theme-operativa .crm-recent-item .muted {
+  color: rgba(var(--ink-rgb), 0.78);
+}
+
 body.theme-operativa .data-table,
 body.theme-operativa .ui-table tr,
 body.theme-operativa .ui-table-scroll {
