@@ -63878,9 +63878,12 @@ const submitGestoriaRentaQuick = async () => {
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa.";
     return;
   }
+  // Nota: en algunos navegadores/flows (p.ej. PWA/Windows) el input puede re-montarse y
+  // la referencia global quedarse "stale". Leemos el nodo actual del DOM como fuente de verdad.
+  const fileInput = document.getElementById("gestoriaRentaQuickFile") || gestoriaRentaQuickFile;
   const file =
-    gestoriaRentaQuickFile && gestoriaRentaQuickFile.files && gestoriaRentaQuickFile.files.length
-      ? gestoriaRentaQuickFile.files[0]
+    fileInput && fileInput.files && fileInput.files.length
+      ? fileInput.files[0]
       : null;
   if (!file) {
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Selecciona un archivo.";
@@ -77024,9 +77027,10 @@ if (gestoriaRentaQuickPendingUser) {
 if (gestoriaRentaQuickFile) {
   gestoriaRentaQuickFile.addEventListener("change", async () => {
     if (!state.gestoriaRentaQuickAutoSubmit) return;
+    const fileInput = document.getElementById("gestoriaRentaQuickFile") || gestoriaRentaQuickFile;
     const file =
-      gestoriaRentaQuickFile && gestoriaRentaQuickFile.files && gestoriaRentaQuickFile.files.length
-        ? gestoriaRentaQuickFile.files[0]
+      fileInput && fileInput.files && fileInput.files.length
+        ? fileInput.files[0]
         : null;
     if (!file) return;
     state.gestoriaRentaQuickAutoSubmit = false;
