@@ -19561,6 +19561,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
                 <span>${formatEurosCompact(Number(row.cuota_mensual || 0))}</span>
                 <span>${numberFormatter.format(Number(row.incidencias_abiertas || 0))} abiertas</span>
                 <button type="button" class="secondary ghost" data-community-edit="${row.id}">Editar</button>
+                <button type="button" class="secondary danger" data-community-delete="${row.id}">Eliminar</button>
               </div>
             </div>
           `
@@ -19578,6 +19579,28 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
             workspaceFincasCommunityForm.scrollIntoView({ behavior: "smooth", block: "start" });
           }
         } catch (e) {}
+      }
+    });
+  });
+  workspaceFincasCommunityList.querySelectorAll("[data-community-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = String(button.dataset.communityDelete || "").trim();
+      if (!id) return;
+      const record = rows.find((row) => String(row.id || "") === id);
+      const label = record?.nombre ? `“${record.nombre}”` : "esta comunidad";
+      if (!window.confirm(`¿Eliminar ${label}? Si hay incidencias/proveedores/contabilidad, se archivará para no romper el histórico.`)) return;
+      try {
+        await postJsonWithDbRetry("/api/workspace_fincas_comunidad_delete", {
+          workspace_id: state.currentWorkspaceId,
+          comunidad_id: id,
+        });
+        const data = await safeWorkspaceApi(
+          `/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=500`,
+          { rows: [] }
+        );
+        renderWorkspaceFincasCommunityList(data.rows || []);
+      } catch (error) {
+        alert(error?.message || "No se pudo eliminar.");
       }
     });
   });

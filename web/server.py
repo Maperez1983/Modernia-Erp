@@ -33315,6 +33315,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
+    ensure_column(conn, "workspace_fincas_comunidades", "activo", "activo INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
@@ -38797,6 +38798,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.num_aparcamientos,
           c.cuota_sugerida,
           c.cuota_mensual,
+          COALESCE(c.activo, 1) AS activo,
           c.created_at,
           c.updated_at,
           (
@@ -38807,6 +38809,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
         FROM workspace_fincas_comunidades c
         LEFT JOIN empresas e ON e.id = c.empresa_id
         WHERE c.workspace_id = ?
+          AND COALESCE(c.activo, 1) = 1
         ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
         LIMIT ?
         """,
@@ -56080,6 +56083,89 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+
+        elif parsed.path == "/api/workspace_fincas_comunidad_delete":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or payload.get("id") or "").strip()
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT id, nombre FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Comunidad no encontrada"}, status=404)
+                return
+
+            depend_counts = {}
+            try:
+                depend_counts["incidencias"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS n FROM workspace_fincas_incidencias WHERE workspace_id = ? AND comunidad_id = ?",
+                        (workspace_id, comunidad_id),
+                    ).fetchone()["n"]
+                )
+            except Exception:
+                depend_counts["incidencias"] = 0
+            try:
+                depend_counts["proveedores"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS n FROM workspace_fincas_proveedores WHERE workspace_id = ? AND comunidad_id = ?",
+                        (workspace_id, comunidad_id),
+                    ).fetchone()["n"]
+                )
+            except Exception:
+                depend_counts["proveedores"] = 0
+            try:
+                depend_counts["juntas"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS n FROM workspace_fincas_juntas WHERE workspace_id = ? AND comunidad_id = ?",
+                        (workspace_id, comunidad_id),
+                    ).fetchone()["n"]
+                )
+            except Exception:
+                depend_counts["juntas"] = 0
+            try:
+                depend_counts["contabilidad"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS n FROM workspace_fincas_contabilidad WHERE workspace_id = ? AND comunidad_id = ?",
+                        (workspace_id, comunidad_id),
+                    ).fetchone()["n"]
+                )
+            except Exception:
+                depend_counts["contabilidad"] = 0
+
+            has_dependents = any(int(v or 0) > 0 for v in depend_counts.values())
+            if has_dependents:
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_comunidades
+                    SET activo = 0, estado = 'Archivada', updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (now, comunidad_id, workspace_id),
+                )
+                conn.commit()
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "mode": "archived",
+                        "id": comunidad_id,
+                        "nombre": row["nombre"],
+                        "dependencias": depend_counts,
+                    },
+                )
+                return
+
+            conn.execute(
+                "DELETE FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ?",
+                (comunidad_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "mode": "deleted", "id": comunidad_id, "nombre": row["nombre"]})
             return
 
         elif parsed.path == "/api/workspace_fincas_incidencias":
