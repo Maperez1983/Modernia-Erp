@@ -64741,7 +64741,7 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE id = ?
                     """,
                     (
-                        empresa["id"],
+                        empresa_id,
                         cliente_id,
                         f"renta-{ejercicio}-{entry_id}",
                         doc_nombre,
@@ -64841,7 +64841,7 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """,
-                (empresa["id"], cliente_id, "Declaración en periodo", f"%Renta {ejercicio}%"),
+                (empresa_id, cliente_id, "Declaración en periodo", f"%Renta {ejercicio}%"),
             ).fetchone()
             trabajo_estado = "Finalizado" if estado_presentacion == "Presentada" else "En espera"
             responsable = str(payload.get("responsable") or current_entry.get("responsable") or "Renta").strip()
@@ -65162,7 +65162,7 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE id = ?
                     """,
                     (
-                        empresa["id"],
+                        empresa_id,
                         cliente_id,
                         f"renta-{ejercicio}-{entry_id}",
                         doc_nombre,
