@@ -33474,6 +33474,31 @@ def fetch_workspace_company_ids(conn, workspace_id):
     return fallback
 
 
+def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
+    """
+    Devuelve la lista de `empresas.id` (legacy) asociadas al workspace para scoping.
+
+    - Preferimos vínculos explícitos (`workspace_companies` v2 o `workspace_empresas`).
+    - Compat migración: si el caller aporta `empresa_id` (legacy), lo incluimos en el scope aunque aún no
+      exista el vínculo en `workspace_companies`. Evita listados vacíos en CRMs verticales.
+    - Fallback single-tenant: si sigue vacío, intenta `get_platform_empresa_id`.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return []
+    ids = fetch_workspace_company_ids(conn, ws_id) or []
+    eid = str(empresa_id or "").strip()
+    if eid and eid not in ids:
+        ids.append(eid)
+    if ids:
+        return ids
+    try:
+        platform_eid = str(get_platform_empresa_id(conn) or "").strip()
+    except Exception:
+        platform_eid = ""
+    return [platform_eid] if platform_eid else []
+
+
 def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: str, empresa_id: str):
     """
     Devuelve (where_sql, values) para filtrar una tabla por scope.
@@ -33490,14 +33515,7 @@ def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: 
             # Compat: en muchos datos legacy workspace_id está vacío. En tenant no queremos
             # “perder” esos registros si pertenecen a una empresa del workspace.
             if "empresa_id" in cols:
-                empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
-                if not empresa_ids:
-                    try:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
-                    except Exception:
-                        empresa_ids = []
+                empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws_id, empresa_id=empresa_id)
                 if empresa_ids:
                     placeholders = ",".join(["?"] * len(empresa_ids))
                     return (
@@ -33506,14 +33524,7 @@ def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: 
                     )
             return (f"COALESCE({alias}.workspace_id, '') = ?", [ws_id])
         if "empresa_id" in cols:
-            empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
-            if not empresa_ids:
-                try:
-                    platform_eid = get_platform_empresa_id(conn)
-                    if platform_eid:
-                        empresa_ids = [platform_eid]
-                except Exception:
-                    empresa_ids = []
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws_id, empresa_id=empresa_id)
             if not empresa_ids:
                 return ("1=0", [])
             placeholders = ",".join(["?"] * len(empresa_ids))
@@ -79241,16 +79252,7 @@ class Handler(BaseHTTPRequestHandler):
                     # Compat: registros legacy pueden tener workspace_id NULL. En tenant
                     # permitimos también los que pertenezcan a empresas del workspace.
                     if "empresa_id" in columns:
-                        empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                        # Compat: si el caller pasa empresa_id explícito (legacy), lo incluimos en el scope.
-                        # Esto evita listados vacíos durante la migración cuando aún no existe el vínculo
-                        # en `workspace_companies`, pero el usuario pertenece al workspace.
-                        if empresa_id and empresa_id not in empresa_ids:
-                            empresa_ids.append(empresa_id)
-                        if not empresa_ids:
-                            platform_eid = get_platform_empresa_id(conn)
-                            if platform_eid:
-                                empresa_ids = [platform_eid]
+                        empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id)
                         if empresa_ids:
                             placeholders_ws = ",".join(["?"] * len(empresa_ids))
                             where.append(
