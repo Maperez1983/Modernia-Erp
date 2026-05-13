@@ -64769,7 +64769,7 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (
                             doc_id,
-                            empresa["id"],
+                            empresa_id,
                             cliente_id,
                             f"renta-{ejercicio}-{entry_id}",
                             doc_nombre,
