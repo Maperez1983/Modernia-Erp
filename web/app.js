@@ -22124,7 +22124,9 @@ const syncCrmTecnocloudVerticalNav = () => {
   // No mezclar pantallas: Gestoría NO debe mostrar el workspace del CRM Inmobiliaria.
   // Reutilizamos el estilo (topbar / módulos). La vista activa la decide `setCrmWorkspaceView`.
   if (crmWorkspaceShell) {
-    crmWorkspaceShell.classList.toggle("hidden", false);
+    const showFicha = isInmo && String(state.crmWorkspaceView || "") === "inmueble_ficha";
+    // En vista ficha, ocultamos el shell/listados siempre.
+    crmWorkspaceShell.classList.toggle("hidden", showFicha ? true : false);
   }
   if (crmLightningSidebar) {
     // Sidebar estilo "Lightning" en Inmobiliaria, Gestoría y Financiaciones.
