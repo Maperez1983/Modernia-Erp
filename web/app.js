@@ -7716,6 +7716,37 @@ workspaceEngineButtons.forEach((button) => {
   });
 });
 
+// Delegación defensiva: si por cualquier motivo los listeners anteriores no se montaron
+// (caché, cambios DOM, reinicios parciales), este handler asegura que los tabs de Motores funcionan.
+try {
+  if (!window.__workspaceEngineTabsDelegationBound) {
+    window.__workspaceEngineTabsDelegationBound = true;
+    document.addEventListener("click", async (ev) => {
+      const target = ev?.target;
+      const btn = target?.closest?.("[data-workspace-engine-tab]");
+      if (!btn) return;
+      const engine = btn.dataset.workspaceEngineTab || "documental";
+      // Evita interferir fuera de la vista de Motores.
+      if (normalizeSimple(state.currentWorkspaceView || "") !== "motores") return;
+      setWorkspaceEngineView(engine);
+      try {
+        if (engine === "registro_horario") {
+          if (isWorkspaceTimeManager()) {
+            await refreshWorkspaceTimeSetup();
+            await refreshWorkspaceTimeSweepStatus();
+            await runWorkspaceTimeAlertSweep();
+          } else {
+            applyWorkspaceTimeMode();
+          }
+        }
+        if (engine === "rrhh") {
+          await refreshWorkspaceRrhh();
+        }
+      } catch (e) {}
+    });
+  }
+} catch (e) {}
+
 if (workspaceMotoresBackBtn) {
   workspaceMotoresBackBtn.addEventListener("click", () => {
     focusWorkspaceView("overview", workspaceLauncher, { scroll: true, forceTenantView: true });
