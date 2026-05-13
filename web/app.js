@@ -32658,15 +32658,20 @@ const populateAgendaClientesFromCandidates = (listEl, inputEl, hiddenEl, candida
   if (!inputEl || !hiddenEl) return;
   const map = new Map(unique.map((item) => [normalizeSimple(item.nombre), item.id || ""]));
   inputEl._agendaCandidatesMap = map;
-  if (inputEl.dataset.agendaBound === "1") return;
-  inputEl.dataset.agendaBound = "1";
-  const handler = () => {
+  const syncHidden = () => {
     const value = normalizeSimple(inputEl.value || "");
     const id = (inputEl._agendaCandidatesMap && inputEl._agendaCandidatesMap.get(value)) || "";
     hiddenEl.value = id || "";
   };
-  inputEl.addEventListener("input", handler);
-  inputEl.addEventListener("change", handler);
+  if (inputEl.dataset.agendaBound === "1") {
+    syncHidden();
+    return;
+  }
+  inputEl.dataset.agendaBound = "1";
+  inputEl.addEventListener("input", syncHidden);
+  inputEl.addEventListener("change", syncHidden);
+  inputEl.addEventListener("blur", syncHidden);
+  syncHidden();
 };
 
 const populateAgendaClienteQuickSelect = (selectEl, inputEl, hiddenEl, candidates = [], placeholder = "") => {
