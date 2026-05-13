@@ -70168,6 +70168,13 @@ if (crmClientesSearch) {
   crmClientesSearch.addEventListener("input", () => {
     scheduleCrmClientesReload();
   });
+  crmClientesSearch.addEventListener("keydown", (event) => {
+    // UX: muchos usuarios esperan que Enter aplique el filtro/búsqueda.
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadCrmClientes();
+    }
+  });
 }
 
 if (crmClientesPrintBtn) {
