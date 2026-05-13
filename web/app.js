@@ -137,7 +137,8 @@ const api = async (path) => {
           if (wcid) qs.set("workspace_company_id", wcid);
         }
         // Si el caller adjunta `empresa_id` en modo tenant, normalizamos a legacy id para endpoints legacy.
-        // Si no podemos resolver, preferimos confiar en el scope por `workspace_id` para no “vaciar” listados.
+        // Nota: NO borramos `empresa_id` si no podemos resolver, porque el backend puede usarlo como compat
+        // cuando falte el vínculo en `workspace_companies` (migración).
         try {
           const eidRaw = String(qs.get("empresa_id") || "").trim();
           if (eidRaw && String(qs.get("workspace_id") || "").trim()) {
@@ -145,8 +146,6 @@ const api = async (path) => {
             const legacy = resolveLegacyEmpresaId(resolved);
             if (legacy) {
               qs.set("empresa_id", legacy);
-            } else {
-              qs.delete("empresa_id");
             }
           }
         } catch (e) {}
