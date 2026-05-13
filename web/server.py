@@ -65602,10 +65602,17 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/acciones":
-            servicio = payload.get("servicio")
+            servicio = str(payload.get("servicio") or "").strip()
             if not servicio:
-                json_response(self, {"error": "servicio requerido"}, status=400)
-                return
+                # Compat/robustez: algunas pantallas legacy no envían `servicio`.
+                # Inferimos el servicio por FKs conocidas para evitar 400 en agenda.
+                if str(payload.get("inmueble_id") or "").strip():
+                    servicio = "inmobiliaria"
+                elif str(payload.get("asesoramiento_id") or "").strip():
+                    servicio = "financiaciones"
+                else:
+                    json_response(self, {"error": "servicio requerido"}, status=400)
+                    return
             tipo = str(payload.get("tipo") or "").strip()
             estado = str(payload.get("estado") or "").strip() or "Pendiente"
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
@@ -65627,7 +65634,16 @@ class Handler(BaseHTTPRequestHandler):
             related_tipo_fk = str(payload.get("related_tipo") or "").strip() or None
             workspace_id_fk = str(payload.get("workspace_id") or "").strip() or None
             action_id = os.urandom(16).hex()
-            empresa_id_fk = (empresa["id"] if empresa else None) or get_platform_empresa_id(conn) or None
+            # En agenda (acciones) no dependemos de empresa. Por compatibilidad con el esquema legacy,
+            # usamos `empresa_id` si viene y existe; si no, una empresa técnica de plataforma.
+            empresa_id_fk = (
+                str(payload.get("empresa_id") or "").strip()
+                or get_platform_empresa_id(conn)
+                or None
+            )
+            if not empresa_id_fk:
+                json_response(self, {"error": "empresa_id no resoluble"}, status=500)
+                return
             conn.execute(
                 """
                 INSERT INTO acciones (
@@ -65852,17 +65868,20 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE acciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
-            inmueble_id = str(updates.get("inmueble_id") if "inmueble_id" in updates else current["inmueble_id"] or "").strip()
+            inmueble_id = str(
+                updates.get("inmueble_id") if "inmueble_id" in updates else current["inmueble_id"] or ""
+            ).strip()
             tipo_norm = normalize_inmo_action_type(tipo_final)
             action_row = conn.execute(
                 "SELECT * FROM acciones WHERE id = ? LIMIT 1",
                 (record_id,),
             ).fetchone()
+            empresa_id_ctx = str(current["empresa_id"] or "").strip() or get_platform_empresa_id(conn) or None
             if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
-                apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+                apply_fin_action_workflow(conn, empresa_id_ctx, action_row, now)
             audit_event(
                 conn,
-                empresa["id"],
+                empresa_id_ctx,
                 "accion",
                 record_id,
                 "Actualizar acción",
