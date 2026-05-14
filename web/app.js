@@ -20560,8 +20560,8 @@ const buildWorkspacePresupuestoUpdatePayloadFromRow = (row = {}, overrides = {})
     solicitante_email: calc.solicitante_email || row.cliente_email || "",
     carta_presentacion: calc.carta_presentacion || "",
     colegiado_numero: calc.colegiado_numero || "3079",
-    map_lat: String(values.map_lat || "").trim(),
-    map_lon: String(values.map_lon || "").trim(),
+    map_lat: String(calc.map_lat ?? row.map_lat ?? "").trim(),
+    map_lon: String(calc.map_lon ?? row.map_lon ?? "").trim(),
     servicios_incluidos: serviciosIncluidos,
     lineas: Array.isArray(row.lineas) ? row.lineas : [],
   };
