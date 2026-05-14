@@ -19854,9 +19854,19 @@ const renderWorkspaceFincasDashboard = () => {
     ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
     : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
   const budgets = budgetsBase.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
-  const budgetsTotal = budgets.length;
-  const budgetsAccepted = budgets.filter((row) => normalizeSimple(row.estado || "") === "aceptado").length;
-  const budgetsRatio = budgetsTotal > 0 ? `${((budgetsAccepted / budgetsTotal) * 100).toFixed(0)}%` : "-";
+  const selectedYear = String(yearSelect?.value || "").trim() || String(new Date().getFullYear());
+  const getRowYear = (row) => {
+    const dateValue = String(row?.fecha || row?.created_at || row?.updated_at || "").trim();
+    const match = dateValue.match(/^(\d{4})/);
+    return match ? match[1] : "";
+  };
+  const budgetsYear = budgets.filter((row) => getRowYear(row) === selectedYear);
+  const budgetsTotal = budgetsYear.length;
+  const budgetsAccepted = budgetsYear.filter((row) => normalizeSimple(row.estado || "") === "aceptado").length;
+  const budgetsRejected = budgetsYear.filter((row) => normalizeSimple(row.estado || "") === "rechazado").length;
+  const budgetsPresented = budgetsYear.filter((row) => normalizeSimple(row.estado || "") !== "borrador").length;
+  const budgetsAcceptRatio = budgetsPresented > 0 ? `${((budgetsAccepted / budgetsPresented) * 100).toFixed(0)}%` : "-";
+  const budgetsRejectRatio = budgetsPresented > 0 ? `${((budgetsRejected / budgetsPresented) * 100).toFixed(0)}%` : "-";
   const ledgerRows = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
   const relevantLedger = ledgerRows.filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || "")));
   const ingresos = relevantLedger
@@ -19873,7 +19883,11 @@ const renderWorkspaceFincasDashboard = () => {
     { label: "Cuota mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Suma de cuotas por comunidad" },
     { label: "Ingresos", value: euroFormatter.format(ingresos || 0), note: "Desde contabilidad (ingresos)" },
     { label: "Gastos", value: euroFormatter.format(gastos || 0), note: "Desde contabilidad (gastos)" },
-    { label: "Presupuestos", value: `${budgetsAccepted}/${budgetsTotal}`, note: `Aceptados · ratio ${budgetsRatio}` },
+    {
+      label: `Presupuestos ${selectedYear}`,
+      value: `${budgetsAccepted}/${budgetsPresented}`,
+      note: `Aceptados/presentados · rechazados ${budgetsRejected} · ratio ok ${budgetsAcceptRatio} · ratio no ${budgetsRejectRatio}`,
+    },
   ];
 
   workspaceFincasDashboardKpis.innerHTML = `
