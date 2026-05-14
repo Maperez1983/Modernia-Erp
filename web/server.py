@@ -69768,11 +69768,14 @@ class Handler(BaseHTTPRequestHandler):
                 values.append(limit_val)
                 rows = conn.execute(
                     f"""
-                    SELECT DISTINCT c.id, c.nombre, c.nif, c.telefono, c.email
+                    SELECT c.id, c.nombre, c.nif, c.telefono, c.email
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
                     WHERE {' AND '.join(where)}
-                    ORDER BY c.updated_at DESC, c.created_at DESC
+                    GROUP BY c.id, c.nombre, c.nif, c.telefono, c.email
+                    ORDER BY
+                      MAX(COALESCE(c.updated_at, c.created_at)) DESC,
+                      MAX(c.created_at) DESC
                     LIMIT ?
                     """,
                     values,
