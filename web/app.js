@@ -2006,6 +2006,9 @@ const workspaceRemittancesStatus = document.getElementById("workspaceRemittances
 const workspaceRemittancesList = document.getElementById("workspaceRemittancesList");
 const workspaceInboxForm = document.getElementById("workspaceInboxForm");
 const workspaceInboxFile = document.getElementById("workspaceInboxFile");
+const workspaceFacturaUploadForm = document.getElementById("workspaceFacturaUploadForm");
+const workspaceFacturaUploadFiles = document.getElementById("workspaceFacturaUploadFiles");
+const workspaceFacturaUploadStatus = document.getElementById("workspaceFacturaUploadStatus");
 const workspaceInboxClienteLookup = document.getElementById("workspaceInboxClienteLookup");
 const workspaceInboxResetBtn = document.getElementById("workspaceInboxResetBtn");
 const workspaceInboxStatus = document.getElementById("workspaceInboxStatus");
@@ -75236,6 +75239,69 @@ if (workspaceInboxForm) {
     } catch (error) {
       if (workspaceInboxStatus) workspaceInboxStatus.textContent = error.message || "No se pudo guardar.";
     }
+  });
+}
+
+if (workspaceFacturaUploadForm) {
+  workspaceFacturaUploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const files = Array.from(workspaceFacturaUploadFiles?.files || []).filter(Boolean);
+    if (!files.length) {
+      if (workspaceFacturaUploadStatus) workspaceFacturaUploadStatus.textContent = "Selecciona al menos un archivo.";
+      return;
+    }
+    if (!state.currentWorkspaceId) {
+      if (workspaceFacturaUploadStatus) workspaceFacturaUploadStatus.textContent = "Workspace no seleccionado.";
+      return;
+    }
+    const formData = new FormData(workspaceFacturaUploadForm);
+    const empresaId = String(formData.get("empresa_id") || "").trim();
+    const canal = String(formData.get("canal_entrada") || "Manual").trim() || "Manual";
+    if (!empresaId) {
+      if (workspaceFacturaUploadStatus) workspaceFacturaUploadStatus.textContent = "Selecciona empresa.";
+      return;
+    }
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      try {
+        if (workspaceFacturaUploadStatus) {
+          workspaceFacturaUploadStatus.textContent = `Subiendo ${i + 1}/${files.length}: ${file.name || "archivo"}...`;
+        }
+        const upload = await uploadFileToS3(file, "workspace", workspaceFacturaUploadStatus);
+        const payload = {
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: empresaId,
+          servicio: "gestoria",
+          nombre: `Factura · ${String(file.name || "archivo").slice(0, 120)}`,
+          tipo: "Factura",
+          clasificacion: "Factura",
+          canal_entrada: canal,
+          doc_key: upload?.key || "",
+          doc_url: upload?.public_url || "",
+        };
+        const data = await fetch("/api/workspace_inbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        ok += 1;
+      } catch (error) {
+        fail += 1;
+        try {
+          console.error(error);
+        } catch (e) {}
+      }
+    }
+    if (workspaceFacturaUploadStatus) {
+      workspaceFacturaUploadStatus.textContent = `Subida completada. OK: ${ok} · Error: ${fail}.`;
+    }
+    if (workspaceFacturaUploadFiles) workspaceFacturaUploadFiles.value = "";
+    try {
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (e) {}
   });
 }
 

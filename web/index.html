@@ -1733,18 +1733,46 @@
 		          </div>
 		        </div>
 		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
-		          <div class="form-card">
-		            <div class="section-head">
-		              <div>
-		                <h3>Inbox de entrada</h3>
-                <p class="muted">Bandeja central para documentos entrantes antes de clasificarlos o asignarlos.</p>
-              </div>
-            </div>
-            <form id="workspaceInboxForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <input type="hidden" name="cliente_id" />
-              <input type="hidden" name="suggested_cliente_id" />
+			          <div class="form-card">
+			            <div class="section-head">
+			              <div>
+			                <h3>Inbox de entrada</h3>
+	                <p class="muted">Bandeja central para documentos entrantes antes de clasificarlos o asignarlos.</p>
+	              </div>
+	            </div>
+              <details class="workspace-fold" open>
+                <summary>Subir factura (OCR)</summary>
+                <form id="workspaceFacturaUploadForm" class="form-grid" style="margin-top:10px;">
+                  <label>
+                    Empresa
+                    <select name="empresa_id" required></select>
+                  </label>
+                  <label>
+                    Canal
+                    <select name="canal_entrada">
+                      <option>Manual</option>
+                      <option>Email</option>
+                      <option>Portal</option>
+                      <option>WhatsApp</option>
+                      <option>Oficina</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    Archivos (PDF o imagen)
+                    <input type="file" id="workspaceFacturaUploadFiles" accept="application/pdf,image/*" multiple />
+                  </label>
+                  <div class="form-actions span-2">
+                    <button type="submit">Subir factura</button>
+                    <span id="workspaceFacturaUploadStatus" class="muted"></span>
+                  </div>
+                  <p class="muted span-2">Cada archivo se guardará como una entrada en el Inbox con clasificación <strong>Factura</strong>. Luego podrás lanzar “OCR factura” desde el listado.</p>
+                </form>
+              </details>
+	            <form id="workspaceInboxForm" class="form-grid">
+	              <input type="hidden" name="id" />
+	              <input type="hidden" name="workspace_id" />
+	              <input type="hidden" name="cliente_id" />
+	              <input type="hidden" name="suggested_cliente_id" />
               <label>
                 Empresa
                 <select name="empresa_id" required></select>
