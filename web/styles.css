@@ -3121,6 +3121,8 @@ body.theme-operativa .workspace-home-count {
   border-radius: 14px;
   border: 1px solid rgba(60, 110, 113, 0.14);
   background: rgba(255, 255, 255, 0.92);
+  position: relative;
+  z-index: 1;
 }
 
 .workspace-billing-meta {
@@ -3130,6 +3132,8 @@ body.theme-operativa .workspace-home-count {
   color: var(--muted);
   font-size: 12px;
   text-align: right;
+  position: relative;
+  z-index: 2;
 }
 
 .workspace-billing-meta .button-inline {
@@ -12483,4 +12487,8 @@ body.theme-operativa .pill {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.u-mt-14 {
+  margin-top: 14px;
 }
