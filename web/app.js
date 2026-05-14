@@ -18121,7 +18121,19 @@ const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
-  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceTimeEmployeeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm, workspaceFincasBudgetQuickForm].forEach((form) => {
+  [
+    workspaceBillingForm,
+    workspaceBudgetForm,
+    workspaceInboxForm,
+    workspaceFacturaUploadForm,
+    workspaceSeriesForm,
+    workspaceTimeForm,
+    workspaceTimeEmployeeForm,
+    workspaceFincasCommunityForm,
+    workspaceRemittancesForm,
+    workspaceFincasProviderForm,
+    workspaceFincasBudgetQuickForm,
+  ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
       select.innerHTML = html;
