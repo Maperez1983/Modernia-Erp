@@ -1963,11 +1963,17 @@ const workspaceCustomerStatus = document.getElementById("workspaceCustomerStatus
 const workspaceCustomerModules = document.getElementById("workspaceCustomerModules");
 const workspaceCustomerCancelBtn = document.getElementById("workspaceCustomerCancelBtn");
 const workspaceCustomerCreateBtn = document.getElementById("workspaceCustomerCreateBtn");
-	const workspaceCompanies = document.getElementById("workspaceCompanies");
-	const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
-	const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
-	const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
-const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
+		const workspaceCompanies = document.getElementById("workspaceCompanies");
+		const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
+		const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
+		const workspaceCompanyFicha = document.getElementById("workspaceCompanyFicha");
+		const workspaceCompanyFichaTitle = document.getElementById("workspaceCompanyFichaTitle");
+		const workspaceCompanyFichaSubtitle = document.getElementById("workspaceCompanyFichaSubtitle");
+		const workspaceCompanyFichaClose = document.getElementById("workspaceCompanyFichaClose");
+		const workspaceCompanyFichaTabs = document.getElementById("workspaceCompanyFichaTabs");
+		const workspaceCompanyFichaBody = document.getElementById("workspaceCompanyFichaBody");
+		const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
+	const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
 const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
 const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
 const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
@@ -6518,12 +6524,18 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const raw = state.currentWorkspaceDetail || {};
   const companiesV2 = Array.isArray(raw?.companies_v2) ? raw.companies_v2 : [];
   const legacy = Array.isArray(raw?.companies) ? raw.companies : [];
-  const companies = companiesV2.length ? companiesV2 : legacy;
+ const companies = companiesV2.length ? companiesV2 : legacy;
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
-    state.currentWorkspaceCompanyId = "";
-    state.currentWorkspaceCompanyName = "";
-    state.currentWorkspaceCompanyWsId = "";
-    renderWorkspaceCompanySwitcher([]);
+    const selected =
+      companies.find((row) => String(row?.id || "").trim() === String(companyId || "").trim())
+      || companies[0]
+      || null;
+    state.currentWorkspaceCompanyWsId = selected ? String(selected?.id || "").trim() : "";
+    state.currentWorkspaceCompanyId = selected
+      ? String(selected?.legacy_empresa_id || selected?.id || "").trim()
+      : "";
+    state.currentWorkspaceCompanyName = selected ? String(selected?.nombre || "").trim() : "";
+    renderWorkspaceCompanySwitcher([]); // en tenant no mostramos switcher global
     renderWorkspaceCompanies(companies);
     renderWorkspaceCompanyScopedData();
     if (rerenderForms) {
@@ -9918,6 +9930,250 @@ const renderWorkspaceList = (rows = []) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// Ficha de empresa (UX): subpestañas por empresa dentro de Config → Empresas
+// Reutiliza los paneles ya existentes de Motores (contabilidad/facturación/etc.)
+// moviendo nodos DOM temporalmente, para no duplicar lógica.
+// ---------------------------------------------------------------------------
+
+let _companyFichaMovedNodes = [];
+let _companyFichaActiveTab = "dashboard";
+
+const _companyFichaTabs = [
+  "dashboard",
+  "contabilidad",
+  "facturacion",
+  "presupuestos",
+  "documentos",
+  "ajustes",
+];
+
+const getWorkspaceCompanyById = (companyId) => {
+  const wanted = String(companyId || "").trim();
+  if (!wanted) return null;
+  const companies = Array.isArray(state?.currentWorkspaceDetail?.companies)
+    ? state.currentWorkspaceDetail.companies
+    : [];
+  return (
+    companies.find((row) => String(row?.id || "").trim() === wanted)
+    || companies.find((row) => String(row?.legacy_empresa_id || "").trim() === wanted)
+    || null
+  );
+};
+
+const ensureWorkspaceCompanyFichaPanels = () => {
+  if (!workspaceCompanyFichaBody) return null;
+  if (workspaceCompanyFichaBody.dataset.companyFichaReady === "1") return workspaceCompanyFichaBody;
+  workspaceCompanyFichaBody.dataset.companyFichaReady = "1";
+  workspaceCompanyFichaBody.innerHTML = `
+    <div data-company-ficha-panel="dashboard"></div>
+    <div data-company-ficha-panel="contabilidad" class="hidden"></div>
+    <div data-company-ficha-panel="facturacion" class="hidden"></div>
+    <div data-company-ficha-panel="presupuestos" class="hidden"></div>
+    <div data-company-ficha-panel="documentos" class="hidden"></div>
+    <div data-company-ficha-panel="ajustes" class="hidden"></div>
+  `;
+  return workspaceCompanyFichaBody;
+};
+
+const moveNodeToCompanyFicha = (node, panelKey) => {
+  if (!node || !workspaceCompanyFichaBody) return;
+  const panel = workspaceCompanyFichaBody.querySelector(`[data-company-ficha-panel="${panelKey}"]`);
+  if (!panel) return;
+  // Evita duplicar tracking si se reabre sin restaurar (defensivo).
+  if (_companyFichaMovedNodes.some((row) => row.node === node)) return;
+  _companyFichaMovedNodes.push({
+    node,
+    parent: node.parentNode,
+    next: node.nextSibling,
+  });
+  panel.appendChild(node);
+};
+
+const restoreCompanyFichaNodes = () => {
+  if (!_companyFichaMovedNodes.length) return;
+  // Restauramos en orden inverso para minimizar efectos colaterales en el DOM.
+  for (let i = _companyFichaMovedNodes.length - 1; i >= 0; i -= 1) {
+    const item = _companyFichaMovedNodes[i];
+    try {
+      if (!item?.node || !item?.parent) continue;
+      if (item.next && item.next.parentNode === item.parent) {
+        item.parent.insertBefore(item.node, item.next);
+      } else {
+        item.parent.appendChild(item.node);
+      }
+    } catch (e) {}
+  }
+  _companyFichaMovedNodes = [];
+};
+
+const renderWorkspaceCompanyFichaDashboard = (company) => {
+  if (!workspaceCompanyFichaBody) return;
+  const panel = workspaceCompanyFichaBody.querySelector('[data-company-ficha-panel="dashboard"]');
+  if (!panel) return;
+  const name = String(company?.nombre || company?.razon_social || "Empresa").trim() || "Empresa";
+  const nif = String(company?.nif || "").trim();
+  const direccion = String(company?.direccion || "").trim();
+  panel.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Resumen</h3>
+          <p class="muted">KPI operativos y acceso rápido a módulos (se completa con datos conforme se carguen facturas y movimientos).</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis">
+        <div class="kpi-card">
+          <div class="kpi-title">Empresa</div>
+          <div class="kpi-value" style="font-size:18px">${escapeHtml(name)}</div>
+          <div class="muted">${nif ? `CIF/NIF: ${escapeHtml(nif)}` : "Sin CIF/NIF"}${direccion ? ` · ${escapeHtml(direccion)}` : ""}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Facturas recibidas</div>
+          <div class="kpi-value">—</div>
+          <div class="muted">OCR en Contabilidad</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">IVA (mes)</div>
+          <div class="kpi-value">—</div>
+          <div class="muted">Pendiente de cálculo</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Cobros pendientes</div>
+          <div class="kpi-value">—</div>
+          <div class="muted">En Facturación</div>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+const prefillWorkspaceCompanyEditorFromRow = (company) => {
+  if (!workspaceCompanyEditor || !workspaceCompanyForm) return;
+  const companyId = String(company?.id || "").trim();
+  if (!companyId) return;
+  const set = (name, value) => {
+    const el = workspaceCompanyForm.querySelector(`[name="${name}"]`);
+    if (el) el.value = value ?? "";
+  };
+  set("id", companyId);
+  set("nombre", String(company?.nombre || ""));
+  set("logo_url", String(company?.logo_url || ""));
+  set("razon_social", String(company?.razon_social || ""));
+  set("nif", String(company?.nif || ""));
+  set("direccion", String(company?.direccion || ""));
+  set("direccion_fiscal", String(company?.direccion_fiscal || ""));
+  set("telefono", String(company?.telefono || ""));
+  set("email", String(company?.email || ""));
+  set("web", String(company?.web || ""));
+  set("contacto_nombre", String(company?.contacto_nombre || ""));
+  set("contacto_email", String(company?.contacto_email || ""));
+  set("contacto_telefono", String(company?.contacto_telefono || ""));
+  set("iban", String(company?.iban || ""));
+  set("bic", String(company?.bic || ""));
+  set("banco_nombre", String(company?.banco_nombre || ""));
+  set("sector", String(company?.sector || ""));
+  set("cnae", String(company?.cnae || ""));
+  const cnaes = Array.isArray(company?._cnaes) ? company._cnaes : [];
+  if (workspaceCompanyCnaes) workspaceCompanyCnaes.value = cnaes.join(", ");
+  set("convenio_nombre", String(company?.convenio_nombre || ""));
+  set("convenio_key", String(company?.convenio_key || ""));
+  set("vacaciones_modo", String(company?.vacaciones_modo || "habiles"));
+  set("vacaciones_dias_anuales", String(company?.vacaciones_dias_anuales || ""));
+  if (workspaceCompanyLogoPreview) {
+    const src = String(company?.logo_url || "").trim();
+    workspaceCompanyLogoPreview.src = src ? buildPhotoSrc(src) : "";
+  }
+  workspaceCompanyEditor.classList.remove("hidden");
+};
+
+const setWorkspaceCompanyFichaTab = (tabKey, opts = {}) => {
+  const tab = String(tabKey || "dashboard").trim().toLowerCase();
+  if (!workspaceCompanyFicha || !workspaceCompanyFichaBody || !_companyFichaTabs.includes(tab)) return;
+  _companyFichaActiveTab = tab;
+
+  // Activa botón tab
+  if (workspaceCompanyFichaTabs) {
+    workspaceCompanyFichaTabs.querySelectorAll("[data-company-ficha-tab]").forEach((btn) => {
+      const key = String(btn.dataset.companyFichaTab || "");
+      btn.classList.toggle("active", key === tab);
+    });
+  }
+
+  // Muestra panel activo
+  workspaceCompanyFichaBody.querySelectorAll("[data-company-ficha-panel]").forEach((panel) => {
+    const key = String(panel.dataset.companyFichaPanel || "");
+    const show = key === tab;
+    panel.classList.toggle("hidden", !show);
+    panel.hidden = !show;
+  });
+
+  if (tab === "ajustes") {
+    const company = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId);
+    if (company) prefillWorkspaceCompanyEditorFromRow(company);
+    if (workspaceCompanyEditor && workspaceCompanyFichaBody) {
+      moveNodeToCompanyFicha(workspaceCompanyEditor, "ajustes");
+    }
+  }
+
+  if (opts.scroll !== false && typeof workspaceCompanyFicha.scrollIntoView === "function") {
+    workspaceCompanyFicha.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
+function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
+  if (!workspaceCompanyFicha) return;
+  const company = getWorkspaceCompanyById(companyId);
+  if (!company) {
+    setUiToast("Empresa no encontrada", "No se pudo abrir la ficha de empresa.");
+    return;
+  }
+
+  // Asegura contexto empresa activa para selects/queries.
+  setWorkspaceCompanyContext(String(company.id || "").trim());
+
+  // Resetea UI previa
+  restoreCompanyFichaNodes();
+  ensureWorkspaceCompanyFichaPanels();
+
+  // Título/subtítulo
+  if (workspaceCompanyFichaTitle) workspaceCompanyFichaTitle.textContent = String(company.nombre || company.razon_social || "Empresa");
+  if (workspaceCompanyFichaSubtitle) {
+    const bits = [];
+    if (company.nif) bits.push(`CIF/NIF: ${company.nif}`);
+    if (company.direccion) bits.push(String(company.direccion));
+    workspaceCompanyFichaSubtitle.textContent = bits.length ? bits.join(" · ") : "Panel por empresa: dashboard, contabilidad, facturación y documentos.";
+  }
+
+  // Dashboard HTML
+  renderWorkspaceCompanyFichaDashboard(company);
+
+  // Mover paneles de Motores a la ficha (contabilidad/OCR/facturación/etc.)
+  const contaPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="contabilidad"]');
+  const facturasRecibidasPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="facturas_recibidas"]');
+  const documentalPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="documental"]');
+
+  const budgetsPanel = workspaceBudgetForm ? workspaceBudgetForm.closest('[data-workspace-engine="facturacion"]') : null;
+  const billingPanel = workspaceBillingForm ? workspaceBillingForm.closest('[data-workspace-engine="facturacion"]') : null;
+  const collectionsPanel = workspaceCollectionsForm ? workspaceCollectionsForm.closest('[data-workspace-engine="facturacion"]') : null;
+
+  if (facturasRecibidasPanel) moveNodeToCompanyFicha(facturasRecibidasPanel, "contabilidad");
+  if (contaPanel) moveNodeToCompanyFicha(contaPanel, "contabilidad");
+  if (billingPanel) moveNodeToCompanyFicha(billingPanel, "facturacion");
+  if (collectionsPanel) moveNodeToCompanyFicha(collectionsPanel, "facturacion");
+  if (budgetsPanel) moveNodeToCompanyFicha(budgetsPanel, "presupuestos");
+  if (documentalPanel) moveNodeToCompanyFicha(documentalPanel, "documentos");
+
+  // Ajustes: editor (se mueve bajo demanda al cambiar tab, pero lo dejamos listo)
+  if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
+
+  workspaceCompanyFicha.classList.remove("hidden");
+  workspaceCompanyFicha.hidden = false;
+
+  setWorkspaceCompanyFichaTab(initialTab || "dashboard", { scroll: true });
+  hydrateWorkspaceCompanySelects();
+}
+
 const renderWorkspaceCompanies = (rows = []) => {
   if (!workspaceCompanies) return;
   const canEdit = (() => {
@@ -10196,11 +10452,11 @@ const renderWorkspaceCompanies = (rows = []) => {
                   class="secondary ghost"
                   data-workspace-company-focus="${row.id || ""}"
                 >${String(row.id || "") === activeId ? "Empresa activa" : "Activar empresa"}</button>
-                <button
-                  type="button"
-                  class="secondary ghost"
-                  data-workspace-company-enter="${row.nombre || ""}"
-                >Entrar en empresa</button>
+	                <button
+	                  type="button"
+	                  class="secondary ghost"
+	                  data-workspace-company-enter="${row.id || ""}"
+	                >Entrar en empresa</button>
                 <button
                   type="button"
                   class="secondary ghost"
@@ -10422,6 +10678,14 @@ const renderWorkspaceCompanies = (rows = []) => {
     });
   }
   applyCompanyFilters();
+  workspaceCompanies.querySelectorAll("[data-workspace-company-chip]").forEach((chip) => {
+    chip.addEventListener("click", (ev) => {
+      if (ev && ev.target && ev.target.closest && ev.target.closest("button")) return;
+      const companyId = String(chip.dataset.workspaceCompanyChip || "").trim();
+      if (!companyId) return;
+      openWorkspaceCompanyFicha(companyId, "dashboard");
+    });
+  });
   workspaceCompanies.querySelectorAll("[data-workspace-company-focus]").forEach((button) => {
     button.addEventListener("click", () => {
       const companyId = button.dataset.workspaceCompanyFocus || "";
@@ -10431,25 +10695,23 @@ const renderWorkspaceCompanies = (rows = []) => {
   });
   workspaceCompanies.querySelectorAll("[data-workspace-company-enter]").forEach((button) => {
     button.addEventListener("click", () => {
-      const companyName = button.dataset.workspaceCompanyEnter || "";
-      if (!companyName) return;
-      openCompany(companyName, { allowRestricted: true });
+      const companyId = String(button.dataset.workspaceCompanyEnter || "").trim();
+      if (!companyId) return;
+      openWorkspaceCompanyFicha(companyId, "dashboard");
     });
   });
   workspaceCompanies.querySelectorAll("[data-workspace-company-budgets]").forEach((button) => {
     button.addEventListener("click", async () => {
       const companyId = String(button.dataset.workspaceCompanyBudgets || "").trim();
       if (!companyId) return;
-      setWorkspaceCompanyContext(companyId);
-      await focusWorkspaceEngine("facturacion", workspaceBudgetForm?.closest(".form-card") || null, { scroll: true });
+      openWorkspaceCompanyFicha(companyId, "presupuestos");
     });
   });
   workspaceCompanies.querySelectorAll("[data-workspace-company-billing]").forEach((button) => {
     button.addEventListener("click", async () => {
       const companyId = String(button.dataset.workspaceCompanyBilling || "").trim();
       if (!companyId) return;
-      setWorkspaceCompanyContext(companyId);
-      await focusWorkspaceEngine("facturacion", workspaceBillingForm?.closest(".form-card") || null, { scroll: true });
+      openWorkspaceCompanyFicha(companyId, "facturacion");
     });
   });
 	  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
@@ -21138,9 +21400,17 @@ const loadWorkspaceDetail = async (workspaceId) => {
     return false;
   });
   const picked = companyMatch || companies[0] || null;
-  state.currentWorkspaceCompanyName = tenantOperationalMode ? "" : (picked?.nombre || "");
-  state.currentWorkspaceCompanyWsId = tenantOperationalMode ? "" : (companiesV2.length ? String(picked?.id || "") : "");
-  state.currentWorkspaceCompanyId = tenantOperationalMode ? "" : (companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || ""));
+  if (tenantOperationalMode) {
+    state.currentWorkspaceCompanyName = picked?.nombre || "";
+    state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
+    state.currentWorkspaceCompanyId = companiesV2.length
+      ? String(picked?.legacy_empresa_id || picked?.id || "")
+      : String(picked?.id || "");
+  } else {
+    state.currentWorkspaceCompanyName = picked?.nombre || "";
+    state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
+    state.currentWorkspaceCompanyId = companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || "");
+  }
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
@@ -73797,6 +74067,29 @@ if (workspaceCompanyEditorClose && workspaceCompanyEditor) {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "";
     if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = "";
     if (workspaceCompanyLogoFile) workspaceCompanyLogoFile.value = "";
+  });
+}
+
+if (workspaceCompanyFichaClose && workspaceCompanyFicha) {
+  workspaceCompanyFichaClose.addEventListener("click", () => {
+    try {
+      restoreCompanyFichaNodes();
+    } catch (e) {}
+    try {
+      if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
+    } catch (e) {}
+    workspaceCompanyFicha.classList.add("hidden");
+    workspaceCompanyFicha.hidden = true;
+  });
+}
+
+if (workspaceCompanyFichaTabs && workspaceCompanyFicha) {
+  workspaceCompanyFichaTabs.addEventListener("click", (ev) => {
+    const btn = ev && ev.target && ev.target.closest ? ev.target.closest("[data-company-ficha-tab]") : null;
+    if (!btn) return;
+    const tab = String(btn.dataset.companyFichaTab || "").trim();
+    if (!tab) return;
+    setWorkspaceCompanyFichaTab(tab, { scroll: false });
   });
 }
 

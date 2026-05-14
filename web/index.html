@@ -298,8 +298,8 @@
                   <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
                 </div>
               </div>
-              <div id="workspaceCompanies"></div>
-	              <div id="workspaceCompanyEditor" class="form-card hidden u-mt-14">
+	              <div id="workspaceCompanies"></div>
+		              <div id="workspaceCompanyEditor" class="form-card hidden u-mt-14">
                 <div class="section-head">
                   <div>
                     <h3>Editar empresa</h3>
@@ -840,6 +840,26 @@
 	                    <div id="workspaceSeriesList"></div>
 	                  </div>
 	                </div>
+	              </div>
+	              <div id="workspaceCompanyFicha" class="form-card hidden u-mt-14">
+	                <div class="section-head">
+	                  <div>
+	                    <h3 id="workspaceCompanyFichaTitle">Empresa</h3>
+	                    <p id="workspaceCompanyFichaSubtitle" class="muted">Panel por empresa: dashboard, contabilidad, facturación y documentos.</p>
+	                  </div>
+	                  <div class="toolbar">
+	                    <button type="button" id="workspaceCompanyFichaClose" class="secondary ghost">Cerrar</button>
+	                  </div>
+	                </div>
+	                <div class="tabs" id="workspaceCompanyFichaTabs">
+	                  <button type="button" class="tab active" data-company-ficha-tab="dashboard">Dashboard</button>
+	                  <button type="button" class="tab" data-company-ficha-tab="contabilidad">Contabilidad</button>
+	                  <button type="button" class="tab" data-company-ficha-tab="facturacion">Facturación</button>
+	                  <button type="button" class="tab" data-company-ficha-tab="presupuestos">Presupuestos</button>
+	                  <button type="button" class="tab" data-company-ficha-tab="documentos">Documentos</button>
+	                  <button type="button" class="tab" data-company-ficha-tab="ajustes">Ajustes</button>
+	                </div>
+	                <div id="workspaceCompanyFichaBody" class="u-mt-14"></div>
 	              </div>
 	            </div>
 
