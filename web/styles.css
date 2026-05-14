@@ -1823,7 +1823,14 @@ body.crm-fin #companySummary {
   color: var(--ink);
   line-height: 1.15;
   min-width: 0;
-  overflow-wrap: anywhere;
+  /* Evita que nombres largos se “rompan por letra” (efecto texto vertical). */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .workspace-company-tags {
