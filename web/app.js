@@ -7561,6 +7561,16 @@ const setWorkspaceEngineView = (engine = "documental") => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  // Facturas (OCR) es un flujo específico: ocultamos el formulario genérico de Inbox
+  // para evitar confusión (queda disponible en Documentos).
+  try {
+    const inboxForm = document.getElementById("workspaceInboxForm");
+    if (inboxForm) {
+      const hideGeneric = normalized === "facturas_recibidas";
+      inboxForm.classList.toggle("hidden", hideGeneric);
+      inboxForm.hidden = hideGeneric;
+    }
+  } catch (e) {}
   if (normalized === "simuladores") {
     void ensureIivtnuSimulator();
     ensureIrpfSimulators();
