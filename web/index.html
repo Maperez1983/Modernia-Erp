@@ -789,10 +789,59 @@
                 </div>
                   </form>
                   <datalist id="workspaceClientOptions"></datalist>
-                  <div id="workspaceBillingList"></div>
-                </div>
-              </div>
-            </div>
+	                  <div id="workspaceBillingList"></div>
+	                  <div class="form-card" style="margin-top:14px;">
+	                    <div class="section-head">
+	                      <div>
+	                        <h3>Series de facturación</h3>
+	                        <p class="muted">Numeración por empresa y servicio para profesionalizar la facturación transversal.</p>
+	                      </div>
+	                    </div>
+	                    <form id="workspaceSeriesForm" class="form-grid">
+	                      <input type="hidden" name="id" />
+	                      <input type="hidden" name="workspace_id" />
+	                      <label>
+	                        Empresa
+	                        <select name="empresa_id" required></select>
+	                      </label>
+	                      <label>
+	                        Servicio
+	                        <select name="servicio">
+	                          <option value="">General</option>
+	                          <option value="gestoria">Gestoría</option>
+	                          <option value="seguros">Seguros</option>
+	                          <option value="inmobiliaria">Inmobiliaria</option>
+	                          <option value="financiacion">Financiación</option>
+	                          <option value="fincas">Fincas</option>
+	                        </select>
+	                      </label>
+	                      <label>
+	                        Serie
+	                        <input name="serie" required />
+	                      </label>
+	                      <label>
+	                        Prefijo
+	                        <input name="prefijo" />
+	                      </label>
+	                      <label>
+	                        Siguiente número
+	                        <input name="siguiente_numero" type="number" min="1" value="1" />
+	                      </label>
+	                      <label class="inline-check">
+	                        <input type="checkbox" name="activa" checked />
+	                        Activa
+	                      </label>
+	                      <div class="form-actions span-2">
+	                        <button type="submit">Guardar serie</button>
+	                        <button type="button" id="workspaceSeriesResetBtn" class="secondary ghost">Nueva</button>
+	                        <span id="workspaceSeriesStatus" class="muted"></span>
+	                      </div>
+	                    </form>
+	                    <div id="workspaceSeriesList"></div>
+	                  </div>
+	                </div>
+	              </div>
+	            </div>
 
             <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturacion">
               <div class="form-card">
@@ -1732,14 +1781,14 @@
 		            <div id="workspaceContaEntriesTable" class="ui-table-scroll"></div>
 		          </div>
 		        </div>
-		        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
-			          <div class="form-card">
-			            <div class="section-head">
-			              <div>
-			                <h3>Inbox de entrada</h3>
-	                <p class="muted">Bandeja central para documentos entrantes antes de clasificarlos o asignarlos.</p>
-	              </div>
-	            </div>
+			        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas" data-workspace-module="facturas_recibidas">
+				          <div class="form-card span-2">
+				            <div class="section-head">
+				              <div>
+				                <h3>Facturas recibidas (OCR)</h3>
+		                <p class="muted">Cargador de facturas (una o varias) + bandeja para revisión y lanzamiento de OCR.</p>
+		              </div>
+		            </div>
               <details class="workspace-fold" open>
                 <summary>Subir factura (OCR)</summary>
                 <form id="workspaceFacturaUploadForm" class="form-grid" style="margin-top:10px;">
@@ -1768,135 +1817,9 @@
                   <p class="muted span-2">Cada archivo se guardará como una entrada en el Inbox con clasificación <strong>Factura</strong>. Luego podrás lanzar “OCR factura” desde el listado.</p>
                 </form>
               </details>
-	            <form id="workspaceInboxForm" class="form-grid" data-inbox-form="generic">
-	              <input type="hidden" name="id" />
-	              <input type="hidden" name="workspace_id" />
-	              <input type="hidden" name="cliente_id" />
-	              <input type="hidden" name="suggested_cliente_id" />
-              <label>
-                Empresa
-                <select name="empresa_id" required></select>
-              </label>
-              <label>
-                Servicio
-                <select name="servicio">
-                  <option value="">Sin servicio</option>
-                  <option value="gestoria">Gestoría</option>
-                  <option value="seguros">Seguros</option>
-                  <option value="inmobiliaria">Inmobiliaria</option>
-                  <option value="financiacion">Financiación</option>
-                  <option value="fincas">Fincas</option>
-                </select>
-              </label>
-              <label class="span-2">
-                Documento
-                <input name="nombre" required />
-              </label>
-              <label class="span-2">
-                Archivo
-                <input type="file" id="workspaceInboxFile" />
-              </label>
-              <label>
-                Tipo
-                <input name="tipo" />
-              </label>
-              <label>
-                Clasificación
-                <input name="clasificacion" placeholder="Factura, póliza, escritura..." />
-              </label>
-              <label>
-                Canal
-                <select name="canal_entrada">
-                  <option>Email</option>
-                  <option>Portal</option>
-                  <option>Manual</option>
-                  <option>WhatsApp</option>
-                  <option>Oficina</option>
-                </select>
-              </label>
-              <label>
-                Prioridad
-                <select name="prioridad">
-                  <option>Normal</option>
-                  <option>Alta</option>
-                  <option>Urgente</option>
-                </select>
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Pendiente</option>
-                  <option>En revisión</option>
-                  <option>Clasificado</option>
-                  <option>Archivado</option>
-                </select>
-              </label>
-              <label class="span-2">
-                Cliente sugerido
-                <input id="workspaceInboxClienteLookup" list="workspaceClientOptions" placeholder="Nombre o DNI del cliente final" />
-              </label>
-              <label class="span-2">
-                Notas
-                <textarea name="notas" rows="2"></textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Añadir al inbox</button>
-                <button type="button" id="workspaceInboxResetBtn" class="secondary ghost">Nuevo</button>
-                <span id="workspaceInboxStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="workspaceInboxList"></div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Series de facturación</h3>
-                <p class="muted">Numeración por empresa y servicio para profesionalizar la facturación transversal.</p>
-              </div>
-            </div>
-            <form id="workspaceSeriesForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <label>
-                Empresa
-                <select name="empresa_id" required></select>
-              </label>
-              <label>
-                Servicio
-                <select name="servicio">
-                  <option value="">General</option>
-                  <option value="gestoria">Gestoría</option>
-                  <option value="seguros">Seguros</option>
-                  <option value="inmobiliaria">Inmobiliaria</option>
-                  <option value="financiacion">Financiación</option>
-                  <option value="fincas">Fincas</option>
-                </select>
-              </label>
-              <label>
-                Serie
-                <input name="serie" required />
-              </label>
-              <label>
-                Prefijo
-                <input name="prefijo" />
-              </label>
-              <label>
-                Siguiente número
-                <input name="siguiente_numero" type="number" min="1" value="1" />
-              </label>
-              <label class="inline-check">
-                <input type="checkbox" name="activa" checked />
-                Activa
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Guardar serie</button>
-                <button type="button" id="workspaceSeriesResetBtn" class="secondary ghost">Nueva</button>
-                <span id="workspaceSeriesStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="workspaceSeriesList"></div>
-          </div>
-        </div>
+	            <div id="workspaceInboxList"></div>
+	          </div>
+	        </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="portal_cliente">
           <div class="form-card">
             <div class="section-head">
