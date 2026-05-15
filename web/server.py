@@ -70027,139 +70027,153 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/acciones":
-            workspace_id = params.get("workspace_id", [""])[0]
-            empresa_id = params.get("empresa_id", [""])[0]
-            servicio = params.get("servicio", [""])[0]
-            cliente_id = params.get("cliente_id", [""])[0]
-            inmueble_id = params.get("inmueble_id", [""])[0]
-            asesoramiento_id = params.get("asesoramiento_id", [""])[0]
-            related_id = params.get("related_id", [""])[0]
-            related_tipo = params.get("related_tipo", [""])[0]
-            start = params.get("start", [""])[0]
-            end = params.get("end", [""])[0]
-            order = params.get("order", [""])[0]
-            limit = params.get("limit", [""])[0]
-            offset = params.get("offset", [""])[0]
-            servicio_key = str(servicio or "").strip().lower()
-            if not servicio_key:
-                json_response(self, {"error": "servicio requerido"}, status=400)
-                return
             try:
-                limit_val = int(str(limit or "").strip() or "300")
-            except Exception:
-                limit_val = 300
-            try:
-                offset_val = int(str(offset or "").strip() or "0")
-            except Exception:
-                offset_val = 0
-            if limit_val <= 0:
-                limit_val = 300
-            if limit_val > 2000:
-                limit_val = 2000
-            if offset_val < 0:
-                offset_val = 0
-            if offset_val > 100000:
-                offset_val = 100000
-
-            where = ["a.servicio = ?"]
-            values = [servicio_key]
-            workspace_id = str(workspace_id or "").strip()
-            empresa_id = str(empresa_id or "").strip()
-            cliente_id = str(cliente_id or "").strip()
-            inmueble_id = str(inmueble_id or "").strip()
-            asesoramiento_id = str(asesoramiento_id or "").strip()
-            related_id = str(related_id or "").strip()
-            related_tipo = str(related_tipo or "").strip()
-            start = str(start or "").strip()
-            end = str(end or "").strip()
-            order = str(order or "").strip().lower()
-            # Service-first: si llega workspace_id, acotamos por workspace.
-            # Compat: si hay acciones legacy sin workspace_id, también las devolvemos si pertenecen
-            # a alguna empresa vinculada al workspace. Si no, al usuario le “desaparecen” citas antiguas.
-            if workspace_id:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                ok, err = enforce_workspace_membership(conn, session, workspace_id)
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                workspace_id = params.get("workspace_id", [""])[0]
+                empresa_id = params.get("empresa_id", [""])[0]
+                servicio = params.get("servicio", [""])[0]
+                cliente_id = params.get("cliente_id", [""])[0]
+                inmueble_id = params.get("inmueble_id", [""])[0]
+                asesoramiento_id = params.get("asesoramiento_id", [""])[0]
+                related_id = params.get("related_id", [""])[0]
+                related_tipo = params.get("related_tipo", [""])[0]
+                start = params.get("start", [""])[0]
+                end = params.get("end", [""])[0]
+                order = params.get("order", [""])[0]
+                limit = params.get("limit", [""])[0]
+                offset = params.get("offset", [""])[0]
+                servicio_key = str(servicio or "").strip().lower()
+                if not servicio_key:
+                    json_response(self, {"error": "servicio requerido"}, status=400)
                     return
-                empresa_ids = []
                 try:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    limit_val = int(str(limit or "").strip() or "300")
                 except Exception:
+                    limit_val = 300
+                try:
+                    offset_val = int(str(offset or "").strip() or "0")
+                except Exception:
+                    offset_val = 0
+                if limit_val <= 0:
+                    limit_val = 300
+                if limit_val > 2000:
+                    limit_val = 2000
+                if offset_val < 0:
+                    offset_val = 0
+                if offset_val > 100000:
+                    offset_val = 100000
+
+                where = ["a.servicio = ?"]
+                values = [servicio_key]
+                workspace_id = str(workspace_id or "").strip()
+                empresa_id = str(empresa_id or "").strip()
+                cliente_id = str(cliente_id or "").strip()
+                inmueble_id = str(inmueble_id or "").strip()
+                asesoramiento_id = str(asesoramiento_id or "").strip()
+                related_id = str(related_id or "").strip()
+                related_tipo = str(related_tipo or "").strip()
+                start = str(start or "").strip()
+                end = str(end or "").strip()
+                order = str(order or "").strip().lower()
+                # Service-first: si llega workspace_id, acotamos por workspace.
+                # Compat: si hay acciones legacy sin workspace_id, también las devolvemos si pertenecen
+                # a alguna empresa vinculada al workspace. Si no, al usuario le “desaparecen” citas antiguas.
+                if workspace_id:
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ok, err = enforce_workspace_membership(conn, session, workspace_id)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
                     empresa_ids = []
-                # Fallback: si no hay empresas vinculadas aún, al menos filtramos por workspace_id puro.
-                if empresa_ids:
-                    placeholders = ",".join(["?"] * len(empresa_ids))
-                    where.append(
-                        f"(COALESCE(a.workspace_id, '') = ? OR (COALESCE(a.workspace_id, '') = '' AND a.empresa_id IN ({placeholders})))"
-                    )
-                    values.append(workspace_id)
-                    values.extend(empresa_ids)
-                else:
-                    where.append("COALESCE(a.workspace_id, '') = ?")
-                    values.append(workspace_id)
-            elif empresa_id:
-                where.append("a.empresa_id = ?")
-                values.append(empresa_id)
-            if cliente_id:
-                where.append("a.cliente_id = ?")
-                values.append(cliente_id)
-            if inmueble_id:
-                where.append("a.inmueble_id = ?")
-                values.append(inmueble_id)
-            if asesoramiento_id:
-                where.append("a.asesoramiento_id = ?")
-                values.append(asesoramiento_id)
-            if related_id:
-                where.append("a.related_id = ?")
-                values.append(related_id)
-            if related_tipo:
-                where.append("LOWER(COALESCE(a.related_tipo, '')) = LOWER(?)")
-                values.append(related_tipo)
-            # Rango por fecha (YYYY-MM-DD). Evita traer 300 últimos y romper agenda con históricos.
-            # NOTA: `fecha` se guarda como texto en formato ISO (YYYY-MM-DD), así que las comparaciones
-            # lexicográficas son seguras en SQLite y Postgres.
-            if start:
-                where.append("a.fecha >= ?")
-                values.append(start)
-            if end:
-                where.append("a.fecha <= ?")
-                values.append(end)
-            where_clause = " AND ".join(where) if where else "1=1"
-            order_sql = "DESC"
-            if order in {"asc", "1", "true"}:
-                order_sql = "ASC"
-            rows = conn.execute(
-                f"""
-                SELECT
-                  a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
-                  COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                  a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
-                  a.documento_tipo, a.importe_propuesta,
-                  a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
-                  a.related_id, a.related_tipo
-                FROM acciones a
-                LEFT JOIN clientes c ON c.id = a.cliente_id
-                WHERE {where_clause}
-                ORDER BY a.fecha {order_sql}, a.hora {order_sql}
-                LIMIT ? OFFSET ?
-                """,
-                tuple(values + [limit_val, offset_val]),
-            ).fetchall()
-            json_response(
-                self,
-                {
-                    "rows": [dict(r) for r in rows],
-                    "limit": limit_val,
-                    "offset": offset_val,
-                    "returned": len(rows),
-                    "truncated": len(rows) >= limit_val,
-                    "start": start,
-                    "end": end,
-                    "order": order_sql.lower(),
-                },
-            )
-            return
+                    try:
+                        empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    except Exception:
+                        empresa_ids = []
+                    # Fallback: si no hay empresas vinculadas aún, al menos filtramos por workspace_id puro.
+                    if empresa_ids:
+                        placeholders = ",".join(["?"] * len(empresa_ids))
+                        where.append(
+                            f"(COALESCE(a.workspace_id, '') = ? OR (COALESCE(a.workspace_id, '') = '' AND a.empresa_id IN ({placeholders})))"
+                        )
+                        values.append(workspace_id)
+                        values.extend(empresa_ids)
+                    else:
+                        where.append("COALESCE(a.workspace_id, '') = ?")
+                        values.append(workspace_id)
+                elif empresa_id:
+                    where.append("a.empresa_id = ?")
+                    values.append(empresa_id)
+                if cliente_id:
+                    where.append("a.cliente_id = ?")
+                    values.append(cliente_id)
+                if inmueble_id:
+                    where.append("a.inmueble_id = ?")
+                    values.append(inmueble_id)
+                if asesoramiento_id:
+                    where.append("a.asesoramiento_id = ?")
+                    values.append(asesoramiento_id)
+                if related_id:
+                    where.append("a.related_id = ?")
+                    values.append(related_id)
+                if related_tipo:
+                    where.append("LOWER(COALESCE(a.related_tipo, '')) = LOWER(?)")
+                    values.append(related_tipo)
+                # Rango por fecha (YYYY-MM-DD). Evita traer 300 últimos y romper agenda con históricos.
+                # NOTA: `fecha` se guarda como texto en formato ISO (YYYY-MM-DD), así que las comparaciones
+                # lexicográficas son seguras en SQLite y Postgres.
+                # Si el caller no especifica rango, limitamos por defecto para evitar timeouts/502.
+                if (not start) and (not end):
+                    try:
+                        start = (datetime.now() - timedelta(days=240)).strftime("%Y-%m-%d")
+                    except Exception:
+                        start = ""
+                if start:
+                    where.append("a.fecha >= ?")
+                    values.append(start)
+                if end:
+                    where.append("a.fecha <= ?")
+                    values.append(end)
+                where_clause = " AND ".join(where) if where else "1=1"
+                order_sql = "DESC"
+                if order in {"asc", "1", "true"}:
+                    order_sql = "ASC"
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                      a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
+                      COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                      a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
+                      a.documento_tipo, a.importe_propuesta,
+                      a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
+                      a.related_id, a.related_tipo
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE {where_clause}
+                    ORDER BY a.fecha {order_sql}, a.hora {order_sql}
+                    LIMIT ? OFFSET ?
+                    """,
+                    tuple(values + [limit_val, offset_val]),
+                ).fetchall()
+                json_response(
+                    self,
+                    {
+                        "rows": [dict(r) for r in rows],
+                        "limit": limit_val,
+                        "offset": offset_val,
+                        "returned": len(rows),
+                        "truncated": len(rows) >= limit_val,
+                        "start": start,
+                        "end": end,
+                        "order": order_sql.lower(),
+                    },
+                )
+                return
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/acciones", exc)
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudieron cargar las acciones."}, status=500)
+                return
 
         if path == "/api/fin_asesoramientos":
             empresa_id = params.get("empresa_id", [""])[0]
