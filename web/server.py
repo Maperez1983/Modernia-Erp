@@ -69808,13 +69808,20 @@ class Handler(BaseHTTPRequestHandler):
                     (job_id,),
                 ).fetchone()
             except Exception as exc:
-                # Robustez: si la DB de OCR está bloqueada/no disponible, no devolvemos 500/502 (proxy),
-                # devolvemos 503 para que el frontend aplique backoff en el polling.
+                # UX/robustez: si la DB de OCR está bloqueada/no disponible, devolvemos 200 con status "queued"
+                # para evitar "Failed to fetch / Failed to load resource" en el navegador y permitir backoff.
                 json_response(
                     self,
-                    {"error": "OCR temporalmente no disponible", "detail": Handler._safe_exc_detail(exc)},
-                    status=503,
-                    extra_headers=[("Retry-After", "2"), ("Cache-Control", "no-store")],
+                    {
+                        "id": job_id,
+                        "kind": "",
+                        "status": "queued",
+                        "result": None,
+                        "error": "OCR temporalmente no disponible",
+                        "detail": Handler._safe_exc_detail(exc),
+                    },
+                    status=200,
+                    extra_headers=[("Cache-Control", "no-store")],
                 )
                 return
             if not row:
