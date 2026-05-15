@@ -64561,19 +64561,26 @@ const submitGestoriaRentaQuick = async () => {
     }
     const docId = String(ocrStart?.doc_id || "").trim();
     const jobId = ocrStart?.ocr_job_id;
+    let result = null;
     if (!jobId) {
-      throw new Error("No se pudo iniciar OCR.");
+      // Fallback: el backend puede devolver el OCR directo cuando la cola está caída.
+      result = ocrStart?.result || null;
+      if (!result || typeof result !== "object") {
+        throw new Error("No se pudo iniciar OCR.");
+      }
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR completado (modo directo).";
+    } else {
+      if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR en cola...";
+      result = await pollOcrJob(
+        jobId,
+        (jobRow) => {
+          if (!gestoriaRentaQuickStatus) return;
+          if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR procesando…";
+          if (jobRow.status === "queued") gestoriaRentaQuickStatus.textContent = "OCR en cola...";
+        },
+        4 * 60 * 1000
+      );
     }
-    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "OCR en cola...";
-    const result = await pollOcrJob(
-      jobId,
-      (jobRow) => {
-        if (!gestoriaRentaQuickStatus) return;
-        if (jobRow.status === "processing") gestoriaRentaQuickStatus.textContent = "OCR procesando…";
-        if (jobRow.status === "queued") gestoriaRentaQuickStatus.textContent = "OCR en cola...";
-      },
-      4 * 60 * 1000
-    );
     const fields = (result && typeof result === "object" ? result.fields : null) || {};
     const nif = String(fields.nif_detectado || "").trim();
     const docKey = String(ocrStart?.doc_key || upload?.key || "").trim();

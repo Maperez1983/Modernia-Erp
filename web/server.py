@@ -65235,7 +65235,40 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             except Exception as exc:
-                json_response(self, {"error": f"OCR no disponible: {type(exc).__name__}", "detail": str(exc)}, status=503)
+                # Fallback de robustez: si la cola OCR falla (db locked, workers caídos, disco efímero, etc.)
+                # hacemos OCR directo para que el usuario no se quede bloqueado.
+                try:
+                    direct = process_renta_ocr_job(
+                        {
+                            "s3_key": doc_key,
+                            "filename": filename,
+                            "source_hint": "renta quick direct fallback",
+                        },
+                        conn=None,
+                    )
+                except Exception as exc2:
+                    json_response(
+                        self,
+                        {
+                            "error": f"OCR no disponible: {type(exc).__name__}",
+                            "detail": str(exc),
+                            "fallback_error": str(exc2),
+                        },
+                        status=503,
+                    )
+                    return
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "doc_id": doc_id,
+                        "ocr_job_id": "",
+                        "doc_key": doc_key,
+                        "doc_url": doc_url,
+                        "result": direct,
+                        "ocr_fallback": True,
+                    },
+                )
                 return
             try:
                 if doc_id:
