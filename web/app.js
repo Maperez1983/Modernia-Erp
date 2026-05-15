@@ -3942,7 +3942,9 @@ const SEGUROS_RAMOS_CATALOGO = [
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
 // Por defecto mostramos TODAS las pólizas (aunque no tengan PDF enlazado).
 // El modo "solo subidas" se dejó para depurar migraciones SQLite->Postgres, pero confunde los KPIs.
-const SEGUROS_ONLY_UPLOADED_MODE = false;
+// Seguros: por defecto, trabajamos solo con pólizas con documentación/PDF subido para evitar “ruido”
+// de datos legacy incompletos (se puede ampliar más adelante con un toggle si se necesitara).
+const SEGUROS_ONLY_UPLOADED_MODE = true;
 const SEGUROS_DISABLE_BDT_LINKING = false;
 
 const createOption = (value, label) => {
