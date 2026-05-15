@@ -193,7 +193,7 @@ const api = async (path) => {
       const error = new Error(safePath ? `${msg} · ${safePath}` : msg);
       error.status = res.status;
       error.data = data;
-      if (res.status === 401) {
+      if (res.status === 401 || res.status === 403) {
         error.isAuthError = true;
         handleAuthExpired();
       }
@@ -651,16 +651,38 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
         } catch {
           return "";
         }
-	      })();
-	      const hint = origin ? ` Revisa CORS del bucket para permitir PUT desde ${origin}.` : "";
-	      const message = String(fetchErr?.message || xhrErr?.message || "").trim();
-	      const msgKey = normalizeSimple(message).replace(/\s+/g, "");
-	      if (msgKey === "loadfailed") {
-	        throw new Error(`No se pudo subir el archivo (bloqueo de red/CORS).${hint}`);
-	      }
-	      throw new Error(message || `No se pudo subir el archivo.${hint}`);
-	    }
-	  }
+		      })();
+		      const hint = origin ? ` Revisa CORS del bucket para permitir PUT desde ${origin}.` : "";
+		      const message = String(fetchErr?.message || xhrErr?.message || "").trim();
+		      const msgKey = normalizeSimple(message).replace(/\s+/g, "");
+		      const rawLower = message.toLowerCase();
+		      const looksLikeCors =
+		        msgKey === "loadfailed"
+		        || msgKey.replace(/[^a-z0-9]+/g, "") === "failedtofetch"
+		        || rawLower.includes("failed to fetch")
+		        || rawLower.includes("networkerror")
+		        || rawLower.includes("err_failed")
+		        || rawLower.includes("cors");
+		      if (!looksLikeCors) {
+		        throw new Error(message || `No se pudo subir el archivo.${hint}`);
+		      }
+		      // Fallback robusto: sube el archivo al backend (base64) para evitar CORS/presign intermitente.
+		      if (statusEl) statusEl.textContent = "Subida directa bloqueada. Enviando al servidor...";
+		      const fileBase64 = await fileToBase64(fileToUpload);
+		      const fallback = await apiPost("/api/s3_upload_base64", {
+		        prefix: prefix || "seguros",
+		        filename: fileToUpload.name || "archivo.pdf",
+		        content_type: contentType || "application/octet-stream",
+		        file_base64: fileBase64,
+		      });
+		      if (fallback?.error) throw new Error(fallback.error);
+		      if (!fallback?.key && !fallback?.public_url) {
+		        throw new Error(`No se pudo subir el archivo (bloqueo de red/CORS).${hint}`);
+		      }
+		      if (statusEl) statusEl.textContent = "Subida completada (vía servidor).";
+		      return { key: fallback.key || "", public_url: fallback.public_url || "" };
+		    }
+		  }
   if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
     const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
     const pct = optimized.originalSize
@@ -890,12 +912,16 @@ const pollOcrJob = async (jobId, onUpdate, timeoutMs = 3 * 60 * 1000) => {
       data = await api(`/api/ocr_job?id=${encodeURIComponent(jobId)}`);
       readErrors = 0;
     } catch (_err) {
-      readErrors += 1;
-      if (readErrors >= 5) {
-        throw new Error("Fallo al consultar el estado OCR.");
+      const status = Number(_err?.status || 0) || 0;
+      const transient = status === 0 || status === 502 || status === 503 || status === 504;
+      if (!transient) {
+        readErrors += 1;
+        if (readErrors >= 3) {
+          throw new Error("Fallo al consultar el estado OCR.");
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      delay = Math.min(delay + 400, 5000);
+      delay = Math.min(delay + (transient ? 600 : 400), 8000);
       continue;
     }
     const status = data.status === "pending" ? "queued" : data.status;

@@ -46093,7 +46093,16 @@ class Handler(BaseHTTPRequestHandler):
                     self._ensure_db_ready()
                 self.handle_api(parsed)
             except DbUnavailableError as exc:
-                json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
+                try:
+                    Handler._trigger_db_bootstrap_async(self.db_path)
+                except Exception:
+                    pass
+                json_response(
+                    self,
+                    {"error": "DB no disponible", "detail": "Reintenta en unos segundos."},
+                    status=503,
+                    extra_headers=[("Retry-After", "2")],
+                )
             except Exception as exc:
                 # Backpressure: pool saturado -> 503 con Retry-After (api() lo reintenta y no ensucia UI).
                 try:
@@ -46508,9 +46517,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         if parsed.path not in (
-	            "/api/movimientos",
-	            "/api/hipotecas",
-	            "/api/hipotecas/firmar",
+            "/api/movimientos",
+            "/api/hipotecas",
+            "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/gestoria",
@@ -46602,10 +46611,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fiscal_scenarios_list",
             "/api/fiscal_scenario_upsert",
             "/api/fiscal_scenario_delete",
-            "/api/fiscal_venta_pdf",
-            "/api/s3_presign",
-            "/api/ingest_facturas_presign",
-            "/api/ingest_facturas_ocr",
+	            "/api/fiscal_venta_pdf",
+	            "/api/s3_upload_base64",
+	            "/api/s3_presign",
+	            "/api/ingest_facturas_presign",
+	            "/api/ingest_facturas_ocr",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
@@ -46766,7 +46776,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._ensure_db_ready()
         except DbUnavailableError as exc:
-            json_response(self, {"error": "DB no disponible", "detail": str(exc)}, status=503)
+            try:
+                Handler._trigger_db_bootstrap_async(self.db_path)
+            except Exception:
+                pass
+            json_response(
+                self,
+                {"error": "DB no disponible", "detail": str(exc)},
+                status=503,
+                extra_headers=[("Retry-After", "2")],
+            )
             return
         except Exception as exc:
             try:
@@ -48993,6 +49012,60 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": str(exc)}, status=400)
                 return
             json_response(self, {"ok": True, **(result or {})})
+            return
+
+        if parsed.path == "/api/s3_upload_base64":
+            filename = str(payload.get("filename") or "archivo.pdf").strip() or "archivo.pdf"
+            content_type = str(payload.get("content_type") or payload.get("contentType") or "").strip() or "application/octet-stream"
+            prefix = str(payload.get("prefix") or "docs").strip() or "docs"
+            file_base64 = payload.get("file_base64") or payload.get("fileBase64") or payload.get("data") or ""
+            if not file_base64:
+                json_response(self, {"error": "file_base64 requerido"}, status=400)
+                return
+            try:
+                raw = str(file_base64).strip()
+                if "base64," in raw:
+                    raw = raw.split("base64,", 1)[1]
+                blob = base64.b64decode(raw.encode("utf-8"), validate=False)
+            except Exception:
+                json_response(self, {"error": "file_base64 inválido"}, status=400)
+                return
+            if len(blob) <= 0:
+                json_response(self, {"error": "file_base64 vacío"}, status=400)
+                return
+            if len(blob) > 25 * 1024 * 1024:
+                json_response(self, {"error": "Archivo demasiado grande (máx 25MB)"}, status=413)
+                return
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, region = s3_config()
+            key = s3_safe_key(prefix, filename)
+            try:
+                put_params = {"Bucket": bucket, "Key": key, "Body": blob}
+                if content_type:
+                    put_params["ContentType"] = content_type
+                client.put_object(**put_params)
+            except Exception:
+                json_response(self, {"error": "No se pudo subir el archivo a S3"}, status=502)
+                return
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                _s3_grant_key(session, key, conn=conn)
+            except Exception:
+                pass
+            json_response(self, {"ok": True, "key": key, "public_url": public_url})
             return
 
         if parsed.path == "/api/s3_presign":
@@ -69723,16 +69796,27 @@ class Handler(BaseHTTPRequestHandler):
             if not job_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            ocr_conn = open_sqlite_conn(self.ocr_db_path, with_row_factory=True)
-            self._track_conn(ocr_conn)
-            row = ocr_conn.execute(
-                """
-                SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
-                FROM ocr_jobs
-                WHERE id = ?
-                """,
-                (job_id,),
-            ).fetchone()
+            try:
+                ocr_conn = open_sqlite_conn(self.ocr_db_path, with_row_factory=True)
+                self._track_conn(ocr_conn)
+                row = ocr_conn.execute(
+                    """
+                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
+                    FROM ocr_jobs
+                    WHERE id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
+            except Exception as exc:
+                # Robustez: si la DB de OCR está bloqueada/no disponible, no devolvemos 500/502 (proxy),
+                # devolvemos 503 para que el frontend aplique backoff en el polling.
+                json_response(
+                    self,
+                    {"error": "OCR temporalmente no disponible", "detail": Handler._safe_exc_detail(exc)},
+                    status=503,
+                    extra_headers=[("Retry-After", "2"), ("Cache-Control", "no-store")],
+                )
+                return
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
@@ -69754,6 +69838,7 @@ class Handler(BaseHTTPRequestHandler):
                     "started_at": row["started_at"],
                     "finished_at": row["finished_at"],
                 },
+                extra_headers=[("Cache-Control", "no-store")],
             )
             return
 
