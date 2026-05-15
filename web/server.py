@@ -2704,6 +2704,30 @@ def seguro_estado_requires_pdf(value: object) -> bool:
     return False
 
 
+def resolve_seguro_pdf_from_movimientos(conn, seguro_id: str) -> tuple[str, str]:
+    """
+    Devuelve (doc_key, doc_url) desde `seguros_movimientos` si existe algún PDF asociado.
+    Útil cuando el PDF se adjuntó como movimiento pero aún no está reflejado en `seguros.poliza_key/url`.
+    """
+    try:
+        row = conn.execute(
+            """
+            SELECT COALESCE(doc_key, '') AS doc_key, COALESCE(doc_url, '') AS doc_url
+            FROM seguros_movimientos
+            WHERE seguro_id = ?
+              AND (COALESCE(TRIM(doc_key), '') <> '' OR COALESCE(TRIM(doc_url), '') <> '')
+            ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC
+            LIMIT 1
+            """,
+            (seguro_id,),
+        ).fetchone()
+        if not row:
+            return ("", "")
+        return (str(row["doc_key"] or "").strip(), str(row["doc_url"] or "").strip())
+    except Exception:
+        return ("", "")
+
+
 def can_transition_seguro_estado(current_value, target_value):
     return runtime_can_transition_seguro_estado(current_value, target_value)
 
@@ -58514,12 +58538,23 @@ class Handler(BaseHTTPRequestHandler):
             next_key = str(updates.get("poliza_key", current_row["poliza_key"]) or "").strip()
             next_url = str(updates.get("poliza_url", current_row["poliza_url"]) or "").strip()
             if seguro_estado_requires_pdf(next_estado) and (not next_key) and (not next_url):
-                json_response(
-                    self,
-                    {"error": "Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor."},
-                    status=400,
-                )
-                return
+                # Compat: hay flujos donde el PDF se adjunta como movimiento (seguros_movimientos)
+                # pero no se rellenan aún `seguros.poliza_key/url`. Si existe, lo usamos y backfill.
+                mov_key, mov_url = resolve_seguro_pdf_from_movimientos(conn, record_id)
+                if mov_key or mov_url:
+                    next_key = next_key or mov_key
+                    next_url = next_url or mov_url
+                    if "poliza_key" not in updates and not str(current_row["poliza_key"] or "").strip() and mov_key:
+                        updates["poliza_key"] = mov_key
+                    if "poliza_url" not in updates and not str(current_row["poliza_url"] or "").strip() and mov_url:
+                        updates["poliza_url"] = mov_url
+                if (not next_key) and (not next_url):
+                    json_response(
+                        self,
+                        {"error": "Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor."},
+                        status=400,
+                    )
+                    return
             if "tipo_vigencia" in updates or "ramo" in updates:
                 updates["tipo_vigencia"] = infer_tipo_vigencia(
                     updates.get("ramo", current_row["ramo"]),
