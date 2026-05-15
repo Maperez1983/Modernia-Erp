@@ -50899,7 +50899,16 @@ const loadCrmAgenda = () => {
   }
 
   const params = new URLSearchParams({
-    servicio: "inmobiliaria",
+    servicio: (() => {
+      // Agenda compartida entre verticales CRM: decide el servicio por el contexto actual.
+      // Mantener mapeo estable con lo que el backend espera en `acciones.servicio`.
+      const crmKey = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+      if (crmKey === "seguros") return "seguros";
+      if (crmKey === "fin" || crmKey === "financiaciones") return "financiaciones";
+      if (crmKey === "gestoria") return "gestoria";
+      // Inmo (por defecto)
+      return "inmobiliaria";
+    })(),
     // Agenda requiere más filas; usamos rango + limit alto.
     limit: "2000",
     order: "asc",
