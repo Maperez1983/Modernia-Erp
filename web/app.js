@@ -47755,6 +47755,10 @@ const resolveInmoScopeParams = () => {
     const ws = String(new URLSearchParams(window.location.search || "").get("workspace") || state.currentWorkspaceId || "").trim();
     if (ws) return { workspace_id: ws };
   } catch (e) {}
+  try {
+    const ws = String(state.homeTimeStatus?.workspace_id || "").trim();
+    if (ws) return { workspace_id: ws };
+  } catch (e) {}
   const empresa = resolveCrmInmoEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
   if (!empresaId) return null;
@@ -68983,6 +68987,17 @@ const init = async () => {
     state.tablas = tablas;
     state.resumen = resumen;
     state.homeTimeStatus = homeTimeStatus && homeTimeStatus.ok ? homeTimeStatus : null;
+    // Tenant: asegura workspace_id “activo” aunque el usuario entre por un deep-link sin `?workspace=...`.
+    // Esto afecta a módulos como Agenda (/api/acciones) que requieren scope por workspace.
+    try {
+      const wsFromStatus = String(state.homeTimeStatus?.workspace_id || "").trim();
+      if (wsFromStatus && !String(state.currentWorkspaceId || "").trim()) {
+        state.currentWorkspaceId = wsFromStatus;
+        try {
+          localStorage.setItem("crm.currentWorkspaceId", wsFromStatus);
+        } catch (e) {}
+      }
+    } catch (e) {}
     try {
       // Refresca el pill de usuario cuando llega RRHH (puede diferir del nombre del usuario si hay datos legacy).
       if (typeof setAuthUi === "function") setAuthUi(state.authUser);
