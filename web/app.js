@@ -62511,7 +62511,22 @@ const loadAcciones = (servicio, empresaId, container, infoEl) => {
   container.dataset.service = servicio || "";
   const params = new URLSearchParams({ servicio });
   if (isTenantWorkspaceMode()) {
-    if (state.currentWorkspaceId) params.set("workspace_id", state.currentWorkspaceId);
+    // En tenant, la agenda siempre debe ir acotada por workspace. En algunos flujos
+    // (deep-link / no admin) `state.currentWorkspaceId` puede no estar aún hidratado.
+    const ws =
+      String(state.currentWorkspaceId || "").trim()
+      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.homeTimeStatus?.workspace_id || "").trim()
+      || (() => {
+        try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
+      })();
+    if (ws) {
+      params.set("workspace_id", ws);
+    } else {
+      container.innerHTML = "<p class='muted'>Sin workspace.</p>";
+      infoEl.textContent = "";
+      return;
+    }
   } else {
     params.set("empresa_id", empresaId);
   }
