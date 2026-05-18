@@ -71379,9 +71379,18 @@ if (actionModalSave) {
     }
     const ctx = state.actionModalContext;
     if (ctx && typeof ctx === "object") {
+      // Al editar una cita existente, no debemos “pisar” relaciones (inmueble/related)
+      // con el contexto actual del módulo, porque puede reasignar la cita y hacer que
+      // el usuario perciba que “cambia otras” (al mover citas entre inmuebles).
       ["asesoramiento_id", "inmueble_id", "related_id", "related_tipo"].forEach((key) => {
         const value = ctx[key];
-        if (value !== undefined && value !== null && String(value).trim()) {
+        if (value === undefined || value === null) return;
+        if (!String(value).trim()) return;
+        if (!editId) {
+          payload[key] = value;
+          return;
+        }
+        if (payload[key] === undefined || payload[key] === null || !String(payload[key]).trim()) {
           payload[key] = value;
         }
       });
