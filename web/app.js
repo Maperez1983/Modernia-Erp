@@ -66006,13 +66006,19 @@ const loadGestoriaFact = () => {
 
 const loadAgendaGeneral = () => {
   if (!agendaGeneral) return;
+  // Por diseño: cada vertical tiene su propia agenda. La “agenda general” solo la dejamos
+  // disponible para usuarios privilegiados (dirección/superadmin) para visión transversal.
+  const authUser = getAuthScopeUser();
+  if (!authUser || !isPrivilegedUser(authUser)) {
+    agendaGeneral.innerHTML = "<p class='muted'>La agenda general está desactivada. Usa la agenda del servicio (Inmobiliaria/Seguros/Financiaciones/Gestoría).</p>";
+    return;
+  }
   const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   const fin = resolveCrmFinEmpresa();
   const tasks = [];
-  const user = getAuthScopeUser();
   const allowed = (state.currentUserServices && state.currentUserServices.length)
     ? state.currentUserServices
-    : expandServiceAliases(parseServiceList(user?.servicio || ""));
+    : expandServiceAliases(parseServiceList(authUser?.servicio || ""));
   const allowService = (value) => {
     if (!allowed.length) return true;
     return allowed.includes(normalizeSimple(value));
@@ -71441,7 +71447,12 @@ if (actionModalSave) {
             state.crmAgendaAnchorDay = String(payload.fecha || "").trim() || state.crmAgendaAnchorDay;
           }
         } catch (e) {}
-        loadAgendaGeneral();
+        try {
+          const u = getAuthScopeUser();
+          if (u && isPrivilegedUser(u)) {
+            loadAgendaGeneral();
+          }
+        } catch (e) {}
         if (service === "inmobiliaria") {
           loadCrmAgenda();
         }
