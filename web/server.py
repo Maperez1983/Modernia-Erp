@@ -40960,7 +40960,19 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                     continue
                 service_lines.extend(_pdf_wrap_lines(f"• {text}", width=104))
             if service_lines:
-                required_h = 64 + len(service_lines) * 22
+                # Altura dinámica robusta: evita que el texto "pise" otras secciones cuando el font/spacing cambia.
+                try:
+                    sample_box = draw.textbbox((0, 0), "Ag", font=font_table)
+                    line_h = max(18, int(sample_box[3] - sample_box[1])) + 6
+                except Exception:
+                    line_h = 22
+                # Evita que un listado enorme desborde la página (mejor truncar y dejar nota).
+                max_lines = 18
+                if len(service_lines) > max_lines:
+                    remaining = max(0, len(service_lines) - max_lines)
+                    service_lines = service_lines[:max_lines]
+                    service_lines.append(f"• … y {remaining} líneas más")
+                required_h = 64 + len(service_lines) * line_h
                 ensure_space(required_h + 24)
                 box3 = (margin_x, y, page_width - margin_x, y + required_h)
                 draw.rounded_rectangle(box3, radius=24, fill=(247, 248, 252), outline=border)
