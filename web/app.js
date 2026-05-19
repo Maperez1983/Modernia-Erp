@@ -193,7 +193,9 @@ const api = async (path) => {
       const error = new Error(safePath ? `${msg} · ${safePath}` : msg);
       error.status = res.status;
       error.data = data;
-      if (res.status === 401 || res.status === 403) {
+      // 401 = sesión caducada / no autenticado. 403 puede ser “sin permisos” para un recurso
+      // (muy común en modo workspace), y NO debe expulsar al usuario.
+      if (res.status === 401) {
         error.isAuthError = true;
         handleAuthExpired();
       }
