@@ -66009,7 +66009,10 @@ const loadAgendaGeneral = () => {
   const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   const fin = resolveCrmFinEmpresa();
   const tasks = [];
-  const allowed = state.currentUserServices || [];
+  const user = getAuthScopeUser();
+  const allowed = (state.currentUserServices && state.currentUserServices.length)
+    ? state.currentUserServices
+    : expandServiceAliases(parseServiceList(user?.servicio || ""));
   const allowService = (value) => {
     if (!allowed.length) return true;
     return allowed.includes(normalizeSimple(value));
@@ -66032,7 +66035,7 @@ const loadAgendaGeneral = () => {
     return;
   }
   agendaGeneral.dataset.readonly = "1";
-  Promise.all(tasks).then((responses) => {
+  Promise.all(tasks.map((t) => t.catch(() => ({ rows: [] })))).then((responses) => {
     const allRows = responses.flatMap((data) => data.rows || []);
     const events = buildAgendaEvents(allRows, "", "");
     renderAgendaCalendar(agendaGeneral, events, "Agenda general");
@@ -71454,15 +71457,21 @@ if (actionModalSave) {
         const fin = resolveCrmFinEmpresa();
         if (fincas) {
           const fincasId = resolveLegacyEmpresaId(fincas);
-          loadAcciones("gestoria", fincasId, gestoriaAgendaTable, gestoriaAgendaInfo);
-          loadAcciones("seguros", fincasId, segurosAgendaTable, segurosAgendaInfo);
+          if (userCanAccessService("gestoria")) {
+            loadAcciones("gestoria", fincasId, gestoriaAgendaTable, gestoriaAgendaInfo);
+          }
+          if (userCanAccessService("seguros")) {
+            loadAcciones("seguros", fincasId, segurosAgendaTable, segurosAgendaInfo);
+          }
         }
         if (fin) {
           const finId = resolveLegacyEmpresaId(fin);
-          loadAcciones("financiaciones", finId, finAgendaTable, finAgendaInfo);
-          loadFinWorkflowActions(finId);
-          if (payload.related_tipo === "hipoteca" && payload.related_id) {
-            loadFinHipotecaActions(finId);
+          if (userCanAccessService("financiaciones")) {
+            loadAcciones("financiaciones", finId, finAgendaTable, finAgendaInfo);
+            loadFinWorkflowActions(finId);
+            if (payload.related_tipo === "hipoteca" && payload.related_id) {
+              loadFinHipotecaActions(finId);
+            }
           }
         }
         if (state.currentClienteId) {
