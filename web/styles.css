@@ -8580,6 +8580,29 @@ body.crm-context-inmo .crm-resumen-compact-note {
   image-rendering: -webkit-optimize-contrast;
 }
 
+.form-grid.fincas-budget-grid #workspaceFincasBudgetServiciosIncluidos,
+.form-grid.fincas-budget-grid #workspaceFincasBudgetHero,
+.form-grid.fincas-budget-grid .form-actions {
+  grid-column: 1 / -1;
+}
+
+.budget-services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.budget-services-grid .inline-check {
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  line-height: 1.35;
+}
+
 #workspaceFincasBudgetQuickForm h4 {
   grid-column: 1 / -1;
   margin: 12px 0 -2px;
