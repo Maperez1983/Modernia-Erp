@@ -4742,6 +4742,21 @@ const getTenantWorkspaceIdFromUrl = () => {
   }
 };
 
+const resolveActiveTenantWorkspaceId = () => {
+  try {
+    const ws =
+      String(state.currentWorkspaceId || "").trim()
+      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.homeTimeStatus?.workspace_id || "").trim()
+      || (() => {
+        try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
+      })();
+    return ws;
+  } catch (_e) {
+    return "";
+  }
+};
+
 const shouldPreferTenantRouting = () => {
   // Si ya estamos en modo tenant/workspace o hay un workspace_id recordado, no debemos caer al modo global.
   if (isTenantWorkspaceMode && isTenantWorkspaceMode()) return true;
@@ -50840,7 +50855,7 @@ const loadCrmAgenda = () => {
   }
   ensureCrmAgendaSelectors().catch(() => {});
   const tenantMode = Boolean(isTenantWorkspaceMode && isTenantWorkspaceMode());
-  const workspaceId = tenantMode ? String(state.currentWorkspaceId || new URLSearchParams(window.location.search || "").get("workspace") || "").trim() : "";
+  const workspaceId = tenantMode ? resolveActiveTenantWorkspaceId() : "";
   const empresa = tenantMode ? null : resolveCrmInmoEmpresa();
   if (!workspaceId && !empresa) {
     if (crmAgendaTable) crmAgendaTable.innerHTML = "<p class='muted'>Sin workspace/empresa.</p>";
@@ -50948,7 +50963,7 @@ const ensureCrmAgendaSelectors = async () => {
   }
   if (crmAgendaInmueble) {
     const tenantMode = Boolean(isTenantWorkspaceMode && isTenantWorkspaceMode());
-    const workspaceId = tenantMode ? String(state.currentWorkspaceId || new URLSearchParams(window.location.search || "").get("workspace") || "").trim() : "";
+    const workspaceId = tenantMode ? resolveActiveTenantWorkspaceId() : "";
     const empresa = tenantMode ? null : resolveCrmInmoEmpresa();
     if (!workspaceId && !empresa) return;
     const params = new URLSearchParams({ tabla: "inmuebles", include_id: "1", limit: "400" });
