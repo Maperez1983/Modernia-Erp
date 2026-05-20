@@ -40957,6 +40957,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         addr_for_map = str(calc.get("comunidad_direccion") or "").strip()
         photo_key = str(calc.get("edificio_foto_key") or "").strip()
         map_url = ""
+        map_img = None
         qr_img = None
         if addr_for_map:
             map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
@@ -40966,6 +40967,34 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
             except Exception:
                 qr_img = None
+            # Intentamos incluir un "mapa" visible en el PDF, no solo el QR.
+            # Usamos geocodificación ya existente + staticmap de OpenStreetMap (server-side, sin CORS).
+            try:
+                coords = fetch_geocode_coordinates(addr_for_map)
+                if coords and coords.get("ok"):
+                    lat = float(coords.get("lat"))
+                    lon = float(coords.get("lon"))
+                    params = urllib.parse.urlencode(
+                        {
+                            "center": f"{lat},{lon}",
+                            "zoom": "16",
+                            "size": "660x210",
+                            "maptype": "mapnik",
+                            "markers": f"{lat},{lon},red-pushpin",
+                        }
+                    )
+                    req = urllib.request.Request(
+                        f"https://staticmap.openstreetmap.de/staticmap.php?{params}",
+                        headers={
+                            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as response:
+                        raw = response.read()
+                    if raw:
+                        map_img = Image.open(BytesIO(raw)).convert("RGB")
+            except Exception:
+                map_img = None
         building_photo = None
         if photo_key:
             try:
@@ -40974,7 +41003,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                     building_photo = Image.open(BytesIO(raw_bytes))
             except Exception:
                 building_photo = None
-        if qr_img or building_photo:
+        if qr_img or building_photo or map_img:
             ensure_space(330)
             box_media = (margin_x, y, page_width - margin_x, y + 300)
             draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
@@ -40984,7 +41013,20 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             photo_w, photo_h = 660, 210
             gap = 24
             qr_x = inner_left
-            if building_photo:
+            if map_img:
+                try:
+                    map_fit = ImageOps.fit(map_img, (photo_w, photo_h), method=Image.LANCZOS)
+                    image.paste(map_fit, (inner_left, inner_top))
+                    draw.rounded_rectangle(
+                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
+                        radius=20,
+                        outline=border,
+                        width=2,
+                    )
+                except Exception:
+                    map_img = None
+                qr_x = inner_left + photo_w + gap
+            elif building_photo:
                 try:
                     photo = building_photo.convert("RGB")
                     photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
