@@ -2157,6 +2157,11 @@ const workspaceFincasCommunityMap = document.getElementById("workspaceFincasComm
 const workspaceFincasCommunityBuildingPhoto = document.getElementById("workspaceFincasCommunityBuildingPhoto");
 const workspaceFincasCommunityBuildingPhotoPreview = document.getElementById("workspaceFincasCommunityBuildingPhotoPreview");
 const workspaceFincasCommunityBuildingPhotoStatus = document.getElementById("workspaceFincasCommunityBuildingPhotoStatus");
+const workspaceFincasCommunityFichaTitle = document.getElementById("workspaceFincasCommunityFichaTitle");
+const workspaceFincasCommunityFichaSubtitle = document.getElementById("workspaceFincasCommunityFichaSubtitle");
+const workspaceFincasCommunityFichaBackBtn = document.getElementById("workspaceFincasCommunityFichaBackBtn");
+const workspaceFincasCommunityFichaTabs = document.getElementById("workspaceFincasCommunityFichaTabs");
+const workspaceFincasCommunityFichaPanel = document.getElementById("workspaceFincasCommunityFichaPanel");
 	const workspaceFincasTabs = document.getElementById("workspaceFincasTabs");
 
 	let fiscalWizardActivePreset = null;
@@ -19901,6 +19906,665 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
   }
 };
 
+const openWorkspaceFincasCommunityFicha = (record) => {
+  if (!record) return;
+  state.workspaceFincasSelectedCommunityId = String(record.id || "").trim();
+  state.workspaceFincasCommunityFichaTab = "datos";
+  setWorkspaceFincasTab("comunidad_ficha");
+};
+
+const renderWorkspaceFincasCommunityFicha = async () => {
+  if (!workspaceFincasCommunityFichaPanel || !workspaceFincasCommunityFichaTabs) return;
+  const comunidadId = String(state.workspaceFincasSelectedCommunityId || "").trim();
+  if (!comunidadId) {
+    workspaceFincasCommunityFichaPanel.innerHTML = "<p class='muted'>Selecciona una comunidad.</p>";
+    return;
+  }
+  const communities = Array.isArray((state.currentWorkspaceData || {}).fincasCommunities) ? (state.currentWorkspaceData || {}).fincasCommunities : [];
+  let record = communities.find((row) => String(row.id || "") === comunidadId) || null;
+  if (!record) {
+    try {
+      await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+      const refreshed = Array.isArray((state.currentWorkspaceData || {}).fincasCommunities) ? (state.currentWorkspaceData || {}).fincasCommunities : [];
+      record = refreshed.find((row) => String(row.id || "") === comunidadId) || null;
+    } catch (e) {}
+  }
+  if (!record) {
+    workspaceFincasCommunityFichaPanel.innerHTML = "<p class='muted'>Comunidad no encontrada.</p>";
+    return;
+  }
+  if (workspaceFincasCommunityFichaTitle) workspaceFincasCommunityFichaTitle.textContent = record.nombre || "Ficha de comunidad";
+  if (workspaceFincasCommunityFichaSubtitle) workspaceFincasCommunityFichaSubtitle.textContent = record.direccion || record.empresa_nombre || "";
+
+  if (!window.__fincasCommunityFichaBound) {
+    window.__fincasCommunityFichaBound = true;
+    if (workspaceFincasCommunityFichaBackBtn) {
+      workspaceFincasCommunityFichaBackBtn.addEventListener("click", () => {
+        state.workspaceFincasSelectedCommunityId = "";
+        state.workspaceFincasCommunityFichaTab = "datos";
+        setWorkspaceFincasTab("comunidades");
+        try {
+          workspaceFincasCommunityList?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        } catch (e) {}
+      });
+    }
+    workspaceFincasCommunityFichaTabs.querySelectorAll("[data-community-ficha-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.workspaceFincasCommunityFichaTab = String(btn.dataset.communityFichaTab || "datos");
+        void renderWorkspaceFincasCommunityFicha();
+      });
+    });
+  }
+
+  const tab = String(state.workspaceFincasCommunityFichaTab || "datos").trim() || "datos";
+  workspaceFincasCommunityFichaTabs.querySelectorAll("[data-community-ficha-tab]").forEach((btn) => {
+    btn.classList.toggle("active", String(btn.dataset.communityFichaTab || "") === tab);
+  });
+
+  const workspaceId = state.currentWorkspaceId;
+  const empresaId = String(record.empresa_id || state.currentWorkspaceCompanyId || "").trim();
+
+  const providersAll = Array.isArray((state.currentWorkspaceData || {}).fincasProviders) ? (state.currentWorkspaceData || {}).fincasProviders : [];
+  const incidentsAll = Array.isArray((state.currentWorkspaceData || {}).fincasIncidents) ? (state.currentWorkspaceData || {}).fincasIncidents : [];
+  const ledgerAll = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
+  const providers = providersAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+  const incidents = incidentsAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+  const ledger = ledgerAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+
+  if (tab === "datos") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <form class="form-grid" data-community-ficha-datos-form data-money-euro="1">
+        <input type="hidden" name="id" value="${escapeHtml(String(record.id || ""))}" />
+        <label class="span-all">
+          Nombre
+          <input name="nombre" value="${escapeHtml(String(record.nombre || ""))}" />
+        </label>
+        <label>
+          CIF
+          <input name="cif" value="${escapeHtml(String(record.cif || ""))}" />
+        </label>
+        <label>
+          Ref. catastral
+          <input name="referencia_catastral" value="${escapeHtml(String(record.referencia_catastral || ""))}" />
+        </label>
+        <label class="span-all">
+          Dirección
+          <input name="direccion" value="${escapeHtml(String(record.direccion || ""))}" />
+        </label>
+        <label>
+          Presidente
+          <input name="presidente" value="${escapeHtml(String(record.presidente || ""))}" />
+        </label>
+        <label>
+          Secretario
+          <input name="secretario" value="${escapeHtml(String(record.secretario || ""))}" />
+        </label>
+        <label>
+          Estado
+          <select name="estado">
+            ${["Activa","En implantación","Pausada","Archivada"].map((v) => `<option value="${v}" ${String(record.estado||"Activa")===v?"selected":""}>${v}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Viviendas
+          <input name="num_vecinos" inputmode="numeric" value="${escapeHtml(String(record.num_vecinos ?? ""))}" />
+        </label>
+        <label>
+          Locales
+          <input name="num_locales" inputmode="numeric" value="${escapeHtml(String(record.num_locales ?? ""))}" />
+        </label>
+        <label>
+          Trasteros
+          <input name="num_trasteros" inputmode="numeric" value="${escapeHtml(String(record.num_trasteros ?? ""))}" />
+        </label>
+        <label>
+          Aparcamientos
+          <input name="num_aparcamientos" inputmode="numeric" value="${escapeHtml(String(record.num_aparcamientos ?? ""))}" />
+        </label>
+        <label>
+          Cuota mensual
+          <input name="cuota_mensual" inputmode="decimal" value="${escapeHtml(String(record.cuota_mensual ?? ""))}" />
+        </label>
+        <div class="muted span-all" data-community-ficha-status></div>
+        <div class="form-actions span-all">
+          <button type="submit">Guardar</button>
+        </div>
+      </form>
+    `;
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-community-ficha-datos-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-community-ficha-status]");
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.workspace_id = workspaceId;
+        payload.empresa_id = empresaId;
+        const res = await fetch("/api/workspace_fincas_comunidades", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        void renderWorkspaceFincasCommunityFicha();
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "vecinos") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="workspace-two-cols">
+        <div>
+          <h4>Vecinos</h4>
+          <div class="muted" data-vecinos-status>Cargando...</div>
+          <div data-vecinos-list></div>
+        </div>
+        <div>
+          <h4 data-vecino-form-title>Nuevo vecino</h4>
+          <form class="form-grid" data-vecino-form>
+            <input type="hidden" name="id" value="" />
+            <label class="span-all">Nombre <input name="nombre" /></label>
+            <label>NIF <input name="nif" /></label>
+            <label>Piso <input name="piso" /></label>
+            <label>Teléfono <input name="telefono" /></label>
+            <label>Email <input name="email" /></label>
+            <label>Coeficiente <input name="coeficiente" inputmode="decimal" /></label>
+            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <div class="muted span-all" data-vecino-status></div>
+            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+          </form>
+        </div>
+      </div>
+    `;
+    const listWrap = workspaceFincasCommunityFichaPanel.querySelector("[data-vecinos-list]");
+    const listStatus = workspaceFincasCommunityFichaPanel.querySelector("[data-vecinos-status]");
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-status]");
+    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-form-title]");
+    const loadVecinos = async () => {
+      try {
+        if (listStatus) listStatus.textContent = "Cargando...";
+        const data = await api(`/api/workspace_fincas_vecinos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`);
+        const items = Array.isArray(data?.rows) ? data.rows : [];
+        if (!items.length) {
+          if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin vecinos todavía.</p>";
+          if (listStatus) listStatus.textContent = "";
+          return items;
+        }
+        if (listWrap) {
+          listWrap.innerHTML = `
+            <div class="workspace-billing-list">
+              ${items.map((v) => `
+                <div class="workspace-billing-row">
+                  <div>
+                    <strong>${escapeHtml(v.nombre || "-")}</strong>
+                    <div class="muted">${escapeHtml([v.piso, v.nif].filter(Boolean).join(" · ") || "-")}</div>
+                  </div>
+                  <div class="workspace-billing-meta">
+                    <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          `;
+        }
+        if (listStatus) listStatus.textContent = "";
+        (listWrap?.querySelectorAll("[data-vecino-edit]") || []).forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const id = String(btn.dataset.vecinoEdit || "");
+            const v = items.find((row) => String(row.id || "") === id);
+            if (!v) return;
+            form.querySelector('[name="id"]').value = v.id || "";
+            ["nombre","nif","piso","telefono","email","coeficiente","notas"].forEach((k) => {
+              const el = form.querySelector(`[name="${k}"]`);
+              if (el) el.value = v[k] ?? "";
+            });
+            if (titleEl) titleEl.textContent = "Editar vecino";
+          });
+        });
+        return items;
+      } catch (e) {
+        if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar vecinos.";
+        return [];
+      }
+    };
+    const reset = () => {
+      form.reset();
+      form.querySelector('[name="id"]').value = "";
+      if (titleEl) titleEl.textContent = "Nuevo vecino";
+    };
+    await loadVecinos();
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.workspace_id = workspaceId;
+        payload.comunidad_id = comunidadId;
+        const res = await fetch("/api/workspace_fincas_vecinos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        reset();
+        await loadVecinos();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "proveedores") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="workspace-two-cols">
+        <div>
+          <h4>Proveedores</h4>
+          ${providers.length ? `
+            <div class="workspace-billing-list">
+              ${providers.slice(0, 200).map((p) => `
+                <div class="workspace-billing-row">
+                  <div>
+                    <strong>${escapeHtml(p.nombre || "-")}</strong>
+                    <div class="muted">${escapeHtml(p.tipo_servicio || "-")}</div>
+                  </div>
+                  <div class="workspace-billing-meta">
+                    <span>${escapeHtml(p.estado || "Activo")}</span>
+                    <button type="button" class="secondary ghost" data-provider-edit="${escapeHtml(String(p.id || ""))}">Editar</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">Sin proveedores todavía.</p>`}
+        </div>
+        <div>
+          <h4 data-provider-form-title>Nuevo proveedor</h4>
+          <form class="form-grid" data-provider-form data-money-euro="1">
+            <input type="hidden" name="id" value="" />
+            <label class="span-all">Nombre <input name="nombre" /></label>
+            <label class="span-all">Tipo servicio <input name="tipo_servicio" /></label>
+            <label>Teléfono <input name="telefono" /></label>
+            <label>Email <input name="email" /></label>
+            <label>Estado
+              <select name="estado">
+                ${["Activo","Inactivo"].map((v) => `<option value="${v}">${v}</option>`).join("")}
+              </select>
+            </label>
+            <label>Tarifa mensual <input name="tarifa_mensual" inputmode="decimal" /></label>
+            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <div class="muted span-all" data-provider-status></div>
+            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+          </form>
+        </div>
+      </div>
+    `;
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-provider-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-provider-status]");
+    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-provider-form-title]");
+    const reset = () => {
+      form.reset();
+      form.querySelector('[name="id"]').value = "";
+      if (titleEl) titleEl.textContent = "Nuevo proveedor";
+    };
+    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-provider-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = String(btn.dataset.providerEdit || "");
+        const p = providers.find((row) => String(row.id || "") === id);
+        if (!p) return;
+        form.querySelector('[name="id"]').value = p.id || "";
+        ["nombre","tipo_servicio","telefono","email","estado","tarifa_mensual","notas"].forEach((k) => {
+          const el = form.querySelector(`[name="${k}"]`);
+          if (el) el.value = p[k] ?? "";
+        });
+        if (titleEl) titleEl.textContent = "Editar proveedor";
+        if (statusEl) statusEl.textContent = "";
+      });
+    });
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.workspace_id = workspaceId;
+        payload.comunidad_id = comunidadId;
+        payload.empresa_id = empresaId;
+        const res = await fetch("/api/workspace_fincas_proveedores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await loadWorkspaceDetail(workspaceId);
+        reset();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        void renderWorkspaceFincasCommunityFicha();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "incidencias") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="workspace-two-cols">
+        <div>
+          <h4>Incidencias</h4>
+          ${incidents.length ? `
+            <div class="workspace-billing-list">
+              ${incidents.slice(0, 200).map((i) => `
+                <div class="workspace-billing-row">
+                  <div>
+                    <strong>${escapeHtml(i.titulo || "-")}</strong>
+                    <div class="muted">${escapeHtml(i.estado || "Abierta")} · ${escapeHtml(i.prioridad || "Normal")}</div>
+                  </div>
+                  <div class="workspace-billing-meta">
+                    <span>${escapeHtml(i.fecha_apertura || "")}</span>
+                    <button type="button" class="secondary ghost" data-incident-edit="${escapeHtml(String(i.id || ""))}">Editar</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">Sin incidencias todavía.</p>`}
+        </div>
+        <div>
+          <h4 data-incident-form-title>Nueva incidencia</h4>
+          <form class="form-grid" data-incident-form data-money-euro="1">
+            <input type="hidden" name="id" value="" />
+            <label class="span-all">Título <input name="titulo" /></label>
+            <label class="span-all">Descripción <textarea name="descripcion" rows="3"></textarea></label>
+            <label>Prioridad
+              <select name="prioridad">
+                ${["Baja","Normal","Alta","Urgente"].map((v) => `<option value="${v}" ${v==="Normal"?"selected":""}>${v}</option>`).join("")}
+              </select>
+            </label>
+            <label>Estado
+              <select name="estado">
+                ${["Abierta","En curso","Resuelta","Cerrada"].map((v) => `<option value="${v}" ${v==="Abierta"?"selected":""}>${v}</option>`).join("")}
+              </select>
+            </label>
+            <label class="span-all">Proveedor
+              <select name="proveedor_id">
+                <option value="">(Sin proveedor)</option>
+                ${providers.map((p) => `<option value="${escapeHtml(String(p.id || ""))}">${escapeHtml(p.nombre || "-")}</option>`).join("")}
+              </select>
+            </label>
+            <label>Fecha apertura <input type="date" name="fecha_apertura" value="${new Date().toISOString().slice(0,10)}" /></label>
+            <label>Coste estimado <input name="coste_estimado" inputmode="decimal" /></label>
+            <label class="span-all">Responsable <input name="responsable" /></label>
+            <div class="muted span-all" data-incident-status></div>
+            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+          </form>
+        </div>
+      </div>
+    `;
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-status]");
+    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-form-title]");
+    const reset = () => {
+      form.reset();
+      form.querySelector('[name="id"]').value = "";
+      const dateEl = form.querySelector('[name="fecha_apertura"]');
+      if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+      if (titleEl) titleEl.textContent = "Nueva incidencia";
+    };
+    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-incident-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = String(btn.dataset.incidentEdit || "");
+        const i = incidents.find((row) => String(row.id || "") === id);
+        if (!i) return;
+        form.querySelector('[name="id"]').value = i.id || "";
+        ["titulo","descripcion","prioridad","estado","proveedor_id","fecha_apertura","coste_estimado","responsable"].forEach((k) => {
+          const el = form.querySelector(`[name="${k}"]`);
+          if (el) el.value = i[k] ?? "";
+        });
+        if (titleEl) titleEl.textContent = "Editar incidencia";
+        if (statusEl) statusEl.textContent = "";
+      });
+    });
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.workspace_id = workspaceId;
+        payload.comunidad_id = comunidadId;
+        const res = await fetch("/api/workspace_fincas_incidencias", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await loadWorkspaceDetail(workspaceId);
+        reset();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        void renderWorkspaceFincasCommunityFicha();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "contabilidad") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="workspace-two-cols">
+        <div>
+          <h4>Contabilidad</h4>
+          ${ledger.length ? `
+            <div class="workspace-billing-list">
+              ${ledger.slice(0, 200).map((l) => `
+                <div class="workspace-billing-row">
+                  <div>
+                    <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+                    <div class="muted">${escapeHtml(l.tipo || "-")} · ${escapeHtml(l.fecha || "-")}</div>
+                  </div>
+                  <div class="workspace-billing-meta">
+                    <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+                    <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">Sin movimientos todavía.</p>`}
+        </div>
+        <div>
+          <h4 data-ledger-form-title>Nuevo movimiento</h4>
+          <form class="form-grid" data-ledger-form data-money-euro="1">
+            <input type="hidden" name="id" value="" />
+            <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
+            <label>Tipo
+              <select name="tipo">
+                <option value="Gasto">Gasto</option>
+                <option value="Ingreso">Ingreso</option>
+              </select>
+            </label>
+            <label class="span-all">Concepto <input name="concepto" /></label>
+            <label>Importe <input name="importe" inputmode="decimal" /></label>
+            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <div class="muted span-all" data-ledger-status></div>
+            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+          </form>
+        </div>
+      </div>
+    `;
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-status]");
+    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form-title]");
+    const reset = () => {
+      form.reset();
+      form.querySelector('[name="id"]').value = "";
+      const dateEl = form.querySelector('[name="fecha"]');
+      if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+      if (titleEl) titleEl.textContent = "Nuevo movimiento";
+    };
+    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = String(btn.dataset.ledgerEdit || "");
+        const l = ledger.find((row) => String(row.id || "") === id);
+        if (!l) return;
+        form.querySelector('[name="id"]').value = l.id || "";
+        ["fecha","tipo","concepto","importe","notas"].forEach((k) => {
+          const el = form.querySelector(`[name="${k}"]`);
+          if (el) el.value = l[k] ?? "";
+        });
+        if (titleEl) titleEl.textContent = "Editar movimiento";
+        if (statusEl) statusEl.textContent = "";
+      });
+    });
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.workspace_id = workspaceId;
+        payload.comunidad_id = comunidadId;
+        const res = await fetch("/api/workspace_fincas_contabilidad", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await refreshWorkspaceFincasLedger({ force: true, silent: true });
+        reset();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        void renderWorkspaceFincasCommunityFicha();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "documentos") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="workspace-two-cols">
+        <div>
+          <h4>Documentación</h4>
+          <div class="muted" data-docs-status>Cargando...</div>
+          <div data-docs-list></div>
+        </div>
+        <div>
+          <h4>Subir documento</h4>
+          <form class="form-grid" data-doc-form>
+            <label class="span-all">Título <input name="titulo" /></label>
+            <label>Tipo <input name="tipo" /></label>
+            <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
+            <label class="span-all">Archivo <input type="file" name="file" /></label>
+            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <div class="muted span-all" data-doc-status></div>
+            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+          </form>
+        </div>
+      </div>
+    `;
+    const listWrap = workspaceFincasCommunityFichaPanel.querySelector("[data-docs-list]");
+    const listStatus = workspaceFincasCommunityFichaPanel.querySelector("[data-docs-status]");
+    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-doc-form]");
+    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-doc-status]");
+    const loadDocs = async () => {
+      try {
+        if (listStatus) listStatus.textContent = "Cargando...";
+        const data = await api(`/api/workspace_fincas_documentos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`);
+        const items = Array.isArray(data?.rows) ? data.rows : [];
+        if (!items.length) {
+          if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin documentos todavía.</p>";
+          if (listStatus) listStatus.textContent = "";
+          return items;
+        }
+        if (listWrap) {
+          listWrap.innerHTML = `
+            <div class="workspace-billing-list">
+              ${items.map((d) => {
+                const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(d.doc_url)}" target="_blank" rel="noreferrer">Abrir</a>` : "";
+                const meta = [d.tipo, d.fecha].filter(Boolean).join(" · ");
+                return `
+                  <div class="workspace-billing-row">
+                    <div>
+                      <strong>${escapeHtml(d.titulo || "-")}</strong>
+                      <div class="muted">${escapeHtml(meta || "-")}</div>
+                    </div>
+                    <div class="workspace-billing-meta">
+                      ${link}
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          `;
+        }
+        if (listStatus) listStatus.textContent = "";
+        return items;
+      } catch (e) {
+        if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar documentos.";
+        return [];
+      }
+    };
+    await loadDocs();
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        if (statusEl) statusEl.textContent = "Subiendo...";
+        const fd = new FormData(form);
+        const titulo = String(fd.get("titulo") || "").trim();
+        if (!titulo) throw new Error("Título requerido.");
+        let doc_key = "";
+        let doc_url = "";
+        const file = form.querySelector('[name="file"]')?.files?.[0] || null;
+        if (file) {
+          const upload = await uploadFileToS3(file, "workspace", statusEl);
+          doc_key = upload?.key || "";
+          doc_url = upload?.public_url || "";
+        }
+        const payload = {
+          workspace_id: workspaceId,
+          comunidad_id: comunidadId,
+          titulo,
+          tipo: String(fd.get("tipo") || "").trim(),
+          fecha: String(fd.get("fecha") || "").trim(),
+          notas: String(fd.get("notas") || "").trim(),
+          doc_key,
+          doc_url,
+        };
+        const res = await fetch("/api/workspace_fincas_documentos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        form.reset();
+        const dateEl = form.querySelector('[name="fecha"]');
+        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+        await loadDocs();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+      }
+    };
+    return;
+  }
+
+  workspaceFincasCommunityFichaPanel.innerHTML = "<p class='muted'>Pestaña no disponible.</p>";
+};
+
 const openFincasCommunityFichaModal = (record) => {
   if (!record || !state.currentWorkspaceId) return;
   let modal = document.getElementById("fincasCommunityFichaModal");
@@ -20702,7 +21366,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
   workspaceFincasCommunityList.querySelectorAll("[data-community-open]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityOpen || ""));
-      if (record) openFincasCommunityFichaModal(record);
+      if (record) openWorkspaceFincasCommunityFicha(record);
     });
   });
   workspaceFincasCommunityList.querySelectorAll("[data-community-edit]").forEach((button) => {
@@ -20919,7 +21583,7 @@ const renderWorkspaceFincasMeetingList = (rows = []) => {
 
 const normalizeWorkspaceFincasTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["dashboard", "comunidades", "incidencias", "proveedores", "juntas", "contabilidad", "presupuestos"].includes(key)) return key;
+  if (["dashboard", "comunidades", "comunidad_ficha", "incidencias", "proveedores", "juntas", "contabilidad", "presupuestos"].includes(key)) return key;
   return "dashboard";
 };
 
@@ -21103,6 +21767,10 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  try {
+    const fichaBtn = workspaceFincasTabs?.querySelector?.('[data-fincas-tab-btn="comunidad_ficha"]');
+    if (fichaBtn) fichaBtn.classList.toggle("hidden", normalized !== "comunidad_ficha");
+  } catch (e) {}
   if (normalized === "dashboard") {
     void refreshWorkspaceFincasCommunities({ silent: true, force: true });
     renderWorkspaceFincasDashboard();
@@ -21142,6 +21810,12 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
         })
         .catch(() => {});
     }
+  }
+
+  if (normalized === "comunidad_ficha") {
+    try {
+      renderWorkspaceFincasCommunityFicha();
+    } catch (e) {}
   }
 };
 

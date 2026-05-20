@@ -2342,6 +2342,12 @@
 	              </span>
 	              <span class="tc-mod-label">Presup.</span>
 	            </button>
+	            <button class="tab tc-module hidden" type="button" data-fincas-tab-btn="comunidad_ficha" title="Ficha comunidad">
+	              <span class="tc-mod-ico" aria-hidden="true">
+	                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	              </span>
+	              <span class="tc-mod-label">Ficha</span>
+	            </button>
 	          </div>
         </div>
 
@@ -2653,6 +2659,27 @@
 	              </div>
             </form>
             <div id="workspaceFincasCommunityList"></div>
+          </div>
+        </div>
+
+        <div class="workspace-central-layout crm-workspace-view hidden" data-workspace-view="fincas" data-fincas-tab="comunidad_ficha">
+          <div class="form-card">
+            <div class="section-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;">
+              <div style="flex:1;">
+                <h3 id="workspaceFincasCommunityFichaTitle">Ficha de comunidad</h3>
+                <p class="muted" id="workspaceFincasCommunityFichaSubtitle"></p>
+              </div>
+              <button type="button" class="secondary ghost" id="workspaceFincasCommunityFichaBackBtn">Volver</button>
+            </div>
+            <div class="crm-workspace-tabs" style="margin-top: 8px; flex-wrap: wrap;" id="workspaceFincasCommunityFichaTabs">
+              <button class="tab active" type="button" data-community-ficha-tab="datos">Datos</button>
+              <button class="tab" type="button" data-community-ficha-tab="vecinos">Vecinos</button>
+              <button class="tab" type="button" data-community-ficha-tab="proveedores">Proveedores</button>
+              <button class="tab" type="button" data-community-ficha-tab="documentos">Documentación</button>
+              <button class="tab" type="button" data-community-ficha-tab="incidencias">Incidencias</button>
+              <button class="tab" type="button" data-community-ficha-tab="contabilidad">Contabilidad</button>
+            </div>
+            <div id="workspaceFincasCommunityFichaPanel"></div>
           </div>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="incidencias">
