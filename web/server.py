@@ -70192,8 +70192,10 @@ class Handler(BaseHTTPRequestHandler):
                     offset_val = 0
                 if limit_val <= 0:
                     limit_val = 300
-                if limit_val > 2000:
-                    limit_val = 2000
+                # Agenda: permitir cargas grandes (p.ej. vista “todas”) sin forzar rango de fechas.
+                # Mantiene un techo para no tumbar la API.
+                if limit_val > 20000:
+                    limit_val = 20000
                 if offset_val < 0:
                     offset_val = 0
                 if offset_val > 100000:

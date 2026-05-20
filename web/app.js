@@ -50884,7 +50884,7 @@ const loadCrmAgenda = () => {
   const weekEnd = addDays(weekStart, 6);
 
   // Rango por defecto: para vistas calendario, pide exactamente lo visible (con 1 día de margen).
-  // Para vista lista, el rango depende del preset para no traer miles de filas.
+  // Para vista lista, por requisito se muestran todas las citas/acciones (sin rango de fechas).
   let rangeStart = null;
   let rangeEnd = null;
   if (view === "day") {
@@ -50897,23 +50897,8 @@ const loadCrmAgenda = () => {
     rangeStart = clampDay(addDays(monthStart, -1));
     rangeEnd = clampDay(addDays(monthEnd, 1));
   } else {
-    const presetRaw = normalizeSimple(crmAgendaPreset?.value || "citas_7dias") || "citas_7dias";
-    const preset = presetRaw.endsWith("_equipo") ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
-    if (preset === "citas_hoy" || preset === "actividades_hoy") {
-      rangeStart = clampDay(anchor);
-      rangeEnd = clampDay(anchor);
-    } else if (preset === "citas_7dias" || preset === "citas_7dias_caducadas") {
-      // UX: mostrar también las citas recientes pasadas, no solo “a futuro”.
-      rangeStart = clampDay(addDays(anchor, -7));
-      rangeEnd = clampDay(addDays(anchor, 7));
-    } else if (preset === "citas" || preset === "actividades" || preset === "actividades_caducadas") {
-      // Listados largos: 60 días hacia atrás/adelante para no truncar.
-      rangeStart = clampDay(addDays(anchor, -60));
-      rangeEnd = clampDay(addDays(anchor, 60));
-    } else {
-      rangeStart = clampDay(addDays(anchor, -30));
-      rangeEnd = clampDay(addDays(anchor, 30));
-    }
+    rangeStart = null;
+    rangeEnd = null;
   }
 
   const params = new URLSearchParams({
@@ -50927,8 +50912,8 @@ const loadCrmAgenda = () => {
       // Inmo (por defecto)
       return "inmobiliaria";
     })(),
-    // Agenda requiere más filas; usamos rango + limit alto.
-    limit: "2000",
+    // Agenda lista: mostrar todo (capado por backend).
+    limit: "20000",
     order: "asc",
   });
   if (workspaceId) {
