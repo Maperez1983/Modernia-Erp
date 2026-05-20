@@ -40737,14 +40737,67 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             cursor_x = bbox[2]
         return cursor_x
 
+    def _draw_small_icon(draw, x, y, kind, *, size=18, fill=(35, 40, 44)):
+        x = int(x)
+        y = int(y)
+        s = int(size)
+        try:
+            if kind == "house":
+                # Roof
+                draw.polygon([(x + s // 2, y), (x, y + s // 2), (x + s, y + s // 2)], fill=fill)
+                # Body
+                draw.rectangle((x + 3, y + s // 2, x + s - 3, y + s), outline=fill, width=2)
+                # Door
+                door_w = max(4, s // 4)
+                draw.rectangle((x + s // 2 - door_w // 2, y + s - (s // 3), x + s // 2 + door_w // 2, y + s), outline=fill, width=2)
+            elif kind == "shop":
+                draw.rectangle((x + 2, y + 4, x + s - 2, y + s), outline=fill, width=2)
+                draw.rectangle((x, y, x + s, y + 6), fill=fill)
+            elif kind == "box":
+                draw.rectangle((x + 2, y + 2, x + s - 2, y + s - 2), outline=fill, width=2)
+                draw.line((x + 2, y + s // 2, x + s - 2, y + s // 2), fill=fill, width=2)
+                draw.line((x + s // 2, y + 2, x + s // 2, y + s - 2), fill=fill, width=2)
+            elif kind == "car":
+                draw.rectangle((x + 3, y + s // 2, x + s - 3, y + s - 4), outline=fill, width=2)
+                draw.polygon([(x + 5, y + s // 2), (x + s // 2, y + 4), (x + s - 5, y + s // 2)], outline=fill, fill=None, width=2)
+                r = max(2, s // 7)
+                draw.ellipse((x + 5, y + s - 2 * r - 2, x + 5 + 2 * r, y + s - 2), outline=fill, width=2)
+                draw.ellipse((x + s - 5 - 2 * r, y + s - 2 * r - 2, x + s - 5, y + s - 2), outline=fill, width=2)
+        except Exception:
+            return
+
+    def _make_map_placeholder(width, height, *, title, subtitle):
+        img = Image.new("RGB", (int(width), int(height)), (246, 248, 250))
+        d = ImageDraw.Draw(img)
+        # Light "street" strokes
+        for i in range(0, img.width, 70):
+            d.line((i, 0, i + 70, img.height), fill=(232, 236, 240), width=3)
+        for j in range(0, img.height, 60):
+            d.line((0, j, img.width, j + 30), fill=(235, 239, 243), width=2)
+        # Pin
+        cx = img.width // 2
+        cy = img.height // 2 - 10
+        d.ellipse((cx - 12, cy - 12, cx + 12, cy + 12), fill=(215, 62, 54), outline=(180, 40, 35), width=2)
+        d.polygon([(cx, cy + 26), (cx - 10, cy + 8), (cx + 10, cy + 8)], fill=(215, 62, 54), outline=(180, 40, 35))
+        # Text
+        d.text((16, 14), title, fill=(35, 40, 44), font=_document_font(16, True))
+        d.text((16, 38), subtitle, fill=(88, 96, 104), font=_document_font(14, False))
+        return img
+
     def _paste_photo_cover(image, draw, photo_img, box):
         if not photo_img:
             return
         x0, y0, x1, y1 = [int(v) for v in box]
         try:
+            w = max(10, x1 - x0)
+            h = max(10, y1 - y0)
+            bg = Image.new("RGB", (w, h), "white")
             photo = photo_img.convert("RGB")
-            photo = ImageOps.fit(photo, (max(10, x1 - x0), max(10, y1 - y0)), method=Image.LANCZOS)
-            image.paste(photo, (x0, y0))
+            photo.thumbnail((w, h), Image.LANCZOS)
+            px = int((w - photo.width) / 2)
+            py = int((h - photo.height) / 2)
+            bg.paste(photo, (px, py))
+            image.paste(bg, (x0, y0))
         except Exception:
             return
         draw.rounded_rectangle((x0, y0, x1, y1), radius=22, outline=border, width=2)
@@ -40753,8 +40806,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         nonlocal page_index
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
-        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
+        header_h = 210
+        draw.rounded_rectangle((0, 0, page_width, header_h), radius=0, fill=primary)
+        draw.polygon([(page_width - 200, 0), (page_width, 0), (page_width, 160)], fill=accent)
         draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
         # Empresa en negrita (evita que pase desapercibida).
         draw.text(
@@ -40763,7 +40817,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             fill=(240, 246, 248),
             font=font_subtitle_bold,
         )
-        chip_y = top_margin + 116
+        chip_y = top_margin + 112
         chips = [
             f"REF {ref_label[:12]}",
             f"FECHA {budget.get('fecha') or '-'}",
@@ -40786,7 +40840,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
                 padding=14,
             )
-        current_y = 296
+        current_y = header_h + 36
         # Foto de equipo solo en la primera página del presupuesto (no en la portada especial de Fincas).
         if page_index == 0 and team_photo and servicio_key != "fincas":
             photo_y = 266
@@ -40944,10 +40998,10 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         letter_h = 470
         photo_h = 360
         gap = 22
+        # La carta va directamente "sobre el folio" (sin recuadro), para un look más editorial.
         letter_box = (margin_x, y_cover, page_width - margin_x, y_cover + letter_h)
-        cover_draw.rounded_rectangle(letter_box, radius=28, fill=(252, 252, 252), outline=border)
-        text_x = letter_box[0] + 34
-        text_y = letter_box[1] + 28
+        text_x = margin_x
+        text_y = y_cover
         for idx, line in enumerate(cuerpo):
             if not str(line).strip():
                 text_y += 16
@@ -40955,7 +41009,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             # Primer bloque (subtitle) más destacado.
             use_font = font_section if idx == 0 else font_table
             wrapped = _pdf_wrap_lines(line, width=98 if idx != 0 else 70)
-            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=use_font, spacing=6)
+            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=use_font, spacing=6, align="left")
             sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=use_font)
             text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
             if text_y > letter_box[3] - 26:
@@ -40963,12 +41017,18 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
 
         photo_y = letter_box[3] + gap
         photo_box = (margin_x, photo_y, page_width - margin_x, min(page_height - bottom_margin - 22, photo_y + photo_h))
-        cover_draw.rounded_rectangle(photo_box, radius=28, fill=(255, 255, 255), outline=border)
         if team_photo:
             try:
+                cover_draw.rounded_rectangle(photo_box, radius=28, fill=(255, 255, 255), outline=border)
+                w = max(10, photo_box[2] - photo_box[0] - 6)
+                h = max(10, photo_box[3] - photo_box[1] - 6)
+                bg = Image.new("RGB", (w, h), "white")
                 photo = team_photo.convert("RGB")
-                photo = ImageOps.fit(photo, (photo_box[2] - photo_box[0] - 6, photo_box[3] - photo_box[1] - 6), method=Image.LANCZOS)
-                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
+                photo.thumbnail((w, h), Image.LANCZOS)
+                px = int((w - photo.width) / 2)
+                py = int((h - photo.height) / 2)
+                bg.paste(photo, (px, py))
+                cover.paste(bg, (photo_box[0] + 3, photo_box[1] + 3))
             except Exception:
                 pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
@@ -40991,26 +41051,28 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
         draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
         base_y = box[1] + 58
-        base_x = box[0] + 24
+        cursor_x = box[0] + 24
+        icon_y = base_y - 2
+        icon_size = 18
+        sep = " · "
+        items = [
+            ("house", calc.get("num_vecinos") or 0),
+            ("shop", calc.get("num_locales") or 0),
+            ("box", calc.get("num_trasteros") or 0),
+            ("car", calc.get("num_aparcamientos") or 0),
+        ]
+        for idx, (kind, value) in enumerate(items):
+            _draw_small_icon(draw, cursor_x, icon_y, kind, size=icon_size, fill=ink)
+            cursor_x += icon_size + 8
+            cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": f"{value}", "font": font_table_bold}], fill=ink)
+            if idx != len(items) - 1:
+                cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": sep, "font": font_table}], fill=ink)
+        cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": " · Base sugerida ", "font": font_table}], fill=ink)
         _draw_inline_text(
             draw,
-            base_x,
+            cursor_x,
             base_y,
-            [
-                {"text": "🏠 ", "font": font_table},
-                {"text": f"{calc.get('num_vecinos') or 0}", "font": font_table_bold},
-                {"text": " · ", "font": font_table},
-                {"text": "🏬 ", "font": font_table},
-                {"text": f"{calc.get('num_locales') or 0}", "font": font_table_bold},
-                {"text": " · ", "font": font_table},
-                {"text": "📦 ", "font": font_table},
-                {"text": f"{calc.get('num_trasteros') or 0}", "font": font_table_bold},
-                {"text": " · ", "font": font_table},
-                {"text": "🚗 ", "font": font_table},
-                {"text": f"{calc.get('num_aparcamientos') or 0}", "font": font_table_bold},
-                {"text": " · Base sugerida ", "font": font_table},
-                {"text": f"{format_eur(calc.get('cuota_sugerida') or 0)}", "font": font_table_bold},
-            ],
+            [{"text": f"{format_eur(calc.get('cuota_sugerida') or 0)}", "font": font_table_bold}],
             fill=ink,
         )
         y = box[3] + 24
@@ -41142,6 +41204,21 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 except Exception:
                     building_photo = None
                 qr_x = inner_left + photo_w + gap
+            elif addr_for_map:
+                # Fallback robusto: si no podemos descargar un mapa real (red/rate-limit),
+                # generamos un "mapa" de cortesía para que siempre se vea algo en el PDF.
+                try:
+                    placeholder = _make_map_placeholder(photo_w, photo_h, title="Mapa (vista previa)", subtitle=addr_for_map)
+                    image.paste(placeholder, (inner_left, inner_top))
+                    draw.rounded_rectangle(
+                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
+                        radius=20,
+                        outline=border,
+                        width=2,
+                    )
+                except Exception:
+                    pass
+                qr_x = inner_left + photo_w + gap
             if qr_img:
                 image.paste(qr_img, (qr_x, inner_top), qr_img)
                 draw.text((qr_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
@@ -41198,24 +41275,15 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
 
     def _draw_cell_text(draw, col_key, y0, text, *, font, fill, align="left", extra_x=0):
         x0, w = columns[col_key]
-        text = str(text or "")
+        text = str(text or "").replace("\xa0", " ")
         if align == "right":
-            try:
-                box = draw.textbbox((0, 0), text, font=font)
-                text_w = max(0, box[2] - box[0])
-            except Exception:
-                text_w = 0
-            x = x0 + w - cell_pad_x - text_w + extra_x
-        elif align == "center":
-            try:
-                box = draw.textbbox((0, 0), text, font=font)
-                text_w = max(0, box[2] - box[0])
-            except Exception:
-                text_w = 0
-            x = x0 + int((w - text_w) / 2) + extra_x
-        else:
-            x = x0 + cell_pad_x + extra_x
-        draw.text((x, y0), text, fill=fill, font=font)
+            # anchor="ra" evita descuadres por mediciones diferentes de textbbox (fuentes/símbolos).
+            draw.text((x0 + w - cell_pad_x + extra_x, y0), text, fill=fill, font=font, anchor="ra")
+            return
+        if align == "center":
+            draw.text((x0 + int(w / 2) + extra_x, y0), text, fill=fill, font=font, anchor="ma")
+            return
+        draw.text((x0 + cell_pad_x + extra_x, y0), text, fill=fill, font=font)
     header_h = 40
     draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + header_h), radius=16, fill=primary)
     draw.text((columns["concepto"][0] + 18, y + 10), "PARTIDA", fill="white", font=font_table_head)
