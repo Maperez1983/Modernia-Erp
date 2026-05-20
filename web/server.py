@@ -56031,7 +56031,7 @@ class Handler(BaseHTTPRequestHandler):
                       titulo, estado, fecha, fecha_seguimiento, motivo_estado, responsable, forma_pago, encargo_estado,
                       fecha_encargo, observaciones, subtotal, impuestos, total, calculo_json, seguimiento_accion_id,
                       encargo_accion_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
