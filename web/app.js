@@ -21103,12 +21103,230 @@ const renderWorkspaceFincasBudgetsList = () => {
     if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = overrides?.id === "" ? "Duplicando presupuesto: revisa y guarda para crear la copia." : "Editando presupuesto.";
   };
 
+  const openFincasBudgetEditModal = (row) => {
+    if (!row || !state.currentWorkspaceId) return;
+    let modal = document.getElementById("fincasBudgetEditModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "fincasBudgetEditModal";
+      modal.className = "modal hidden";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 980px;">
+          <div class="modal-header">
+            <h3>Editar presupuesto (Fincas)</h3>
+            <button type="button" class="secondary ghost" data-fincas-budget-close>Cerrar</button>
+          </div>
+          <form class="modal-body form-grid" data-fincas-budget-form data-money-euro="1">
+            <input type="hidden" name="id" />
+            <div>
+              <label>Título</label>
+              <input name="titulo" placeholder="Título del presupuesto" />
+            </div>
+            <div>
+              <label>Estado</label>
+              <select name="estado">
+                <option value="Borrador">Borrador</option>
+                <option value="Presentada">Presentada</option>
+                <option value="Estudio">Estudio</option>
+                <option value="Aceptado">Aceptado</option>
+                <option value="Rechazado">Rechazado</option>
+              </select>
+            </div>
+            <div>
+              <label>Fecha</label>
+              <input type="date" name="fecha" />
+            </div>
+            <div>
+              <label>Fecha seguimiento</label>
+              <input type="date" name="fecha_seguimiento" />
+            </div>
+            <div style="grid-column: 1 / -1;">
+              <label>Motivo estado</label>
+              <input name="motivo_estado" placeholder="Motivo (si aplica)" />
+            </div>
+
+            <div>
+              <label>Vecinos</label>
+              <input name="num_vecinos" inputmode="numeric" />
+            </div>
+            <div>
+              <label>Locales</label>
+              <input name="num_locales" inputmode="numeric" />
+            </div>
+            <div>
+              <label>Trasteros</label>
+              <input name="num_trasteros" inputmode="numeric" />
+            </div>
+            <div>
+              <label>Aparcamientos</label>
+              <input name="num_aparcamientos" inputmode="numeric" />
+            </div>
+
+            <div>
+              <label>Subtotal</label>
+              <input name="subtotal" inputmode="decimal" />
+            </div>
+            <div>
+              <label>Impuestos</label>
+              <input name="impuestos" inputmode="decimal" />
+            </div>
+            <div>
+              <label>Total</label>
+              <input name="total" inputmode="decimal" />
+            </div>
+            <div>
+              <label>Forma de pago</label>
+              <input name="forma_pago" placeholder="Transferencia, domiciliación..." />
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label>Servicios incluidos (1 por línea)</label>
+              <textarea name="servicios_incluidos" rows="4" placeholder="• Gestión contable&#10;• Gestión de incidencias"></textarea>
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label>Partidas (formato: Categoría | Concepto | Cantidad | Unidad | Precio | DTO)</label>
+              <textarea name="lineas_texto" rows="7" placeholder="Edificio | Viviendas (5 €/unidad) | 10 | viv | 5 | 0"></textarea>
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label>Observaciones</label>
+              <textarea name="observaciones" rows="3"></textarea>
+            </div>
+
+            <div class="muted" data-fincas-budget-status style="grid-column: 1 / -1;"></div>
+
+            <div class="modal-actions" style="grid-column: 1 / -1;">
+              <button type="submit" class="primary">Guardar</button>
+              <button type="button" class="secondary" data-fincas-budget-cancel>Cancelar</button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const form = modal.querySelector("[data-fincas-budget-form]");
+    const closeBtn = modal.querySelector("[data-fincas-budget-close]");
+    const cancelBtn = modal.querySelector("[data-fincas-budget-cancel]");
+    const statusEl = modal.querySelector("[data-fincas-budget-status]");
+
+    const cleanup = () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+      if (statusEl) statusEl.textContent = "";
+      if (form) form.reset();
+    };
+
+    const calc = parseWorkspaceBudgetCalc(row);
+    const lineasText = stringifyWorkspaceBudgetLines(row.lineas || []);
+    const serviciosIncluidos = Array.isArray(calc.servicios_incluidos) ? calc.servicios_incluidos : [];
+    const setValue = (name, value) => {
+      const el = form?.querySelector(`[name="${name}"]`);
+      if (el) el.value = value == null ? "" : String(value);
+    };
+    setValue("id", row.id || "");
+    setValue("titulo", row.titulo || "");
+    setValue("estado", row.estado || "Borrador");
+    setValue("fecha", row.fecha || "");
+    setValue("fecha_seguimiento", row.fecha_seguimiento || "");
+    setValue("motivo_estado", row.motivo_estado || "");
+    setValue("num_vecinos", calc.num_vecinos ?? row.num_vecinos ?? "");
+    setValue("num_locales", calc.num_locales ?? row.num_locales ?? "");
+    setValue("num_trasteros", calc.num_trasteros ?? row.num_trasteros ?? "");
+    setValue("num_aparcamientos", calc.num_aparcamientos ?? row.num_aparcamientos ?? "");
+    setValue("subtotal", row.subtotal ?? "");
+    setValue("impuestos", row.impuestos ?? "");
+    setValue("total", row.total ?? "");
+    setValue("forma_pago", row.forma_pago || "");
+    setValue("servicios_incluidos", serviciosIncluidos.join("\n"));
+    setValue("lineas_texto", lineasText);
+    setValue("observaciones", row.observaciones || "");
+
+    const recomputeTotals = () => {
+      if (!form) return;
+      const lineas = parseWorkspaceBudgetLinesText(form.querySelector('[name="lineas_texto"]')?.value || "");
+      const computed = computeWorkspaceBudgetTotals({
+        servicio: "fincas",
+        subtotal: form.querySelector('[name="subtotal"]')?.value,
+        impuestos: form.querySelector('[name="impuestos"]')?.value,
+        lineas,
+        num_vecinos: form.querySelector('[name="num_vecinos"]')?.value,
+        num_locales: form.querySelector('[name="num_locales"]')?.value,
+        num_trasteros: form.querySelector('[name="num_trasteros"]')?.value,
+        num_aparcamientos: form.querySelector('[name="num_aparcamientos"]')?.value,
+      });
+      const subtotalEl = form.querySelector('[name="subtotal"]');
+      const totalEl = form.querySelector('[name="total"]');
+      if (subtotalEl && !String(subtotalEl.value || "").trim()) subtotalEl.value = computed.subtotal.toFixed(2);
+      if (totalEl) totalEl.value = computed.total.toFixed(2);
+    };
+
+    if (!modal.dataset.bound) {
+      form?.addEventListener("input", recomputeTotals, { passive: true });
+      form?.addEventListener("change", recomputeTotals, { passive: true });
+      modal.dataset.bound = "1";
+    }
+
+    closeBtn.onclick = cleanup;
+    cancelBtn.onclick = cleanup;
+    modal.onclick = (event) => {
+      if (event.target === modal) cleanup();
+    };
+
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (!state.currentWorkspaceId) return;
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        const fd = new FormData(form);
+        const lineas = parseWorkspaceBudgetLinesText(String(fd.get("lineas_texto") || ""));
+        const servicios = String(fd.get("servicios_incluidos") || "")
+          .split(/\r?\n/)
+          .map((s) => String(s || "").trim())
+          .filter(Boolean);
+        const overrides = {
+          id: String(fd.get("id") || row.id || "").trim(),
+          titulo: String(fd.get("titulo") || "").trim(),
+          estado: String(fd.get("estado") || "").trim(),
+          fecha: String(fd.get("fecha") || "").trim(),
+          fecha_seguimiento: String(fd.get("fecha_seguimiento") || "").trim(),
+          motivo_estado: String(fd.get("motivo_estado") || "").trim(),
+          num_vecinos: String(fd.get("num_vecinos") || "").trim(),
+          num_locales: String(fd.get("num_locales") || "").trim(),
+          num_trasteros: String(fd.get("num_trasteros") || "").trim(),
+          num_aparcamientos: String(fd.get("num_aparcamientos") || "").trim(),
+          subtotal: String(fd.get("subtotal") || "").trim(),
+          impuestos: String(fd.get("impuestos") || "").trim(),
+          total: String(fd.get("total") || "").trim(),
+          forma_pago: String(fd.get("forma_pago") || "").trim(),
+          observaciones: String(fd.get("observaciones") || "").trim(),
+          servicios_incluidos: servicios,
+          lineas,
+        };
+        await updateWorkspacePresupuestoFromRow(row, overrides);
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(cleanup, 350);
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+      }
+    };
+
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+    window.setTimeout(() => {
+      try {
+        form?.querySelector('[name="titulo"]')?.focus();
+      } catch (e) {}
+    }, 50);
+  };
+
   workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-edit]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const row = findRow(btn.dataset.fincasBudgetEdit || "");
       if (!row) return;
       try {
-        openBudgetEngineFromRow(row, {});
+        openFincasBudgetEditModal(row);
       } catch (e) {}
     });
   });
