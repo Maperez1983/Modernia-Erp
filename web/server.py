@@ -41092,13 +41092,35 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         "dto": (1028, 72),
         "total": (1114, 110),
     }
+    cell_pad_x = 14
+
+    def _draw_cell_text(draw, col_key, y0, text, *, font, fill, align="left", extra_x=0):
+        x0, w = columns[col_key]
+        text = str(text or "")
+        if align == "right":
+            try:
+                box = draw.textbbox((0, 0), text, font=font)
+                text_w = max(0, box[2] - box[0])
+            except Exception:
+                text_w = 0
+            x = x0 + w - cell_pad_x - text_w + extra_x
+        elif align == "center":
+            try:
+                box = draw.textbbox((0, 0), text, font=font)
+                text_w = max(0, box[2] - box[0])
+            except Exception:
+                text_w = 0
+            x = x0 + int((w - text_w) / 2) + extra_x
+        else:
+            x = x0 + cell_pad_x + extra_x
+        draw.text((x, y0), text, fill=fill, font=font)
     header_h = 40
     draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + header_h), radius=16, fill=primary)
     draw.text((columns["concepto"][0] + 18, y + 10), "PARTIDA", fill="white", font=font_table_head)
-    draw.text((columns["cantidad"][0], y + 10), "CANT.", fill="white", font=font_table_head)
-    draw.text((columns["precio"][0], y + 10), "PRECIO", fill="white", font=font_table_head)
-    draw.text((columns["dto"][0], y + 10), "DTO", fill="white", font=font_table_head)
-    draw.text((columns["total"][0], y + 10), "TOTAL", fill="white", font=font_table_head)
+    _draw_cell_text(draw, "cantidad", y + 10, "CANT.", font=font_table_head, fill="white", align="center")
+    _draw_cell_text(draw, "precio", y + 10, "PRECIO", font=font_table_head, fill="white", align="center")
+    _draw_cell_text(draw, "dto", y + 10, "DTO", font=font_table_head, fill="white", align="center")
+    _draw_cell_text(draw, "total", y + 10, "TOTAL", font=font_table_head, fill="white", align="center")
     y += header_h + 10
     row_fill = (249, 250, 251)
     for index, line in enumerate(lineas or [{"categoria": "Partida", "concepto": budget.get("titulo") or "-", "cantidad": 1, "unidad": "", "precio_unitario": budget.get("subtotal") or budget.get("total") or 0, "descuento_pct": 0, "total_linea": budget.get("subtotal") or budget.get("total") or 0}], start=1):
@@ -41110,10 +41132,11 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + row_h), radius=14, fill=fill, outline=border)
         draw.multiline_text((columns["concepto"][0] + 18, y + 12), "\n".join(concept_lines), fill=ink, font=font_table, spacing=4)
         qty_text = f"{_pdf_format_number(line.get('cantidad'), 2) or '0'} {line.get('unidad') or ''}".strip()
-        draw.text((columns["cantidad"][0], y + 16), qty_text, fill=ink, font=font_table)
-        draw.text((columns["precio"][0], y + 16), format_eur(line.get("precio_unitario") or 0), fill=ink, font=font_table)
-        draw.text((columns["dto"][0], y + 16), f"{_pdf_format_number(line.get('descuento_pct'), 2) or '0'}%", fill=ink, font=font_table)
-        draw.text((columns["total"][0], y + 16), format_eur(line.get("total_linea") or 0), fill=ink, font=font_table)
+        qty_text = qty_text.replace("\xa0", " ")
+        _draw_cell_text(draw, "cantidad", y + 16, qty_text, font=font_table, fill=ink, align="right")
+        _draw_cell_text(draw, "precio", y + 16, format_eur(line.get("precio_unitario") or 0), font=font_table, fill=ink, align="right")
+        _draw_cell_text(draw, "dto", y + 16, f"{_pdf_format_number(line.get('descuento_pct'), 2) or '0'}%", font=font_table, fill=ink, align="right")
+        _draw_cell_text(draw, "total", y + 16, format_eur(line.get("total_linea") or 0), font=font_table, fill=ink, align="right")
         y += row_h + 10
 
     ensure_space(180)
