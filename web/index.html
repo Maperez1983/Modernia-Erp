@@ -2609,11 +2609,11 @@
                 Aparcamientos
                 <input name="num_aparcamientos" type="number" min="0" step="1" />
               </label>
-              <label class="span-2">
+              <label class="span-all">
                 Dirección
                 <input name="direccion" />
               </label>
-              <div class="span-2 hidden" id="workspaceFincasCommunityMapWrap">
+              <div class="span-all hidden" id="workspaceFincasCommunityMapWrap">
                 <iframe
                   id="workspaceFincasCommunityMap"
                   title="Mapa comunidad"
@@ -2638,19 +2638,19 @@
 	                Cuota mensual
 	                <input name="cuota_mensual" type="text" inputmode="decimal" />
 	              </label>
-	              <label class="span-2">
-	                Foto del edificio (opcional)
-	                <input type="hidden" name="foto_edificio_key" />
-	                <input id="workspaceFincasCommunityBuildingPhoto" type="file" accept="image/*" />
-	                <div id="workspaceFincasCommunityBuildingPhotoStatus" class="muted"></div>
-	                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
-	              </label>
-	              <p class="muted span-2">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
-	              <div class="form-actions span-2">
-	                <button type="submit">Guardar comunidad</button>
-	                <button type="button" id="workspaceFincasCommunityResetBtn" class="secondary ghost">Nueva</button>
-                <span id="workspaceFincasCommunityStatus" class="muted"></span>
-              </div>
+		              <label class="span-all">
+		                Foto del edificio (opcional)
+		                <input type="hidden" name="foto_edificio_key" />
+		                <input id="workspaceFincasCommunityBuildingPhoto" type="file" accept="image/*" />
+		                <div id="workspaceFincasCommunityBuildingPhotoStatus" class="muted"></div>
+		                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+		              </label>
+		              <p class="muted span-all">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
+		              <div class="form-actions span-all">
+		                <button type="submit">Guardar comunidad</button>
+		                <button type="button" id="workspaceFincasCommunityResetBtn" class="secondary ghost">Nueva</button>
+	                <span id="workspaceFincasCommunityStatus" class="muted"></span>
+	              </div>
             </form>
             <div id="workspaceFincasCommunityList"></div>
           </div>

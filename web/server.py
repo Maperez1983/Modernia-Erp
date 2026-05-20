@@ -56840,6 +56840,126 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
+        elif parsed.path == "/api/workspace_fincas_vecinos":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not nombre:
+                json_response(self, {"error": "workspace_id, comunidad_id y nombre requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            coef_raw = str(payload.get("coeficiente") or "").strip()
+            coeficiente = None
+            if coef_raw:
+                try:
+                    coeficiente = float(coef_raw.replace(",", "."))
+                except Exception:
+                    coeficiente = None
+            values = (
+                workspace_id,
+                comunidad_id,
+                nombre,
+                (payload.get("nif") or "").strip() or None,
+                (payload.get("piso") or "").strip() or None,
+                (payload.get("telefono") or "").strip() or None,
+                (payload.get("email") or "").strip() or None,
+                coeficiente,
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                current = conn.execute(
+                    "SELECT id FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "vecino no encontrado"}, status=404)
+                    return
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_vecinos
+                    SET workspace_id = ?, comunidad_id = ?, nombre = ?, nif = ?, piso = ?, telefono = ?, email = ?, coeficiente = ?, notas = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_vecinos (
+                      id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_documentos":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            titulo = str(payload.get("titulo") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not titulo:
+                json_response(self, {"error": "workspace_id, comunidad_id y titulo requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            values = (
+                workspace_id,
+                comunidad_id,
+                titulo,
+                (payload.get("tipo") or "").strip() or None,
+                (payload.get("fecha") or "").strip() or None,
+                (payload.get("doc_key") or "").strip() or None,
+                (payload.get("doc_url") or "").strip() or None,
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                current = conn.execute(
+                    "SELECT id FROM workspace_fincas_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "documento no encontrado"}, status=404)
+                    return
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_documentos
+                    SET workspace_id = ?, comunidad_id = ?, titulo = ?, tipo = ?, fecha = ?, doc_key = ?, doc_url = ?, notas = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_documentos (
+                      id, workspace_id, comunidad_id, titulo, tipo, fecha, doc_key, doc_url, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
         elif parsed.path == "/api/workspace_fincas_convert_presupuesto":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -68892,25 +69012,51 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             json_response(self, fetch_workspace_fincas_comunidades(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/workspace_fincas_incidencias":
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["40"])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_fincas_incidencias(conn, workspace_id, limit=limit))
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_incidencias_for_comunidad(conn, workspace_id, comunidad_id=comunidad_id, limit=limit))
             return
 
         if path == "/api/workspace_fincas_proveedores":
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["40"])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_fincas_proveedores(conn, workspace_id, limit=limit))
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_proveedores_for_comunidad(conn, workspace_id, comunidad_id=comunidad_id, limit=limit))
             return
 
         if path == "/api/workspace_fincas_juntas":
@@ -68938,6 +69084,42 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=limit, comunidad_id=comunidad_id))
+            return
+
+        if path == "/api/workspace_fincas_vecinos":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["200"])[0]
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_documentos":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["200"])[0]
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_documentos(conn, workspace_id, comunidad_id, limit=limit))
             return
 
         if path == "/api/workspace_automatizacion_logs":

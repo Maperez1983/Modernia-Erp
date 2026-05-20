@@ -6664,7 +6664,9 @@ const shouldScopeByCompanyForService = (serviceKey = "") => {
   return true;
 };
 
-const shouldScopeFincasByCompany = () => shouldScopeByCompanyForService("fincas");
+// Fincas: regla de producto Modernia → cualquier usuario con acceso al módulo debe ver
+// todas las comunidades/incidencias del workspace. No aplicamos scope por empresa.
+const shouldScopeFincasByCompany = () => false;
 
 const filterWorkspaceFincasRowsByCompany = (rows = [], field = "empresa_id") => {
   const items = Array.isArray(rows) ? rows : [];
@@ -19899,6 +19901,770 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
   }
 };
 
+const openFincasCommunityFichaModal = (record) => {
+  if (!record || !state.currentWorkspaceId) return;
+  let modal = document.getElementById("fincasCommunityFichaModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "fincasCommunityFichaModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 1120px;">
+        <div class="modal-header" style="gap: 12px;">
+          <div style="flex: 1;">
+            <h3 style="margin:0;" data-community-title>Comunidad</h3>
+            <div class="muted" data-community-subtitle></div>
+          </div>
+          <button type="button" class="secondary ghost" data-community-close>Cerrar</button>
+        </div>
+        <div class="modal-body" style="padding-top: 0;">
+          <div class="workspace-tabs" style="margin: 10px 0 18px 0; flex-wrap: wrap;" data-community-tabs>
+            <button type="button" class="tab-btn active" data-community-tab="datos">Datos</button>
+            <button type="button" class="tab-btn" data-community-tab="vecinos">Vecinos</button>
+            <button type="button" class="tab-btn" data-community-tab="proveedores">Proveedores</button>
+            <button type="button" class="tab-btn" data-community-tab="documentos">Documentación</button>
+            <button type="button" class="tab-btn" data-community-tab="incidencias">Incidencias</button>
+            <button type="button" class="tab-btn" data-community-tab="contabilidad">Contabilidad</button>
+          </div>
+          <div data-community-panel></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  const titleEl = modal.querySelector("[data-community-title]");
+  const subtitleEl = modal.querySelector("[data-community-subtitle]");
+  const panel = modal.querySelector("[data-community-panel]");
+  const closeBtn = modal.querySelector("[data-community-close]");
+  const tabsWrap = modal.querySelector("[data-community-tabs]");
+  const workspaceId = state.currentWorkspaceId;
+  const comunidadId = String(record.id || "").trim();
+  const empresaId = String(record.empresa_id || state.currentWorkspaceCompanyId || "").trim();
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    modal.classList.remove("open");
+    if (panel) panel.innerHTML = "";
+  };
+  closeBtn.onclick = cleanup;
+  modal.onclick = (event) => {
+    if (event.target === modal) cleanup();
+  };
+
+  const renderTab = async (key) => {
+    if (!panel) return;
+    const providersAll = Array.isArray((state.currentWorkspaceData || {}).fincasProviders) ? (state.currentWorkspaceData || {}).fincasProviders : [];
+    const incidentsAll = Array.isArray((state.currentWorkspaceData || {}).fincasIncidents) ? (state.currentWorkspaceData || {}).fincasIncidents : [];
+    const ledgerAll = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
+    const providers = providersAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+    const incidents = incidentsAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+    const ledger = ledgerAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+
+    if (key === "datos") {
+      panel.innerHTML = `
+        <form class="form-grid" data-community-datos-form data-money-euro="1">
+          <input type="hidden" name="id" value="${escapeHtml(String(record.id || ""))}" />
+          <div style="grid-column:1/-1;">
+            <label>Nombre</label>
+            <input name="nombre" value="${escapeHtml(String(record.nombre || ""))}" />
+          </div>
+          <div>
+            <label>CIF</label>
+            <input name="cif" value="${escapeHtml(String(record.cif || ""))}" />
+          </div>
+          <div>
+            <label>Referencia catastral</label>
+            <input name="referencia_catastral" value="${escapeHtml(String(record.referencia_catastral || ""))}" />
+          </div>
+          <div style="grid-column:1/-1;">
+            <label>Dirección</label>
+            <input name="direccion" value="${escapeHtml(String(record.direccion || ""))}" />
+          </div>
+          <div>
+            <label>Presidente</label>
+            <input name="presidente" value="${escapeHtml(String(record.presidente || ""))}" />
+          </div>
+          <div>
+            <label>Secretario</label>
+            <input name="secretario" value="${escapeHtml(String(record.secretario || ""))}" />
+          </div>
+          <div>
+            <label>Estado</label>
+            <select name="estado">
+              ${["Activa","Archivada","Baja"].map((v) => `<option value="${v}" ${String(record.estado||"Activa")===v?"selected":""}>${v}</option>`).join("")}
+            </select>
+          </div>
+          <div>
+            <label>Cuota mensual</label>
+            <input name="cuota_mensual" value="${escapeHtml(String(record.cuota_mensual || ""))}" />
+          </div>
+          <div>
+            <label>Viviendas</label>
+            <input name="num_vecinos" inputmode="numeric" value="${escapeHtml(String(record.num_vecinos ?? ""))}" />
+          </div>
+          <div>
+            <label>Locales</label>
+            <input name="num_locales" inputmode="numeric" value="${escapeHtml(String(record.num_locales ?? ""))}" />
+          </div>
+          <div>
+            <label>Trasteros</label>
+            <input name="num_trasteros" inputmode="numeric" value="${escapeHtml(String(record.num_trasteros ?? ""))}" />
+          </div>
+          <div>
+            <label>Aparcamientos</label>
+            <input name="num_aparcamientos" inputmode="numeric" value="${escapeHtml(String(record.num_aparcamientos ?? ""))}" />
+          </div>
+          <div class="muted" data-community-status style="grid-column:1/-1;"></div>
+          <div class="modal-actions" style="grid-column:1/-1;">
+            <button type="submit" class="primary">Guardar cambios</button>
+          </div>
+        </form>
+      `;
+      const form = panel.querySelector("[data-community-datos-form]");
+      const statusEl = panel.querySelector("[data-community-status]");
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          const fd = new FormData(form);
+          const payload = Object.fromEntries(fd.entries());
+          payload.workspace_id = workspaceId;
+          payload.empresa_id = empresaId;
+          const res = await fetch("/api/workspace_fincas_comunidades", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          if (statusEl) statusEl.textContent = "Guardado.";
+          await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+          const updated = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === comunidadId);
+          if (updated) record = updated;
+          if (titleEl) titleEl.textContent = record.nombre || "Comunidad";
+          if (subtitleEl) subtitleEl.textContent = record.direccion || record.empresa_nombre || "";
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+
+    if (key === "proveedores") {
+      panel.innerHTML = `
+        <div class="workspace-two-cols">
+          <div>
+            <h4>Proveedores</h4>
+            ${providers.length ? `
+              <div class="workspace-billing-list">
+                ${providers.slice(0, 120).map((p) => `
+                  <div class="workspace-billing-row">
+                    <div>
+                      <strong>${escapeHtml(p.nombre || "-")}</strong>
+                      <div class="muted">${escapeHtml(p.tipo_servicio || "-")}</div>
+                    </div>
+                    <div class="workspace-billing-meta">
+                      <span>${escapeHtml(p.estado || "Activo")}</span>
+                      <button type="button" class="secondary ghost" data-provider-edit="${escapeHtml(String(p.id || ""))}">Editar</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `<p class="muted">Sin proveedores todavía.</p>`}
+          </div>
+          <div>
+            <h4 data-provider-form-title>Nuevo proveedor</h4>
+            <form class="form-grid" data-provider-form data-money-euro="1">
+              <input type="hidden" name="id" value="" />
+              <div style="grid-column:1/-1;">
+                <label>Nombre</label>
+                <input name="nombre" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Tipo de servicio</label>
+                <input name="tipo_servicio" />
+              </div>
+              <div>
+                <label>Teléfono</label>
+                <input name="telefono" />
+              </div>
+              <div>
+                <label>Email</label>
+                <input name="email" />
+              </div>
+              <div>
+                <label>Estado</label>
+                <select name="estado">
+                  ${["Activo","Inactivo"].map((v) => `<option value="${v}">${v}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label>Tarifa mensual</label>
+                <input name="tarifa_mensual" inputmode="decimal" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Notas</label>
+                <textarea name="notas" rows="3"></textarea>
+              </div>
+              <div class="muted" data-provider-status style="grid-column:1/-1;"></div>
+              <div class="modal-actions" style="grid-column:1/-1;">
+                <button type="submit" class="primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      const form = panel.querySelector("[data-provider-form]");
+      const statusEl = panel.querySelector("[data-provider-status]");
+      const title = panel.querySelector("[data-provider-form-title]");
+      const resetProviderForm = () => {
+        if (!form) return;
+        form.reset();
+        form.querySelector('[name="id"]').value = "";
+        if (title) title.textContent = "Nuevo proveedor";
+      };
+      panel.querySelectorAll("[data-provider-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = String(btn.dataset.providerEdit || "");
+          const p = providers.find((row) => String(row.id || "") === id);
+          if (!p || !form) return;
+          form.querySelector('[name="id"]').value = p.id || "";
+          ["nombre","tipo_servicio","telefono","email","estado","tarifa_mensual","notas"].forEach((k) => {
+            const el = form.querySelector(`[name="${k}"]`);
+            if (el) el.value = p[k] ?? "";
+          });
+          if (title) title.textContent = "Editar proveedor";
+          if (statusEl) statusEl.textContent = "";
+        });
+      });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          const fd = new FormData(form);
+          const payload = Object.fromEntries(fd.entries());
+          payload.workspace_id = workspaceId;
+          payload.comunidad_id = comunidadId;
+          payload.empresa_id = empresaId;
+          const res = await fetch("/api/workspace_fincas_proveedores", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          await loadWorkspaceDetail(workspaceId);
+          resetProviderForm();
+          renderTab("proveedores");
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+
+    if (key === "incidencias") {
+      panel.innerHTML = `
+        <div class="workspace-two-cols">
+          <div>
+            <h4>Incidencias</h4>
+            ${incidents.length ? `
+              <div class="workspace-billing-list">
+                ${incidents.slice(0, 120).map((i) => `
+                  <div class="workspace-billing-row">
+                    <div>
+                      <strong>${escapeHtml(i.titulo || "-")}</strong>
+                      <div class="muted">${escapeHtml(i.estado || "Abierta")} · ${escapeHtml(i.prioridad || "Normal")}</div>
+                    </div>
+                    <div class="workspace-billing-meta">
+                      <span>${escapeHtml(i.fecha_apertura || "")}</span>
+                      <button type="button" class="secondary ghost" data-incident-edit="${escapeHtml(String(i.id || ""))}">Editar</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `<p class="muted">Sin incidencias todavía.</p>`}
+          </div>
+          <div>
+            <h4 data-incident-form-title>Nueva incidencia</h4>
+            <form class="form-grid" data-incident-form data-money-euro="1">
+              <input type="hidden" name="id" value="" />
+              <div style="grid-column:1/-1;">
+                <label>Título</label>
+                <input name="titulo" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Descripción</label>
+                <textarea name="descripcion" rows="3"></textarea>
+              </div>
+              <div>
+                <label>Prioridad</label>
+                <select name="prioridad">
+                  ${["Baja","Normal","Alta","Urgente"].map((v) => `<option value="${v}" ${v==="Normal"?"selected":""}>${v}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label>Estado</label>
+                <select name="estado">
+                  ${["Abierta","En curso","Resuelta","Cerrada"].map((v) => `<option value="${v}" ${v==="Abierta"?"selected":""}>${v}</option>`).join("")}
+                </select>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Proveedor</label>
+                <select name="proveedor_id">
+                  <option value="">(Sin proveedor)</option>
+                  ${providers.map((p) => `<option value="${escapeHtml(String(p.id || ""))}">${escapeHtml(p.nombre || "-")}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label>Fecha apertura</label>
+                <input type="date" name="fecha_apertura" value="${new Date().toISOString().slice(0,10)}" />
+              </div>
+              <div>
+                <label>Coste estimado</label>
+                <input name="coste_estimado" inputmode="decimal" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Responsable</label>
+                <input name="responsable" />
+              </div>
+              <div class="muted" data-incident-status style="grid-column:1/-1;"></div>
+              <div class="modal-actions" style="grid-column:1/-1;">
+                <button type="submit" class="primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      const form = panel.querySelector("[data-incident-form]");
+      const statusEl = panel.querySelector("[data-incident-status]");
+      const title = panel.querySelector("[data-incident-form-title]");
+      const resetIncidentForm = () => {
+        if (!form) return;
+        form.reset();
+        form.querySelector('[name="id"]').value = "";
+        const dateEl = form.querySelector('[name="fecha_apertura"]');
+        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+        if (title) title.textContent = "Nueva incidencia";
+      };
+      panel.querySelectorAll("[data-incident-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = String(btn.dataset.incidentEdit || "");
+          const i = incidents.find((row) => String(row.id || "") === id);
+          if (!i || !form) return;
+          form.querySelector('[name="id"]').value = i.id || "";
+          ["titulo","descripcion","prioridad","estado","proveedor_id","fecha_apertura","coste_estimado","responsable"].forEach((k) => {
+            const el = form.querySelector(`[name="${k}"]`);
+            if (el) el.value = i[k] ?? "";
+          });
+          if (title) title.textContent = "Editar incidencia";
+          if (statusEl) statusEl.textContent = "";
+        });
+      });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          const fd = new FormData(form);
+          const payload = Object.fromEntries(fd.entries());
+          payload.workspace_id = workspaceId;
+          payload.comunidad_id = comunidadId;
+          const res = await fetch("/api/workspace_fincas_incidencias", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          await loadWorkspaceDetail(workspaceId);
+          resetIncidentForm();
+          renderTab("incidencias");
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+
+    if (key === "contabilidad") {
+      panel.innerHTML = `
+        <div class="workspace-two-cols">
+          <div>
+            <h4>Contabilidad</h4>
+            ${ledger.length ? `
+              <div class="workspace-billing-list">
+                ${ledger.slice(0, 120).map((l) => `
+                  <div class="workspace-billing-row">
+                    <div>
+                      <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+                      <div class="muted">${escapeHtml(l.tipo || "-")} · ${escapeHtml(l.fecha || "-")}</div>
+                    </div>
+                    <div class="workspace-billing-meta">
+                      <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+                      <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `<p class="muted">Sin movimientos todavía.</p>`}
+          </div>
+          <div>
+            <h4 data-ledger-form-title>Nuevo movimiento</h4>
+            <form class="form-grid" data-ledger-form data-money-euro="1">
+              <input type="hidden" name="id" value="" />
+              <div>
+                <label>Fecha</label>
+                <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" />
+              </div>
+              <div>
+                <label>Tipo</label>
+                <select name="tipo">
+                  <option value="Gasto">Gasto</option>
+                  <option value="Ingreso">Ingreso</option>
+                </select>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Concepto</label>
+                <input name="concepto" />
+              </div>
+              <div>
+                <label>Importe</label>
+                <input name="importe" inputmode="decimal" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Notas</label>
+                <textarea name="notas" rows="3"></textarea>
+              </div>
+              <div class="muted" data-ledger-status style="grid-column:1/-1;"></div>
+              <div class="modal-actions" style="grid-column:1/-1;">
+                <button type="submit" class="primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      const form = panel.querySelector("[data-ledger-form]");
+      const statusEl = panel.querySelector("[data-ledger-status]");
+      const title = panel.querySelector("[data-ledger-form-title]");
+      const resetLedgerForm = () => {
+        if (!form) return;
+        form.reset();
+        form.querySelector('[name="id"]').value = "";
+        const dateEl = form.querySelector('[name="fecha"]');
+        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+        if (title) title.textContent = "Nuevo movimiento";
+      };
+      panel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = String(btn.dataset.ledgerEdit || "");
+          const l = ledger.find((row) => String(row.id || "") === id);
+          if (!l || !form) return;
+          form.querySelector('[name="id"]').value = l.id || "";
+          ["fecha","tipo","concepto","importe","notas"].forEach((k) => {
+            const el = form.querySelector(`[name="${k}"]`);
+            if (el) el.value = l[k] ?? "";
+          });
+          if (title) title.textContent = "Editar movimiento";
+          if (statusEl) statusEl.textContent = "";
+        });
+      });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          const fd = new FormData(form);
+          const payload = Object.fromEntries(fd.entries());
+          payload.workspace_id = workspaceId;
+          payload.comunidad_id = comunidadId;
+          const res = await fetch("/api/workspace_fincas_contabilidad", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          await refreshWorkspaceFincasLedger({ force: true, silent: true });
+          resetLedgerForm();
+          renderTab("contabilidad");
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+
+    if (key === "vecinos") {
+      panel.innerHTML = `
+        <div class="workspace-two-cols">
+          <div>
+            <h4>Vecinos</h4>
+            <div class="muted" data-vecinos-status>Cargando...</div>
+            <div data-vecinos-list></div>
+          </div>
+          <div>
+            <h4 data-vecino-form-title>Nuevo vecino</h4>
+            <form class="form-grid" data-vecino-form>
+              <input type="hidden" name="id" value="" />
+              <div style="grid-column:1/-1;">
+                <label>Nombre</label>
+                <input name="nombre" />
+              </div>
+              <div>
+                <label>NIF</label>
+                <input name="nif" />
+              </div>
+              <div>
+                <label>Piso</label>
+                <input name="piso" placeholder="1ºA, Bajo B..." />
+              </div>
+              <div>
+                <label>Teléfono</label>
+                <input name="telefono" />
+              </div>
+              <div>
+                <label>Email</label>
+                <input name="email" />
+              </div>
+              <div>
+                <label>Coeficiente</label>
+                <input name="coeficiente" inputmode="decimal" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Notas</label>
+                <textarea name="notas" rows="3"></textarea>
+              </div>
+              <div class="muted" data-vecino-status style="grid-column:1/-1;"></div>
+              <div class="modal-actions" style="grid-column:1/-1;">
+                <button type="submit" class="primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      const listWrap = panel.querySelector("[data-vecinos-list]");
+      const listStatus = panel.querySelector("[data-vecinos-status]");
+      const form = panel.querySelector("[data-vecino-form]");
+      const statusEl = panel.querySelector("[data-vecino-status]");
+      const title = panel.querySelector("[data-vecino-form-title]");
+      const loadVecinos = async () => {
+        try {
+          if (listStatus) listStatus.textContent = "Cargando...";
+          const data = await api(`/api/workspace_fincas_vecinos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`);
+          const items = Array.isArray(data?.rows) ? data.rows : [];
+          if (!items.length) {
+            if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin vecinos todavía.</p>";
+            if (listStatus) listStatus.textContent = "";
+            return items;
+          }
+          if (listWrap) {
+            listWrap.innerHTML = `
+              <div class="workspace-billing-list">
+                ${items.map((v) => `
+                  <div class="workspace-billing-row">
+                    <div>
+                      <strong>${escapeHtml(v.nombre || "-")}</strong>
+                      <div class="muted">${escapeHtml([v.piso, v.nif].filter(Boolean).join(" · ") || "-")}</div>
+                    </div>
+                    <div class="workspace-billing-meta">
+                      <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            `;
+          }
+          if (listStatus) listStatus.textContent = "";
+          (listWrap?.querySelectorAll("[data-vecino-edit]") || []).forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const id = String(btn.dataset.vecinoEdit || "");
+              const v = items.find((row) => String(row.id || "") === id);
+              if (!v || !form) return;
+              form.querySelector('[name="id"]').value = v.id || "";
+              ["nombre","nif","piso","telefono","email","coeficiente","notas"].forEach((k) => {
+                const el = form.querySelector(`[name="${k}"]`);
+                if (el) el.value = v[k] ?? "";
+              });
+              if (title) title.textContent = "Editar vecino";
+            });
+          });
+          return items;
+        } catch (e) {
+          if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar vecinos.";
+          return [];
+        }
+      };
+      await loadVecinos();
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          const fd = new FormData(form);
+          const payload = Object.fromEntries(fd.entries());
+          payload.workspace_id = workspaceId;
+          payload.comunidad_id = comunidadId;
+          const res = await fetch("/api/workspace_fincas_vecinos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          form.reset();
+          form.querySelector('[name="id"]').value = "";
+          if (title) title.textContent = "Nuevo vecino";
+          await loadVecinos();
+          if (statusEl) statusEl.textContent = "Guardado.";
+          window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        } catch (e) {
+          if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+
+    if (key === "documentos") {
+      panel.innerHTML = `
+        <div class="workspace-two-cols">
+          <div>
+            <h4>Documentación</h4>
+            <div class="muted" data-docs-status>Cargando...</div>
+            <div data-docs-list></div>
+          </div>
+          <div>
+            <h4>Subir documento</h4>
+            <form class="form-grid" data-doc-form>
+              <input type="hidden" name="id" value="" />
+              <div style="grid-column:1/-1;">
+                <label>Título</label>
+                <input name="titulo" placeholder="Acta, contrato, seguro..." />
+              </div>
+              <div>
+                <label>Tipo</label>
+                <input name="tipo" placeholder="Acta, Contrato..." />
+              </div>
+              <div>
+                <label>Fecha</label>
+                <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Archivo</label>
+                <input type="file" name="file" />
+              </div>
+              <div style="grid-column:1/-1;">
+                <label>Notas</label>
+                <textarea name="notas" rows="3"></textarea>
+              </div>
+              <div class="muted" data-doc-status style="grid-column:1/-1;"></div>
+              <div class="modal-actions" style="grid-column:1/-1;">
+                <button type="submit" class="primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      const listWrap = panel.querySelector("[data-docs-list]");
+      const listStatus = panel.querySelector("[data-docs-status]");
+      const form = panel.querySelector("[data-doc-form]");
+      const statusEl = panel.querySelector("[data-doc-status]");
+      const loadDocs = async () => {
+        try {
+          if (listStatus) listStatus.textContent = "Cargando...";
+          const data = await api(`/api/workspace_fincas_documentos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`);
+          const items = Array.isArray(data?.rows) ? data.rows : [];
+          if (!items.length) {
+            if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin documentos todavía.</p>";
+            if (listStatus) listStatus.textContent = "";
+            return items;
+          }
+          if (listWrap) {
+            listWrap.innerHTML = `
+              <div class="workspace-billing-list">
+                ${items.map((d) => {
+                  const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(d.doc_url)}" target="_blank" rel="noreferrer">Abrir</a>` : "";
+                  const meta = [d.tipo, d.fecha].filter(Boolean).join(" · ");
+                  return `
+                    <div class="workspace-billing-row">
+                      <div>
+                        <strong>${escapeHtml(d.titulo || "-")}</strong>
+                        <div class="muted">${escapeHtml(meta || "-")}</div>
+                      </div>
+                      <div class="workspace-billing-meta">
+                        ${link}
+                      </div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            `;
+          }
+          if (listStatus) listStatus.textContent = "";
+          return items;
+        } catch (e) {
+          if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar documentos.";
+          return [];
+        }
+      };
+      await loadDocs();
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          if (statusEl) statusEl.textContent = "Subiendo...";
+          const fd = new FormData(form);
+          const titulo = String(fd.get("titulo") || "").trim();
+          if (!titulo) throw new Error("Título requerido.");
+          let doc_key = "";
+          let doc_url = "";
+          const file = form.querySelector('[name="file"]')?.files?.[0] || null;
+          if (file) {
+            const upload = await uploadFileToS3(file, "workspace", statusEl);
+            doc_key = upload?.key || "";
+            doc_url = upload?.public_url || "";
+          }
+          const payload = {
+            workspace_id: workspaceId,
+            comunidad_id: comunidadId,
+            titulo,
+            tipo: String(fd.get("tipo") || "").trim(),
+            fecha: String(fd.get("fecha") || "").trim(),
+            notas: String(fd.get("notas") || "").trim(),
+            doc_key,
+            doc_url,
+          };
+          const res = await fetch("/api/workspace_fincas_documentos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          form.reset();
+          const dateEl = form.querySelector('[name="fecha"]');
+          if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+          await loadDocs();
+          if (statusEl) statusEl.textContent = "Guardado.";
+          window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+        } catch (e) {
+          if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+        }
+      };
+      return;
+    }
+  };
+
+  const setActiveTab = (key) => {
+    (tabsWrap?.querySelectorAll("[data-community-tab]") || []).forEach((btn) => {
+      const btnKey = String(btn.dataset.communityTab || "");
+      btn.classList.toggle("active", btnKey === key);
+    });
+    void renderTab(key);
+  };
+
+  (tabsWrap?.querySelectorAll("[data-community-tab]") || []).forEach((btn) => {
+    btn.onclick = () => setActiveTab(String(btn.dataset.communityTab || "datos"));
+  });
+
+  if (titleEl) titleEl.textContent = record.nombre || "Comunidad";
+  if (subtitleEl) subtitleEl.textContent = record.direccion || record.empresa_nombre || "";
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  setActiveTab("datos");
+};
+
 const renderWorkspaceFincasCommunityList = (rows = []) => {
   if (!workspaceFincasCommunityList) return;
   if (!rows.length) {
@@ -19923,6 +20689,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
                 <span>Sug. ${formatEurosCompact(Number(row.cuota_sugerida || 0))}</span>
                 <span>${formatEurosCompact(Number(row.cuota_mensual || 0))}</span>
                 <span>${numberFormatter.format(Number(row.incidencias_abiertas || 0))} abiertas</span>
+                <button type="button" class="secondary ghost" data-community-open="${row.id}">Ficha</button>
                 <button type="button" class="secondary ghost" data-community-edit="${row.id}">Editar</button>
                 <button type="button" class="secondary danger" data-community-delete="${row.id}">Eliminar</button>
               </div>
@@ -19932,6 +20699,12 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
         .join("")}
     </div>
   `;
+  workspaceFincasCommunityList.querySelectorAll("[data-community-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityOpen || ""));
+      if (record) openFincasCommunityFichaModal(record);
+    });
+  });
   workspaceFincasCommunityList.querySelectorAll("[data-community-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityEdit || ""));
