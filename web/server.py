@@ -40660,6 +40660,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
     # En Fincas, forzamos marca Fincas Velazquez (la empresa emisora puede tener un logo genérico/legacy).
     logo = fincas_logo if servicio_key == "fincas" and fincas_logo else (brand_logo or fincas_logo)
+    # Foto de equipo bajo la cabecera del presupuesto (opcional).
+    # Para activarla, guarda la imagen en `assets/photos/equipo-modernia.jpg`.
+    team_photo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
@@ -40718,7 +40721,22 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         py = y0 + padding + int((inner_h - fitted.height) / 2)
         image.paste(fitted, (px, py), fitted)
 
+    page_index = 0
+
+    def _paste_photo_cover(image, draw, photo_img, box):
+        if not photo_img:
+            return
+        x0, y0, x1, y1 = [int(v) for v in box]
+        try:
+            photo = photo_img.convert("RGB")
+            photo = ImageOps.fit(photo, (max(10, x1 - x0), max(10, y1 - y0)), method=Image.LANCZOS)
+            image.paste(photo, (x0, y0))
+        except Exception:
+            return
+        draw.rounded_rectangle((x0, y0, x1, y1), radius=22, outline=border, width=2)
+
     def new_page(include_cards=False):
+        nonlocal page_index
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
         draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
@@ -40749,6 +40767,14 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 padding=14,
             )
         current_y = 296
+        # Foto de equipo solo en la primera página del presupuesto (no en la portada especial de Fincas).
+        if page_index == 0 and team_photo and servicio_key != "fincas":
+            photo_y = 266
+            photo_h = 190
+            photo_box = (margin_x, photo_y, page_width - margin_x, photo_y + photo_h)
+            draw.rounded_rectangle(photo_box, radius=22, fill=(255, 255, 255), outline=border)
+            _paste_photo_cover(image, draw, team_photo, (photo_box[0] + 2, photo_box[1] + 2, photo_box[2] - 2, photo_box[3] - 2))
+            current_y = photo_box[3] + 26
         if include_cards:
             left = (margin_x, current_y, margin_x + 560, current_y + 250)
             right = (page_width - margin_x - 420, current_y, page_width - margin_x, current_y + 250)
@@ -40767,6 +40793,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((right[0] + 24, right[1] + 198), f"Impuestos {format_eur(budget.get('impuestos') or 0)}", fill=ink, font=font_table)
             draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
             current_y = left[3] + 34
+        page_index += 1
         return image, draw, current_y
 
     if servicio_key == "fincas":
