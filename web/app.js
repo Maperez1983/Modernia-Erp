@@ -50903,7 +50903,8 @@ const loadCrmAgenda = () => {
       rangeStart = clampDay(anchor);
       rangeEnd = clampDay(anchor);
     } else if (preset === "citas_7dias" || preset === "citas_7dias_caducadas") {
-      rangeStart = clampDay(anchor);
+      // UX: mostrar también las citas recientes pasadas, no solo “a futuro”.
+      rangeStart = clampDay(addDays(anchor, -7));
       rangeEnd = clampDay(addDays(anchor, 7));
     } else if (preset === "citas" || preset === "actividades" || preset === "actividades_caducadas") {
       // Listados largos: 60 días hacia atrás/adelante para no truncar.
