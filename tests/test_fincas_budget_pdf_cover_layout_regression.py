@@ -18,11 +18,13 @@ class FincasBudgetPdfCoverLayoutRegressionTests(unittest.TestCase):
 
     def test_fincas_budget_cover_title_splits_as_carta_de_presentacion(self):
         """
-        Regression: forzamos split determinista del título cuando no cabe para evitar
-        solapes con el sello.
+        Regression: la cabecera no debe solaparse con el sello del colegio. Ahora el
+        título de cabecera es más corto ("PRESUPUESTO"), y el texto de carta/propuesta
+        se renderiza en el cuerpo.
         """
         server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
-        self.assertIn("prefer_split=(\"CARTA DE\", \"PRESENTACIÓN\")", server_py)
+        self.assertIn('cover_title = "PRESUPUESTO"', server_py)
+        self.assertIn('subtitle = "Administración de fincas · Propuesta de servicios"', server_py)
 
 
 if __name__ == "__main__":

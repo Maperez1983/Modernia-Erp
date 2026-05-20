@@ -40665,6 +40665,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     team_photo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
+    font_subtitle_bold = _document_font(20, bold=True)
     font_chip = _document_font(16, bold=True)
     font_section = _document_font(22, bold=True)
     font_label = _document_font(14, bold=True)
@@ -40742,7 +40743,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
         draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
         draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
-        draw.text((margin_x, top_margin + 62), company.get("nombre") or workspace.get("nombre") or "Workspace", fill=(240, 246, 248), font=font_subtitle)
+        # Empresa en negrita (evita que pase desapercibida).
+        draw.text(
+            (margin_x, top_margin + 62),
+            company.get("nombre") or workspace.get("nombre") or "Workspace",
+            fill=(240, 246, 248),
+            font=font_subtitle_bold,
+        )
         chip_y = top_margin + 116
         chips = [
             f"REF {ref_label[:12]}",
@@ -40801,7 +40808,8 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         cover_draw = ImageDraw.Draw(cover)
         cover_draw.rounded_rectangle((0, 0, page_width, 240), radius=0, fill=primary)
         cover_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 200)], fill=accent)
-        cover_title = "CARTA DE PRESENTACIÓN"
+        # Cabecera limpia: el texto de carta/propuesta se mueve al cuerpo (debajo de la cabecera).
+        cover_title = "PRESUPUESTO"
         subtitle = "Administración de fincas · Propuesta de servicios"
         title_x = margin_x
         # Reserva espacio a derecha para el sello/colegio: evita que el título "pise" la cabecera.
@@ -40857,20 +40865,8 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             fill="white",
             max_w=max_title_w,
             spacing=10,
-            prefer_split=("CARTA DE", "PRESENTACIÓN"),
         )
-        # Ajusta Y del subtítulo si el título ocupa 2 líneas.
-        subtitle_y = top_margin + 86 + (44 if title_lines > 1 else 0)
-        _draw_cover_text(
-            cover_draw,
-            title_x,
-            subtitle_y,
-            subtitle,
-            font=font_subtitle,
-            fill=(240, 246, 248),
-            max_w=max_title_w,
-            spacing=6,
-        )
+        # Subtítulo NO en cabecera (se renderiza abajo, en la carta).
         if colegio_logo:
             _paste_logo_box(cover, cover_draw, colegio_logo, colegio_box, padding=10)
             colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
@@ -40896,10 +40892,19 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
         impuestos = float(budget.get("impuestos") or 0.0)
         total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
+        # Carta de presentación atractiva (sobre la foto del equipo).
+        intro_lines = [
+            "Somos una empresa con más de 40 años de experiencia en la administración de comunidades.",
+            "Nuestro despacho multidisciplinar está compuesto por especialistas en LABORAL, FISCAL Y CONTABLE, MEDIACIÓN DE SEGUROS, ADMINISTRADORES DE FINCAS COLEGIADOS y ABOGADO.",
+        ]
         cuerpo = [
+            subtitle,
+            "",
             f"{fecha_txt}",
             "",
             f"A la atención de {client_name}:",
+            "",
+            *intro_lines,
             "",
             "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
             "",
@@ -40908,30 +40913,48 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             + " (mínimo 60 €).",
             f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
             f"Total anual (con IVA): {format_eur_short(total * 12)}.",
-            "",
-            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
         ]
         extra_letter = str(calc.get("carta_presentacion") or "").strip()
         if extra_letter:
-            cuerpo.extend(["", "Carta de presentación adicional:", ""])
+            cuerpo.extend(["", "Información adicional:", ""])
             cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
         cuerpo.extend([
             "",
             "Atentamente,",
             f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
         ])
-        y_cover = 278
-        cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
-        text_x = margin_x + 34
-        text_y = y_cover + 30
-        for line in cuerpo:
+        # Layout portada: carta (arriba) + foto de equipo (abajo).
+        y_cover = 262
+        letter_h = 470
+        photo_h = 360
+        gap = 22
+        letter_box = (margin_x, y_cover, page_width - margin_x, y_cover + letter_h)
+        cover_draw.rounded_rectangle(letter_box, radius=28, fill=(252, 252, 252), outline=border)
+        text_x = letter_box[0] + 34
+        text_y = letter_box[1] + 28
+        for idx, line in enumerate(cuerpo):
             if not str(line).strip():
-                text_y += 18
+                text_y += 16
                 continue
-            wrapped = _pdf_wrap_lines(line, width=98)
-            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
-            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=font_table)
+            # Primer bloque (subtitle) más destacado.
+            use_font = font_section if idx == 0 else font_table
+            wrapped = _pdf_wrap_lines(line, width=98 if idx != 0 else 70)
+            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=use_font, spacing=6)
+            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=use_font)
             text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+            if text_y > letter_box[3] - 26:
+                break
+
+        photo_y = letter_box[3] + gap
+        photo_box = (margin_x, photo_y, page_width - margin_x, min(page_height - bottom_margin - 22, photo_y + photo_h))
+        cover_draw.rounded_rectangle(photo_box, radius=28, fill=(255, 255, 255), outline=border)
+        if team_photo:
+            try:
+                photo = team_photo.convert("RGB")
+                photo = ImageOps.fit(photo, (photo_box[2] - photo_box[0] - 6, photo_box[3] - photo_box[1] - 6), method=Image.LANCZOS)
+                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
+            except Exception:
+                pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
         cover_draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(_pdf_wrap_lines(footer_cover, width=108)), fill=muted, font=font_footer, spacing=4)
         pages.append(cover)
