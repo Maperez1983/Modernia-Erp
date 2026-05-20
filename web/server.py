@@ -40802,7 +40802,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         d.polygon([(cx, cy + 26), (cx - 10, cy + 8), (cx + 10, cy + 8)], fill=(215, 62, 54), outline=(180, 40, 35))
         # Text
         d.text((16, 14), title, fill=(35, 40, 44), font=_document_font(16, True))
-        d.text((16, 38), subtitle, fill=(88, 96, 104), font=_document_font(14, False))
+        note = "Vista previa (sin conexión). Escanee el QR para abrir el mapa exacto."
+        d.text((16, 38), note, fill=(88, 96, 104), font=_document_font(13, False))
+        d.text((16, 60), subtitle, fill=(88, 96, 104), font=_document_font(14, False))
         return img
 
     def _paste_photo_cover(image, draw, photo_img, box):
@@ -41040,16 +41042,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         photo_box = (margin_x, photo_y, page_width - margin_x, min(page_height - bottom_margin - 22, photo_y + photo_h))
         if team_photo:
             try:
+                # Mejor look: foto a sangre dentro del cuadro (sin márgenes), con recorte suave.
                 cover_draw.rounded_rectangle(photo_box, radius=28, fill=(255, 255, 255), outline=border)
                 w = max(10, photo_box[2] - photo_box[0] - 6)
                 h = max(10, photo_box[3] - photo_box[1] - 6)
-                bg = Image.new("RGB", (w, h), "white")
                 photo = team_photo.convert("RGB")
-                photo.thumbnail((w, h), Image.LANCZOS)
-                px = int((w - photo.width) / 2)
-                py = int((h - photo.height) / 2)
-                bg.paste(photo, (px, py))
-                cover.paste(bg, (photo_box[0] + 3, photo_box[1] + 3))
+                photo = ImageOps.fit(photo, (w, h), method=Image.LANCZOS, centering=(0.5, 0.32))
+                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
             except Exception:
                 pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
@@ -41348,13 +41347,26 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         y += row_h + 10
 
     ensure_space(180)
-    totals_box = (page_width - margin_x - 360, y + 10, page_width - margin_x, y + 170)
+    # Caja de cierre con posición robusta: si el listado de partidas llega abajo, evitamos que se "corte" el total.
+    totals_h = 160
+    totals_top = y + 10
+    max_top = (page_height - bottom_margin) - totals_h - 36
+    if totals_top > max_top:
+        pages.append(image)
+        image, draw, y = new_page(include_cards=False)
+        totals_top = y + 10
+    totals_box = (page_width - margin_x - 360, totals_top, page_width - margin_x, totals_top + totals_h)
     draw.rounded_rectangle(totals_box, radius=26, fill=soft, outline=border)
     draw.text((totals_box[0] + 24, totals_box[1] + 22), "CIERRE ECONÓMICO", fill=primary, font=font_section)
-    draw.text((totals_box[0] + 24, totals_box[1] + 72), f"Subtotal  {format_eur(budget.get('subtotal') or 0)}", fill=ink, font=font_table)
-    draw.text((totals_box[0] + 24, totals_box[1] + 102), f"Impuestos {format_eur(budget.get('impuestos') or 0)}", fill=ink, font=font_table)
-    draw.text((totals_box[0] + 24, totals_box[1] + 132), f"Total     {format_eur(budget.get('total') or 0)}", fill=ink, font=_document_font(20, True))
-    left_text_top = y + 18
+    # Valores alineados a la derecha para evitar descuadres con importes largos.
+    val_right = totals_box[2] - 24
+    draw.text((totals_box[0] + 24, totals_box[1] + 76), "Subtotal", fill=ink, font=font_table)
+    draw.text((val_right, totals_box[1] + 76), f"{format_eur(budget.get('subtotal') or 0)}", fill=ink, font=font_table, anchor="ra")
+    draw.text((totals_box[0] + 24, totals_box[1] + 106), "Impuestos", fill=ink, font=font_table)
+    draw.text((val_right, totals_box[1] + 106), f"{format_eur(budget.get('impuestos') or 0)}", fill=ink, font=font_table, anchor="ra")
+    draw.text((totals_box[0] + 24, totals_box[1] + 136), "Total", fill=ink, font=_document_font(20, True))
+    draw.text((val_right, totals_box[1] + 136), f"{format_eur(budget.get('total') or 0)}", fill=ink, font=_document_font(20, True), anchor="ra")
+    left_text_top = totals_top + 8
     draw.text((margin_x, left_text_top), "RESPONSABLE", fill=muted, font=font_label)
     draw.text((margin_x, left_text_top + 24), budget.get("responsable") or "-", fill=ink, font=font_table)
     draw.text((margin_x, left_text_top + 68), "FORMA DE PAGO", fill=muted, font=font_label)
