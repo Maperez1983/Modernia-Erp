@@ -12,7 +12,8 @@ class FincasBudgetPdfMapRenderRegressionTests(unittest.TestCase):
         renderizar un mapa estático (server-side) a partir de la dirección.
         """
         server_py = (ROOT / "web" / "server.py").read_text(encoding="utf-8")
-        self.assertIn("fetch_geocode_coordinates(addr_for_map)", server_py)
+        self.assertIn("fetch_geocode_coordinates(normalized_addr)", server_py)
+        self.assertIn('lat_raw = str(calc.get("map_lat")', server_py)
         self.assertIn("staticmap.openstreetmap.de/staticmap.php", server_py)
 
 

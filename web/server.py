@@ -40960,7 +40960,24 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         map_img = None
         qr_img = None
         if addr_for_map:
-            map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
+            normalized_addr = addr_for_map if re.search(r"(españa|spain)\b", addr_for_map, flags=re.I) else f"{addr_for_map}, España"
+            # Si el front ya resolvió coordenadas, las reutilizamos (evita fallos por direcciones incompletas como "Jalón 25").
+            lat = None
+            lon = None
+            try:
+                lat_raw = str(calc.get("map_lat") or "").strip()
+                lon_raw = str(calc.get("map_lon") or "").strip()
+                if lat_raw and lon_raw:
+                    lat = float(lat_raw.replace(",", "."))
+                    lon = float(lon_raw.replace(",", "."))
+            except Exception:
+                lat = None
+                lon = None
+            map_url = (
+                f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(normalized_addr)}"
+                if (lat is None or lon is None)
+                else f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(f'{lat},{lon}')}"
+            )
             try:
                 import qrcode
 
@@ -40970,10 +40987,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             # Intentamos incluir un "mapa" visible en el PDF, no solo el QR.
             # Usamos geocodificación ya existente + staticmap de OpenStreetMap (server-side, sin CORS).
             try:
-                coords = fetch_geocode_coordinates(addr_for_map)
-                if coords and coords.get("ok"):
-                    lat = float(coords.get("lat"))
-                    lon = float(coords.get("lon"))
+                coords = None
+                if lat is None or lon is None:
+                    coords = fetch_geocode_coordinates(normalized_addr)
+                    if coords and coords.get("ok"):
+                        lat = float(coords.get("lat"))
+                        lon = float(coords.get("lon"))
+                if lat is not None and lon is not None:
                     params = urllib.parse.urlencode(
                         {
                             "center": f"{lat},{lon}",
@@ -40987,6 +41007,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                         f"https://staticmap.openstreetmap.de/staticmap.php?{params}",
                         headers={
                             "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+                            "Accept": "image/png,image/*;q=0.9,*/*;q=0.8",
                         },
                     )
                     with urllib.request.urlopen(req, timeout=8) as response:
