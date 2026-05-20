@@ -40777,6 +40777,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         cover_title = "CARTA DE PRESENTACIÓN"
         subtitle = "Administración de fincas · Propuesta de servicios"
         title_x = margin_x
+        # Reserva espacio a derecha para el sello/colegio: evita que el título "pise" la cabecera.
+        colegio_box = (page_width - margin_x - 340, 24, page_width - margin_x, 24 + 90)
+        right_limit = colegio_box[0] - 18 if colegio_logo else (page_width - margin_x)
         if logo:
             # Evita que el logo se monte sobre el título.
             _paste_logo_box(
@@ -40787,10 +40790,61 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 padding=10,
             )
             title_x = margin_x + 270
-        cover_draw.text((title_x, top_margin + 12), cover_title, fill="white", font=font_title)
-        cover_draw.text((title_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
+
+        def _draw_cover_text(draw, x, y, text, *, font, fill, max_w, spacing=6, prefer_split=None):
+            """
+            Dibuja texto (1-2 líneas) asegurando que no sobrepase `max_w`.
+            Priorizamos partir en dos líneas antes que reducir tipografía (layout estable).
+            """
+            try:
+                box = draw.textbbox((x, y), text, font=font)
+                if (box[2] - box[0]) <= max_w:
+                    draw.text((x, y), text, fill=fill, font=font)
+                    return 1
+            except Exception:
+                pass
+            parts = [p for p in (text or "").split(" ") if p]
+            if len(parts) <= 1:
+                draw.text((x, y), text, fill=fill, font=font)
+                return 1
+            # Permite split determinista para títulos conocidos (p.ej. "CARTA DE PRESENTACIÓN").
+            if prefer_split and isinstance(prefer_split, (tuple, list)) and len(prefer_split) == 2:
+                line1, line2 = str(prefer_split[0] or "").strip(), str(prefer_split[1] or "").strip()
+                if line1 and line2:
+                    draw.multiline_text((x, y), f"{line1}\n{line2}", fill=fill, font=font, spacing=spacing)
+                    return 2
+            # Split simple en 2 líneas por espacio.
+            mid = max(1, int(len(parts) / 2))
+            line1 = " ".join(parts[:mid]).strip()
+            line2 = " ".join(parts[mid:]).strip()
+            draw.multiline_text((x, y), f"{line1}\n{line2}", fill=fill, font=font, spacing=spacing)
+            return 2
+
+        max_title_w = max(200, int(right_limit - title_x))
+        title_lines = _draw_cover_text(
+            cover_draw,
+            title_x,
+            top_margin + 12,
+            cover_title,
+            font=font_title,
+            fill="white",
+            max_w=max_title_w,
+            spacing=10,
+            prefer_split=("CARTA DE", "PRESENTACIÓN"),
+        )
+        # Ajusta Y del subtítulo si el título ocupa 2 líneas.
+        subtitle_y = top_margin + 86 + (44 if title_lines > 1 else 0)
+        _draw_cover_text(
+            cover_draw,
+            title_x,
+            subtitle_y,
+            subtitle,
+            font=font_subtitle,
+            fill=(240, 246, 248),
+            max_w=max_title_w,
+            spacing=6,
+        )
         if colegio_logo:
-            colegio_box = (page_width - margin_x - 340, 24, page_width - margin_x, 24 + 90)
             _paste_logo_box(cover, cover_draw, colegio_logo, colegio_box, padding=10)
             colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
             cover_draw.text(
