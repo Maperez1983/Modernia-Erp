@@ -40663,6 +40663,12 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     # Foto de equipo bajo la cabecera del presupuesto (opcional).
     # Para activarla, guarda la imagen en `assets/photos/equipo-modernia.jpg`.
     team_photo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
+    emoji_icons = {
+        "house": _load_asset_logo("emoji/house.png", max_width=22),
+        "shop": _load_asset_logo("emoji/shop.png", max_width=22),
+        "box": _load_asset_logo("emoji/box.png", max_width=22),
+        "car": _load_asset_logo("emoji/car.png", max_width=22),
+    }
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_subtitle_bold = _document_font(20, bold=True)
@@ -40675,6 +40681,21 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     font_table_bold = _document_font(16, bold=True)
     font_total = _document_font(28, bold=True)
     font_footer = _document_font(14, bold=False)
+    # Emojis (opcional): en macOS intentamos Apple Color Emoji; si no se puede renderizar, usaremos PNGs.
+    font_emoji = None
+    try:
+        apple_paths = [
+            "/System/Library/Fonts/Apple Color Emoji.ttc",
+            "/System/Library/Fonts/Apple Color Emoji.ttf",
+            "/Library/Fonts/Apple Color Emoji.ttc",
+            "/Library/Fonts/Apple Color Emoji.ttf",
+        ]
+        for p in apple_paths:
+            if os.path.exists(p):
+                font_emoji = ImageFont.truetype(p, 18)
+                break
+    except Exception:
+        font_emoji = None
     pages = []
     servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
@@ -41061,9 +41082,26 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             ("box", calc.get("num_trasteros") or 0),
             ("car", calc.get("num_aparcamientos") or 0),
         ]
+        emoji_chars = {"house": "🏠", "shop": "🏬", "box": "📦", "car": "🚗"}
         for idx, (kind, value) in enumerate(items):
-            _draw_small_icon(draw, cursor_x, icon_y, kind, size=icon_size, fill=ink)
-            cursor_x += icon_size + 8
+            if font_emoji:
+                ch = emoji_chars.get(kind) or ""
+                if ch:
+                    cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": f"{ch} ", "font": font_emoji}], fill=ink)
+                else:
+                    _draw_small_icon(draw, cursor_x, icon_y, kind, size=icon_size, fill=ink)
+                    cursor_x += icon_size + 8
+            else:
+                icon = emoji_icons.get(kind)
+                if icon:
+                    try:
+                        image.paste(icon, (int(cursor_x), int(base_y - 4)), icon)
+                    except Exception:
+                        pass
+                    cursor_x += icon.width + 8
+                else:
+                    _draw_small_icon(draw, cursor_x, icon_y, kind, size=icon_size, fill=ink)
+                    cursor_x += icon_size + 8
             cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": f"{value}", "font": font_table_bold}], fill=ink)
             if idx != len(items) - 1:
                 cursor_x = _draw_inline_text(draw, cursor_x, base_y, [{"text": sep, "font": font_table}], fill=ink)
