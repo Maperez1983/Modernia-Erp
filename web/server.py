@@ -40892,10 +40892,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
         impuestos = float(budget.get("impuestos") or 0.0)
         total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
-        # Carta de presentación atractiva (sobre la foto del equipo).
+        # Carta de presentación (tono comercial y clara, encima de la foto del equipo).
         intro_lines = [
-            "Somos una empresa con más de 40 años de experiencia en la administración de comunidades.",
-            "Nuestro despacho multidisciplinar está compuesto por especialistas en LABORAL, FISCAL Y CONTABLE, MEDIACIÓN DE SEGUROS, ADMINISTRADORES DE FINCAS COLEGIADOS y ABOGADO.",
+            "Gracias por solicitar nuestra propuesta. En Modernia llevamos más de 40 años administrando comunidades con un enfoque cercano y muy práctico.",
+            "Trabajamos con un despacho multidisciplinar: laboral, fiscal y contable, mediación de seguros, administrador de fincas colegiado y apoyo jurídico.",
+            "Nuestro objetivo es sencillo: tranquilidad para la comunidad. Respuesta ágil ante incidencias, control de costes y proveedores, y transparencia en cada decisión.",
+            "Entregamos información clara y periódica (cuentas, situación de morosidad e incidencias) para que el presidente y la junta puedan decidir con seguridad.",
+            "Si lo desea, concertamos una visita y revisamos su documentación actual para afinar la cuota y proponer mejoras inmediatas sin compromiso.",
         ]
         cuerpo = [
             subtitle,
