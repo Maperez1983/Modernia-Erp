@@ -40672,6 +40672,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     font_value = _document_font(20, bold=False)
     font_table_head = _document_font(15, bold=True)
     font_table = _document_font(16, bold=False)
+    font_table_bold = _document_font(16, bold=True)
     font_total = _document_font(28, bold=True)
     font_footer = _document_font(14, bold=False)
     pages = []
@@ -40723,6 +40724,18 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         image.paste(fitted, (px, py), fitted)
 
     page_index = 0
+
+    def _draw_inline_text(draw, x, y, parts, *, fill):
+        cursor_x = x
+        for part in parts:
+            text = str(part.get("text") or "")
+            if not text:
+                continue
+            font = part.get("font") or font_table
+            draw.text((cursor_x, y), text, fill=fill, font=font)
+            bbox = draw.textbbox((cursor_x, y), text, font=font)
+            cursor_x = bbox[2]
+        return cursor_x
 
     def _paste_photo_cover(image, draw, photo_img, box):
         if not photo_img:
@@ -40977,14 +40990,29 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         box = (margin_x, y, page_width - margin_x, y + 100)
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
         draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
-        base_text = (
-            f"{calc.get('num_vecinos') or 0} vecinos · "
-            f"{calc.get('num_locales') or 0} locales · "
-            f"{calc.get('num_trasteros') or 0} trasteros · "
-            f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
-            f"Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
+        base_y = box[1] + 58
+        base_x = box[0] + 24
+        _draw_inline_text(
+            draw,
+            base_x,
+            base_y,
+            [
+                {"text": "🏠 ", "font": font_table},
+                {"text": f"{calc.get('num_vecinos') or 0}", "font": font_table_bold},
+                {"text": " · ", "font": font_table},
+                {"text": "🏬 ", "font": font_table},
+                {"text": f"{calc.get('num_locales') or 0}", "font": font_table_bold},
+                {"text": " · ", "font": font_table},
+                {"text": "📦 ", "font": font_table},
+                {"text": f"{calc.get('num_trasteros') or 0}", "font": font_table_bold},
+                {"text": " · ", "font": font_table},
+                {"text": "🚗 ", "font": font_table},
+                {"text": f"{calc.get('num_aparcamientos') or 0}", "font": font_table_bold},
+                {"text": " · Base sugerida ", "font": font_table},
+                {"text": f"{format_eur(calc.get('cuota_sugerida') or 0)}", "font": font_table_bold},
+            ],
+            fill=ink,
         )
-        draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
 
         ensure_space(240)
