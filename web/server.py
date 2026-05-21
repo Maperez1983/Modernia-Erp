@@ -40875,20 +40875,27 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             fill=(240, 246, 248),
             font=font_subtitle_bold,
         )
-        chip_y = top_margin + 112
-        chips = [
-            f"REF {ref_label[:12]}",
-            f"FECHA {budget.get('fecha') or '-'}",
-            f"ESTADO {budget.get('estado') or 'Borrador'}",
-            f"SERVICIO {servicio_label.upper()}",
-        ]
-        chip_x = margin_x
-        for chip in chips:
-            box = draw.textbbox((chip_x, chip_y), chip, font=font_chip)
-            chip_w = (box[2] - box[0]) + 30
-            draw.rounded_rectangle((chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26), radius=18, fill=(94, 137, 139), outline=(255, 255, 255))
-            draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
-            chip_x += chip_w + 12
+        # Chips de cabecera: útiles en presupuestos generales, pero en Fincas ensucian el diseño.
+        if servicio_key != "fincas":
+            chip_y = top_margin + 112
+            chips = [
+                f"REF {ref_label[:12]}",
+                f"FECHA {budget.get('fecha') or '-'}",
+                f"ESTADO {budget.get('estado') or 'Borrador'}",
+                f"SERVICIO {servicio_label.upper()}",
+            ]
+            chip_x = margin_x
+            for chip in chips:
+                box = draw.textbbox((chip_x, chip_y), chip, font=font_chip)
+                chip_w = (box[2] - box[0]) + 30
+                draw.rounded_rectangle(
+                    (chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26),
+                    radius=18,
+                    fill=(94, 137, 139),
+                    outline=(255, 255, 255),
+                )
+                draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
+                chip_x += chip_w + 12
         if logo:
             # Logo en caja fija para evitar solapes con chips/títulos.
             _paste_logo_box(
