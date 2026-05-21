@@ -41075,10 +41075,10 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 w = max(10, photo_box[2] - photo_box[0] - 6)
                 h = max(10, photo_box[3] - photo_box[1] - 6)
                 photo = team_photo.convert("RGB")
-                contained = ImageOps.contain(photo, (w, h), method=Image.LANCZOS)
-                bg = Image.new("RGB", (w, h), "white")
-                bg.paste(contained, ((w - contained.width) // 2, (h - contained.height) // 2))
-                cover.paste(bg, (photo_box[0] + 3, photo_box[1] + 3))
+                # Rellenar "de punta a punta" evitando cortar por abajo:
+                # usamos cover (fit) anclado a la parte inferior, recortando si hace falta por arriba.
+                photo = ImageOps.fit(photo, (w, h), method=Image.LANCZOS, centering=(0.5, 1.0))
+                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
             except Exception:
                 pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
