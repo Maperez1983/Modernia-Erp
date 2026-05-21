@@ -41349,12 +41349,37 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     ensure_space(70)
     draw.text((margin_x, y), "PARTIDAS PRESUPUESTADAS", fill=primary, font=font_section)
     y += 42
+    # Columnas de la tabla: se calculan dinámicamente para respetar márgenes.
+    # Antes estaban "hardcoded" y la columna TOTAL se salía del área útil (se recortaba en PDF).
+    table_left = margin_x
+    table_right = page_width - margin_x
+    table_w = max(600, int(table_right - table_left))
+    col_gap = 12
+    col_w_qty = 150
+    col_w_price = 150
+    col_w_dto = 100
+    col_w_total = 150
+    col_w_concept = table_w - (col_w_qty + col_w_price + col_w_dto + col_w_total + col_gap * 4)
+    # Salvaguarda: si el espacio es menor (fuente/escala), recortamos columnas numéricas.
+    if col_w_concept < 380:
+        short = 380 - col_w_concept
+        take_each = int((short + 3) / 4)
+        col_w_qty = max(120, col_w_qty - take_each)
+        col_w_price = max(120, col_w_price - take_each)
+        col_w_dto = max(84, col_w_dto - take_each)
+        col_w_total = max(120, col_w_total - take_each)
+        col_w_concept = table_w - (col_w_qty + col_w_price + col_w_dto + col_w_total + col_gap * 4)
+    x_concept = table_left
+    x_qty = x_concept + col_w_concept + col_gap
+    x_price = x_qty + col_w_qty + col_gap
+    x_dto = x_price + col_w_price + col_gap
+    x_total = x_dto + col_w_dto + col_gap
     columns = {
-        "concepto": (margin_x, 650),
-        "cantidad": (770, 90),
-        "precio": (880, 130),
-        "dto": (1028, 72),
-        "total": (1114, 110),
+        "concepto": (x_concept, col_w_concept),
+        "cantidad": (x_qty, col_w_qty),
+        "precio": (x_price, col_w_price),
+        "dto": (x_dto, col_w_dto),
+        "total": (x_total, col_w_total),
     }
     cell_pad_x = 14
 
