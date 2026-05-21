@@ -41288,25 +41288,61 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             except Exception:
                 building_photo = None
         if qr_img or building_photo or map_img:
-            ensure_space(330)
-            box_media = (margin_x, y, page_width - margin_x, y + 300)
+            # Altura dinámica: permite mostrar mapa + foto de edificio en la misma sección.
+            photo_w = 660
+            map_h = 140 if (map_img and building_photo) else 210
+            building_h = 140 if (map_img and building_photo) else 210
+            stack_gap = 14
+            left_h = map_h
+            if map_img and building_photo:
+                left_h = map_h + stack_gap + building_h
+            elif building_photo and not map_img:
+                left_h = building_h
+            inner_h = max(180, left_h)
+            box_h = 62 + inner_h + 24
+            ensure_space(box_h + 30)
+            box_media = (margin_x, y, page_width - margin_x, y + box_h)
             draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
             draw.text((box_media[0] + 24, box_media[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
             inner_left = box_media[0] + 24
             inner_top = box_media[1] + 62
-            photo_w, photo_h = 660, 210
+            photo_h = inner_h
             gap = 24
             qr_x = inner_left
             if map_img:
                 try:
-                    map_fit = ImageOps.fit(map_img, (photo_w, photo_h), method=Image.LANCZOS)
-                    image.paste(map_fit, (inner_left, inner_top))
-                    draw.rounded_rectangle(
-                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
-                        radius=20,
-                        outline=border,
-                        width=2,
-                    )
+                    # Si también hay foto de edificio, apilamos ambas (mapa arriba, edificio abajo).
+                    if building_photo:
+                        map_fit = ImageOps.fit(map_img, (photo_w, map_h), method=Image.LANCZOS)
+                        image.paste(map_fit, (inner_left, inner_top))
+                        draw.rounded_rectangle(
+                            (inner_left, inner_top, inner_left + photo_w, inner_top + map_h),
+                            radius=20,
+                            outline=border,
+                            width=2,
+                        )
+                        try:
+                            photo = building_photo.convert("RGB")
+                            photo = ImageOps.fit(photo, (photo_w, building_h), method=Image.LANCZOS)
+                            by = inner_top + map_h + stack_gap
+                            image.paste(photo, (inner_left, by))
+                            draw.rounded_rectangle(
+                                (inner_left, by, inner_left + photo_w, by + building_h),
+                                radius=20,
+                                outline=border,
+                                width=2,
+                            )
+                        except Exception:
+                            building_photo = None
+                    else:
+                        map_fit = ImageOps.fit(map_img, (photo_w, photo_h), method=Image.LANCZOS)
+                        image.paste(map_fit, (inner_left, inner_top))
+                        draw.rounded_rectangle(
+                            (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
+                            radius=20,
+                            outline=border,
+                            width=2,
+                        )
                 except Exception:
                     map_img = None
                 qr_x = inner_left + photo_w + gap
