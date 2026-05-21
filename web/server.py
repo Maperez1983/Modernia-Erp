@@ -44,7 +44,7 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 try:
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.lib import colors as rl_colors
@@ -41076,9 +41076,19 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 h = max(10, photo_box[3] - photo_box[1] - 6)
                 photo = team_photo.convert("RGB")
                 # Rellenar "de punta a punta" evitando cortar por abajo:
-                # usamos cover (fit) anclado a la parte inferior, recortando si hace falta por arriba.
-                photo = ImageOps.fit(photo, (w, h), method=Image.LANCZOS, centering=(0.5, 1.0))
-                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
+                # Sin recorte del sujeto (contain) pero sin márgenes "vacíos":
+                # rellenamos el rectángulo con un fondo a sangre (cover) desenfocado
+                # y encima colocamos la foto completa centrada.
+                bg = ImageOps.fit(photo, (w, h), method=Image.LANCZOS, centering=(0.5, 0.5))
+                try:
+                    bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
+                    bg = ImageEnhance.Brightness(bg).enhance(0.95)
+                    bg = ImageEnhance.Contrast(bg).enhance(0.95)
+                except Exception:
+                    pass
+                fg = ImageOps.contain(photo, (w, h), method=Image.LANCZOS)
+                bg.paste(fg, ((w - fg.width) // 2, (h - fg.height) // 2))
+                cover.paste(bg, (photo_box[0] + 3, photo_box[1] + 3))
             except Exception:
                 pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
