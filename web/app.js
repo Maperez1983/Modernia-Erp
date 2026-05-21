@@ -22557,13 +22557,13 @@ const renderWorkspaceFincasBudgetsList = () => {
       modal = document.createElement("div");
       modal.id = "fincasBudgetEditModal";
       modal.className = "modal hidden";
-      modal.innerHTML = `
-        <div class="modal-content" style="max-width: 980px;">
-          <div class="modal-header">
-            <h3>Editar presupuesto (Fincas)</h3>
-            <button type="button" class="secondary ghost" data-fincas-budget-close>Cerrar</button>
-          </div>
-          <form class="modal-body form-grid" data-fincas-budget-form data-money-euro="1">
+	      modal.innerHTML = `
+	        <div class="modal-content" style="max-width: 980px;">
+	          <div class="modal-header">
+	            <h3>Editar presupuesto (Fincas)</h3>
+	            <button type="button" class="secondary ghost" data-fincas-budget-close>Cerrar</button>
+	          </div>
+	          <form class="modal-body form-grid" data-fincas-budget-form data-money-euro="1">
             <input type="hidden" name="id" />
             <div>
               <label>Título</label>
@@ -22642,21 +22642,23 @@ const renderWorkspaceFincasBudgetsList = () => {
             </div>
 
             <div class="muted" data-fincas-budget-status style="grid-column: 1 / -1;"></div>
-
-            <div class="modal-actions" style="grid-column: 1 / -1;">
-              <button type="submit" class="primary">Guardar</button>
-              <button type="button" class="secondary" data-fincas-budget-cancel>Cancelar</button>
-            </div>
-          </form>
-        </div>
-      `;
+	
+	            <div class="modal-actions" style="grid-column: 1 / -1;">
+	              <button type="button" class="secondary danger" data-fincas-budget-delete-modal>Borrar</button>
+	              <button type="submit" class="primary">Guardar</button>
+	              <button type="button" class="secondary" data-fincas-budget-cancel>Cancelar</button>
+	            </div>
+	          </form>
+	        </div>
+	      `;
       document.body.appendChild(modal);
     }
 
     const form = modal.querySelector("[data-fincas-budget-form]");
-    const closeBtn = modal.querySelector("[data-fincas-budget-close]");
-    const cancelBtn = modal.querySelector("[data-fincas-budget-cancel]");
-    const statusEl = modal.querySelector("[data-fincas-budget-status]");
+	    const closeBtn = modal.querySelector("[data-fincas-budget-close]");
+	    const cancelBtn = modal.querySelector("[data-fincas-budget-cancel]");
+	    const deleteBtn = modal.querySelector("[data-fincas-budget-delete-modal]");
+	    const statusEl = modal.querySelector("[data-fincas-budget-status]");
 
     const cleanup = () => {
       modal.classList.add("hidden");
@@ -22715,11 +22717,36 @@ const renderWorkspaceFincasBudgetsList = () => {
       modal.dataset.bound = "1";
     }
 
-    closeBtn.onclick = cleanup;
-    cancelBtn.onclick = cleanup;
-    modal.onclick = (event) => {
-      if (event.target === modal) cleanup();
-    };
+	    closeBtn.onclick = cleanup;
+	    cancelBtn.onclick = cleanup;
+	    if (deleteBtn) {
+	      deleteBtn.onclick = async () => {
+	        const id = String(form?.querySelector('[name="id"]')?.value || row.id || "").trim();
+	        if (!id || !state.currentWorkspaceId) return;
+	        if (!confirm("¿Seguro que quieres borrar este presupuesto? Esta acción no se puede deshacer.")) return;
+	        try {
+	          deleteBtn.disabled = true;
+	          if (statusEl) statusEl.textContent = "Borrando...";
+	          const res = await fetch("/api/workspace_presupuesto_delete", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id }),
+	          }).then((r) => r.json());
+	          if (res?.error) throw new Error(res.error);
+	          await refreshWorkspaceBudgets({ silent: true });
+	          renderWorkspaceFincasBudgetsList();
+	          if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Presupuesto borrado.";
+	          cleanup();
+	        } catch (error) {
+	          if (statusEl) statusEl.textContent = error?.message || "No se pudo borrar.";
+	        } finally {
+	          try { deleteBtn.disabled = false; } catch (e) {}
+	        }
+	      };
+	    }
+	    modal.onclick = (event) => {
+	      if (event.target === modal) cleanup();
+	    };
 
     form.onsubmit = async (event) => {
       event.preventDefault();
