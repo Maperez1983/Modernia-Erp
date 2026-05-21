@@ -41223,17 +41223,25 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                             "markers": f"{lat},{lon},red-pushpin",
                         }
                     )
-                    req = urllib.request.Request(
+                    headers = {
+                        "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+                        "Accept": "image/png,image/*;q=0.9,*/*;q=0.8",
+                    }
+                    # staticmap.openstreetmap.de a veces falla por rate-limit / red; probamos espejos.
+                    candidates = [
                         f"https://staticmap.openstreetmap.de/staticmap.php?{params}",
-                        headers={
-                            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
-                            "Accept": "image/png,image/*;q=0.9,*/*;q=0.8",
-                        },
-                    )
-                    with urllib.request.urlopen(req, timeout=8) as response:
-                        raw = response.read()
-                    if raw:
-                        map_img = Image.open(BytesIO(raw)).convert("RGB")
+                        f"https://staticmap.openstreetmap.fr/staticmap.php?{params}",
+                    ]
+                    for url in candidates:
+                        try:
+                            req = urllib.request.Request(url, headers=headers)
+                            with urllib.request.urlopen(req, timeout=10) as response:
+                                raw = response.read()
+                            if raw:
+                                map_img = Image.open(BytesIO(raw)).convert("RGB")
+                                break
+                        except Exception:
+                            map_img = None
             except Exception:
                 map_img = None
         building_photo = None
