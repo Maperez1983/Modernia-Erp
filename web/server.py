@@ -56449,6 +56449,8 @@ class Handler(BaseHTTPRequestHandler):
                 calculo["solicitante_direccion"] = str(payload.get("solicitante_direccion") or "").strip()
                 calculo["solicitante_email"] = str(payload.get("solicitante_email") or payload.get("cliente_email") or "").strip()
                 calculo["edificio_foto_key"] = str(payload.get("edificio_foto_key") or "").strip()
+                calculo["map_lat"] = str(payload.get("map_lat") or "").strip()
+                calculo["map_lon"] = str(payload.get("map_lon") or "").strip()
                 calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip()
                 colegiado_raw = str(payload.get("colegiado_numero") or "").strip()
                 calculo["colegiado_numero"] = colegiado_raw if colegiado_raw else "3079"
