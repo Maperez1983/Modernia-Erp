@@ -56698,6 +56698,35 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
+        elif parsed.path == "/api/workspace_presupuesto_delete":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or payload.get("presupuesto_id") or "").strip()
+            if not workspace_id or not record_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            row = conn.execute(
+                "SELECT id, servicio, titulo FROM workspace_presupuestos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Presupuesto no encontrado"}, status=404)
+                return
+            try:
+                conn.execute("DELETE FROM workspace_presupuesto_lineas WHERE presupuesto_id = ?", (record_id,))
+            except Exception:
+                pass
+            conn.execute("DELETE FROM workspace_presupuestos WHERE id = ? AND workspace_id = ?", (record_id, workspace_id))
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
         elif parsed.path == "/api/workspace_fincas_comunidades":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
