@@ -41859,7 +41859,50 @@ const resolveHipotecaBankBrand = (label) => {
 
 const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
   if (!hipotecaEntidadKpis) return;
-  if (!rows.length) {
+  const mergedRows = (() => {
+    const buckets = new Map();
+    (rows || []).forEach((row) => {
+      const label = String(row?.label || "").trim();
+      const brand = resolveHipotecaBankBrand(label);
+      const key = String(brand?.name || label || "").trim() || "Entidad sin identificar";
+      const yearTotal = Number(row?.year_total || 0);
+      const total = Number(row?.total || 0);
+      const volumenTotal = Number(row?.volumen_total || 0);
+      const comisionTotal = Number(row?.comision_total || 0);
+      const plazoMedio = Number(row?.plazo_medio_dias || 0);
+
+      const existing = buckets.get(key) || {
+        label: key,
+        year_total: 0,
+        total: 0,
+        volumen_total: 0,
+        comision_total: 0,
+        _plazo_weight: 0,
+        _plazo_sum: 0,
+      };
+
+      existing.year_total += yearTotal;
+      existing.total += total;
+      existing.volumen_total += volumenTotal;
+      existing.comision_total += comisionTotal;
+      if (plazoMedio) {
+        const w = yearTotal > 0 ? yearTotal : 1;
+        existing._plazo_weight += w;
+        existing._plazo_sum += plazoMedio * w;
+      }
+      buckets.set(key, existing);
+    });
+    const out = Array.from(buckets.values()).map((item) => {
+      const denom = item._plazo_weight || 0;
+      const plazo = denom ? item._plazo_sum / denom : 0;
+      const { _plazo_weight, _plazo_sum, ...rest } = item;
+      return { ...rest, plazo_medio_dias: plazo };
+    });
+    out.sort((a, b) => Number(b.year_total || 0) - Number(a.year_total || 0));
+    return out;
+  })();
+
+  if (!mergedRows.length) {
     hipotecaEntidadKpis.innerHTML = "<p class='muted'>Sin entidades para este año.</p>";
     return;
   }
@@ -41874,7 +41917,7 @@ const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
   thead.appendChild(trHead);
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
-  rows.forEach((row) => {
+  mergedRows.forEach((row) => {
     const brand = resolveHipotecaBankBrand(row.label);
     const tr = document.createElement("tr");
     const entityTd = document.createElement("td");
