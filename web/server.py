@@ -41025,16 +41025,44 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         letter_box = (margin_x, y_cover, page_width - margin_x, y_cover + letter_h)
         text_x = margin_x
         text_y = y_cover
+        max_letter_w = max(200, int(letter_box[2] - text_x))
+
+        def _should_justify_line(txt):
+            t = str(txt or "").strip()
+            if not t:
+                return False
+            if t.endswith(":"):
+                return False
+            if any(k in t for k in ("·", "×")):
+                return False
+            if t.lower().startswith(("a la atención", "atentamente", "información adicional")):
+                return False
+            if t.lower().startswith(("cálculo base:", "cuota mensual", "total anual")):
+                return False
+            return len(t.split()) >= 7
+
         for idx, line in enumerate(cuerpo):
             if not str(line).strip():
                 text_y += 16
                 continue
             # Primer bloque (subtitle) más destacado.
             use_font = font_section if idx == 0 else font_table
-            wrapped = _pdf_wrap_lines(line, width=98 if idx != 0 else 70)
-            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=use_font, spacing=6, align="left")
-            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=use_font)
-            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+            if idx == 0 or not _should_justify_line(line):
+                wrapped = _pdf_wrap_lines_px(cover_draw, line, use_font, max_letter_w if idx != 0 else int(max_letter_w * 0.78))
+                cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=use_font, spacing=6, align="left")
+                sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=use_font)
+                text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+            else:
+                text_y = _pdf_draw_justified_paragraph(
+                    cover_draw,
+                    text_x,
+                    text_y,
+                    max_letter_w,
+                    line,
+                    use_font,
+                    ink,
+                    line_spacing=6,
+                )
             if text_y > letter_box[3] - 26:
                 break
 
@@ -41047,8 +41075,10 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 w = max(10, photo_box[2] - photo_box[0] - 6)
                 h = max(10, photo_box[3] - photo_box[1] - 6)
                 photo = team_photo.convert("RGB")
-                photo = ImageOps.fit(photo, (w, h), method=Image.LANCZOS, centering=(0.5, 0.32))
-                cover.paste(photo, (photo_box[0] + 3, photo_box[1] + 3))
+                contained = ImageOps.contain(photo, (w, h), method=Image.LANCZOS)
+                bg = Image.new("RGB", (w, h), "white")
+                bg.paste(contained, ((w - contained.width) // 2, (h - contained.height) // 2))
+                cover.paste(bg, (photo_box[0] + 3, photo_box[1] + 3))
             except Exception:
                 pass
         footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
@@ -43134,6 +43164,81 @@ def _pdf_wrap_lines(text, width=86):
         wrapped = textwrap.wrap(block, width=width, break_long_words=False, break_on_hyphens=False)
         lines.extend(wrapped or [""])
     return lines or [""]
+
+
+def _pdf_wrap_lines_px(draw, text, font, max_width_px):
+    raw = str(text or "").strip()
+    if not raw:
+        return [""]
+
+    def measure(txt):
+        try:
+            return float(draw.textlength(txt, font=font))
+        except Exception:
+            box = draw.textbbox((0, 0), txt, font=font)
+            return float(box[2] - box[0])
+
+    lines = []
+    for block in raw.splitlines():
+        block = block.strip()
+        if not block:
+            lines.append("")
+            continue
+        words = block.split()
+        current = ""
+        for w in words:
+            trial = f"{current} {w}".strip()
+            if current and measure(trial) > max_width_px:
+                lines.append(current)
+                current = w
+            else:
+                current = trial
+        if current:
+            lines.append(current)
+    return lines or [""]
+
+
+def _pdf_draw_justified_paragraph(draw, x, y, max_width_px, text, font, fill, *, line_spacing=6):
+    raw = str(text or "").strip()
+    if not raw:
+        return y
+
+    def measure(txt):
+        try:
+            return float(draw.textlength(txt, font=font))
+        except Exception:
+            box = draw.textbbox((0, 0), txt, font=font)
+            return float(box[2] - box[0])
+
+    lines = _pdf_wrap_lines_px(draw, raw, font, max_width_px)
+    sample_box = draw.textbbox((x, y), "Ag", font=font)
+    line_h = (sample_box[3] - sample_box[1]) + (line_spacing + 2)
+
+    for i, line in enumerate(lines):
+        if not line.strip():
+            y += line_h
+            continue
+        is_last = i == len(lines) - 1
+        words = line.split()
+        if is_last or len(words) <= 1:
+            draw.text((x, y), line, fill=fill, font=font)
+            y += line_h
+            continue
+
+        base = " ".join(words)
+        base_w = measure(base)
+        extra = max(0.0, max_width_px - base_w)
+        gaps = max(1, len(words) - 1)
+        per_gap = extra / gaps
+
+        cursor_x = float(x)
+        for wi, word in enumerate(words):
+            draw.text((cursor_x, y), word, fill=fill, font=font)
+            cursor_x += measure(word)
+            if wi != len(words) - 1:
+                cursor_x += measure(" ") + per_gap
+        y += line_h
+    return y
 
 
 def _pdf_format_number(value, decimals=2):
