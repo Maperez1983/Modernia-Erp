@@ -582,6 +582,41 @@ def _s3_key_visible_for_user(conn, session, key):
         except Exception:
             ok = False
 
+    # 1b) Fincas (comunidades y presupuestos)
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_fincas_comunidades c
+                JOIN workspace_miembros m ON m.workspace_id = c.workspace_id AND m.usuario_id = ?
+                WHERE c.foto_edificio_key = ? OR c.foto_edificio_key = ?
+                LIMIT 1
+                """,
+                (uid, safe_key, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            # calculo_json guarda el key como string (p.ej. {"edificio_foto_key":"..."}). Usamos LIKE para compatibilidad.
+            like_plain = f'%\"edificio_foto_key\"%\"{safe_key}\"%'
+            like_s3 = f'%\"edificio_foto_key\"%\"{s3_url_value}\"%'
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_presupuestos p
+                JOIN workspace_miembros m ON m.workspace_id = p.workspace_id AND m.usuario_id = ?
+                WHERE (p.calculo_json LIKE ? OR p.calculo_json LIKE ?)
+                LIMIT 1
+                """,
+                (uid, like_plain, like_s3),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+
     # 2) Tablas por empresa_id → workspace_empresas → workspace_miembros
     if not ok:
         try:
