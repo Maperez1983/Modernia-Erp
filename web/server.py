@@ -67333,6 +67333,7 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/hipotecas":
             # try to update existing encargo/estudio instead of creating duplicates
+            force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
             cliente = str(payload.get("cliente") or "").strip()
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
             fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
@@ -67343,21 +67344,23 @@ class Handler(BaseHTTPRequestHandler):
             comision = parse_optional_float(payload.get("comision"))
             anio = parse_optional_int(payload.get("anio"))
             estado_busqueda = ("estudio", "encargo", "pendiente")
-            where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
-            values = [empresa["id"], *estado_busqueda, cliente]
-            if fecha_encargo:
-                where += " AND fecha_encargo = ?"
-                values.append(fecha_encargo)
-            if precio is not None:
-                where += " AND precio = ?"
-                values.append(precio)
-            if importe_hipoteca is not None:
-                where += " AND importe_hipoteca = ?"
-                values.append(importe_hipoteca)
-            existing = conn.execute(
-                f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
-                values,
-            ).fetchone()
+            existing = None
+            if (not force_new) and cliente:
+                where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
+                values = [empresa["id"], *estado_busqueda, cliente]
+                if fecha_encargo:
+                    where += " AND fecha_encargo = ?"
+                    values.append(fecha_encargo)
+                if precio is not None:
+                    where += " AND precio = ?"
+                    values.append(precio)
+                if importe_hipoteca is not None:
+                    where += " AND importe_hipoteca = ?"
+                    values.append(importe_hipoteca)
+                existing = conn.execute(
+                    f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
+                    values,
+                ).fetchone()
             existing_row = None
             if existing:
                 existing_row = conn.execute(

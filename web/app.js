@@ -40915,6 +40915,22 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   }
   const panel = ensureHipotecaFichaPanel();
   if (!panel) return;
+  // Importante: evitar que queden valores “arrastrados” de la ficha anterior si el siguiente
+  // registro trae campos vacíos o aún no tiene JSON. Reseteamos el formulario antes de rellenar.
+  try {
+    panel.querySelectorAll("#hipotecaFichaForm input, #hipotecaFichaForm select, #hipotecaFichaForm textarea").forEach((el) => {
+      if (!el || el.disabled) return;
+      const tag = String(el.tagName || "").toUpperCase();
+      if (tag === "INPUT") {
+        const t = String(el.type || "").toLowerCase();
+        if (t === "checkbox" || t === "radio") {
+          el.checked = false;
+          return;
+        }
+      }
+      el.value = "";
+    });
+  } catch (e) {}
   panel.dataset.recordId = target;
   const meta = panel.querySelector("#hipotecaFichaMeta");
   if (meta) meta.textContent = "Cargando ficha...";
@@ -41164,6 +41180,9 @@ const saveHipotecaFicha = async (event) => {
         return;
       }
       const createPayload = { ...base };
+      // Evita “herencias”/reutilización accidental: cada nueva operación debe crear un registro nuevo,
+      // incluso si coincide cliente/estado con una pendiente previa.
+      createPayload.force_new = true;
       // Endpoint legacy: crea (o reutiliza) una hipoteca en BDT y nos devuelve el id.
       [
         "cliente",
