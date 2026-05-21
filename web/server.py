@@ -41042,12 +41042,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             *intro_lines,
             "",
             "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
-            "",
-            f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
-            + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
-            + " (mínimo 60 €).",
-            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
-            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
         ]
         extra_letter = str(calc.get("carta_presentacion") or "").strip()
         if extra_letter:
