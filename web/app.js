@@ -51383,7 +51383,7 @@ const initCrmAgendaPrefsIfNeeded = () => {
   // Por defecto: agenda de EQUIPO (no solo la del usuario activo).
   // Importante: por UX, la agenda no debe “vaciarse” al pasar de semana.
   // Usamos un preset más amplio por defecto.
-  const DEFAULT_PRESET = "citas_7dias_equipo";
+  const DEFAULT_PRESET = "citas_equipo";
   if (!state.crmAgendaView) {
     let view = "list";
     let day = formatAgendaDate(new Date());
@@ -51402,7 +51402,7 @@ const initCrmAgendaPrefsIfNeeded = () => {
     try {
       const storedPreset = String(localStorage.getItem("crm.agenda.preset") || "").trim();
       // Migración suave: si existía el preset antiguo, pásalo a equipo.
-      if (storedPreset) preset = storedPreset === "citas_7dias" ? DEFAULT_PRESET : storedPreset;
+      if (storedPreset) preset = storedPreset === "citas_7dias" ? "citas_7dias_equipo" : storedPreset;
     } catch (e) {}
     state.crmAgendaView = view;
     state.crmAgendaAnchorDay = day;
@@ -51444,7 +51444,7 @@ const persistCrmAgendaPrefs = () => {
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
     localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
     if (crmAgendaPreset) {
-      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_7dias_equipo"));
+      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_equipo"));
     }
   } catch (e) {}
 };
@@ -51484,8 +51484,14 @@ const syncCrmAgendaControls = () => {
       btn.setAttribute("aria-selected", key === view ? "true" : "false");
     });
   }
+  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo").trim() || "citas_7dias_equipo";
+  const presetEquipo = presetRaw.endsWith("_equipo");
+  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
+  const isWindowPreset = preset === "citas_hoy" || preset === "citas_7dias" || preset === "citas_7dias_caducadas" || preset === "actividades_hoy";
+  // En vista lista, mantener navegación visible para poder moverse por el tiempo cuando el preset es por ventana.
   const showCalendar = view !== "list";
-  if (crmAgendaNav) crmAgendaNav.classList.toggle("hidden", !showCalendar);
+  const showNav = showCalendar || (view === "list" && isWindowPreset);
+  if (crmAgendaNav) crmAgendaNav.classList.toggle("hidden", !showNav);
   if (crmAgendaCalendar) crmAgendaCalendar.classList.toggle("hidden", !showCalendar);
   if (crmAgendaTable) crmAgendaTable.classList.toggle("hidden", showCalendar);
   if (crmAgendaAz) crmAgendaAz.classList.toggle("hidden", showCalendar);
@@ -52531,6 +52537,9 @@ const loadCrmAgenda = () => {
   const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
   const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
   const anchor = parseAgendaDate(anchorDayKey) || new Date();
+  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo").trim() || "citas_equipo";
+  const presetEquipo = presetRaw.endsWith("_equipo");
+  const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
 
   const fmt = (d) => formatAgendaDate(d);
   const clampDay = (d) => {
@@ -52589,6 +52598,11 @@ const loadCrmAgenda = () => {
   }
   if (rangeStart) params.set("start", fmt(rangeStart));
   if (rangeEnd) params.set("end", fmt(rangeEnd));
+  // En vista lista, si el usuario está en "todas las citas", pedimos histórico completo.
+  // Esto evita el recorte por defecto del backend (pensado para evitar timeouts).
+  if (view === "list" && (preset === "citas" || preset === "actividades_caducadas" || preset === "citas_caducadas")) {
+    params.set("range", "all");
+  }
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     renderCrmHomeAgendaPreview();

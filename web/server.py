@@ -70801,6 +70801,7 @@ class Handler(BaseHTTPRequestHandler):
                 related_tipo = params.get("related_tipo", [""])[0]
                 start = params.get("start", [""])[0]
                 end = params.get("end", [""])[0]
+                range_mode = params.get("range", [""])[0]
                 order = params.get("order", [""])[0]
                 limit = params.get("limit", [""])[0]
                 offset = params.get("offset", [""])[0]
@@ -70886,9 +70887,18 @@ class Handler(BaseHTTPRequestHandler):
                 # NOTA: `fecha` se guarda como texto en formato ISO (YYYY-MM-DD), así que las comparaciones
                 # lexicográficas son seguras en SQLite y Postgres.
                 # Si el caller no especifica rango, limitamos por defecto para evitar timeouts/502.
-                if (not start) and (not end):
+                range_mode = str(range_mode or "").strip().lower()
+                if range_mode not in {"all", "todo", "todas"} and (not start) and (not end):
+                    # Por defecto acotamos para evitar timeouts, pero en Agenda (limit grande)
+                    # ampliamos el histórico para que el usuario pueda ver citas pasadas.
+                    default_days = 240
                     try:
-                        start = (datetime.now() - timedelta(days=240)).strftime("%Y-%m-%d")
+                        if int(limit_val or 0) >= 5000:
+                            default_days = 730
+                    except Exception:
+                        default_days = 240
+                    try:
+                        start = (datetime.now() - timedelta(days=default_days)).strftime("%Y-%m-%d")
                     except Exception:
                         start = ""
                 if start:
