@@ -2368,17 +2368,29 @@
               <p class="muted">Registra ingresos y gastos por comunidad (y agrúpalos en el dashboard).</p>
             </div>
           </div>
-	          <form id="workspaceFincasLedgerForm" class="form-grid">
-	            <input type="hidden" name="id" />
-	            <input type="hidden" name="workspace_id" />
-	            <label class="span-2">
-	              Comunidad (opcional)
-	              <select name="comunidad_id"></select>
-	            </label>
-	            <label>
-	              Fecha
-	              <input name="fecha" type="date" />
-	            </label>
+		          <form id="workspaceFincasLedgerForm" class="form-grid">
+		            <input type="hidden" name="id" />
+		            <input type="hidden" name="workspace_id" />
+		            <label class="span-2">
+		              Comunidad (opcional)
+		              <select name="comunidad_id"></select>
+		            </label>
+		            <div class="span-2" style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px;">
+		              <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+		                <strong>Importar extracto</strong>
+		                <span class="muted" style="font-size: 12px;">CSV o XLSX (requiere comunidad)</span>
+		              </div>
+		              <div class="muted" style="margin:6px 0 10px 0;">Importa movimientos en la comunidad seleccionada (detecta duplicados).</div>
+		              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+		                <input type="file" id="workspaceFincasLedgerImportFile" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
+		                <button type="button" class="secondary" id="workspaceFincasLedgerImportBtn">Previsualizar</button>
+		              </div>
+		              <div class="muted" style="margin-top:8px;" id="workspaceFincasLedgerImportStatus"></div>
+		            </div>
+		            <label>
+		              Fecha
+		              <input name="fecha" type="date" />
+		            </label>
             <label>
               Tipo
               <select name="tipo">
@@ -11191,7 +11203,7 @@
         </script>
 				    <script src="app-routing.js?v=11"></script>
 				    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-																	    <script src="app.js?v=766"></script>
+																	    <script src="app.js?v=767"></script>
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;

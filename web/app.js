@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v354";
+const APP_SW_VERSION = "v356";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -723,7 +723,11 @@ const openFincasLedgerImportModal = ({
     if (!Number.isFinite(n)) return String(v ?? "");
     return euroFormatter.format(n);
   };
-  const showRows = rows.slice(0, 80);
+  const showRows = rows.slice(0, 80).map((r) => {
+    const importeNum = Number(r?.importe);
+    const tipoFallback = Number.isFinite(importeNum) ? (importeNum >= 0 ? "Ingreso" : "Gasto") : "";
+    return { ...(r || {}), tipo: r?.tipo || tipoFallback };
+  });
   body.innerHTML = `
     <div class="muted" style="margin-bottom:10px;">Detectados ${numberFormatter.format(Number(total || rows.length || 0))} movimientos. Previsualización (máx. ${numberFormatter.format(showRows.length)}):</div>
     <div style="overflow:auto; max-height: 46vh; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px;">
@@ -2312,7 +2316,10 @@ const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
 const workspaceFincasLedgerStatus = document.getElementById("workspaceFincasLedgerStatus");
 const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedgerList");
-	const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
+const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
+const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
+const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
+		const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
 const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
@@ -77332,6 +77339,55 @@ if (workspaceFincasLedgerResetBtn) {
   workspaceFincasLedgerResetBtn.addEventListener("click", () => {
     fillWorkspaceFincasLedgerForm();
     if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "";
+  });
+}
+
+if (workspaceFincasLedgerImportBtn) {
+  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
+    if (!state.currentWorkspaceId) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
+      return;
+    }
+    const file = workspaceFincasLedgerImportFile?.files?.[0] || null;
+    const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
+    if (!comunidadId) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona una comunidad para importar.";
+      return;
+    }
+    try {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "";
+      workspaceFincasLedgerImportBtn.disabled = true;
+      const previewData = await fincasPreviewLedgerImportFromFile({
+        workspaceId: state.currentWorkspaceId,
+        comunidadId,
+        file,
+        statusEl: workspaceFincasLedgerImportStatus,
+      });
+      openFincasLedgerImportModal({
+        subtitle: "Se importarán como movimientos de la comunidad seleccionada.",
+        total: previewData.total,
+        preview: previewData.preview,
+        onConfirm: async ({ statusEl: modalStatusEl } = {}) => {
+          const res = await fincasRunLedgerImport({
+            workspaceId: state.currentWorkspaceId,
+            comunidadId,
+            file_key: previewData.file_key,
+            file_url: previewData.file_url,
+            filename: file?.name || "",
+          });
+          const inserted = Number(res.inserted || 0);
+          const skipped = Number(res.skipped || 0);
+          const msg = `Insertados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
+          if (modalStatusEl) modalStatusEl.textContent = msg;
+          if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = msg;
+          await refreshWorkspaceFincasLedger({ force: true, silent: true });
+        },
+      });
+    } catch (e) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = e?.message || "No se pudo previsualizar/importar.";
+    } finally {
+      try { workspaceFincasLedgerImportBtn.disabled = false; } catch (err) {}
+    }
   });
 }
 
