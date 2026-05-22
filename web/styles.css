@@ -3117,6 +3117,118 @@ body.theme-operativa .workspace-home-count {
   gap: 10px;
 }
 
+.fincas-community-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fincas-community-card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(22, 27, 43, 0.08);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 10px 22px rgba(22, 27, 43, 0.05);
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.fincas-community-card.is-clickable {
+  cursor: pointer;
+}
+
+.fincas-community-card.is-clickable:hover {
+  border-color: rgba(255, 199, 0, 0.55);
+  box-shadow: 0 12px 24px rgba(22, 27, 43, 0.08);
+}
+
+.fincas-community-card.is-clickable:focus {
+  outline: none;
+}
+
+.fincas-community-card.is-clickable:focus-visible {
+  outline: 2px solid rgba(255, 199, 0, 0.8);
+  outline-offset: 2px;
+}
+
+.fincas-community-photo {
+  width: calc(100% + 24px);
+  margin: -12px -12px 2px;
+  height: 140px;
+  object-fit: cover;
+  background: #f3f4f6;
+}
+
+.fincas-community-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fincas-community-title {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fincas-community-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(255, 199, 0, 0.16);
+  border: 1px solid rgba(255, 199, 0, 0.28);
+  color: #1b1b1b;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.fincas-community-subtitle {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.fincas-community-submeta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fincas-community-meta {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.fincas-community-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.fincas-community-metric {
+  display: grid;
+  gap: 2px;
+}
+
+.fincas-community-metric .k {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.fincas-community-metric .v {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .workspace-billing-row {
   display: flex;
   justify-content: space-between;
