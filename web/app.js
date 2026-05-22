@@ -29556,15 +29556,21 @@ const applyCompanyCell = (td, colName, value, options = {}) => {
 };
 
 const filterRowsByQuery = (rows, query, fields = []) => {
-  const q = (query || "").trim().toLowerCase();
-  if (!q) return rows;
+  const qRaw = String(query || "").trim();
+  const q = qRaw.toLowerCase();
+  const qNorm = normalizeSimple(qRaw);
+  if (!q && !qNorm) return rows;
   return rows.filter((row) => {
     const values = fields.length
       ? fields.map((field) => row[field])
       : Object.values(row);
-    return values.some((value) =>
-      String(value || "").toLowerCase().includes(q)
-    );
+    return values.some((value) => {
+      const text = String(value || "");
+      if (qNorm) {
+        return normalizeSimple(text).includes(qNorm);
+      }
+      return text.toLowerCase().includes(q);
+    });
   });
 };
 
@@ -34775,20 +34781,31 @@ const populateAgendaClientes = (listEl, inputEl, hiddenEl) => {
   if (!listEl) return;
   listEl.innerHTML = "";
   const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
+  const normalizedMap = new Map();
   clientes.forEach((cliente) => {
     const option = document.createElement("option");
     option.value = formatNombreCliente(cliente.nombre);
     option.dataset.id = cliente.id;
     listEl.appendChild(option);
+    const key = normalizeSimple(option.value);
+    if (key && !normalizedMap.has(key)) normalizedMap.set(key, String(cliente.id || "").trim());
   });
   if (inputEl) {
     const handler = () => {
       const value = inputEl.value.trim();
       if (!value || !hiddenEl) return;
-      const match = clientes.find(
-        (c) => formatNombreCliente(c.nombre) === value
-      );
-      hiddenEl.value = match ? match.id : "";
+      const norm = normalizeSimple(value);
+      let id = (norm && normalizedMap.get(norm)) || "";
+      // Si el usuario escribe sin seleccionar del datalist (p.ej. sin tildes),
+      // intentamos un match por substring siempre que sea único.
+      if (!id && norm && norm.length >= 3) {
+        const hits = [];
+        normalizedMap.forEach((cid, cname) => {
+          if (cname.includes(norm)) hits.push(cid);
+        });
+        if (hits.length === 1) id = hits[0];
+      }
+      hiddenEl.value = id || "";
     };
     if (hiddenEl) {
       if (inputEl.dataset.agendaBoundBase !== "1") {
@@ -34896,6 +34913,7 @@ const populateAgendaClienteQuickSelect = (selectEl, inputEl, hiddenEl, candidate
 const resolveClienteFromInput = (inputEl, hiddenEl) => {
   const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
   const nombre = inputEl ? inputEl.value.trim() : "";
+  const nombreNorm = normalizeSimple(nombre);
   let clienteId = hiddenEl ? hiddenEl.value.trim() : "";
   // Evita que se "arrastre" el cliente_id anterior si el usuario cambia el texto del cliente.
   // Si el nombre no coincide con el cliente_id actual, limpiamos el id y volvemos a intentar por nombre.
@@ -34912,12 +34930,19 @@ const resolveClienteFromInput = (inputEl, hiddenEl) => {
     }
   }
   if (!clienteId && nombre) {
-    const match = clientes.find(
-      (c) => formatNombreCliente(c.nombre) === nombre
-    );
+    const match = clientes.find((c) => normalizeSimple(formatNombreCliente(c.nombre)) === nombreNorm);
     if (match) {
       clienteId = match.id;
       if (hiddenEl) hiddenEl.value = clienteId;
+    }
+    if (!clienteId && nombreNorm && nombreNorm.length >= 3) {
+      const hits = clientes
+        .map((c) => ({ id: String(c.id || "").trim(), key: normalizeSimple(formatNombreCliente(c.nombre)) }))
+        .filter((c) => c.id && c.key && c.key.includes(nombreNorm));
+      if (hits.length === 1) {
+        clienteId = hits[0].id;
+        if (hiddenEl) hiddenEl.value = clienteId;
+      }
     }
   }
   return { cliente_id: clienteId || "", cliente_nombre: nombre || "" };
