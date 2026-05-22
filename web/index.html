@@ -2375,15 +2375,6 @@
 	              Comunidad (opcional)
 	              <select name="comunidad_id"></select>
 	            </label>
-	            <label class="span-2">
-	              Importar extracto (XLSX/CSV)
-	              <input id="workspaceFincasLedgerImportFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" />
-	              <div class="muted">Importa movimientos como Ingreso/Gasto y evita duplicados por fecha+importe+concepto.</div>
-	              <div class="form-actions">
-	                <button type="button" id="workspaceFincasLedgerImportBtn" class="secondary">Importar</button>
-	                <span id="workspaceFincasLedgerImportStatus" class="muted"></span>
-	              </div>
-	            </label>
 	            <label>
 	              Fecha
 	              <input name="fecha" type="date" />
@@ -2575,19 +2566,25 @@
           <div class="footer" id="workspaceFincasBudgetsInfo"></div>
         </div>
 
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="comunidades">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Comunidades de fincas</h3>
-                <p class="muted">Núcleo de administración de fincas para comunidades, cuotas e incidencias.</p>
-              </div>
-            </div>
-            <form id="workspaceFincasCommunityForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <label>
-                Empresa
+	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="comunidades">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Comunidades de fincas</h3>
+	                <p class="muted">Núcleo de administración de fincas para comunidades, cuotas e incidencias.</p>
+	              </div>
+	              <div class="toolbar">
+	                <button type="button" id="workspaceFincasCommunityNewBtn" class="secondary">Nueva comunidad</button>
+	                <button type="button" id="workspaceFincasCommunityRefreshBtn" class="secondary ghost">Recargar</button>
+	              </div>
+	            </div>
+	            <div id="workspaceFincasCommunityStatus" class="muted" style="margin-top:8px;"></div>
+	            <div id="workspaceFincasCommunityFormWrap" class="hidden" style="margin-top:14px;">
+	            <form id="workspaceFincasCommunityForm" class="form-grid">
+	              <input type="hidden" name="id" />
+	              <input type="hidden" name="workspace_id" />
+	              <label>
+	                Empresa
                 <select name="empresa_id" required></select>
               </label>
               <label>
@@ -2662,16 +2659,16 @@
 		                <div id="workspaceFincasCommunityBuildingPhotoStatus" class="muted"></div>
 		                <img id="workspaceFincasCommunityBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 		              </label>
-		              <p class="muted span-all">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
-		              <div class="form-actions span-all">
-		                <button type="submit">Guardar comunidad</button>
-		                <button type="button" id="workspaceFincasCommunityResetBtn" class="secondary ghost">Nueva</button>
-	                <span id="workspaceFincasCommunityStatus" class="muted"></span>
-	              </div>
-            </form>
-            <div id="workspaceFincasCommunityList"></div>
-          </div>
-        </div>
+			              <p class="muted span-all">Administración de fincas: 5 € por vivienda + 1 € por local, trastero o aparcamiento, con mínimo mensual de 60 €. La cuota mensual final se puede editar.</p>
+			              <div class="form-actions span-all">
+			                <button type="submit">Guardar comunidad</button>
+			                <button type="button" id="workspaceFincasCommunityResetBtn" class="secondary ghost">Cancelar</button>
+		              </div>
+	            </form>
+	            </div>
+	            <div id="workspaceFincasCommunityList"></div>
+	          </div>
+	        </div>
 
         <div class="workspace-central-layout crm-workspace-view hidden" data-workspace-view="fincas" data-fincas-tab="comunidad_ficha">
           <div class="form-card">

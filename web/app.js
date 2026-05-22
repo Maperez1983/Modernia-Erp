@@ -707,6 +707,133 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   return presign;
 };
 
+const openFincasLedgerImportModal = ({
+  title = "Importar extracto bancario",
+  subtitle = "",
+  total = 0,
+  preview = [],
+  onConfirm,
+} = {}) => {
+  const modal = ensureCrmModal("fincasLedgerImportModal", title, subtitle);
+  const body = modal.querySelector("[data-crm-modal-body]");
+  if (!body) return;
+  const rows = Array.isArray(preview) ? preview : [];
+  const fmtMoney = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? "");
+    return euroFormatter.format(n);
+  };
+  const showRows = rows.slice(0, 80);
+  body.innerHTML = `
+    <div class="muted" style="margin-bottom:10px;">Detectados ${numberFormatter.format(Number(total || rows.length || 0))} movimientos. Previsualización (máx. ${numberFormatter.format(showRows.length)}):</div>
+    <div style="overflow:auto; max-height: 46vh; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px;">
+      <table style="width:100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="position: sticky; top: 0; background: #fff;">
+            <th style="text-align:left; padding:8px; border-bottom: 1px solid rgba(0,0,0,0.08);">Fecha</th>
+            <th style="text-align:left; padding:8px; border-bottom: 1px solid rgba(0,0,0,0.08);">Tipo</th>
+            <th style="text-align:left; padding:8px; border-bottom: 1px solid rgba(0,0,0,0.08);">Concepto</th>
+            <th style="text-align:right; padding:8px; border-bottom: 1px solid rgba(0,0,0,0.08);">Importe</th>
+            <th style="text-align:right; padding:8px; border-bottom: 1px solid rgba(0,0,0,0.08);">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${showRows.map((r) => `
+            <tr>
+              <td style="padding:8px; border-bottom: 1px solid rgba(0,0,0,0.06); white-space: nowrap;">${escapeHtml(String(r.fecha || ""))}</td>
+              <td style="padding:8px; border-bottom: 1px solid rgba(0,0,0,0.06); white-space: nowrap;">${escapeHtml(String(r.tipo || ""))}</td>
+              <td style="padding:8px; border-bottom: 1px solid rgba(0,0,0,0.06);">${escapeHtml(String(r.concepto || ""))}</td>
+              <td style="padding:8px; border-bottom: 1px solid rgba(0,0,0,0.06); text-align:right; white-space: nowrap;">${escapeHtml(fmtMoney(r.importe))}</td>
+              <td style="padding:8px; border-bottom: 1px solid rgba(0,0,0,0.06); text-align:right; white-space: nowrap;">${escapeHtml(fmtMoney(r.saldo))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="muted" style="margin-top:10px;" data-fincas-ledger-import-modal-status></div>
+    <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="button" class="secondary" data-fincas-ledger-import-confirm="1">Importar movimientos</button>
+      <button type="button" class="secondary ghost" data-fincas-ledger-import-cancel="1">Cancelar</button>
+    </div>
+  `;
+  const statusMsgEl = body.querySelector("[data-fincas-ledger-import-modal-status]");
+  const confirmBtn = body.querySelector('[data-fincas-ledger-import-confirm="1"]');
+  const cancelBtn = body.querySelector('[data-fincas-ledger-import-cancel="1"]');
+  cancelBtn?.addEventListener("click", () => modal.classList.add("hidden"));
+  confirmBtn?.addEventListener("click", async () => {
+    if (typeof onConfirm !== "function") return;
+    try {
+      confirmBtn.disabled = true;
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (statusMsgEl) statusMsgEl.textContent = "Importando...";
+      await onConfirm({ statusEl: statusMsgEl });
+      if (statusMsgEl) statusMsgEl.textContent = "Importación completada.";
+      window.setTimeout(() => modal.classList.add("hidden"), 450);
+    } catch (e) {
+      if (statusMsgEl) statusMsgEl.textContent = e?.message || "No se pudo importar.";
+      try { confirmBtn.disabled = false; } catch (err) {}
+      try { if (cancelBtn) cancelBtn.disabled = false; } catch (err) {}
+    }
+  });
+  modal.classList.remove("hidden");
+};
+
+const fincasPreviewLedgerImportFromFile = async ({
+  workspaceId,
+  comunidadId,
+  file,
+  statusEl,
+} = {}) => {
+  if (!workspaceId || !comunidadId) throw new Error("Contexto inválido (workspace/comunidad).");
+  if (!file) throw new Error("Selecciona un archivo CSV o XLSX.");
+  if (statusEl) statusEl.textContent = "Subiendo extracto...";
+  const upload = await uploadFileToS3(file, `fincas_extractos/${workspaceId}`, statusEl);
+  const file_key = upload?.key || "";
+  const file_url = upload?.public_url || "";
+  if (!file_key && !file_url) throw new Error("No se pudo subir el archivo.");
+  if (statusEl) statusEl.textContent = "Analizando extracto...";
+  const res = await fetch("/api/workspace_fincas_contabilidad_import_preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      comunidad_id: comunidadId,
+      file_key,
+      file_url,
+      filename: file?.name || "",
+    }),
+  }).then((r) => r.json());
+  if (res?.error) throw new Error(res.error);
+  return {
+    file_key,
+    file_url,
+    total: Number(res.total || 0),
+    preview: Array.isArray(res.preview) ? res.preview : [],
+  };
+};
+
+const fincasRunLedgerImport = async ({
+  workspaceId,
+  comunidadId,
+  file_key,
+  file_url,
+  filename,
+} = {}) => {
+  const res = await fetch("/api/workspace_fincas_contabilidad_import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      comunidad_id: comunidadId,
+      file_key: file_key || "",
+      file_url: file_url || "",
+      filename: filename || "",
+    }),
+  }).then((r) => r.json());
+  if (res?.error) throw new Error(res.error);
+  return res;
+};
+
 const uploadFileToPortalS3 = async (file, token, statusEl, category = "") => {
   if (!file) return null;
   const optimized = await maybeCompressUploadFile(file, statusEl);
@@ -2155,13 +2282,16 @@ const workspaceBudgetForm = document.getElementById("workspaceBudgetForm");
 const workspaceBudgetResetBtn = document.getElementById("workspaceBudgetResetBtn");
 const workspaceBudgetStatus = document.getElementById("workspaceBudgetStatus");
 const workspaceBudgetList = document.getElementById("workspaceBudgetList");
-const workspaceBudgetClienteLookup = document.getElementById("workspaceBudgetClienteLookup");
-const workspaceBudgetTemplateSelect = document.getElementById("workspaceBudgetTemplateSelect");
-const workspaceBudgetConfigHelp = document.getElementById("workspaceBudgetConfigHelp");
-const workspaceFincasCommunityForm = document.getElementById("workspaceFincasCommunityForm");
-const workspaceFincasCommunityResetBtn = document.getElementById("workspaceFincasCommunityResetBtn");
-const workspaceFincasCommunityStatus = document.getElementById("workspaceFincasCommunityStatus");
-const workspaceFincasCommunityList = document.getElementById("workspaceFincasCommunityList");
+	const workspaceBudgetClienteLookup = document.getElementById("workspaceBudgetClienteLookup");
+	const workspaceBudgetTemplateSelect = document.getElementById("workspaceBudgetTemplateSelect");
+	const workspaceBudgetConfigHelp = document.getElementById("workspaceBudgetConfigHelp");
+	const workspaceFincasCommunityForm = document.getElementById("workspaceFincasCommunityForm");
+	const workspaceFincasCommunityFormWrap = document.getElementById("workspaceFincasCommunityFormWrap");
+	const workspaceFincasCommunityNewBtn = document.getElementById("workspaceFincasCommunityNewBtn");
+	const workspaceFincasCommunityRefreshBtn = document.getElementById("workspaceFincasCommunityRefreshBtn");
+	const workspaceFincasCommunityResetBtn = document.getElementById("workspaceFincasCommunityResetBtn");
+	const workspaceFincasCommunityStatus = document.getElementById("workspaceFincasCommunityStatus");
+	const workspaceFincasCommunityList = document.getElementById("workspaceFincasCommunityList");
 const workspaceFincasCommunityMapWrap = document.getElementById("workspaceFincasCommunityMapWrap");
 const workspaceFincasCommunityMap = document.getElementById("workspaceFincasCommunityMap");
 const workspaceFincasCommunityBuildingPhoto = document.getElementById("workspaceFincasCommunityBuildingPhoto");
@@ -2182,9 +2312,6 @@ const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
 const workspaceFincasLedgerStatus = document.getElementById("workspaceFincasLedgerStatus");
 const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedgerList");
-	const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
-	const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
-	const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
 	const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
@@ -20377,11 +20504,11 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     return;
   }
 
-  if (tab === "contabilidad") {
-    workspaceFincasCommunityFichaPanel.innerHTML = `
-      <div class="workspace-two-cols">
-        <div>
-          <h4>Contabilidad</h4>
+	  if (tab === "contabilidad") {
+	    workspaceFincasCommunityFichaPanel.innerHTML = `
+	      <div class="workspace-two-cols">
+	        <div>
+	          <h4>Contabilidad</h4>
           ${ledger.length ? `
             <div class="workspace-billing-list">
               ${ledger.slice(0, 200).map((l) => `
@@ -20398,12 +20525,24 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               `).join("")}
             </div>
           ` : `<p class="muted">Sin movimientos todavía.</p>`}
-        </div>
-        <div>
-          <h4 data-ledger-form-title>Nuevo movimiento</h4>
-          <form class="form-grid" data-ledger-form data-money-euro="1">
-            <input type="hidden" name="id" value="" />
-            <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
+	        </div>
+	        <div>
+	          <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
+	            <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+	              <strong>Importar extracto</strong>
+	              <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
+	            </div>
+	            <div class="muted" style="margin:6px 0 10px 0;">Crea movimientos automáticamente desde el extracto del banco (detecta duplicados).</div>
+	            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+	              <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
+	              <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
+	            </div>
+	            <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
+	          </div>
+	          <h4 data-ledger-form-title>Nuevo movimiento</h4>
+	          <form class="form-grid" data-ledger-form data-money-euro="1">
+	            <input type="hidden" name="id" value="" />
+	            <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
             <label>Tipo
               <select name="tipo">
                 <option value="Gasto">Gasto</option>
@@ -20419,13 +20558,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         </div>
       </div>
     `;
-    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form]");
-    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-status]");
-    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form-title]");
-    const reset = () => {
-      form.reset();
-      form.querySelector('[name="id"]').value = "";
-      const dateEl = form.querySelector('[name="fecha"]');
+	    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form]");
+	    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-status]");
+	    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form-title]");
+	    const importFileEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-file]");
+	    const importBtn = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-btn]");
+	    const importStatusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-status]");
+	    const reset = () => {
+	      form.reset();
+	      form.querySelector('[name="id"]').value = "";
+	      const dateEl = form.querySelector('[name="fecha"]');
       if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
       if (titleEl) titleEl.textContent = "Nuevo movimiento";
     };
@@ -20463,11 +20605,50 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
         void renderWorkspaceFincasCommunityFicha();
       } catch (e) {
-        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
-      }
-    };
-    return;
-  }
+	        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+	      }
+	    };
+	    importBtn?.addEventListener("click", async () => {
+	      if (!importFileEl) return;
+	      const file = importFileEl.files?.[0] || null;
+	      try {
+	        if (importStatusEl) importStatusEl.textContent = "";
+	        importBtn.disabled = true;
+	        const previewData = await fincasPreviewLedgerImportFromFile({
+	          workspaceId,
+	          comunidadId,
+	          file,
+	          statusEl: importStatusEl,
+	        });
+	        openFincasLedgerImportModal({
+	          subtitle: "Se importarán como movimientos de la comunidad actual.",
+	          total: previewData.total,
+	          preview: previewData.preview,
+	          onConfirm: async ({ statusEl: modalStatusEl } = {}) => {
+	            const res = await fincasRunLedgerImport({
+	              workspaceId,
+	              comunidadId,
+	              file_key: previewData.file_key,
+	              file_url: previewData.file_url,
+	              filename: file?.name || "",
+	            });
+	            const inserted = Number(res.inserted || 0);
+	            const skipped = Number(res.skipped || 0);
+	            const msg = `Insertados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
+	            if (modalStatusEl) modalStatusEl.textContent = msg;
+	            if (importStatusEl) importStatusEl.textContent = msg;
+	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	            void renderWorkspaceFincasCommunityFicha();
+	          },
+	        });
+	      } catch (e) {
+	        if (importStatusEl) importStatusEl.textContent = e?.message || "No se pudo previsualizar/importar.";
+	      } finally {
+	        try { importBtn.disabled = false; } catch (err) {}
+	      }
+	    });
+	    return;
+	  }
 
   if (tab === "documentos") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
@@ -20964,11 +21145,11 @@ const openFincasCommunityFichaModal = (record) => {
       return;
     }
 
-    if (key === "contabilidad") {
-      panel.innerHTML = `
-        <div class="workspace-two-cols">
-          <div>
-            <h4>Contabilidad</h4>
+	    if (key === "contabilidad") {
+	      panel.innerHTML = `
+	        <div class="workspace-two-cols">
+	          <div>
+	            <h4>Contabilidad</h4>
             ${ledger.length ? `
               <div class="workspace-billing-list">
                 ${ledger.slice(0, 120).map((l) => `
@@ -20985,12 +21166,24 @@ const openFincasCommunityFichaModal = (record) => {
                 `).join("")}
               </div>
             ` : `<p class="muted">Sin movimientos todavía.</p>`}
-          </div>
-          <div>
-            <h4 data-ledger-form-title>Nuevo movimiento</h4>
-            <form class="form-grid" data-ledger-form data-money-euro="1">
-              <input type="hidden" name="id" value="" />
-              <div>
+	          </div>
+	          <div>
+	            <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
+	              <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+	                <strong>Importar extracto</strong>
+	                <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
+	              </div>
+	              <div class="muted" style="margin:6px 0 10px 0;">Crea movimientos automáticamente desde el extracto del banco (detecta duplicados).</div>
+	              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+	                <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
+	                <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
+	              </div>
+	              <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
+	            </div>
+	            <h4 data-ledger-form-title>Nuevo movimiento</h4>
+	            <form class="form-grid" data-ledger-form data-money-euro="1">
+	              <input type="hidden" name="id" value="" />
+	              <div>
                 <label>Fecha</label>
                 <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" />
               </div>
@@ -21021,12 +21214,15 @@ const openFincasCommunityFichaModal = (record) => {
           </div>
         </div>
       `;
-      const form = panel.querySelector("[data-ledger-form]");
-      const statusEl = panel.querySelector("[data-ledger-status]");
-      const title = panel.querySelector("[data-ledger-form-title]");
-      const resetLedgerForm = () => {
-        if (!form) return;
-        form.reset();
+	      const form = panel.querySelector("[data-ledger-form]");
+	      const statusEl = panel.querySelector("[data-ledger-status]");
+	      const title = panel.querySelector("[data-ledger-form-title]");
+	      const importFileEl = panel.querySelector("[data-ledger-import-file]");
+	      const importBtn = panel.querySelector("[data-ledger-import-btn]");
+	      const importStatusEl = panel.querySelector("[data-ledger-import-status]");
+	      const resetLedgerForm = () => {
+	        if (!form) return;
+	        form.reset();
         form.querySelector('[name="id"]').value = "";
         const dateEl = form.querySelector('[name="fecha"]');
         if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
@@ -21063,12 +21259,51 @@ const openFincasCommunityFichaModal = (record) => {
           await refreshWorkspaceFincasLedger({ force: true, silent: true });
           resetLedgerForm();
           renderTab("contabilidad");
-        } catch (error) {
-          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
-        }
-      };
-      return;
-    }
+	        } catch (error) {
+	          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+	        }
+	      };
+	      importBtn?.addEventListener("click", async () => {
+	        if (!importFileEl) return;
+	        const file = importFileEl.files?.[0] || null;
+	        try {
+	          if (importStatusEl) importStatusEl.textContent = "";
+	          importBtn.disabled = true;
+	          const previewData = await fincasPreviewLedgerImportFromFile({
+	            workspaceId,
+	            comunidadId,
+	            file,
+	            statusEl: importStatusEl,
+	          });
+	          openFincasLedgerImportModal({
+	            subtitle: `Comunidad: ${record?.nombre || ""}`.trim(),
+	            total: previewData.total,
+	            preview: previewData.preview,
+	            onConfirm: async ({ statusEl: modalStatusEl } = {}) => {
+	              const res = await fincasRunLedgerImport({
+	                workspaceId,
+	                comunidadId,
+	                file_key: previewData.file_key,
+	                file_url: previewData.file_url,
+	                filename: file?.name || "",
+	              });
+	              const inserted = Number(res.inserted || 0);
+	              const skipped = Number(res.skipped || 0);
+	              const msg = `Insertados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
+	              if (modalStatusEl) modalStatusEl.textContent = msg;
+	              if (importStatusEl) importStatusEl.textContent = msg;
+	              await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	              renderTab("contabilidad");
+	            },
+	          });
+	        } catch (e) {
+	          if (importStatusEl) importStatusEl.textContent = e?.message || "No se pudo previsualizar/importar.";
+	        } finally {
+	          try { importBtn.disabled = false; } catch (err) {}
+	        }
+	      });
+	      return;
+	    }
 
     if (key === "vecinos") {
       panel.innerHTML = `
@@ -21352,33 +21587,83 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
     return;
   }
   workspaceFincasCommunityList.innerHTML = `
-    <div class="workspace-billing-list">
-      ${rows
-        .map(
-          (row) => `
-            <div class="workspace-billing-row">
-              <div>
-                <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.direccion || row.empresa_nombre || "-"}</div>
-                <div class="muted">${row.cif ? `CIF: ${escapeHtml(String(row.cif))} · ` : ""}${row.presidente ? `Presidente: ${escapeHtml(String(row.presidente))}` : ""}</div>
-                <div class="muted">${row.referencia_catastral ? `Catastro: ${row.referencia_catastral} · ` : ""}${numberFormatter.format(Number(row.num_vecinos || 0))} viviendas · ${numberFormatter.format(Number(row.num_locales || 0))} locales · ${numberFormatter.format(Number(row.num_trasteros || 0))} trasteros · ${numberFormatter.format(Number(row.num_aparcamientos || 0))} aparcamientos</div>
-                ${row.foto_edificio_key ? `<div style="margin-top:10px;"><img alt="Foto edificio" src="${buildS3RedirectSrcFromKey(row.foto_edificio_key)}" style="width:100%;max-width:420px;max-height:140px;object-fit:cover;border-radius:12px;border:1px solid rgba(0,0,0,0.06);" /></div>` : ""}
-              </div>
-              <div class="workspace-billing-meta">
-                <span>${row.estado || "Activa"}</span>
-                <span>Sug. ${formatEurosCompact(Number(row.cuota_sugerida || 0))}</span>
-                <span>${formatEurosCompact(Number(row.cuota_mensual || 0))}</span>
-                <span>${numberFormatter.format(Number(row.incidencias_abiertas || 0))} abiertas</span>
-                <button type="button" class="secondary ghost" data-community-open="${row.id}">Ficha</button>
-                <button type="button" class="secondary ghost" data-community-edit="${row.id}">Editar</button>
-                <button type="button" class="secondary danger" data-community-delete="${row.id}">Eliminar</button>
-              </div>
+    <div class="fincas-community-cards">
+      ${rows.map((row) => {
+        const idRaw = String(row.id || "");
+        const id = escapeHtml(idRaw);
+        const nombre = escapeHtml(String(row.nombre || "-"));
+        const direccion = escapeHtml(String(row.direccion || row.empresa_nombre || "-"));
+        const empresa = String(row.empresa_nombre || "").trim();
+        const estado = escapeHtml(String(row.estado || "Activa"));
+        const cif = String(row.cif || "").trim();
+        const presidente = String(row.presidente || "").trim();
+        const catastro = String(row.referencia_catastral || "").trim();
+        const fotoKey = String(row.foto_edificio_key || "").trim();
+        const fotoSrc = buildS3RedirectSrcFromKey(fotoKey);
+        const viviendas = numberFormatter.format(Number(row.num_vecinos || 0));
+        const locales = numberFormatter.format(Number(row.num_locales || 0));
+        const trasteros = numberFormatter.format(Number(row.num_trasteros || 0));
+        const aparcamientos = numberFormatter.format(Number(row.num_aparcamientos || 0));
+        const abiertas = numberFormatter.format(Number(row.incidencias_abiertas || 0));
+        const cuotaSug = formatEurosCompact(Number(row.cuota_sugerida || 0));
+        const cuota = formatEurosCompact(Number(row.cuota_mensual || 0));
+        const subtitleParts = [];
+        if (empresa) subtitleParts.push(escapeHtml(empresa));
+        if (cif) subtitleParts.push(`CIF: ${escapeHtml(cif)}`);
+        if (presidente) subtitleParts.push(`Presidente: ${escapeHtml(presidente)}`);
+        const subtitle = subtitleParts.join(" · ");
+        const metaParts = [];
+        if (catastro) metaParts.push(`Catastro: ${escapeHtml(catastro)}`);
+        metaParts.push(`${viviendas} viviendas`);
+        metaParts.push(`${locales} locales`);
+        metaParts.push(`${trasteros} trasteros`);
+        metaParts.push(`${aparcamientos} aparcamientos`);
+        const meta = metaParts.join(" · ");
+        return `
+          <div class="fincas-community-card is-clickable" role="button" tabindex="0" aria-label="Abrir ficha comunidad: ${nombre}" data-community-card-open="${id}">
+            ${fotoSrc ? `<img class="fincas-community-photo" alt="Foto edificio" loading="lazy" src="${fotoSrc}" />` : ""}
+            <div class="fincas-community-head">
+              <div class="fincas-community-title">${nombre}</div>
+              <span class="fincas-community-status">${estado}</span>
             </div>
-          `
-        )
-        .join("")}
+            <div class="fincas-community-subtitle">${direccion}</div>
+            ${subtitle ? `<div class="fincas-community-submeta">${subtitle}</div>` : ""}
+            <div class="fincas-community-metrics">
+              <div class="fincas-community-metric"><div class="k">Cuota sug.</div><div class="v">${escapeHtml(cuotaSug)}</div></div>
+              <div class="fincas-community-metric"><div class="k">Cuota</div><div class="v">${escapeHtml(cuota)}</div></div>
+              <div class="fincas-community-metric"><div class="k">Abiertas</div><div class="v">${abiertas}</div></div>
+            </div>
+	            <div class="fincas-community-meta muted">${meta}</div>
+	            <div class="inline-actions">
+	              <button type="button" class="secondary ghost" data-community-open="${row.id}">Ficha</button>
+	              <button type="button" class="secondary ghost" data-community-edit="${id}">Editar</button>
+	              <button type="button" class="secondary danger" data-community-delete="${id}">Eliminar</button>
+	            </div>
+	          </div>
+	        `;
+      }).join("")}
     </div>
   `;
+  workspaceFincasCommunityList.querySelectorAll("[data-community-card-open]").forEach((card) => {
+    const openId = String(card.dataset.communityCardOpen || "");
+    const openFicha = () => {
+      const record = rows.find((row) => String(row.id || "") === openId);
+      if (record) openWorkspaceFincasCommunityFicha(record);
+    };
+    card.addEventListener("click", (event) => {
+      const target = event?.target;
+      if (target && typeof target.closest === "function") {
+        if (target.closest("button, a, input, select, textarea, label")) return;
+      }
+      openFicha();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openFicha();
+      }
+    });
+  });
   workspaceFincasCommunityList.querySelectorAll("[data-community-open]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityOpen || ""));
@@ -21389,6 +21674,9 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityEdit || ""));
       if (record) {
+        try {
+          if (workspaceFincasCommunityFormWrap) workspaceFincasCommunityFormWrap.classList.remove("hidden");
+        } catch (e) {}
         fillWorkspaceFincasCommunityForm(record);
         try {
           if (typeof workspaceFincasCommunityForm?.scrollIntoView === "function") {
@@ -76923,8 +77211,38 @@ if (workspaceTimeForm) {
 
 if (workspaceFincasCommunityResetBtn) {
   workspaceFincasCommunityResetBtn.addEventListener("click", () => {
+    try {
+      if (workspaceFincasCommunityFormWrap) workspaceFincasCommunityFormWrap.classList.add("hidden");
+    } catch (e) {}
     fillWorkspaceFincasCommunityForm();
     if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "";
+  });
+}
+
+if (workspaceFincasCommunityNewBtn) {
+  workspaceFincasCommunityNewBtn.addEventListener("click", () => {
+    try {
+      if (workspaceFincasCommunityFormWrap) workspaceFincasCommunityFormWrap.classList.remove("hidden");
+    } catch (e) {}
+    fillWorkspaceFincasCommunityForm();
+    if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "";
+    try {
+      const input = workspaceFincasCommunityForm?.querySelector('[name="nombre"]');
+      if (input && typeof input.focus === "function") input.focus();
+      workspaceFincasCommunityForm?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    } catch (e) {}
+  });
+}
+
+if (workspaceFincasCommunityRefreshBtn) {
+  workspaceFincasCommunityRefreshBtn.addEventListener("click", async () => {
+    try {
+      if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "Recargando...";
+      await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+      if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "";
+    } catch (e) {
+      if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = e?.message || "No se pudo recargar.";
+    }
   });
 }
 
@@ -77040,154 +77358,6 @@ if (workspaceFincasLedgerForm) {
       fillWorkspaceFincasLedgerForm();
     } catch (error) {
       if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = error?.message || "No se pudo guardar.";
-    }
-  });
-}
-
-if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
-  const openPreviewModal = ({ total = 0, preview = [], onConfirm, onClose }) => {
-    let modal = document.getElementById("fincasLedgerImportPreviewModal");
-    if (!modal) {
-      modal = document.createElement("div");
-      modal.id = "fincasLedgerImportPreviewModal";
-      modal.className = "modal hidden";
-      modal.innerHTML = `
-        <div class="modal-content" style="max-width: 980px;">
-          <div class="modal-header">
-            <h3>Previsualización importación</h3>
-            <button type="button" class="secondary ghost" data-import-close>Cerrar</button>
-          </div>
-          <div class="modal-body" style="padding: 16px;">
-            <div class="muted" data-import-summary></div>
-            <div style="overflow:auto;max-height:420px;margin-top:12px;border:1px solid rgba(0,0,0,0.06);border-radius:12px;">
-              <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                <thead>
-                  <tr style="background:#f3f4f6;">
-                    <th style="text-align:left;padding:10px;">Fecha</th>
-                    <th style="text-align:left;padding:10px;">Concepto</th>
-                    <th style="text-align:right;padding:10px;">Importe</th>
-                  </tr>
-                </thead>
-                <tbody data-import-rows></tbody>
-              </table>
-            </div>
-            <div class="modal-actions" style="margin-top:14px;">
-              <button type="button" class="secondary" data-import-cancel>Cancelar</button>
-              <button type="button" class="primary" data-import-confirm>Importar</button>
-              <span class="muted" data-import-status style="margin-left:10px;"></span>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modal);
-    }
-    const closeBtn = modal.querySelector("[data-import-close]");
-    const cancelBtn = modal.querySelector("[data-import-cancel]");
-    const confirmBtn = modal.querySelector("[data-import-confirm]");
-    const rowsEl = modal.querySelector("[data-import-rows]");
-    const summaryEl = modal.querySelector("[data-import-summary]");
-    const statusEl = modal.querySelector("[data-import-status]");
-    if (statusEl) statusEl.textContent = "";
-    if (summaryEl) summaryEl.textContent = `Movimientos detectados: ${Number(total || 0) || 0}. Mostrando ${Math.min(preview.length, 60)}.`;
-    if (rowsEl) {
-      rowsEl.innerHTML = (preview || []).slice(0, 60).map((row) => {
-        const amount = Number(row?.importe || 0) || 0;
-        return `<tr>
-          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);white-space:nowrap;">${escapeHtml(String(row?.fecha || ""))}</td>
-          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);">${escapeHtml(String(row?.concepto || ""))}</td>
-          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);text-align:right;white-space:nowrap;">${escapeHtml(euroFormatter.format(amount))}</td>
-        </tr>`;
-      }).join("");
-    }
-
-    const cleanup = () => {
-      modal.classList.add("hidden");
-      modal.classList.remove("open");
-      if (typeof onClose === "function") onClose();
-    };
-    closeBtn.onclick = cleanup;
-    cancelBtn.onclick = cleanup;
-    modal.onclick = (event) => {
-      if (event.target === modal) cleanup();
-    };
-    confirmBtn.onclick = async () => {
-      if (typeof onConfirm !== "function") return;
-      try {
-        confirmBtn.disabled = true;
-        if (statusEl) statusEl.textContent = "Importando...";
-        await onConfirm();
-        cleanup();
-      } catch (err) {
-        confirmBtn.disabled = false;
-        if (statusEl) statusEl.textContent = err?.message || "No se pudo importar.";
-      }
-    };
-    modal.classList.remove("hidden");
-    modal.classList.add("open");
-  };
-
-  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
-    const file = workspaceFincasLedgerImportFile.files?.[0];
-    if (!file) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un archivo.";
-      return;
-    }
-    if (!state.currentWorkspaceId) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
-      return;
-    }
-    const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
-    let key = "";
-    try {
-      workspaceFincasLedgerImportBtn.disabled = true;
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Subiendo extracto...";
-      const upload = await uploadFileToS3(file, `fincas_extractos/${state.currentWorkspaceId || "workspace"}`, workspaceFincasLedgerImportStatus);
-      key = String(upload?.key || "").trim();
-      if (!key) throw new Error("No se pudo subir el archivo.");
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Previsualizando...";
-      const preview = await fetch("/api/workspace_fincas_contabilidad_import_preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: state.currentWorkspaceId,
-          comunidad_id: comunidadId,
-          s3_key: key,
-          filename: file.name,
-        }),
-      }).then((r) => r.json());
-      if (preview?.error) throw new Error(preview.error);
-      openPreviewModal({
-        total: preview?.total || 0,
-        preview: Array.isArray(preview?.preview) ? preview.preview : [],
-        onConfirm: async () => {
-          const res = await fetch("/api/workspace_fincas_contabilidad_import", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              workspace_id: state.currentWorkspaceId,
-              comunidad_id: comunidadId,
-              s3_key: key,
-              filename: file.name,
-            }),
-          }).then((r) => r.json());
-          if (res?.error) throw new Error(res.error);
-          const inserted = Number(res?.inserted || 0) || 0;
-          const skipped = Number(res?.skipped || 0) || 0;
-          const total = Number(res?.total || 0) || 0;
-          if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted}/${total} nuevos, ${skipped} duplicados.`;
-          await refreshWorkspaceFincasLedger({ force: true, silent: true });
-        },
-      });
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "";
-    } catch (error) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";
-    } finally {
-      try {
-        workspaceFincasLedgerImportBtn.disabled = false;
-      } catch (e) {}
-      try {
-        workspaceFincasLedgerImportFile.value = "";
-      } catch (e) {}
     }
   });
 }
@@ -77977,6 +78147,17 @@ if (workspaceFincasCommunityForm) {
       if (data?.error) throw new Error(data.error);
       if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "Comunidad guardada.";
       await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+      try {
+        if (workspaceFincasCommunityFormWrap) workspaceFincasCommunityFormWrap.classList.add("hidden");
+      } catch (e) {}
+      fillWorkspaceFincasCommunityForm();
+      try {
+        window.setTimeout(() => {
+          if (workspaceFincasCommunityStatus && workspaceFincasCommunityStatus.textContent === "Comunidad guardada.") {
+            workspaceFincasCommunityStatus.textContent = "";
+          }
+        }, 1200);
+      } catch (e) {}
     } catch (error) {
       if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = error.message || "No se pudo guardar.";
     }
