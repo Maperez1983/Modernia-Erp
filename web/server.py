@@ -33567,6 +33567,58 @@ def fetch_workspace_company_ids(conn, workspace_id):
             return inferred
     except Exception:
         pass
+    # Inferencia segura (multi-workspace): deriva empresa_ids desde tablas que ya estén
+    # correctamente scopiadas por `workspace_id`. Esto NO mezcla workspaces y permite
+    # que listados legacy (p.ej. Agenda) funcionen aunque falten vínculos en `workspace_empresas`.
+    try:
+        inferred_ids = []
+        seen = set()
+        candidate_tables = [
+            "clientes_empresas",
+            "inmuebles",
+            "captaciones",
+            "operaciones_inmobiliarias",
+            "demandas",
+            "visitas",
+            "acciones",
+            "hipotecas",
+            "seguros",
+        ]
+        for table in candidate_tables:
+            try:
+                cols = table_columns(conn, table) or set()
+            except Exception:
+                cols = set()
+            if "workspace_id" not in cols or "empresa_id" not in cols:
+                continue
+            try:
+                rows2 = conn.execute(
+                    f"""
+                    SELECT DISTINCT empresa_id
+                    FROM {table}
+                    WHERE workspace_id = ?
+                      AND COALESCE(TRIM(empresa_id), '') <> ''
+                    ORDER BY empresa_id
+                    LIMIT 50
+                    """,
+                    (ws_id,),
+                ).fetchall()
+            except Exception:
+                rows2 = []
+            for r in rows2 or []:
+                eid = str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+                if not eid or eid in seen:
+                    continue
+                seen.add(eid)
+                inferred_ids.append(eid)
+                if len(inferred_ids) >= 50:
+                    break
+            if len(inferred_ids) >= 50:
+                break
+        if inferred_ids:
+            return inferred_ids
+    except Exception:
+        pass
     if not WORKSPACE_AUTO_LINK_COMPANIES:
         return []
     # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
