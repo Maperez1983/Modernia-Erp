@@ -134,7 +134,14 @@ const api = async (path) => {
         }
         if (!qs.get("workspace_company_id")) {
           const wcid = String(state.currentWorkspaceCompanyWsId || "").trim();
-          if (wcid) qs.set("workspace_company_id", wcid);
+          if (wcid) {
+            qs.set("workspace_company_id", wcid);
+          } else {
+            // Compat tenant/legacy: si el workspace aún no usa `workspace_companies` (v2),
+            // permitimos pasar `empresa_id` (legacy) para endpoints que aún lo requieren para scoping.
+            const legacyEid = String(state.currentWorkspaceCompanyId || "").trim();
+            if (legacyEid && !qs.get("empresa_id")) qs.set("empresa_id", legacyEid);
+          }
         }
         // Si el caller adjunta `empresa_id` en modo tenant, normalizamos a legacy id para endpoints legacy.
         // Nota: NO borramos `empresa_id` si no podemos resolver, porque el backend puede usarlo como compat
@@ -2172,6 +2179,9 @@ const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
 const workspaceFincasLedgerStatus = document.getElementById("workspaceFincasLedgerStatus");
 const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedgerList");
+const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
+const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
+const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
 const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
@@ -6574,13 +6584,16 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const raw = state.currentWorkspaceDetail || {};
   const companiesV2 = Array.isArray(raw?.companies_v2) ? raw.companies_v2 : [];
   const legacy = Array.isArray(raw?.companies) ? raw.companies : [];
- const companies = companiesV2.length ? companiesV2 : legacy;
+  const companies = companiesV2.length ? companiesV2 : legacy;
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
     const selected =
       companies.find((row) => String(row?.id || "").trim() === String(companyId || "").trim())
       || companies[0]
       || null;
-    state.currentWorkspaceCompanyWsId = selected ? String(selected?.id || "").trim() : "";
+    // En tenant, `workspace_company_id` SOLO es válido si tenemos `companies_v2`.
+    // Si no existe (workspace en modo legacy), no enviamos un id legacy como `workspace_company_id`.
+    const tenantHasV2 = companiesV2.length > 0;
+    state.currentWorkspaceCompanyWsId = tenantHasV2 && selected ? String(selected?.id || "").trim() : "";
     state.currentWorkspaceCompanyId = selected
       ? String(selected?.legacy_empresa_id || selected?.id || "").trim()
       : "";
@@ -76999,6 +77012,53 @@ if (workspaceFincasLedgerForm) {
       fillWorkspaceFincasLedgerForm();
     } catch (error) {
       if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = error?.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
+  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
+    const file = workspaceFincasLedgerImportFile.files?.[0];
+    if (!file) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un archivo.";
+      return;
+    }
+    if (!state.currentWorkspaceId) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
+      return;
+    }
+    const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
+    try {
+      workspaceFincasLedgerImportBtn.disabled = true;
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Subiendo extracto...";
+      const upload = await uploadFileToS3(file, `fincas_extractos/${state.currentWorkspaceId || "workspace"}`, workspaceFincasLedgerImportStatus);
+      const key = String(upload?.key || "").trim();
+      if (!key) throw new Error("No se pudo subir el archivo.");
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Importando movimientos...";
+      const res = await fetch("/api/workspace_fincas_contabilidad_import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: state.currentWorkspaceId,
+          comunidad_id: comunidadId,
+          s3_key: key,
+          filename: file.name,
+        }),
+      }).then((r) => r.json());
+      if (res?.error) throw new Error(res.error);
+      const inserted = Number(res?.inserted || 0) || 0;
+      const skipped = Number(res?.skipped || 0) || 0;
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted} nuevos, ${skipped} duplicados.`;
+      await refreshWorkspaceFincasLedger({ force: true, silent: true });
+    } catch (error) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";
+    } finally {
+      try {
+        workspaceFincasLedgerImportBtn.disabled = false;
+      } catch (e) {}
+      try {
+        workspaceFincasLedgerImportFile.value = "";
+      } catch (e) {}
     }
   });
 }
