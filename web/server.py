@@ -71122,10 +71122,13 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     empresa_ids = []
                     try:
-                        empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                        # Si el workspace aún no tiene empresas vinculadas, `resolve_workspace_scope_empresa_ids`
+                        # hace fallback a empresa técnica (platform) para evitar que listados como Agenda queden vacíos.
+                        empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
                     except Exception:
                         empresa_ids = []
-                    # Fallback: si no hay empresas vinculadas aún, al menos filtramos por workspace_id puro.
+                    # Preferimos incluir legacy sin workspace_id pero dentro del scope de empresas del workspace.
+                    # Si no hay scope de empresas, filtramos por workspace_id puro (o incluimos legacy si es single-tenant).
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
                         where.append(
@@ -71134,8 +71137,19 @@ class Handler(BaseHTTPRequestHandler):
                         values.append(workspace_id)
                         values.extend(empresa_ids)
                     else:
-                        where.append("COALESCE(a.workspace_id, '') = ?")
-                        values.append(workspace_id)
+                        single_workspace = False
+                        try:
+                            ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+                            ws_total = int(row_value(ws_count_row, "total") or row_value(ws_count_row, 0) or 0)
+                            single_workspace = ws_total == 1
+                        except Exception:
+                            single_workspace = False
+                        if single_workspace:
+                            where.append("(COALESCE(a.workspace_id, '') = ? OR COALESCE(a.workspace_id, '') = '')")
+                            values.append(workspace_id)
+                        else:
+                            where.append("COALESCE(a.workspace_id, '') = ?")
+                            values.append(workspace_id)
                 elif empresa_id:
                     where.append("a.empresa_id = ?")
                     values.append(empresa_id)
