@@ -29980,7 +29980,10 @@ def ensure_tables(db_path):
     except Exception:
         force_sqlite = False
     if (not force_sqlite) and db_is_postgres_enabled():
-        conn = open_postgres_conn(with_row_factory=False)
+        # En Postgres, gran parte del código espera acceso por nombre de columna (row["col"]).
+        # Si usamos tuple_row durante bootstrap, puede romper con:
+        #   TypeError: tuple indices must be integers or slices, not str
+        conn = open_postgres_conn(with_row_factory=True)
         # En Postgres, muchos "best-effort" (índices, backfills) están envueltos en try/except.
         # En Postgres un error deja la transacción en estado abortado hasta rollback, así que usamos autocommit
         # durante el bootstrap del esquema para no bloquear el arranque por errores no críticos.
