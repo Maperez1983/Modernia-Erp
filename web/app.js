@@ -59086,13 +59086,18 @@ const loadSegurosCrm = () => {
     const allRows = data.rows || [];
     let rows = allRows;
     state.segurosRamosSource = { columns, rows };
-    const filtroCliente = segurosCrmClienteInput ? segurosCrmClienteInput.value.trim().toLowerCase() : "";
-    if (filtroCliente) {
+    const filtroClienteRaw = segurosCrmClienteInput ? String(segurosCrmClienteInput.value || "").trim() : "";
+    const filtroClienteNorm = normalizeSimple(filtroClienteRaw);
+    const filtroClienteTokens = filtroClienteNorm ? filtroClienteNorm.split(" ").filter(Boolean) : [];
+    if (filtroClienteTokens.length) {
       const tomadorIndex = columns.indexOf("tomador");
       if (tomadorIndex >= 0) {
-        rows = rows.filter((row) =>
-          String(row[tomadorIndex] || "").toLowerCase().includes(filtroCliente)
-        );
+        rows = rows.filter((row) => {
+          const hay = normalizeSimple(String(row[tomadorIndex] || ""));
+          if (!hay) return false;
+          // Match por tokens (no depende del orden "Nombre Apellidos" vs "Apellidos, Nombre").
+          return filtroClienteTokens.every((tok) => hay.includes(tok));
+        });
       }
     }
     const estadoMode = segurosEstadoFilter ? segurosEstadoFilter.value : "all";
