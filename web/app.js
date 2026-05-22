@@ -2182,6 +2182,9 @@ const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
 const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
 const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
+const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
+const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
+const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
 const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
@@ -77059,6 +77062,54 @@ if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
       const inserted = Number(res?.inserted || 0) || 0;
       const skipped = Number(res?.skipped || 0) || 0;
       if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted} nuevos, ${skipped} duplicados.`;
+      await refreshWorkspaceFincasLedger({ force: true, silent: true });
+    } catch (error) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";
+    } finally {
+      try {
+        workspaceFincasLedgerImportBtn.disabled = false;
+      } catch (e) {}
+      try {
+        workspaceFincasLedgerImportFile.value = "";
+      } catch (e) {}
+    }
+  });
+}
+
+if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
+  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
+    const file = workspaceFincasLedgerImportFile.files?.[0];
+    if (!file) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un archivo.";
+      return;
+    }
+    if (!state.currentWorkspaceId) {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
+      return;
+    }
+    const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
+    try {
+      workspaceFincasLedgerImportBtn.disabled = true;
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Subiendo extracto...";
+      const upload = await uploadFileToS3(file, `fincas_extractos/${state.currentWorkspaceId || "workspace"}`, workspaceFincasLedgerImportStatus);
+      const key = String(upload?.key || "").trim();
+      if (!key) throw new Error("No se pudo subir el archivo.");
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Importando movimientos...";
+      const res = await fetch("/api/workspace_fincas_contabilidad_import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: state.currentWorkspaceId,
+          comunidad_id: comunidadId,
+          s3_key: key,
+          filename: file.name,
+        }),
+      }).then((r) => r.json());
+      if (res?.error) throw new Error(res.error);
+      const inserted = Number(res?.inserted || 0) || 0;
+      const skipped = Number(res?.skipped || 0) || 0;
+      const total = Number(res?.total || 0) || 0;
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted}/${total} nuevos, ${skipped} duplicados.`;
       await refreshWorkspaceFincasLedger({ force: true, silent: true });
     } catch (error) {
       if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";

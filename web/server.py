@@ -39128,6 +39128,82 @@ def parse_fincas_bank_extract_xlsx(raw_bytes):
 
     header_row = 0
     col_map = {}
+    for r in range(1, min(80, ws.max_row or 0) + 1):
+        values = [ws.cell(r, c).value for c in range(1, min(30, ws.max_column or 0) + 1)]
+        norm = [str(v or "").strip().upper() for v in values]
+        if "FECHA OPERACION" in norm and "CONCEPTO" in norm and "IMPORTE" in norm:
+            header_row = r
+            for idx, name in enumerate(norm, start=1):
+                if name == "FECHA OPERACION":
+                    col_map["fecha"] = idx
+                elif name == "CONCEPTO":
+                    col_map["concepto"] = idx
+                elif name == "IMPORTE":
+                    col_map["importe"] = idx
+                elif name == "SALDO":
+                    col_map["saldo"] = idx
+            break
+    if not header_row or not col_map.get("fecha") or not col_map.get("concepto") or not col_map.get("importe"):
+        raise ValueError("Formato XLSX no reconocido (faltan columnas FECHA OPERACION/CONCEPTO/IMPORTE).")
+
+    def _parse_date(value):
+        if value is None:
+            return ""
+        if hasattr(value, "date"):
+            try:
+                return value.date().isoformat()
+            except Exception:
+                pass
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", raw)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+        return raw[:10]
+
+    def _parse_float(value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        raw = str(value).replace("€", "").replace("\xa0", " ").strip()
+        raw = raw.replace(".", "").replace(",", ".")
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    movements = []
+    for r in range(header_row + 1, min(header_row + 8000, (ws.max_row or 0)) + 1):
+        fecha = _parse_date(ws.cell(r, col_map["fecha"]).value)
+        concepto = str(ws.cell(r, col_map["concepto"]).value or "").strip()
+        if not fecha and not concepto:
+            continue
+        if not fecha or not concepto:
+            continue
+        importe = _parse_float(ws.cell(r, col_map["importe"]).value)
+        if importe is None:
+            continue
+        saldo = _parse_float(ws.cell(r, col_map.get("saldo", 0)).value) if col_map.get("saldo") else None
+        movements.append({"fecha": fecha, "concepto": concepto, "importe": float(importe), "saldo": saldo})
+    return movements
+
+
+def parse_fincas_bank_extract_xlsx(raw_bytes):
+    from io import BytesIO
+
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer XLSX (openpyxl): {exc}")
+
+    wb = load_workbook(BytesIO(raw_bytes), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+
+    header_row = 0
+    col_map = {}
     for r in range(1, min(60, ws.max_row or 0) + 1):
         values = [ws.cell(r, c).value for c in range(1, min(25, ws.max_column or 0) + 1)]
         norm = [str(v or "").strip().upper() for v in values]
@@ -57560,6 +57636,91 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_contabilidad_import":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip() or None
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_fincas_bank_extract_xlsx(raw_bytes)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+
+            inserted = 0
+            skipped = 0
+            for mv in movements:
+                fecha = str(mv.get("fecha") or "").strip() or None
+                concepto = str(mv.get("concepto") or "").strip()
+                if not fecha or not concepto:
+                    continue
+                amount = float(mv.get("importe") or 0.0)
+                tipo = "Ingreso" if amount >= 0 else "Gasto"
+                importe = round(abs(amount), 2)
+                notas_parts = []
+                saldo = mv.get("saldo")
+                if saldo is not None:
+                    try:
+                        notas_parts.append(f"Saldo: {round(float(saldo), 2)}")
+                    except Exception:
+                        pass
+                notas = " · ".join(notas_parts) if notas_parts else None
+
+                exists = conn.execute(
+                    """
+                    SELECT id
+                    FROM workspace_fincas_contabilidad
+                    WHERE workspace_id = ?
+                      AND COALESCE(comunidad_id, '') = COALESCE(?, '')
+                      AND COALESCE(fecha, '') = COALESCE(?, '')
+                      AND COALESCE(tipo, '') = COALESCE(?, '')
+                      AND ABS(COALESCE(importe, 0) - ?) < 0.009
+                      AND COALESCE(concepto, '') = ?
+                    LIMIT 1
+                    """,
+                    (workspace_id, comunidad_id or "", fecha or "", tipo, float(importe), concepto),
+                ).fetchone()
+                if exists:
+                    skipped += 1
+                    continue
+
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_contabilidad (
+                      id, workspace_id, comunidad_id, fecha, tipo, concepto, importe, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        workspace_id,
+                        comunidad_id,
+                        fecha,
+                        tipo,
+                        concepto,
+                        float(importe),
+                        notas,
+                        now,
+                        now,
+                    ),
+                )
+                inserted += 1
+            conn.commit()
+            json_response(self, {"ok": True, "inserted": inserted, "skipped": skipped, "total": len(movements)})
             return
         elif parsed.path == "/api/workspace_fincas_vecinos":
             session = getattr(self, "auth_session", None) or self._current_session()

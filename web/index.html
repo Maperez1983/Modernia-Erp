@@ -2368,17 +2368,26 @@
               <p class="muted">Registra ingresos y gastos por comunidad (y agrúpalos en el dashboard).</p>
             </div>
           </div>
-          <form id="workspaceFincasLedgerForm" class="form-grid">
-            <input type="hidden" name="id" />
-            <input type="hidden" name="workspace_id" />
-            <label class="span-2">
-              Comunidad (opcional)
-              <select name="comunidad_id"></select>
-            </label>
-            <label>
-              Fecha
-              <input name="fecha" type="date" />
-            </label>
+	          <form id="workspaceFincasLedgerForm" class="form-grid">
+	            <input type="hidden" name="id" />
+	            <input type="hidden" name="workspace_id" />
+	            <label class="span-2">
+	              Comunidad (opcional)
+	              <select name="comunidad_id"></select>
+	            </label>
+	            <label class="span-2">
+	              Importar extracto (XLSX/CSV)
+	              <input id="workspaceFincasLedgerImportFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" />
+	              <div class="muted">Importa movimientos como Ingreso/Gasto y evita duplicados por fecha+importe+concepto.</div>
+	              <div class="form-actions">
+	                <button type="button" id="workspaceFincasLedgerImportBtn" class="secondary">Importar</button>
+	                <span id="workspaceFincasLedgerImportStatus" class="muted"></span>
+	              </div>
+	            </label>
+	            <label>
+	              Fecha
+	              <input name="fecha" type="date" />
+	            </label>
             <label>
               Tipo
               <select name="tipo">
