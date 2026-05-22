@@ -46078,6 +46078,8 @@ class Handler(BaseHTTPRequestHandler):
     _gestoria_renta_dash_cache = {}  # {(empresa_ids_csv, ejercicio): (expires_ts, payload_dict)}
     _hipoteca_dashboard_lock = threading.Lock()
     _hipoteca_dashboard_cache = {}  # {(empresa_id, year): (expires_ts, payload_dict)}
+    _seguros_insights_lock = threading.Lock()
+    _seguros_insights_cache = {}  # {(empresa_id, uploaded_only): (expires_ts, payload_dict)}
     _fincas_seguros_dash_lock = threading.Lock()
     _fincas_seguros_dash_cache = {}  # {(empresa_id, year, uploaded_only): (expires_ts, payload_dict)}
     _dashboard_lock = threading.Lock()
@@ -72299,6 +72301,16 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"ok": True, "payload": {}, "rows": []})
                 return
             empresa_id = empresa_ids[0]
+            cache_key = (str(empresa_id or "").strip(), "1" if uploaded_only else "0")
+            now_ts = time.time()
+            try:
+                with Handler._seguros_insights_lock:
+                    cached = Handler._seguros_insights_cache.get(cache_key)
+                    if cached and isinstance(cached[1], dict) and cached[0] > now_ts:
+                        json_response(self, cached[1])
+                        return
+            except Exception:
+                pass
             in_vigor_expr = in_vigor_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
@@ -72306,19 +72318,24 @@ class Handler(BaseHTTPRequestHandler):
             uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
             por_ramo_raw = conn.execute(
                 f"""
-                SELECT ramo
+                SELECT ramo, COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
+                GROUP BY ramo
                 """,
                 (empresa_id, uploaded_param),
             ).fetchall()
             por_ramo_map = {}
             for row in por_ramo_raw:
                 ramo_label = canonicalize_ramo(row["ramo"]) or "Sin ramo"
-                por_ramo_map[ramo_label] = por_ramo_map.get(ramo_label, 0) + 1
+                try:
+                    inc = int(row_value(row, "total") or row_value(row, 1) or 0)
+                except Exception:
+                    inc = 0
+                por_ramo_map[ramo_label] = por_ramo_map.get(ramo_label, 0) + inc
             por_ramo = [
                 {"ramo": ramo, "total": total}
                 for ramo, total in sorted(por_ramo_map.items(), key=lambda item: item[1], reverse=True)
@@ -72354,15 +72371,22 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros_preferencias
                 """
             ).fetchone()
-            json_response(
-                self,
-                {
-                    "por_ramo": por_ramo,
-                    "por_compania": [dict(r) for r in por_compania],
-                    "ofertas_estado": [dict(r) for r in ofertas_estado],
-                    "preferencias": dict(preferencias) if preferencias else {},
-                },
-            )
+            payload = {
+                "por_ramo": por_ramo,
+                "por_compania": [dict(r) for r in por_compania],
+                "ofertas_estado": [dict(r) for r in ofertas_estado],
+                "preferencias": dict(preferencias) if preferencias else {},
+            }
+            try:
+                with Handler._seguros_insights_lock:
+                    Handler._seguros_insights_cache[cache_key] = (now_ts + 20.0, payload)
+                    if len(Handler._seguros_insights_cache) > 200:
+                        for k, (exp, _val) in list(Handler._seguros_insights_cache.items())[:80]:
+                            if exp <= now_ts:
+                                Handler._seguros_insights_cache.pop(k, None)
+            except Exception:
+                pass
+            json_response(self, payload)
             return
 
         if path == "/api/seguros_eventos":

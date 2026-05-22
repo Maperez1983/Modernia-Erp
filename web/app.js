@@ -61620,9 +61620,19 @@ const loadSegurosComisiones = () => {
 
 const loadSegurosInsights = (empresaId) => {
   if (!segurosInsights || !empresaId) return;
+  if (state.segurosInsightsLoading === "1") return;
+  const lastKey = String(state.segurosInsightsLastKey || "");
   const params = new URLSearchParams({ empresa_id: empresaId });
   params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
-  api(`/api/seguros_insights?${params.toString()}`).then((data) => {
+  const key = params.toString();
+  // Evita llamadas repetidas por re-render / cambio de tab. Cache corto en front.
+  if (lastKey === key && state.segurosInsightsLastAt && Date.now() - state.segurosInsightsLastAt < 15000) {
+    return;
+  }
+  state.segurosInsightsLoading = "1";
+  state.segurosInsightsLastKey = key;
+  api(`/api/seguros_insights?${key}`)
+    .then((data) => {
     const porRamo = data.por_ramo || [];
     const porCompania = data.por_compania || [];
     const ofertasEstado = data.ofertas_estado || [];
@@ -61686,7 +61696,12 @@ const loadSegurosInsights = (empresaId) => {
     }
     segurosInsights.innerHTML = "";
     segurosInsights.appendChild(wrapper);
-  });
+    state.segurosInsightsLastAt = Date.now();
+  })
+    .catch(() => {})
+    .finally(() => {
+      state.segurosInsightsLoading = "0";
+    });
 };
 
 const renderSegurosPresupuestos = (data) => {
