@@ -71063,6 +71063,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/acciones":
             try:
                 workspace_id = params.get("workspace_id", [""])[0]
+                workspace_company_id = params.get("workspace_company_id", [""])[0]
                 empresa_id = params.get("empresa_id", [""])[0]
                 servicio = params.get("servicio", [""])[0]
                 cliente_id = params.get("cliente_id", [""])[0]
@@ -71102,6 +71103,7 @@ class Handler(BaseHTTPRequestHandler):
                 where = ["a.servicio = ?"]
                 values = [servicio_key]
                 workspace_id = str(workspace_id or "").strip()
+                workspace_company_id = str(workspace_company_id or "").strip()
                 empresa_id = str(empresa_id or "").strip()
                 cliente_id = str(cliente_id or "").strip()
                 inmueble_id = str(inmueble_id or "").strip()
@@ -71116,10 +71118,23 @@ class Handler(BaseHTTPRequestHandler):
                 # a alguna empresa vinculada al workspace. Si no, al usuario le “desaparecen” citas antiguas.
                 if workspace_id:
                     session = getattr(self, "auth_session", None) or self._current_session()
-                    ok, err = enforce_workspace_membership(conn, session, workspace_id)
-                    if not ok:
+                    # Resuelve empresa (legacy) desde `workspace_company_id` cuando exista.
+                    # Esto es clave para filtrar acciones legacy (sin workspace_id) en entornos multi-workspace.
+                    try:
+                        resolved_eid, _wc_id, err = resolve_empresa_id_for_request(
+                            conn,
+                            session,
+                            workspace_id=workspace_id,
+                            empresa_id=empresa_id,
+                            workspace_company_id=workspace_company_id,
+                            write=False,
+                        )
+                    except Exception:
+                        resolved_eid, err = "", "No autorizado"
+                    if err:
                         json_response(self, {"error": err or "No autorizado"}, status=403)
                         return
+                    empresa_id = str(resolved_eid or "").strip()
                     empresa_ids = []
                     try:
                         # Si el workspace aún no tiene empresas vinculadas, `resolve_workspace_scope_empresa_ids`
