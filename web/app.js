@@ -59080,7 +59080,12 @@ const loadSegurosCrm = () => {
     q,
   });
   params.set("include_id", "1");
-  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
+  // UX: por defecto en Seguros solemos mostrar solo pólizas con PDF/documento subido, pero cuando el usuario
+  // busca (por texto o por cliente) espera encontrar *todas* las pólizas aunque no tengan adjunto.
+  const uploadedOnlyDefault = SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0";
+  const filtroClienteRaw = segurosCrmClienteInput ? String(segurosCrmClienteInput.value || "").trim() : "";
+  const uploadedOnlyEffective = q || filtroClienteRaw ? "0" : uploadedOnlyDefault;
+  params.set("uploaded_only", uploadedOnlyEffective);
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     const allRows = data.rows || [];
