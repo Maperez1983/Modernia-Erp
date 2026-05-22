@@ -39189,82 +39189,110 @@ def parse_fincas_bank_extract_xlsx(raw_bytes):
         saldo = _parse_float(ws.cell(r, col_map.get("saldo", 0)).value) if col_map.get("saldo") else None
         movements.append({"fecha": fecha, "concepto": concepto, "importe": float(importe), "saldo": saldo})
     return movements
+def parse_fincas_bank_extract_csv(raw_bytes):
+    import csv
 
-
-def parse_fincas_bank_extract_xlsx(raw_bytes):
-    from io import BytesIO
-
-    try:
-        from openpyxl import load_workbook
-    except Exception as exc:
-        raise ValueError(f"No se pudo leer XLSX (openpyxl): {exc}")
-
-    wb = load_workbook(BytesIO(raw_bytes), data_only=True)
-    ws = wb[wb.sheetnames[0]]
-
-    header_row = 0
-    col_map = {}
-    for r in range(1, min(60, ws.max_row or 0) + 1):
-        values = [ws.cell(r, c).value for c in range(1, min(25, ws.max_column or 0) + 1)]
-        norm = [str(v or "").strip().upper() for v in values]
-        if "FECHA OPERACION" in norm and "CONCEPTO" in norm and "IMPORTE" in norm:
-            header_row = r
-            for idx, name in enumerate(norm, start=1):
-                if name == "FECHA OPERACION":
-                    col_map["fecha"] = idx
-                elif name == "CONCEPTO":
-                    col_map["concepto"] = idx
-                elif name == "IMPORTE":
-                    col_map["importe"] = idx
-                elif name == "SALDO":
-                    col_map["saldo"] = idx
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = raw_bytes.decode(enc)
             break
-    if not header_row or not col_map.get("fecha") or not col_map.get("concepto") or not col_map.get("importe"):
-        raise ValueError("Formato XLSX no reconocido (faltan columnas FECHA OPERACION/CONCEPTO/IMPORTE).")
+        except Exception:
+            text = None
+    if text is None:
+        raise ValueError("No se pudo decodificar el CSV (UTF-8/Latin-1).")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return []
+    sample = "\n".join(lines[:50])
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,|\t,")
+    except Exception:
+        class _D:
+            delimiter = ";" if sample.count(";") >= sample.count(",") else ","
+        dialect = _D()
 
-    def _parse_date(value):
-        if value is None:
+    def _norm_header(s):
+        return normalize_lookup_text(str(s or ""))
+
+    header_idx = None
+    header = []
+    for idx, line in enumerate(lines[:40]):
+        parts = next(csv.reader([line], delimiter=dialect.delimiter))
+        norm = [_norm_header(p) for p in parts]
+        joined = " ".join(norm)
+        if "fecha" in joined and ("importe" in joined or "amount" in joined) and ("concepto" in joined or "concept" in joined or "descripcion" in joined):
+            header_idx = idx
+            header = norm
+            break
+    if header_idx is None:
+        header_idx = 0
+        header = [_norm_header(p) for p in next(csv.reader([lines[0]], delimiter=dialect.delimiter))]
+
+    def _find_col(*candidates):
+        for cand in candidates:
+            cand_n = _norm_header(cand)
+            for i, h in enumerate(header):
+                if cand_n == h or (cand_n and cand_n in h):
+                    return i
+        return -1
+
+    col_fecha = _find_col("fecha operacion", "fecha operación", "fecha", "date")
+    col_concepto = _find_col("concepto", "descripcion", "descripción", "concept", "detalle", "details")
+    col_importe = _find_col("importe", "cantidad", "amount", "eur")
+    col_saldo = _find_col("saldo", "balance")
+    if col_fecha < 0 or col_concepto < 0 or col_importe < 0:
+        raise ValueError("CSV no reconocido: faltan columnas de fecha/concepto/importe.")
+
+    def _parse_date(raw):
+        s = str(raw or "").strip()
+        if not s:
             return ""
-        if hasattr(value, "date"):
-            try:
-                return value.date().isoformat()
-            except Exception:
-                pass
-        raw = str(value).strip()
-        if not raw:
-            return ""
-        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", raw)
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            return s
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
         if m:
             d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
             return f"{y:04d}-{mo:02d}-{d:02d}"
-        return raw[:10]
+        return s[:10]
 
-    def _parse_float(value):
-        if value is None or value == "":
+    def _parse_float(raw):
+        if raw is None or raw == "":
             return None
-        if isinstance(value, (int, float)):
-            return float(value)
-        raw = str(value).replace("€", "").replace("\xa0", " ").strip()
-        raw = raw.replace(".", "").replace(",", ".")
-        try:
+        if isinstance(raw, (int, float)):
             return float(raw)
+        s = str(raw).replace("€", "").replace("\xa0", " ").strip()
+        s = s.replace(".", "").replace(",", ".")
+        try:
+            return float(s)
         except Exception:
             return None
 
     movements = []
-    for r in range(header_row + 1, min(header_row + 5000, (ws.max_row or 0)) + 1):
-        fecha = _parse_date(ws.cell(r, col_map["fecha"]).value)
-        concepto = str(ws.cell(r, col_map["concepto"]).value or "").strip()
-        if not fecha and not concepto:
+    for line in lines[header_idx + 1:]:
+        parts = next(csv.reader([line], delimiter=dialect.delimiter))
+        if max(col_fecha, col_concepto, col_importe, col_saldo) >= len(parts):
             continue
+        fecha = _parse_date(parts[col_fecha])
+        concepto = str(parts[col_concepto] or "").strip()
         if not fecha or not concepto:
             continue
-        importe = _parse_float(ws.cell(r, col_map["importe"]).value)
+        importe = _parse_float(parts[col_importe])
         if importe is None:
             continue
-        saldo = _parse_float(ws.cell(r, col_map.get("saldo", 0)).value) if col_map.get("saldo") else None
+        saldo = _parse_float(parts[col_saldo]) if col_saldo >= 0 and col_saldo < len(parts) else None
         movements.append({"fecha": fecha, "concepto": concepto, "importe": float(importe), "saldo": saldo})
+        if len(movements) >= 20000:
+            break
     return movements
+
+
+def parse_fincas_bank_extract(raw_bytes, filename=""):
+    name = str(filename or "").lower().strip()
+    if name.endswith(".csv"):
+        return parse_fincas_bank_extract_csv(raw_bytes)
+    return parse_fincas_bank_extract_xlsx(raw_bytes)
 
 
 def fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=200):
@@ -57637,6 +57665,41 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
+        elif parsed.path == "/api/workspace_fincas_contabilidad_import_preview":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_fincas_bank_extract(raw_bytes, filename=payload.get("filename") or "")
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            preview = []
+            for mv in (movements or [])[:60]:
+                preview.append(
+                    {
+                        "fecha": mv.get("fecha"),
+                        "concepto": mv.get("concepto"),
+                        "importe": mv.get("importe"),
+                        "saldo": mv.get("saldo"),
+                    }
+                )
+            json_response(self, {"ok": True, "total": len(movements or []), "preview": preview})
+            return
         elif parsed.path == "/api/workspace_fincas_contabilidad_import":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -57657,7 +57720,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": str(exc)}, status=400)
                 return
             try:
-                movements = parse_fincas_bank_extract_xlsx(raw_bytes)
+                movements = parse_fincas_bank_extract(raw_bytes, filename=payload.get("filename") or "")
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return

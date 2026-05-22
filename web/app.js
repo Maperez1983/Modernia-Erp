@@ -134,7 +134,10 @@ const api = async (path) => {
         }
         if (!qs.get("workspace_company_id")) {
           const wcid = String(state.currentWorkspaceCompanyWsId || "").trim();
-          if (wcid) {
+          const hasV2Companies = Array.isArray(state.currentWorkspaceDetail?.companies_v2) && state.currentWorkspaceDetail.companies_v2.length > 0;
+          // En tenant, solo adjuntamos `workspace_company_id` si el workspace realmente usa v2.
+          // Evita mandar valores legacy stale (guardados en state/localStorage) que rompen el scoping.
+          if (hasV2Companies && wcid) {
             qs.set("workspace_company_id", wcid);
           } else {
             // Compat tenant/legacy: si el workspace aún no usa `workspace_companies` (v2),
@@ -2179,13 +2182,10 @@ const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
 const workspaceFincasLedgerStatus = document.getElementById("workspaceFincasLedgerStatus");
 const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedgerList");
-const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
-const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
-const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
-const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
-const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
-const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
-const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
+	const workspaceFincasLedgerImportFile = document.getElementById("workspaceFincasLedgerImportFile");
+	const workspaceFincasLedgerImportBtn = document.getElementById("workspaceFincasLedgerImportBtn");
+	const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFincasLedgerImportStatus");
+	const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
 const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
@@ -77030,53 +77030,87 @@ if (workspaceFincasLedgerForm) {
 }
 
 if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
-  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
-    const file = workspaceFincasLedgerImportFile.files?.[0];
-    if (!file) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un archivo.";
-      return;
+  const openPreviewModal = ({ total = 0, preview = [], onConfirm, onClose }) => {
+    let modal = document.getElementById("fincasLedgerImportPreviewModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "fincasLedgerImportPreviewModal";
+      modal.className = "modal hidden";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 980px;">
+          <div class="modal-header">
+            <h3>Previsualización importación</h3>
+            <button type="button" class="secondary ghost" data-import-close>Cerrar</button>
+          </div>
+          <div class="modal-body" style="padding: 16px;">
+            <div class="muted" data-import-summary></div>
+            <div style="overflow:auto;max-height:420px;margin-top:12px;border:1px solid rgba(0,0,0,0.06);border-radius:12px;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                  <tr style="background:#f3f4f6;">
+                    <th style="text-align:left;padding:10px;">Fecha</th>
+                    <th style="text-align:left;padding:10px;">Concepto</th>
+                    <th style="text-align:right;padding:10px;">Importe</th>
+                  </tr>
+                </thead>
+                <tbody data-import-rows></tbody>
+              </table>
+            </div>
+            <div class="modal-actions" style="margin-top:14px;">
+              <button type="button" class="secondary" data-import-cancel>Cancelar</button>
+              <button type="button" class="primary" data-import-confirm>Importar</button>
+              <span class="muted" data-import-status style="margin-left:10px;"></span>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
     }
-    if (!state.currentWorkspaceId) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
-      return;
+    const closeBtn = modal.querySelector("[data-import-close]");
+    const cancelBtn = modal.querySelector("[data-import-cancel]");
+    const confirmBtn = modal.querySelector("[data-import-confirm]");
+    const rowsEl = modal.querySelector("[data-import-rows]");
+    const summaryEl = modal.querySelector("[data-import-summary]");
+    const statusEl = modal.querySelector("[data-import-status]");
+    if (statusEl) statusEl.textContent = "";
+    if (summaryEl) summaryEl.textContent = `Movimientos detectados: ${Number(total || 0) || 0}. Mostrando ${Math.min(preview.length, 60)}.`;
+    if (rowsEl) {
+      rowsEl.innerHTML = (preview || []).slice(0, 60).map((row) => {
+        const amount = Number(row?.importe || 0) || 0;
+        return `<tr>
+          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);white-space:nowrap;">${escapeHtml(String(row?.fecha || ""))}</td>
+          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);">${escapeHtml(String(row?.concepto || ""))}</td>
+          <td style="padding:10px;border-top:1px solid rgba(0,0,0,0.05);text-align:right;white-space:nowrap;">${escapeHtml(euroFormatter.format(amount))}</td>
+        </tr>`;
+      }).join("");
     }
-    const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
-    try {
-      workspaceFincasLedgerImportBtn.disabled = true;
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Subiendo extracto...";
-      const upload = await uploadFileToS3(file, `fincas_extractos/${state.currentWorkspaceId || "workspace"}`, workspaceFincasLedgerImportStatus);
-      const key = String(upload?.key || "").trim();
-      if (!key) throw new Error("No se pudo subir el archivo.");
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Importando movimientos...";
-      const res = await fetch("/api/workspace_fincas_contabilidad_import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: state.currentWorkspaceId,
-          comunidad_id: comunidadId,
-          s3_key: key,
-          filename: file.name,
-        }),
-      }).then((r) => r.json());
-      if (res?.error) throw new Error(res.error);
-      const inserted = Number(res?.inserted || 0) || 0;
-      const skipped = Number(res?.skipped || 0) || 0;
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted} nuevos, ${skipped} duplicados.`;
-      await refreshWorkspaceFincasLedger({ force: true, silent: true });
-    } catch (error) {
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";
-    } finally {
-      try {
-        workspaceFincasLedgerImportBtn.disabled = false;
-      } catch (e) {}
-      try {
-        workspaceFincasLedgerImportFile.value = "";
-      } catch (e) {}
-    }
-  });
-}
 
-if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
+    const cleanup = () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+      if (typeof onClose === "function") onClose();
+    };
+    closeBtn.onclick = cleanup;
+    cancelBtn.onclick = cleanup;
+    modal.onclick = (event) => {
+      if (event.target === modal) cleanup();
+    };
+    confirmBtn.onclick = async () => {
+      if (typeof onConfirm !== "function") return;
+      try {
+        confirmBtn.disabled = true;
+        if (statusEl) statusEl.textContent = "Importando...";
+        await onConfirm();
+        cleanup();
+      } catch (err) {
+        confirmBtn.disabled = false;
+        if (statusEl) statusEl.textContent = err?.message || "No se pudo importar.";
+      }
+    };
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+  };
+
   workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
     const file = workspaceFincasLedgerImportFile.files?.[0];
     if (!file) {
@@ -77088,14 +77122,15 @@ if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
       return;
     }
     const comunidadId = String(workspaceFincasLedgerForm?.querySelector('[name="comunidad_id"]')?.value || "").trim();
+    let key = "";
     try {
       workspaceFincasLedgerImportBtn.disabled = true;
       if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Subiendo extracto...";
       const upload = await uploadFileToS3(file, `fincas_extractos/${state.currentWorkspaceId || "workspace"}`, workspaceFincasLedgerImportStatus);
-      const key = String(upload?.key || "").trim();
+      key = String(upload?.key || "").trim();
       if (!key) throw new Error("No se pudo subir el archivo.");
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Importando movimientos...";
-      const res = await fetch("/api/workspace_fincas_contabilidad_import", {
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Previsualizando...";
+      const preview = await fetch("/api/workspace_fincas_contabilidad_import_preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -77105,12 +77140,30 @@ if (workspaceFincasLedgerImportBtn && workspaceFincasLedgerImportFile) {
           filename: file.name,
         }),
       }).then((r) => r.json());
-      if (res?.error) throw new Error(res.error);
-      const inserted = Number(res?.inserted || 0) || 0;
-      const skipped = Number(res?.skipped || 0) || 0;
-      const total = Number(res?.total || 0) || 0;
-      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted}/${total} nuevos, ${skipped} duplicados.`;
-      await refreshWorkspaceFincasLedger({ force: true, silent: true });
+      if (preview?.error) throw new Error(preview.error);
+      openPreviewModal({
+        total: preview?.total || 0,
+        preview: Array.isArray(preview?.preview) ? preview.preview : [],
+        onConfirm: async () => {
+          const res = await fetch("/api/workspace_fincas_contabilidad_import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workspace_id: state.currentWorkspaceId,
+              comunidad_id: comunidadId,
+              s3_key: key,
+              filename: file.name,
+            }),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          const inserted = Number(res?.inserted || 0) || 0;
+          const skipped = Number(res?.skipped || 0) || 0;
+          const total = Number(res?.total || 0) || 0;
+          if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = `Importación OK: ${inserted}/${total} nuevos, ${skipped} duplicados.`;
+          await refreshWorkspaceFincasLedger({ force: true, silent: true });
+        },
+      });
+      if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "";
     } catch (error) {
       if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = error?.message || "No se pudo importar.";
     } finally {
