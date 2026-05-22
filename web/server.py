@@ -39115,6 +39115,82 @@ def fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=80, comunidad_
     return {"rows": [dict(row) for row in rows]}
 
 
+def parse_fincas_bank_extract_xlsx(raw_bytes):
+    from io import BytesIO
+
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer XLSX (openpyxl): {exc}")
+
+    wb = load_workbook(BytesIO(raw_bytes), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+
+    header_row = 0
+    col_map = {}
+    for r in range(1, min(60, ws.max_row or 0) + 1):
+        values = [ws.cell(r, c).value for c in range(1, min(25, ws.max_column or 0) + 1)]
+        norm = [str(v or "").strip().upper() for v in values]
+        if "FECHA OPERACION" in norm and "CONCEPTO" in norm and "IMPORTE" in norm:
+            header_row = r
+            for idx, name in enumerate(norm, start=1):
+                if name == "FECHA OPERACION":
+                    col_map["fecha"] = idx
+                elif name == "CONCEPTO":
+                    col_map["concepto"] = idx
+                elif name == "IMPORTE":
+                    col_map["importe"] = idx
+                elif name == "SALDO":
+                    col_map["saldo"] = idx
+            break
+    if not header_row or not col_map.get("fecha") or not col_map.get("concepto") or not col_map.get("importe"):
+        raise ValueError("Formato XLSX no reconocido (faltan columnas FECHA OPERACION/CONCEPTO/IMPORTE).")
+
+    def _parse_date(value):
+        if value is None:
+            return ""
+        if hasattr(value, "date"):
+            try:
+                return value.date().isoformat()
+            except Exception:
+                pass
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", raw)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+        return raw[:10]
+
+    def _parse_float(value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        raw = str(value).replace("€", "").replace("\xa0", " ").strip()
+        raw = raw.replace(".", "").replace(",", ".")
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    movements = []
+    for r in range(header_row + 1, min(header_row + 5000, (ws.max_row or 0)) + 1):
+        fecha = _parse_date(ws.cell(r, col_map["fecha"]).value)
+        concepto = str(ws.cell(r, col_map["concepto"]).value or "").strip()
+        if not fecha and not concepto:
+            continue
+        if not fecha or not concepto:
+            continue
+        importe = _parse_float(ws.cell(r, col_map["importe"]).value)
+        if importe is None:
+            continue
+        saldo = _parse_float(ws.cell(r, col_map.get("saldo", 0)).value) if col_map.get("saldo") else None
+        movements.append({"fecha": fecha, "concepto": concepto, "importe": float(importe), "saldo": saldo})
+    return movements
+
+
 def fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=200):
     comunidad_id = str(comunidad_id or "").strip()
     rows = conn.execute(
