@@ -59449,7 +59449,7 @@ const loadSegurosCrm = () => {
     if (
       segurosCrmInfo &&
       (q ||
-        filtroCliente ||
+        filtroClienteTokens.length ||
         (segurosEstadoFilter && segurosEstadoFilter.value !== "all") ||
         estadoContains ||
         ramoFilter ||
