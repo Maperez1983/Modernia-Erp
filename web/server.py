@@ -33448,6 +33448,41 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_vecinos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          nif TEXT,
+          piso TEXT,
+          telefono TEXT,
+          email TEXT,
+          coeficiente REAL,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_documentos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          titulo TEXT NOT NULL,
+          tipo TEXT,
+          fecha TEXT,
+          doc_key TEXT,
+          doc_url TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
 
 
 def infer_workspace_doc_classification(nombre, tipo, servicio):
@@ -38996,6 +39031,65 @@ def fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=80, comunidad_
         LIMIT ?
         """,
         (*params, max(1, min(int(limit or 80), 200))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=200):
+    comunidad_id = str(comunidad_id or "").strip()
+    rows = conn.execute(
+        """
+        SELECT
+          v.id,
+          v.workspace_id,
+          v.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          v.nombre,
+          COALESCE(v.nif, '') AS nif,
+          COALESCE(v.piso, '') AS piso,
+          COALESCE(v.telefono, '') AS telefono,
+          COALESCE(v.email, '') AS email,
+          v.coeficiente,
+          COALESCE(v.notas, '') AS notas,
+          v.created_at,
+          v.updated_at
+        FROM workspace_fincas_vecinos v
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = v.comunidad_id
+        WHERE v.workspace_id = ?
+          AND v.comunidad_id = ?
+        ORDER BY v.nombre COLLATE NOCASE ASC, v.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, comunidad_id, max(1, min(int(limit or 200), 500))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_documentos(conn, workspace_id, comunidad_id, limit=200):
+    comunidad_id = str(comunidad_id or "").strip()
+    rows = conn.execute(
+        """
+        SELECT
+          d.id,
+          d.workspace_id,
+          d.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          d.titulo,
+          COALESCE(d.tipo, '') AS tipo,
+          COALESCE(d.fecha, '') AS fecha,
+          COALESCE(d.doc_key, '') AS doc_key,
+          COALESCE(d.doc_url, '') AS doc_url,
+          COALESCE(d.notas, '') AS notas,
+          d.created_at,
+          d.updated_at
+        FROM workspace_fincas_documentos d
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = d.comunidad_id
+        WHERE d.workspace_id = ?
+          AND d.comunidad_id = ?
+        ORDER BY COALESCE(d.fecha, d.created_at) DESC, d.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, comunidad_id, max(1, min(int(limit or 200), 500))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
 
