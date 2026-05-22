@@ -33539,6 +33539,31 @@ def fetch_workspace_company_ids(conn, workspace_id):
     empresa_ids = [eid for eid in empresa_ids if eid]
     if empresa_ids:
         return empresa_ids
+    # Inferencia segura: si aún no hay vínculos en `workspace_empresas`, derivamos empresas
+    # desde RRHH del propio workspace. Esto evita listados vacíos (p.ej. Agenda) hasta que
+    # se complete el setup de compañías.
+    try:
+        persona_rows = conn.execute(
+            """
+            SELECT DISTINCT empresa_id
+            FROM workspace_registro_personal
+            WHERE workspace_id = ?
+              AND COALESCE(activo, 1) = 1
+              AND COALESCE(TRIM(empresa_id), '') <> ''
+            ORDER BY empresa_id
+            LIMIT 50
+            """,
+            (ws_id,),
+        ).fetchall()
+        inferred = [
+            str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+            for r in (persona_rows or [])
+        ]
+        inferred = [eid for eid in inferred if eid]
+        if inferred:
+            return inferred
+    except Exception:
+        pass
     if not WORKSPACE_AUTO_LINK_COMPANIES:
         return []
     # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
