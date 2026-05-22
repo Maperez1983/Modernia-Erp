@@ -26959,13 +26959,13 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
           COALESCE(s.estado_poliza, s.estado, '') AS estado,
               s.comision,
               s.prima_total,
-	              COALESCE(s.fecha_efecto, '') AS fecha_efecto,
-	              COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento,
-	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
-	              COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
-	            FROM seguros s
-	            LEFT JOIN clientes c ON c.id = s.cliente_id
-	            LEFT JOIN clientes_empresas ce
+                  COALESCE(s.fecha_efecto, '') AS fecha_efecto,
+                  COALESCE(s.fecha_vencimiento, '') AS fecha_vencimiento,
+                  COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+                  COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
+                FROM seguros s
+                LEFT JOIN clientes c ON c.id = s.cliente_id
+                LEFT JOIN clientes_empresas ce
               ON ce.cliente_id = s.cliente_id
              AND ce.empresa_id = s.empresa_id
              AND LOWER(COALESCE(ce.servicio, '')) LIKE '%seguro%'
@@ -27019,13 +27019,13 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
                 "fecha": str(row_dict.get("fecha_efecto") or "").strip()
                 or str(row_dict.get("fecha_vencimiento") or "").strip(),
                 "estado": str(row_dict.get("estado") or "").strip() or "-",
-	                "cobrada": 1 if is_cobrada else 0,
-	                "comision_cobrada": round(comision_cobrada, 2),
-	                "comision": round(comision_trabajador, 2),
-	                "canal": str(row_dict.get("canal") or "").strip(),
-	                "responsable": str(row_dict.get("responsable") or "").strip(),
-	            }
-	        )
+                    "cobrada": 1 if is_cobrada else 0,
+                    "comision_cobrada": round(comision_cobrada, 2),
+                    "comision": round(comision_trabajador, 2),
+                    "canal": str(row_dict.get("canal") or "").strip(),
+                    "responsable": str(row_dict.get("responsable") or "").strip(),
+                }
+            )
 
     try:
         items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
@@ -27105,15 +27105,15 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
           COALESCE(h.asesor, '') AS responsable,
           COALESCE(h.estado, '') AS estado,
           COALESCE(h.fecha_firma, '') AS fecha_firma,
-	              h.comision_modernia,
-	              h.comision,
-	              h.cesion,
-	              h.comision_juan,
-	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
-	              COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
-	            FROM hipotecas h
-	            LEFT JOIN clientes c ON c.id = h.cliente_id
-	            LEFT JOIN clientes_empresas ce
+                  h.comision_modernia,
+                  h.comision,
+                  h.cesion,
+                  h.comision_juan,
+                  COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+                  COALESCE(ce.procedencia_canal, c.procedencia_canal, '') AS canal
+                FROM hipotecas h
+                LEFT JOIN clientes c ON c.id = h.cliente_id
+                LEFT JOIN clientes_empresas ce
               ON ce.cliente_id = h.cliente_id
              AND ce.empresa_id = h.empresa_id
              AND (
@@ -27167,13 +27167,13 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
                 "inmobiliaria_compra": row_dict.get("inmobiliaria_compra"),
                 "fecha": str(row_dict.get("fecha_firma") or "").strip(),
                 "estado": str(row_dict.get("estado") or "").strip() or "-",
-	                "cobrada": 1 if is_cobrada else 0,
-	                "comision_cobrada": round(comision_cobrada, 2),
-	                "comision": round(comision_trabajador, 2),
-	                "canal": str(row_dict.get("canal") or "").strip(),
-	                "responsable": str(row_dict.get("responsable") or "").strip(),
-	            }
-	        )
+                    "cobrada": 1 if is_cobrada else 0,
+                    "comision_cobrada": round(comision_cobrada, 2),
+                    "comision": round(comision_trabajador, 2),
+                    "canal": str(row_dict.get("canal") or "").strip(),
+                    "responsable": str(row_dict.get("responsable") or "").strip(),
+                }
+            )
 
     try:
         items.sort(key=lambda it: (parse_date_to_timestamp(it.get("fecha") or "") or 0), reverse=True)
@@ -27254,14 +27254,14 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
             f"""
             SELECT
               f.cliente_id,
-	              COALESCE(c.nombre, '') AS cliente_nombre,
-	              COALESCE(c.nif, '') AS cliente_nif,
-	              COALESCE(f.responsable, '') AS responsable,
-	              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
-	              MAX(COALESCE(ce.procedencia_canal, c.procedencia_canal, '')) AS canal,
-	              SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
-	              MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
-	              MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
+                  COALESCE(c.nombre, '') AS cliente_nombre,
+                  COALESCE(c.nif, '') AS cliente_nif,
+                  COALESCE(f.responsable, '') AS responsable,
+                  COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+                  MAX(COALESCE(ce.procedencia_canal, c.procedencia_canal, '')) AS canal,
+                  SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
+                  MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
+                  MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
               COUNT(*) AS num_facturas,
               SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
             FROM workspace_facturacion f
@@ -38577,12 +38577,12 @@ def ensure_workspace_budget_client(
         cliente_id = os.urandom(16).hex()
         conn.execute(
             """
-	            INSERT INTO clientes (
-	              id, nombre, tipo_persona, nif, telefono, email,
-	              procedencia_canal, procedencia_detalle, procedencia_user_id,
-	              estado, created_at, updated_at
-	            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-	            """,
+                INSERT INTO clientes (
+                  id, nombre, tipo_persona, nif, telefono, email,
+                  procedencia_canal, procedencia_detalle, procedencia_user_id,
+                  estado, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
             (
                 cliente_id,
                 lookup,
@@ -47448,14 +47448,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/gestoria",
-	            "/api/gestoria_trabajos",
-	            "/api/gestoria_trabajos_update",
-	            "/api/gestoria_trabajos_delete",
-	            "/api/gestoria_trabajo_tipos_update",
-	            "/api/gestoria_trabajo_tipos_delete",
-	            "/api/gestoria_docs",
-	            "/api/gestoria_docs_update",
-	            "/api/gestoria_docs_delete",
+                "/api/gestoria_trabajos",
+                "/api/gestoria_trabajos_update",
+                "/api/gestoria_trabajos_delete",
+                "/api/gestoria_trabajo_tipos_update",
+                "/api/gestoria_trabajo_tipos_delete",
+                "/api/gestoria_docs",
+                "/api/gestoria_docs_update",
+                "/api/gestoria_docs_delete",
             "/api/gestoria_contabilidad",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
@@ -47471,9 +47471,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
-	            "/api/seguros_update",
-	            "/api/seguros_cambio_compania",
-	            "/api/seguros_delete",
+                "/api/seguros_update",
+                "/api/seguros_cambio_compania",
+                "/api/seguros_delete",
             "/api/seguros_poliza_accion",
             "/api/seguros_renovaciones_update",
             "/api/seguros_enrich",
@@ -47482,14 +47482,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_version_snapshot",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
-	            "/api/seguros_reclamacion_delete",
-	            "/api/seguros_ipid_register",
-	            "/api/seguros_idd_update",
-	            "/api/seguros_consentimientos_update",
-	            "/api/fin_asesoramientos",
-	            "/api/fin_asesoramientos_update",
-	            "/api/fin_asesoramientos_convert",
-	            "/api/seguros_ofertas",
+                "/api/seguros_reclamacion_delete",
+                "/api/seguros_ipid_register",
+                "/api/seguros_idd_update",
+                "/api/seguros_consentimientos_update",
+                "/api/fin_asesoramientos",
+                "/api/fin_asesoramientos_update",
+                "/api/fin_asesoramientos_convert",
+                "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -47536,11 +47536,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fiscal_scenarios_list",
             "/api/fiscal_scenario_upsert",
             "/api/fiscal_scenario_delete",
-	            "/api/fiscal_venta_pdf",
-	            "/api/s3_upload_base64",
-	            "/api/s3_presign",
-	            "/api/ingest_facturas_presign",
-	            "/api/ingest_facturas_ocr",
+                "/api/fiscal_venta_pdf",
+                "/api/s3_upload_base64",
+                "/api/s3_presign",
+                "/api/ingest_facturas_presign",
+                "/api/ingest_facturas_ocr",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
@@ -47612,12 +47612,12 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/workspace_inbox_review",
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
-	            "/api/workspace_registro_notifications",
-	            "/api/workspace_document_assign",
-	            "/api/workspace_portal_upload",
-	            "/api/workspace_portal_public_request",
-	            "/api/workspace_company_logo_upload",
-	            "/api/workspace_cobros",
+                "/api/workspace_registro_notifications",
+                "/api/workspace_document_assign",
+                "/api/workspace_portal_upload",
+                "/api/workspace_portal_public_request",
+                "/api/workspace_company_logo_upload",
+                "/api/workspace_cobros",
             "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_personal",
@@ -48212,12 +48212,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
-	            "/api/seguros_delete",
-	            "/api/seguros_cambio_compania",
-	            "/api/seguros_update",
-	            "/api/seguros_poliza_accion",
-	            "/api/seguros_renovaciones_update",
-	            "/api/seguros_ofertas",
+                "/api/seguros_delete",
+                "/api/seguros_cambio_compania",
+                "/api/seguros_update",
+                "/api/seguros_poliza_accion",
+                "/api/seguros_renovaciones_update",
+                "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -48465,12 +48465,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_trabajos_delete",
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
-	            "/api/seguros_delete",
-	            "/api/seguros_cambio_compania",
-	            "/api/seguros_update",
-	            "/api/seguros_poliza_accion",
-	            "/api/seguros_renovaciones_update",
-	            "/api/gestoria_contabilidad_update",
+                "/api/seguros_delete",
+                "/api/seguros_cambio_compania",
+                "/api/seguros_update",
+                "/api/seguros_poliza_accion",
+                "/api/seguros_renovaciones_update",
+                "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/auditoria",
             "/api/acciones",
@@ -71414,6 +71414,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/acciones":
             try:
+                acciones_cols = table_columns(conn, "acciones") or set()
+                acciones_has_workspace = "workspace_id" in acciones_cols
                 workspace_id = params.get("workspace_id", [""])[0]
                 workspace_company_id = params.get("workspace_company_id", [""])[0]
                 empresa_id = params.get("empresa_id", [""])[0]
@@ -71494,29 +71496,40 @@ class Handler(BaseHTTPRequestHandler):
                         empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
                     except Exception:
                         empresa_ids = []
-                    # Preferimos incluir legacy sin workspace_id pero dentro del scope de empresas del workspace.
-                    # Si no hay scope de empresas, filtramos por workspace_id puro (o incluimos legacy si es single-tenant).
-                    if empresa_ids:
-                        placeholders = ",".join(["?"] * len(empresa_ids))
-                        where.append(
-                            f"(COALESCE(a.workspace_id, '') = ? OR (COALESCE(a.workspace_id, '') = '' AND a.empresa_id IN ({placeholders})))"
-                        )
-                        values.append(workspace_id)
-                        values.extend(empresa_ids)
-                    else:
-                        single_workspace = False
-                        try:
-                            ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
-                            ws_total = int(row_value(ws_count_row, "total") or row_value(ws_count_row, 0) or 0)
-                            single_workspace = ws_total == 1
-                        except Exception:
-                            single_workspace = False
-                        if single_workspace:
-                            where.append("(COALESCE(a.workspace_id, '') = ? OR COALESCE(a.workspace_id, '') = '')")
+                    if acciones_has_workspace:
+                        # Preferimos incluir legacy sin workspace_id pero dentro del scope de empresas del workspace.
+                        # Si no hay scope de empresas, filtramos por workspace_id puro (o incluimos legacy si es single-tenant).
+                        if empresa_ids:
+                            placeholders = ",".join(["?"] * len(empresa_ids))
+                            where.append(
+                                f"(COALESCE(a.workspace_id, '') = ? OR (COALESCE(a.workspace_id, '') = '' AND a.empresa_id IN ({placeholders})))"
+                            )
                             values.append(workspace_id)
+                            values.extend(empresa_ids)
                         else:
-                            where.append("COALESCE(a.workspace_id, '') = ?")
-                            values.append(workspace_id)
+                            single_workspace = False
+                            try:
+                                ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+                                ws_total = int(row_value(ws_count_row, "total") or row_value(ws_count_row, 0) or 0)
+                                single_workspace = ws_total == 1
+                            except Exception:
+                                single_workspace = False
+                            if single_workspace:
+                                where.append("(COALESCE(a.workspace_id, '') = ? OR COALESCE(a.workspace_id, '') = '')")
+                                values.append(workspace_id)
+                            else:
+                                where.append("COALESCE(a.workspace_id, '') = ?")
+                                values.append(workspace_id)
+                    else:
+                        # Compat extremo: instalaciones donde `acciones` todavía no tiene `workspace_id`.
+                        # En ese caso filtramos por empresa_id(s) del workspace y evitamos referenciar la columna.
+                        if empresa_ids:
+                            placeholders = ",".join(["?"] * len(empresa_ids))
+                            where.append(f"a.empresa_id IN ({placeholders})")
+                            values.extend(empresa_ids)
+                        elif empresa_id:
+                            where.append("a.empresa_id = ?")
+                            values.append(empresa_id)
                 elif empresa_id:
                     where.append("a.empresa_id = ?")
                     values.append(empresa_id)
@@ -74371,22 +74384,22 @@ class Handler(BaseHTTPRequestHandler):
                 placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
                 payload = {
-	                    "counts": {
-	                        "total": 0,
-	                        "activos": 0,
-	                        "autonomos": 0,
-	                        "empresas": 0,
-	                        "puntuales": 0,
-	                        "modelos_mes": 0,
-	                        "rentas_ejercicio": "",
-	                        "rentas_total_ejercicio": 0,
-	                        "rentas_realizadas": 0,
-	                        "rentas_pendientes_presentar": 0,
-	                        "sin_vincular_servicio": 0,
-	                        "acciones_pendientes": 0,
-	                        "presupuestos_estudio": 0,
-	                        "encargos_pendientes": 0,
-	                    },
+                        "counts": {
+                            "total": 0,
+                            "activos": 0,
+                            "autonomos": 0,
+                            "empresas": 0,
+                            "puntuales": 0,
+                            "modelos_mes": 0,
+                            "rentas_ejercicio": "",
+                            "rentas_total_ejercicio": 0,
+                            "rentas_realizadas": 0,
+                            "rentas_pendientes_presentar": 0,
+                            "sin_vincular_servicio": 0,
+                            "acciones_pendientes": 0,
+                            "presupuestos_estudio": 0,
+                            "encargos_pendientes": 0,
+                        },
                     "modelos": [],
                     "modelos_vencidos": [],
                     "rentas_pendientes": [],
@@ -74905,47 +74918,47 @@ class Handler(BaseHTTPRequestHandler):
                     # Segmentación de trabajos (totales y abiertos).
                     seg = conn.execute(
                         f"""
-	                        SELECT
-	                          SUM(
-	                            CASE
-	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
-	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
-	                              ELSE 0
-	                            END
-	                          ) AS herencias_total,
-	                          SUM(
-	                            CASE
-	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
-	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-	                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
-	                              ) THEN 1
-	                              ELSE 0
-	                            END
-	                          ) AS trafico_total,
-	                          SUM(
-	                            CASE
-	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
-	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-	                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
-	                              ) THEN 1
-	                              ELSE 0
-	                            END
-	                          ) AS expedientes_total,
-	                          SUM(
-	                            CASE
-	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
-	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
-	                              ELSE 0
-	                            END
-	                          ) AS tasaciones_total,
-	                          SUM(
-	                            CASE
-	                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
-	                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
-	                              ELSE 0
-	                            END
-	                          ) AS rentas_total,
-	                          SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+                            SELECT
+                              SUM(
+                                CASE
+                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
+                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
+                                  ELSE 0
+                                END
+                              ) AS herencias_total,
+                              SUM(
+                                CASE
+                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
+                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
+                                  ) THEN 1
+                                  ELSE 0
+                                END
+                              ) AS trafico_total,
+                              SUM(
+                                CASE
+                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
+                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
+                                  ) THEN 1
+                                  ELSE 0
+                                END
+                              ) AS expedientes_total,
+                              SUM(
+                                CASE
+                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
+                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
+                                  ELSE 0
+                                END
+                              ) AS tasaciones_total,
+                              SUM(
+                                CASE
+                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
+                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
+                                  ELSE 0
+                                END
+                              ) AS rentas_total,
+                              SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
                         FROM gestoria_trabajos gt
                         WHERE gt.empresa_id IN ({placeholders_emp})
                         """,
@@ -75137,8 +75150,8 @@ class Handler(BaseHTTPRequestHandler):
                       c.codigo_postal,
                       c.poblacion,
                       c.provincia,
-	                      {empresas_agg} AS empresas,
-	                      {seguros_servicios_agg} AS servicios
+                          {empresas_agg} AS empresas,
+                          {seguros_servicios_agg} AS servicios
                     FROM clientes c
                     JOIN seguros s ON s.cliente_id = c.id
                     LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = s.empresa_id
@@ -75234,8 +75247,8 @@ class Handler(BaseHTTPRequestHandler):
                       c.codigo_postal,
                       c.poblacion,
                       c.provincia,
-	                      {empresas_agg} AS empresas,
-	                      {servicios_agg} AS servicios
+                          {empresas_agg} AS empresas,
+                          {servicios_agg} AS servicios
                     FROM clientes c
                     {join_clause}
                     LEFT JOIN empresas e ON e.id = ce.empresa_id
