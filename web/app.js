@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v362";
+const APP_SW_VERSION = "v363";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -770,8 +770,9 @@ const openFincasLedgerImportModal = ({
       confirmBtn.disabled = true;
       if (cancelBtn) cancelBtn.disabled = true;
       if (statusMsgEl) statusMsgEl.textContent = "Importando...";
-      await onConfirm({ statusEl: statusMsgEl });
-      if (statusMsgEl) statusMsgEl.textContent = "Importación completada.";
+      const result = await onConfirm({ statusEl: statusMsgEl });
+      const finalMsg = typeof result === "string" ? result : "";
+      if (statusMsgEl) statusMsgEl.textContent = finalMsg || (statusMsgEl.textContent || "Importación completada.");
       window.setTimeout(() => modal.classList.add("hidden"), 450);
     } catch (e) {
       if (statusMsgEl) statusMsgEl.textContent = e?.message || "No se pudo importar.";
@@ -20735,6 +20736,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	            setSubtab("libro");
 	            void renderWorkspaceFincasCommunityFicha();
+	            return msg;
 	          },
 	        });
 	      } catch (e) {
@@ -21457,6 +21459,7 @@ const openFincasCommunityFichaModal = (record) => {
 	              await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	              setSubtab("manual");
 	              renderTab("contabilidad");
+	              return msg;
 	            },
 	          });
 	        } catch (e) {
