@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v360";
+const APP_SW_VERSION = "v361";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20510,7 +20510,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
   }
 
 	  if (tab === "contabilidad") {
-	    const stateKey = "fincas.community.ledger_subtab";
+	    const stateKey = `fincas.community.${comunidadId}.ledger_subtab`;
 	    const editKey = "fincas.community.ledger_edit_id";
 	    const defaultSubtab = "libro";
 	    const getSubtab = () => {
@@ -20720,7 +20720,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	            if (modalStatusEl) modalStatusEl.textContent = msg;
 	            if (importStatusEl) importStatusEl.textContent = msg;
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
-	            setSubtab("manual");
+	            setSubtab("libro");
 	            void renderWorkspaceFincasCommunityFicha();
 	          },
 	        });
@@ -21229,7 +21229,7 @@ const openFincasCommunityFichaModal = (record) => {
     }
 
 	    if (key === "contabilidad") {
-	      const stateKey = "fincas.community.modal.ledger_subtab";
+	      const stateKey = `fincas.community.modal.${comunidadId}.ledger_subtab`;
 	      const editKey = "fincas.community.modal.ledger_edit_id";
 	      const defaultSubtab = "libro";
 	      const getSubtab = () => {
