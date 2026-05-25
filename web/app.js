@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v356";
+const APP_SW_VERSION = "v357";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -77343,7 +77343,11 @@ if (workspaceFincasLedgerResetBtn) {
 }
 
 if (workspaceFincasLedgerImportBtn) {
-  workspaceFincasLedgerImportBtn.addEventListener("click", async () => {
+  workspaceFincasLedgerImportBtn.addEventListener("click", async (event) => {
+    try {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+    } catch (e) {}
     if (!state.currentWorkspaceId) {
       if (workspaceFincasLedgerImportStatus) workspaceFincasLedgerImportStatus.textContent = "Selecciona un workspace.";
       return;
@@ -77388,6 +77392,19 @@ if (workspaceFincasLedgerImportBtn) {
     } finally {
       try { workspaceFincasLedgerImportBtn.disabled = false; } catch (err) {}
     }
+  });
+}
+
+if (workspaceFincasLedgerImportFile && workspaceFincasLedgerImportBtn) {
+  workspaceFincasLedgerImportFile.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+    } catch (e) {}
+    try {
+      workspaceFincasLedgerImportBtn.click();
+    } catch (e) {}
   });
 }
 
