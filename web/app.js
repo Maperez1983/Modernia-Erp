@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v358";
+const APP_SW_VERSION = "v359";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20512,109 +20512,186 @@ const renderWorkspaceFincasCommunityFicha = async () => {
   }
 
 	  if (tab === "contabilidad") {
-	    workspaceFincasCommunityFichaPanel.innerHTML = `
-	      <div class="workspace-two-cols">
-	        <div>
-	          <h4>Contabilidad</h4>
-	          ${ledger.length ? `
-	            <div class="workspace-billing-list">
-	              ${ledger.slice(0, 200).map((l) => `
-	                <div class="workspace-billing-row">
-	                  <div>
-	                    <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
-	                    <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
-	                  </div>
-	                  <div class="workspace-billing-meta">
-	                    <span>${euroFormatter.format(Number(l.importe || 0))}</span>
-	                    <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
-	                  </div>
-                </div>
-              `).join("")}
-            </div>
-          ` : `<p class="muted">Sin movimientos todavía.</p>`}
+	    const stateKey = "fincas.community.ledger_subtab";
+	    const editKey = "fincas.community.ledger_edit_id";
+	    const defaultSubtab = "libro";
+	    const getSubtab = () => {
+	      try {
+	        const raw = String(sessionStorage.getItem(stateKey) || "").trim();
+	        return raw || defaultSubtab;
+	      } catch {
+	        return defaultSubtab;
+	      }
+	    };
+	    const setSubtab = (value) => {
+	      const next = String(value || "").trim() || defaultSubtab;
+	      try { sessionStorage.setItem(stateKey, next); } catch {}
+	      return next;
+	    };
+
+	    const renderList = (rows = [], { showEdit = true } = {}) => {
+	      const items = Array.isArray(rows) ? rows : [];
+	      if (!items.length) return `<p class="muted">Sin movimientos todavía.</p>`;
+	      return `
+	        <div class="workspace-billing-list">
+	          ${items.slice(0, 220).map((l) => `
+	            <div class="workspace-billing-row">
+	              <div>
+	                <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+	                <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
+	              </div>
+	              <div class="workspace-billing-meta">
+	                <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+	                ${showEdit ? `<button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>` : ""}
+	              </div>
+	            </div>
+	          `).join("")}
 	        </div>
-	        <div>
-	          <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
-	            <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
-	              <strong>Importar extracto</strong>
-	              <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
-	            </div>
-	            <div class="muted" style="margin:6px 0 10px 0;">Crea movimientos automáticamente desde el extracto del banco (detecta duplicados).</div>
-	            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-	              <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
-	              <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
-	            </div>
-	            <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
-	          </div>
-	          <h4 data-ledger-form-title>Nuevo movimiento</h4>
-	          <form class="form-grid" data-ledger-form data-money-euro="1">
-	            <input type="hidden" name="id" value="" />
-	            <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
-            <label>Tipo
-              <select name="tipo">
-                <option value="Gasto">Gasto</option>
-                <option value="Ingreso">Ingreso</option>
-              </select>
-            </label>
-            <label class="span-all">Concepto <input name="concepto" /></label>
-            <label>Importe <input name="importe" inputmode="decimal" /></label>
-            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
-            <div class="muted span-all" data-ledger-status></div>
-            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
-          </form>
-        </div>
-      </div>
-    `;
+	      `;
+	    };
+
+	    const currentSubtab = getSubtab();
+	    const importedOnly = ledger.filter((l) => String(l.estado || "").toLowerCase().includes("pendiente"));
+	    const manualFormWrap = `
+	      <h4 data-ledger-form-title>Nuevo movimiento</h4>
+	      <form class="form-grid" data-ledger-form data-money-euro="1">
+	        <input type="hidden" name="id" value="" />
+	        <input type="hidden" name="estado" value="Manual" />
+	        <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
+	        <label>Tipo
+	          <select name="tipo">
+	            <option value="Gasto">Gasto</option>
+	            <option value="Ingreso">Ingreso</option>
+	          </select>
+	        </label>
+	        <label class="span-all">Concepto <input name="concepto" /></label>
+	        <label>Importe <input name="importe" inputmode="decimal" /></label>
+	        <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+	        <div class="muted span-all" data-ledger-status></div>
+	        <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+	      </form>
+	    `;
+
+	    const importWrap = `
+	      <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
+	        <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+	          <strong>Importación masiva</strong>
+	          <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
+	        </div>
+	        <div class="muted" style="margin:6px 0 10px 0;">Importa movimientos bancarios en bloque. Quedan en <strong>Pendiente de casar</strong>.</div>
+	        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+	          <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
+	          <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
+	        </div>
+	        <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
+	      </div>
+	      <h4 style="margin-top:0;">Pendientes de casar</h4>
+	      ${renderList(importedOnly, { showEdit: true })}
+	    `;
+
+	    const rightPanel = (() => {
+	      if (currentSubtab === "import") return importWrap;
+	      if (currentSubtab === "manual") return manualFormWrap;
+	      // libro diario
+	      return `<p class="muted" style="margin:0;">Libro diario: consulta de apuntes contables (sin edición aquí).</p>`;
+	    })();
+	    const leftPanel = (() => {
+	      if (currentSubtab === "import") return `<h4>Libro diario</h4>${renderList(ledger, { showEdit: false })}`;
+	      if (currentSubtab === "manual") return `<h4>Apuntes contables</h4>${renderList(ledger, { showEdit: true })}`;
+	      return `<h4>Libro diario</h4>${renderList(ledger, { showEdit: false })}`;
+	    })();
+
+	    workspaceFincasCommunityFichaPanel.innerHTML = `
+	      <div class="workspace-tabs" style="margin: 0 0 12px 0; flex-wrap: wrap;" data-ledger-subtabs>
+	        <button type="button" class="tab-btn ${currentSubtab === "libro" ? "active" : ""}" data-ledger-subtab="libro">Libro diario</button>
+	        <button type="button" class="tab-btn ${currentSubtab === "import" ? "active" : ""}" data-ledger-subtab="import">Importación masiva</button>
+	        <button type="button" class="tab-btn ${currentSubtab === "manual" ? "active" : ""}" data-ledger-subtab="manual">Apuntes manuales</button>
+	      </div>
+	      <div class="workspace-two-cols" data-ledger-subpanel>
+	        <div>${leftPanel}</div>
+	        <div>${rightPanel}</div>
+	      </div>
+	    `;
+
+	    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-ledger-subtab]").forEach((btn) => {
+	      btn.addEventListener("click", () => {
+	        setSubtab(btn.dataset.ledgerSubtab || defaultSubtab);
+	        void renderWorkspaceFincasCommunityFicha();
+	      });
+	    });
+
 	    const form = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form]");
 	    const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-status]");
 	    const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-form-title]");
 	    const importFileEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-file]");
 	    const importBtn = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-btn]");
 	    const importStatusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-ledger-import-status]");
+
 	    const reset = () => {
+	      if (!form) return;
 	      form.reset();
 	      form.querySelector('[name="id"]').value = "";
 	      const dateEl = form.querySelector('[name="fecha"]');
-      if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-      if (titleEl) titleEl.textContent = "Nuevo movimiento";
-    };
-    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = String(btn.dataset.ledgerEdit || "");
-        const l = ledger.find((row) => String(row.id || "") === id);
-        if (!l) return;
-        form.querySelector('[name="id"]').value = l.id || "";
-        ["fecha","tipo","concepto","importe","notas"].forEach((k) => {
-          const el = form.querySelector(`[name="${k}"]`);
-          if (el) el.value = l[k] ?? "";
-        });
-        if (titleEl) titleEl.textContent = "Editar movimiento";
-        if (statusEl) statusEl.textContent = "";
-      });
-    });
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      try {
-        if (statusEl) statusEl.textContent = "Guardando...";
-        const fd = new FormData(form);
-        const payload = Object.fromEntries(fd.entries());
-        payload.workspace_id = workspaceId;
-        payload.comunidad_id = comunidadId;
-        const res = await fetch("/api/workspace_fincas_contabilidad", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then((r) => r.json());
-        if (res?.error) throw new Error(res.error);
-        await refreshWorkspaceFincasLedger({ force: true, silent: true });
-        reset();
-        if (statusEl) statusEl.textContent = "Guardado.";
-        window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
-        void renderWorkspaceFincasCommunityFicha();
-      } catch (e) {
-	        if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
-	      }
+	      if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+	      const estadoEl = form.querySelector('[name="estado"]');
+	      if (estadoEl && !estadoEl.value) estadoEl.value = "Manual";
+	      if (titleEl) titleEl.textContent = "Nuevo movimiento";
 	    };
+
+	    workspaceFincasCommunityFichaPanel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
+	      btn.addEventListener("click", () => {
+	        const id = String(btn.dataset.ledgerEdit || "");
+	        try { sessionStorage.setItem(editKey, id); } catch (e) {}
+	        setSubtab("manual");
+	        void renderWorkspaceFincasCommunityFicha();
+	      });
+	    });
+
+	    if (form) {
+	      // Si venimos de "Editar" desde otra subpestaña, rellenar el formulario tras render.
+	      try {
+	        const pendingId = String(sessionStorage.getItem(editKey) || "").trim();
+	        if (pendingId) {
+	          const l = ledger.find((row) => String(row.id || "") === pendingId);
+	          if (l) {
+	            form.querySelector('[name="id"]').value = l.id || "";
+	            ["fecha","tipo","concepto","importe","notas","estado"].forEach((k) => {
+	              const el = form.querySelector(`[name="${k}"]`);
+	              if (el) el.value = l[k] ?? "";
+	            });
+	            if (titleEl) titleEl.textContent = "Editar movimiento";
+	            if (statusEl) statusEl.textContent = "";
+	          }
+	          sessionStorage.removeItem(editKey);
+	        }
+	      } catch (e) {}
+	      form.onsubmit = async (event) => {
+	        event.preventDefault();
+	        try {
+	          if (statusEl) statusEl.textContent = "Guardando...";
+	          const fd = new FormData(form);
+	          const payload = Object.fromEntries(fd.entries());
+	          payload.workspace_id = workspaceId;
+	          payload.comunidad_id = comunidadId;
+	          if (!payload.estado) payload.estado = "Manual";
+	          const res = await fetch("/api/workspace_fincas_contabilidad", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify(payload),
+	          }).then((r) => r.json());
+	          if (res?.error) throw new Error(res.error);
+	          await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	          reset();
+	          if (statusEl) statusEl.textContent = "Guardado.";
+	          window.setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 900);
+	          setSubtab("manual");
+	          void renderWorkspaceFincasCommunityFicha();
+	        } catch (e) {
+	          if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
+	        }
+	      };
+	    }
+
 	    importBtn?.addEventListener("click", async () => {
 	      if (!importFileEl) return;
 	      const file = importFileEl.files?.[0] || null;
@@ -20628,7 +20705,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	          statusEl: importStatusEl,
 	        });
 	        openFincasLedgerImportModal({
-	          subtitle: "Se importarán como movimientos de la comunidad actual.",
+	          subtitle: "Se importarán como movimientos (estado: Pendiente de casar).",
 	          total: previewData.total,
 	          preview: previewData.preview,
 	          onConfirm: async ({ statusEl: modalStatusEl } = {}) => {
@@ -20641,10 +20718,11 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	            });
 	            const inserted = Number(res.inserted || 0);
 	            const skipped = Number(res.skipped || 0);
-	            const msg = `Insertados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
+	            const msg = `Importados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
 	            if (modalStatusEl) modalStatusEl.textContent = msg;
 	            if (importStatusEl) importStatusEl.textContent = msg;
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	            setSubtab("manual");
 	            void renderWorkspaceFincasCommunityFicha();
 	          },
 	        });
@@ -21153,123 +21231,189 @@ const openFincasCommunityFichaModal = (record) => {
     }
 
 	    if (key === "contabilidad") {
-	      panel.innerHTML = `
-	        <div class="workspace-two-cols">
+	      const stateKey = "fincas.community.modal.ledger_subtab";
+	      const editKey = "fincas.community.modal.ledger_edit_id";
+	      const defaultSubtab = "libro";
+	      const getSubtab = () => {
+	        try { return String(sessionStorage.getItem(stateKey) || "").trim() || defaultSubtab; } catch { return defaultSubtab; }
+	      };
+	      const setSubtab = (value) => {
+	        const next = String(value || "").trim() || defaultSubtab;
+	        try { sessionStorage.setItem(stateKey, next); } catch {}
+	        return next;
+	      };
+
+	      const renderList = (rows = [], { showEdit = true } = {}) => {
+	        const items = Array.isArray(rows) ? rows : [];
+	        if (!items.length) return `<p class="muted">Sin movimientos todavía.</p>`;
+	        return `
+	          <div class="workspace-billing-list">
+	            ${items.slice(0, 220).map((l) => `
+	              <div class="workspace-billing-row">
+	                <div>
+	                  <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+	                  <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
+	                </div>
+	                <div class="workspace-billing-meta">
+	                  <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+	                  ${showEdit ? `<button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>` : ""}
+	                </div>
+	              </div>
+	            `).join("")}
+	          </div>
+	        `;
+	      };
+
+	      const currentSubtab = getSubtab();
+	      const importedOnly = ledger.filter((l) => String(l.estado || "").toLowerCase().includes("pendiente"));
+	      const importWrap = `
+	        <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
+	          <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+	            <strong>Importación masiva</strong>
+	            <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
+	          </div>
+	          <div class="muted" style="margin:6px 0 10px 0;">Importa movimientos bancarios en bloque. Quedan en <strong>Pendiente de casar</strong>.</div>
+	          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+	            <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
+	            <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
+	          </div>
+	          <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
+	        </div>
+	        <h4 style="margin-top:0;">Pendientes de casar</h4>
+	        ${renderList(importedOnly, { showEdit: true })}
+	      `;
+	      const manualWrap = `
+	        <h4 data-ledger-form-title>Nuevo movimiento</h4>
+	        <form class="form-grid" data-ledger-form data-money-euro="1">
+	          <input type="hidden" name="id" value="" />
+	          <input type="hidden" name="estado" value="Manual" />
 	          <div>
-	            <h4>Contabilidad</h4>
-	            ${ledger.length ? `
-	              <div class="workspace-billing-list">
-	                ${ledger.slice(0, 120).map((l) => `
-	                  <div class="workspace-billing-row">
-	                    <div>
-	                      <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
-	                      <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
-	                    </div>
-	                    <div class="workspace-billing-meta">
-	                      <span>${euroFormatter.format(Number(l.importe || 0))}</span>
-	                      <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
-	                    </div>
-                  </div>
-                `).join("")}
-              </div>
-            ` : `<p class="muted">Sin movimientos todavía.</p>`}
+	            <label>Fecha</label>
+	            <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" />
 	          </div>
 	          <div>
-	            <div style="padding:10px; border:1px solid rgba(0,0,0,0.08); border-radius:12px; margin-bottom:12px;">
-	              <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
-	                <strong>Importar extracto</strong>
-	                <span class="muted" style="font-size: 12px;">CSV o XLSX</span>
-	              </div>
-	              <div class="muted" style="margin:6px 0 10px 0;">Crea movimientos automáticamente desde el extracto del banco (detecta duplicados).</div>
-	              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-	                <input type="file" data-ledger-import-file accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" />
-	                <button type="button" class="secondary" data-ledger-import-btn>Previsualizar</button>
-	              </div>
-	              <div class="muted" style="margin-top:8px;" data-ledger-import-status></div>
-	            </div>
-	            <h4 data-ledger-form-title>Nuevo movimiento</h4>
-	            <form class="form-grid" data-ledger-form data-money-euro="1">
-	              <input type="hidden" name="id" value="" />
-	              <div>
-                <label>Fecha</label>
-                <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" />
-              </div>
-              <div>
-                <label>Tipo</label>
-                <select name="tipo">
-                  <option value="Gasto">Gasto</option>
-                  <option value="Ingreso">Ingreso</option>
-                </select>
-              </div>
-              <div style="grid-column:1/-1;">
-                <label>Concepto</label>
-                <input name="concepto" />
-              </div>
-              <div>
-                <label>Importe</label>
-                <input name="importe" inputmode="decimal" />
-              </div>
-              <div style="grid-column:1/-1;">
-                <label>Notas</label>
-                <textarea name="notas" rows="3"></textarea>
-              </div>
-              <div class="muted" data-ledger-status style="grid-column:1/-1;"></div>
-              <div class="modal-actions" style="grid-column:1/-1;">
-                <button type="submit" class="primary">Guardar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      `;
+	            <label>Tipo</label>
+	            <select name="tipo">
+	              <option value="Gasto">Gasto</option>
+	              <option value="Ingreso">Ingreso</option>
+	            </select>
+	          </div>
+	          <div style="grid-column:1/-1;">
+	            <label>Concepto</label>
+	            <input name="concepto" />
+	          </div>
+	          <div>
+	            <label>Importe</label>
+	            <input name="importe" inputmode="decimal" />
+	          </div>
+	          <div style="grid-column:1/-1;">
+	            <label>Notas</label>
+	            <textarea name="notas" rows="3"></textarea>
+	          </div>
+	          <div class="muted" data-ledger-status style="grid-column:1/-1;"></div>
+	          <div class="modal-actions" style="grid-column:1/-1;">
+	            <button type="submit" class="primary">Guardar</button>
+	          </div>
+	        </form>
+	      `;
+
+	      const rightPanel = (() => {
+	        if (currentSubtab === "import") return importWrap;
+	        if (currentSubtab === "manual") return manualWrap;
+	        return `<p class="muted" style="margin:0;">Libro diario: consulta de apuntes contables.</p>`;
+	      })();
+	      const leftPanel = (() => {
+	        if (currentSubtab === "import") return `<h4>Libro diario</h4>${renderList(ledger, { showEdit: false })}`;
+	        if (currentSubtab === "manual") return `<h4>Apuntes contables</h4>${renderList(ledger, { showEdit: true })}`;
+	        return `<h4>Libro diario</h4>${renderList(ledger, { showEdit: false })}`;
+	      })();
+
+	      panel.innerHTML = `
+	        <div class="workspace-tabs" style="margin: 0 0 12px 0; flex-wrap: wrap;" data-ledger-subtabs>
+	          <button type="button" class="tab-btn ${currentSubtab === "libro" ? "active" : ""}" data-ledger-subtab="libro">Libro diario</button>
+	          <button type="button" class="tab-btn ${currentSubtab === "import" ? "active" : ""}" data-ledger-subtab="import">Importación masiva</button>
+	          <button type="button" class="tab-btn ${currentSubtab === "manual" ? "active" : ""}" data-ledger-subtab="manual">Apuntes manuales</button>
+	        </div>
+	        <div class="workspace-two-cols">
+	          <div>${leftPanel}</div>
+	          <div>${rightPanel}</div>
+	        </div>
+	      `;
+
+	      panel.querySelectorAll("[data-ledger-subtab]").forEach((btn) => {
+	        btn.addEventListener("click", () => renderTab(setSubtab(btn.dataset.ledgerSubtab || defaultSubtab)));
+	      });
+
 	      const form = panel.querySelector("[data-ledger-form]");
 	      const statusEl = panel.querySelector("[data-ledger-status]");
 	      const title = panel.querySelector("[data-ledger-form-title]");
 	      const importFileEl = panel.querySelector("[data-ledger-import-file]");
 	      const importBtn = panel.querySelector("[data-ledger-import-btn]");
 	      const importStatusEl = panel.querySelector("[data-ledger-import-status]");
+
+	      panel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
+	        btn.addEventListener("click", () => {
+	          const id = String(btn.dataset.ledgerEdit || "");
+	          try { sessionStorage.setItem(editKey, id); } catch (e) {}
+	          setSubtab("manual");
+	          renderTab("contabilidad");
+	        });
+	      });
+
 	      const resetLedgerForm = () => {
 	        if (!form) return;
 	        form.reset();
-        form.querySelector('[name="id"]').value = "";
-        const dateEl = form.querySelector('[name="fecha"]');
-        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-        if (title) title.textContent = "Nuevo movimiento";
-      };
-      panel.querySelectorAll("[data-ledger-edit]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const id = String(btn.dataset.ledgerEdit || "");
-          const l = ledger.find((row) => String(row.id || "") === id);
-          if (!l || !form) return;
-          form.querySelector('[name="id"]').value = l.id || "";
-          ["fecha","tipo","concepto","importe","notas"].forEach((k) => {
-            const el = form.querySelector(`[name="${k}"]`);
-            if (el) el.value = l[k] ?? "";
-          });
-          if (title) title.textContent = "Editar movimiento";
-          if (statusEl) statusEl.textContent = "";
-        });
-      });
-      form.onsubmit = async (event) => {
-        event.preventDefault();
-        try {
-          if (statusEl) statusEl.textContent = "Guardando...";
-          const fd = new FormData(form);
-          const payload = Object.fromEntries(fd.entries());
-          payload.workspace_id = workspaceId;
-          payload.comunidad_id = comunidadId;
-          const res = await fetch("/api/workspace_fincas_contabilidad", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }).then((r) => r.json());
-          if (res?.error) throw new Error(res.error);
-          await refreshWorkspaceFincasLedger({ force: true, silent: true });
-          resetLedgerForm();
-          renderTab("contabilidad");
-	        } catch (error) {
-	          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
-	        }
+	        form.querySelector('[name="id"]').value = "";
+	        const dateEl = form.querySelector('[name="fecha"]');
+	        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+	        const estadoEl = form.querySelector('[name="estado"]');
+	        if (estadoEl && !estadoEl.value) estadoEl.value = "Manual";
+	        if (title) title.textContent = "Nuevo movimiento";
 	      };
+
+	      if (form) {
+	        try {
+	          const pendingId = String(sessionStorage.getItem(editKey) || "").trim();
+	          if (pendingId) {
+	            const l = ledger.find((row) => String(row.id || "") === pendingId);
+	            if (l) {
+	              form.querySelector('[name="id"]').value = l.id || "";
+	              ["fecha","tipo","concepto","importe","notas","estado"].forEach((k) => {
+	                const el = form.querySelector(`[name="${k}"]`);
+	                if (el) el.value = l[k] ?? "";
+	              });
+	              if (title) title.textContent = "Editar movimiento";
+	              if (statusEl) statusEl.textContent = "";
+	            }
+	            sessionStorage.removeItem(editKey);
+	          }
+	        } catch (e) {}
+
+	        form.onsubmit = async (event) => {
+	          event.preventDefault();
+	          try {
+	            if (statusEl) statusEl.textContent = "Guardando...";
+	            const fd = new FormData(form);
+	            const payload = Object.fromEntries(fd.entries());
+	            payload.workspace_id = workspaceId;
+	            payload.comunidad_id = comunidadId;
+	            if (!payload.estado) payload.estado = "Manual";
+	            const res = await fetch("/api/workspace_fincas_contabilidad", {
+	              method: "POST",
+	              headers: { "Content-Type": "application/json" },
+	              body: JSON.stringify(payload),
+	            }).then((r) => r.json());
+	            if (res?.error) throw new Error(res.error);
+	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	            resetLedgerForm();
+	            setSubtab("manual");
+	            renderTab("contabilidad");
+	          } catch (error) {
+	            if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+	          }
+	        };
+	      }
+
 	      importBtn?.addEventListener("click", async () => {
 	        if (!importFileEl) return;
 	        const file = importFileEl.files?.[0] || null;
@@ -21296,10 +21440,11 @@ const openFincasCommunityFichaModal = (record) => {
 	              });
 	              const inserted = Number(res.inserted || 0);
 	              const skipped = Number(res.skipped || 0);
-	              const msg = `Insertados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
+	              const msg = `Importados: ${numberFormatter.format(inserted)} · Duplicados: ${numberFormatter.format(skipped)}`;
 	              if (modalStatusEl) modalStatusEl.textContent = msg;
 	              if (importStatusEl) importStatusEl.textContent = msg;
 	              await refreshWorkspaceFincasLedger({ force: true, silent: true });
+	              setSubtab("manual");
 	              renderTab("contabilidad");
 	            },
 	          });
