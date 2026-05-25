@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v361";
+const APP_SW_VERSION = "v362";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20114,10 +20114,23 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 
   const providersAll = Array.isArray((state.currentWorkspaceData || {}).fincasProviders) ? (state.currentWorkspaceData || {}).fincasProviders : [];
   const incidentsAll = Array.isArray((state.currentWorkspaceData || {}).fincasIncidents) ? (state.currentWorkspaceData || {}).fincasIncidents : [];
-  const ledgerAll = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
+  let ledgerAll = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
   const providers = providersAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
   const incidents = incidentsAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
-  const ledger = ledgerAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+  let ledger = ledgerAll.filter((row) => String(row.comunidad_id || "") === comunidadId);
+
+  // Asegurar que el libro diario de la comunidad se refresca (por defecto el módulo puede no haber cargado contabilidad aún).
+  if (tab === "contabilidad" && workspaceId && comunidadId && !ledger.length) {
+    try {
+      const data = await api(`/api/workspace_fincas_contabilidad?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=200`);
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      // Sustituir solo la parte de esta comunidad en el cache global.
+      const keep = ledgerAll.filter((row) => String(row.comunidad_id || "") !== comunidadId);
+      state.workspaceFincasLedgerRows = [...rows, ...keep];
+      ledgerAll = state.workspaceFincasLedgerRows;
+      ledger = rows;
+    } catch (e) {}
+  }
 
   if (tab === "datos") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
