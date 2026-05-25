@@ -33442,6 +33442,7 @@ def ensure_workspace_product_tables(conn):
           workspace_id TEXT NOT NULL,
           comunidad_id TEXT,
           fecha TEXT,
+          estado TEXT NOT NULL DEFAULT 'Manual',
           tipo TEXT NOT NULL DEFAULT 'Gasto',
           concepto TEXT NOT NULL,
           importe REAL NOT NULL DEFAULT 0,
@@ -33451,6 +33452,7 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    ensure_column(conn, "workspace_fincas_contabilidad", "estado", "estado TEXT NOT NULL DEFAULT 'Manual'")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_vecinos (
@@ -39098,6 +39100,7 @@ def fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=80, comunidad_
           l.comunidad_id,
           COALESCE(c.nombre, '') AS comunidad_nombre,
           l.fecha,
+          l.estado,
           l.tipo,
           l.concepto,
           l.importe,
@@ -57614,10 +57617,11 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
+            estado = str(payload.get("estado") or "").strip() or "Manual"
             tipo = str(payload.get("tipo") or "Gasto").strip() or "Gasto"
             if tipo not in {"Ingreso", "Gasto"}:
                 tipo = "Gasto"
@@ -57633,6 +57637,7 @@ class Handler(BaseHTTPRequestHandler):
                 workspace_id,
                 (payload.get("comunidad_id") or "").strip() or None,
                 (payload.get("fecha") or "").strip() or None,
+                estado,
                 tipo,
                 concepto,
                 round(float(importe), 2),
@@ -57649,7 +57654,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_fincas_contabilidad
-                    SET workspace_id = ?, comunidad_id = ?, fecha = ?, tipo = ?, concepto = ?, importe = ?, notas = ?, updated_at = datetime(?)
+                    SET workspace_id = ?, comunidad_id = ?, fecha = ?, estado = ?, tipo = ?, concepto = ?, importe = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -57659,8 +57664,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_contabilidad (
-                      id, workspace_id, comunidad_id, fecha, tipo, concepto, importe, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -57692,9 +57697,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             preview = []
             for mv in (movements or [])[:60]:
+                amount = 0.0
+                try:
+                    amount = float(mv.get("importe") or 0.0)
+                except Exception:
+                    amount = 0.0
+                tipo = "Ingreso" if amount >= 0 else "Gasto"
                 preview.append(
                     {
                         "fecha": mv.get("fecha"),
+                        "tipo": tipo,
                         "concepto": mv.get("concepto"),
                         "importe": mv.get("importe"),
                         "saldo": mv.get("saldo"),
@@ -57764,25 +57776,26 @@ class Handler(BaseHTTPRequestHandler):
                     skipped += 1
                     continue
 
-                conn.execute(
-                    """
-                    INSERT INTO workspace_fincas_contabilidad (
-                      id, workspace_id, comunidad_id, fecha, tipo, concepto, importe, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        workspace_id,
-                        comunidad_id,
-                        fecha,
-                        tipo,
-                        concepto,
-                        float(importe),
-                        notas,
-                        now,
-                        now,
-                    ),
-                )
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_fincas_contabilidad (
+                          id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            workspace_id,
+                            comunidad_id,
+                            fecha,
+                            "Pendiente de casar",
+                            tipo,
+                            concepto,
+                            float(importe),
+                            notas,
+                            now,
+                            now,
+                        ),
+                    )
                 inserted += 1
             conn.commit()
             json_response(self, {"ok": True, "inserted": inserted, "skipped": skipped, "total": len(movements)})

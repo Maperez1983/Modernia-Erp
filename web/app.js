@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v357";
+const APP_SW_VERSION = "v358";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -20516,18 +20516,18 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	      <div class="workspace-two-cols">
 	        <div>
 	          <h4>Contabilidad</h4>
-          ${ledger.length ? `
-            <div class="workspace-billing-list">
-              ${ledger.slice(0, 200).map((l) => `
-                <div class="workspace-billing-row">
-                  <div>
-                    <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
-                    <div class="muted">${escapeHtml(l.tipo || "-")} · ${escapeHtml(l.fecha || "-")}</div>
-                  </div>
-                  <div class="workspace-billing-meta">
-                    <span>${euroFormatter.format(Number(l.importe || 0))}</span>
-                    <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
-                  </div>
+	          ${ledger.length ? `
+	            <div class="workspace-billing-list">
+	              ${ledger.slice(0, 200).map((l) => `
+	                <div class="workspace-billing-row">
+	                  <div>
+	                    <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+	                    <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
+	                  </div>
+	                  <div class="workspace-billing-meta">
+	                    <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+	                    <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
+	                  </div>
                 </div>
               `).join("")}
             </div>
@@ -21157,18 +21157,18 @@ const openFincasCommunityFichaModal = (record) => {
 	        <div class="workspace-two-cols">
 	          <div>
 	            <h4>Contabilidad</h4>
-            ${ledger.length ? `
-              <div class="workspace-billing-list">
-                ${ledger.slice(0, 120).map((l) => `
-                  <div class="workspace-billing-row">
-                    <div>
-                      <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
-                      <div class="muted">${escapeHtml(l.tipo || "-")} · ${escapeHtml(l.fecha || "-")}</div>
-                    </div>
-                    <div class="workspace-billing-meta">
-                      <span>${euroFormatter.format(Number(l.importe || 0))}</span>
-                      <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
-                    </div>
+	            ${ledger.length ? `
+	              <div class="workspace-billing-list">
+	                ${ledger.slice(0, 120).map((l) => `
+	                  <div class="workspace-billing-row">
+	                    <div>
+	                      <strong>${escapeHtml(l.concepto || "Movimiento")}</strong>
+	                      <div class="muted">${[l.estado, l.tipo, l.fecha].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ") || "-"}</div>
+	                    </div>
+	                    <div class="workspace-billing-meta">
+	                      <span>${euroFormatter.format(Number(l.importe || 0))}</span>
+	                      <button type="button" class="secondary ghost" data-ledger-edit="${escapeHtml(String(l.id || ""))}">Editar</button>
+	                    </div>
                   </div>
                 `).join("")}
               </div>
