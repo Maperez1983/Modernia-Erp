@@ -57677,11 +57677,15 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_fincas_contabilidad_import_preview":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not comunidad_id:
+                json_response(self, {"error": "comunidad_id requerido"}, status=400)
                 return
             ok, err = enforce_workspace_membership(conn, session, workspace_id)
             if not ok:
@@ -57725,6 +57729,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not comunidad_id:
+                json_response(self, {"error": "comunidad_id requerido"}, status=400)
                 return
             ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
             if not ok:
