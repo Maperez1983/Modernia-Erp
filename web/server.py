@@ -4522,7 +4522,7 @@ def ensure_workspace_catalog_modules(conn):
 
 def is_gestoria_dashboard_active_state(value):
     state = normalize_lookup_text(value or "")
-    return state in {"ALTA", "ACTIVO", "ACTIVA"}
+    return state in {"ALTA", "ACTIVO", "ACTIVA", "PENDIENTE"}
 
 
 GESTORIA_TRABAJO_CATEGORY_KEYS = {
@@ -28875,6 +28875,74 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         "total": int(total_count),
         "presentadas": int(presentadas_count),
         "rows": preview,
+    }
+
+
+def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
+    empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {"ejercicio": "", "docs_total": 0, "clientes_con_doc": 0, "docs_presentados": 0}
+    ejercicio_raw = str(ejercicio or "").strip()
+    ejercicio_val = ejercicio_raw if re.match(r"^20[0-9]{2}$", ejercicio_raw or "") else ""
+    if not ejercicio_val:
+        try:
+            ejercicio_val = str(datetime.now().year - 1)
+        except Exception:
+            ejercicio_val = ""
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    year_like = f"%{ejercicio_val}%".lower()
+    ref_like = f"renta-{ejercicio_val}-%".lower()
+    renta_filter = """
+      (
+        LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
+        OR LOWER(COALESCE(d.tipo, '')) LIKE '%renta%'
+        OR LOWER(COALESCE(d.nombre, '')) LIKE '%renta%'
+      )
+    """
+    year_filter = """
+      (
+        LOWER(COALESCE(d.referencia_id, '')) LIKE ?
+        OR LOWER(COALESCE(d.nombre, '')) LIKE ?
+        OR COALESCE(d.fecha, '') LIKE ?
+      )
+    """
+    row = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS docs_total,
+          COUNT(DISTINCT NULLIF(TRIM(COALESCE(d.cliente_id, '')), '')) AS clientes_con_doc,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(d.estado, '')) LIKE 'present%'
+                OR LOWER(COALESCE(d.tipo, '')) LIKE '%presentad%'
+              THEN 1 ELSE 0
+            END
+          ) AS docs_presentados
+        FROM gestoria_docs d
+        WHERE (
+            d.empresa_id IN ({placeholders_emp})
+            OR EXISTS (
+              SELECT 1
+              FROM cliente_gestoria cg
+              WHERE cg.cliente_id = d.cliente_id
+                AND (
+                  COALESCE(cg.mod_renta, 0) = 1
+                  OR COALESCE(TRIM(cg.renta_detalles), '') NOT IN ('', '{{}}', '[]')
+                )
+            )
+          )
+          AND {renta_filter}
+          AND {year_filter}
+        """,
+        tuple([*empresa_ids, ref_like, year_like, f"{ejercicio_val}%"]),
+    ).fetchone()
+    return {
+        "ejercicio": ejercicio_val,
+        "docs_total": int(row_value(row, "docs_total", 0) or 0),
+        "clientes_con_doc": int(row_value(row, "clientes_con_doc", 0) or 0),
+        "docs_presentados": int(row_value(row, "docs_presentados", 0) or 0),
     }
 
 
@@ -74657,9 +74725,20 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 renta_summary = compute_gestoria_renta_pending_summary(conn, empresa_ids, ejercicio="", limit=12)
+                renta_docs_summary = compute_gestoria_renta_docs_summary(
+                    conn,
+                    empresa_ids,
+                    ejercicio=str(renta_summary.get("ejercicio") or "").strip(),
+                )
+                campañas_total = int(renta_summary.get("total") or 0)
+                campañas_presentadas = int(renta_summary.get("presentadas") or 0)
+                docs_total = int(renta_docs_summary.get("docs_total") or 0)
+                clientes_con_doc = int(renta_docs_summary.get("clientes_con_doc") or 0)
                 payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
-                payload["counts"]["rentas_total_ejercicio"] = int(renta_summary.get("total") or 0)
-                payload["counts"]["rentas_realizadas"] = int(renta_summary.get("presentadas") or 0)
+                payload["counts"]["rentas_total_ejercicio"] = max(campañas_total, clientes_con_doc)
+                payload["counts"]["rentas_realizadas"] = max(campañas_presentadas, clientes_con_doc)
+                payload["counts"]["rentas_docs_total"] = docs_total
+                payload["counts"]["rentas_clientes_con_doc"] = clientes_con_doc
                 payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
             except Exception as exc:
