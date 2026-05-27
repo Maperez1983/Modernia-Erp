@@ -28894,6 +28894,10 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     year_like = f"%{ejercicio_val}%".lower()
     ref_like = f"renta-{ejercicio_val}-%".lower()
+    try:
+        campaign_upload_year = str(int(ejercicio_val) + 1)
+    except Exception:
+        campaign_upload_year = ""
     renta_filter = """
       (
         LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
@@ -28906,6 +28910,8 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         LOWER(COALESCE(d.referencia_id, '')) LIKE ?
         OR LOWER(COALESCE(d.nombre, '')) LIKE ?
         OR COALESCE(d.fecha, '') LIKE ?
+        OR COALESCE(d.created_at, '') LIKE ?
+        OR COALESCE(d.updated_at, '') LIKE ?
       )
     """
     row = conn.execute(
@@ -28936,7 +28942,14 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
           AND {renta_filter}
           AND {year_filter}
         """,
-        tuple([*empresa_ids, ref_like, year_like, f"{ejercicio_val}%"]),
+        tuple([
+            *empresa_ids,
+            ref_like,
+            year_like,
+            f"{ejercicio_val}%",
+            f"{campaign_upload_year}%",
+            f"{campaign_upload_year}%",
+        ]),
     ).fetchone()
     return {
         "ejercicio": ejercicio_val,
