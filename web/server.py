@@ -74481,6 +74481,24 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
+                try:
+                    renta_clientes = conn.execute(
+                        """
+                        SELECT COUNT(DISTINCT cg.cliente_id) AS total
+                        FROM cliente_gestoria cg
+                        WHERE COALESCE(cg.mod_renta, 0) = 1
+                           OR COALESCE(TRIM(cg.renta_detalles), '') NOT IN ('', '{}', '[]')
+                        """
+                    ).fetchone()
+                    payload["counts"]["clientes_renta_global"] = int(row_value(renta_clientes, "total", 0) or 0)
+                    if payload["counts"]["clientes_renta_global"] > payload["counts"]["total"]:
+                        payload["counts"]["total"] = payload["counts"]["clientes_renta_global"]
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:renta_clientes_global", exc)
+                    except Exception:
+                        pass
+
                 active_ids = set()
                 try:
                     active_rows = conn.execute(
