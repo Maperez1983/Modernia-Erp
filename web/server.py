@@ -3815,6 +3815,39 @@ def normalize_lookup_text(value):
     return text
 
 
+def service_sql_match_clause(alias, services):
+    """Build a tolerant SQL service filter for free-text `clientes_empresas.servicio` labels."""
+    normalized = [normalize_service_key(s) for s in (services or []) if str(s or "").strip()]
+    normalized = [s for s in normalized if s]
+    clauses = []
+    values = []
+    for service in normalized:
+        if service == "gestoria":
+            clauses.append(
+                f"(LOWER(COALESCE({alias}.servicio, '')) IN (?, ?) "
+                f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE ?)"
+            )
+            values.extend(["gestoria", "gestoría", "%gestor%"])
+        elif service == "fincas":
+            clauses.append(
+                f"(LOWER(COALESCE({alias}.servicio, '')) LIKE ? "
+                f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE ?)"
+            )
+            values.extend(["%finca%", "%administraci%n%"])
+        elif service == "financiaciones":
+            clauses.append(
+                f"(LOWER(COALESCE({alias}.servicio, '')) IN (?, ?) "
+                f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE ?)"
+            )
+            values.extend(["financiaciones", "hipotecas", "%financi%"])
+        else:
+            clauses.append(f"LOWER(COALESCE({alias}.servicio, '')) = ?")
+            values.append(service)
+    if not clauses:
+        return "", []
+    return "(" + " OR ".join(clauses) + ")", values
+
+
 def normalizeSimple(value):
     """Compat: older codepaths used normalizeSimple."""
     return normalize_lookup_text(value)
@@ -70910,10 +70943,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, [dict(r) for r in rows])
                 return
             if normalized_services:
-                placeholders = ",".join(["?"] * len(normalized_services))
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
-                where_parts = [f"LOWER(ce.servicio) IN ({placeholders})"]
-                values = list(normalized_services)
+                service_clause, service_values = service_sql_match_clause("ce", normalized_services)
+                where_parts = [service_clause] if service_clause else []
+                values = list(service_values)
                 if workspace_id and "workspace_id" in ce_cols:
                     where_parts.append("COALESCE(ce.workspace_id, '') = ?")
                     values.append(workspace_id)
@@ -71195,9 +71228,9 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"rows": []})
                 return
             if normalized_services:
-                placeholders = ",".join(["?"] * len(normalized_services))
-                where = [f"LOWER(ce.servicio) IN ({placeholders})"]
-                values = list(normalized_services)
+                service_clause, service_values = service_sql_match_clause("ce", normalized_services)
+                where = [service_clause] if service_clause else []
+                values = list(service_values)
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
                 if workspace_id and "workspace_id" in ce_cols:
                     where.append("COALESCE(ce.workspace_id, '') = ?")

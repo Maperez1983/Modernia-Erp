@@ -56635,6 +56635,77 @@ const loadGestoriaCrm = async () => {
     gestoriaCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
+  if (!isRentaTab && isSearching) {
+    try {
+      const cacheAge = Date.now() - Number(state.gestoriaClientesSearchListTs || 0);
+      if (!Array.isArray(state.gestoriaClientesSearchList) || cacheAge < 0 || cacheAge > 60000) {
+        state.gestoriaClientesSearchList = await loadClientesList();
+        state.gestoriaClientesSearchListTs = Date.now();
+      }
+      const clientes = state.gestoriaClientesSearchList;
+      const queryNorm = normalizeLookupText(rawQuery);
+      const docNorm = normalizeDocumento(rawQuery);
+      const matches = (Array.isArray(clientes) ? clientes : [])
+        .filter((cliente) => {
+          const nombre = formatNombreCliente(cliente?.nombre || "");
+          const nombreRaw = String(cliente?.nombre || "");
+          const nif = normalizeDocumento(cliente?.nif || "");
+          return (
+            (queryNorm && (
+              normalizeLookupText(nombre).includes(queryNorm) ||
+              normalizeLookupText(nombreRaw).includes(queryNorm)
+            )) ||
+            (docNorm && nif.includes(docNorm))
+          );
+        })
+        .slice(0, 10);
+      if (matches.length && gestoriaCrmSummary) {
+        const list = document.createElement("div");
+        list.className = "crm-mini-list";
+        matches.forEach((cliente) => {
+          const card = document.createElement("button");
+          card.type = "button";
+          card.className = "crm-mini-card";
+          const main = document.createElement("div");
+          const title = document.createElement("h4");
+          title.textContent = formatNombreCliente(cliente.nombre || "") || "-";
+          const meta = document.createElement("div");
+          meta.className = "muted";
+          meta.textContent = [cliente.nif, cliente.telefono || cliente.movil, cliente.email].filter(Boolean).join(" · ") || "Cliente de gestoría";
+          main.appendChild(title);
+          main.appendChild(meta);
+          const action = document.createElement("div");
+          action.className = "crm-mini-meta";
+          const badge = document.createElement("div");
+          badge.className = "crm-badge";
+          badge.textContent = "Ver ficha";
+          action.appendChild(badge);
+          card.appendChild(main);
+          card.appendChild(action);
+          card.addEventListener("click", () => {
+            const id = String(cliente.id || "").trim();
+            if (id) openClienteDetail(id);
+          });
+          list.appendChild(card);
+        });
+        gestoriaCrmSummary.innerHTML = "";
+        gestoriaCrmSummary.appendChild(list);
+        gestoriaCrmSummary.classList.remove("hidden");
+        gestoriaCrmTable.innerHTML = "";
+        gestoriaCrmTable.classList.add("hidden");
+        gestoriaCrmInfo.textContent = `Resultados ${matches.length} de clientes de gestoría.`;
+        if (gestoriaCrmFilterControls) gestoriaCrmFilterControls.classList.add("hidden");
+        if (gestoriaCrmOpsSplit) gestoriaCrmOpsSplit.classList.add("hidden");
+        if (gestoriaCrmPipelineCard) gestoriaCrmPipelineCard.classList.add("hidden");
+        if (gestoriaCrmTabs) gestoriaCrmTabs.classList.add("hidden");
+        if (gestoriaCrmToggleView) {
+          gestoriaCrmToggleView.classList.remove("hidden");
+          gestoriaCrmToggleView.textContent = "Ver panel completo";
+        }
+        return;
+      }
+    } catch (_err) {}
+  }
   const docQuery = normalizeDocumento(rawQuery);
   let q = rawQuery;
   let docClienteNameSet = null;
