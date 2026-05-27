@@ -3848,6 +3848,15 @@ def service_sql_match_clause(alias, services):
     return "(" + " OR ".join(clauses) + ")", values
 
 
+def gestoria_service_sql_condition(alias):
+    return (
+        f"(LOWER(COALESCE({alias}.servicio, '')) IN "
+        "('gestoria', 'gestoría', 'administracion fincas', 'administración fincas') "
+        f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%gestor%' "
+        f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%finca%')"
+    )
+
+
 def normalizeSimple(value):
     """Compat: older codepaths used normalizeSimple."""
     return normalize_lookup_text(value)
@@ -26384,14 +26393,8 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
     # Importante: `clientes_empresas.servicio` puede venir como etiqueta libre (p.ej. "Gestoría", "Gestoria - ...",
     # "Administración Fincas", etc.). Usamos un filtro laxo por substring para no dejar el conteo a 0.
     # Nota: `LOWER()` no elimina tildes; "gestoría" sigue conteniendo "gestor", así que `LIKE '%gestor%'` funciona.
-    service_filter = (
-        "(LOWER(COALESCE(ce.servicio,'')) LIKE '%gestor%' "
-        " OR LOWER(COALESCE(ce.servicio,'')) LIKE '%finca%')"
-    )
-    service_filter_exists = (
-        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
+    service_filter_exists = gestoria_service_sql_condition("ce2")
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     where = [
         "COALESCE(cg.mod_renta, 0) = 1",
@@ -26787,10 +26790,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
     # `clientes_empresas.servicio` es texto libre y a menudo incluye sufijos ("Gestoría - ...", "Fincas ...").
     # Usamos un filtro laxo por substring para no dejar la productividad a 0.
     # Nota: `LOWER()` no elimina tildes, pero "gestoría" sigue conteniendo "gestor", así que funciona.
-    service_filter = (
-        "(LOWER(COALESCE(ce.servicio,'')) LIKE '%gestor%' "
-        " OR LOWER(COALESCE(ce.servicio,'')) LIKE '%finca%')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
     rows = conn.execute(
         f"""
             SELECT
@@ -28057,14 +28057,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     except Exception:
         prev_val = ""
 
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
-    service_filter_exists = (
-        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
+    service_filter_exists = gestoria_service_sql_condition("ce2")
 
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
@@ -28592,14 +28586,8 @@ def collect_gestoria_renta_campaign_rows(conn, empresa_id, ejercicio="", q=""):
     q_raw = str(q or "").strip()
     q_norm = normalize_lookup_text(q_raw)
 
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
-    service_filter_exists = (
-        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
+    service_filter_exists = gestoria_service_sql_condition("ce2")
 
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
@@ -28793,14 +28781,8 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
         limit_val = 12
     limit_val = max(1, min(limit_val, 100))
 
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
-    service_filter_exists = (
-        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
+    service_filter_exists = gestoria_service_sql_condition("ce2")
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
     rows = conn.execute(
@@ -28914,10 +28896,7 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
     # presente en los datos (20xx) y contamos sobre ese.
     infer_latest = not bool(ejercicio_val)
 
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
         f"""
@@ -33977,10 +33956,7 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
             "presupuestos_estudio": [],
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
     today = datetime.now().date()
     current_month = today.strftime("%Y-%m")
 
@@ -34708,10 +34684,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
             formatted.append(row)
         return formatted
     # Gestoría: evitar UNION pesado (reduce tiempos y cuelgues en SQLite).
-    service_filter = (
-        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-        "'administracion fincas', 'administración fincas')"
-    )
+    service_filter = gestoria_service_sql_condition("ce")
     modelo_rows = conn.execute(
         f"""
         SELECT
@@ -74452,14 +74425,8 @@ class Handler(BaseHTTPRequestHandler):
                 today = datetime.now().date()
                 next_30 = today + timedelta(days=30)
                 next_14 = today + timedelta(days=14)
-                service_filter = (
-                    "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
-                    "'administracion fincas', 'administración fincas')"
-                )
-                service_filter_join = (
-                    "LOWER(ce_join.servicio) IN ('gestoria', 'gestoría', "
-                    "'administracion fincas', 'administración fincas')"
-                )
+                service_filter = gestoria_service_sql_condition("ce")
+                service_filter_join = gestoria_service_sql_condition("ce_join")
                 placeholders_emp = ",".join(["?"] * len(empresa_ids))
 
                 payload = {
