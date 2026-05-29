@@ -254,6 +254,45 @@
       }
       deps.setAuthUi(data?.user || null);
       deps.hideAuthOverlay();
+      try {
+        const current = new URLSearchParams(window.location.search || "");
+        const hasDeepLink =
+          current.has("holding") ||
+          current.has("crm") ||
+          current.has("clientes") ||
+          current.has("cliente") ||
+          current.has("poliza") ||
+          current.has("empresa") ||
+          current.has("agenda") ||
+          current.has("admin") ||
+          current.has("portal_token");
+        const returnUrl = String(deps.state?.postAuthReturnUrl || "").trim();
+        if (!returnUrl && !hasDeepLink) {
+          const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
+          const targetRole = String(data?.user?.rol || "").trim().toLowerCase();
+          const targetService = String(data?.user?.servicio || "").trim().toLowerCase();
+          const params = new URLSearchParams();
+          if (targetUser === "workspace") {
+            params.set("holding", "1");
+            params.set("mode", "tenant");
+            params.set("workspace", "verifika2");
+            params.set("view", "overview");
+          } else if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {
+            params.set("holding", "1");
+            params.set("mode", "platform");
+            params.set("view", "overview");
+            try {
+              const workspaceId = String(localStorage.getItem("crm.currentWorkspaceId") || "").trim();
+              if (workspaceId) params.set("workspace", workspaceId);
+            } catch {}
+          }
+          if (params.toString()) {
+            const url = new URL(window.location.href);
+            url.search = params.toString();
+            history.replaceState({}, "", url.toString());
+          }
+        }
+      } catch {}
       if (!deps.state.appInitialized) {
         await deps.init();
         deps.state.appInitialized = true;

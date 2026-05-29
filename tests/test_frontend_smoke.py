@@ -33,6 +33,13 @@ class FrontendSmokeTests(unittest.TestCase):
         prevent_pos = html.index("event.preventDefault();", guard_pos)
         self.assertLess(guard_pos, prevent_pos)
 
+    def test_login_sets_role_route_before_app_init(self):
+        auth_js = (WEB_DIR / "app-auth.js").read_text(encoding="utf-8")
+        route_pos = auth_js.index('params.set("holding", "1");')
+        init_pos = auth_js.index("await deps.init();", route_pos)
+        self.assertLess(route_pos, init_pos)
+        self.assertIn('localStorage.getItem("crm.currentWorkspaceId")', auth_js)
+
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/*.bak_*", gitignore)
