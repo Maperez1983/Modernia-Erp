@@ -11164,6 +11164,11 @@
 
             if (loginForm && loginUser && loginPass) {
               loginForm.addEventListener("submit", async (event) => {
+                // Fallback real: si app.js ya cargó, dejamos que CRMAppAuth gestione login/routing.
+                // Si no, este handler evita que el usuario quede atrapado en la pantalla de acceso.
+                if (window.__APP_JS_LOADED && window.CRMAppAuth) {
+                  return;
+                }
                 event.preventDefault();
                 const usuario = String(loginUser.value || "").trim();
                 const password = String(loginPass.value || "");

@@ -26,6 +26,13 @@ class FrontendSmokeTests(unittest.TestCase):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         self.assertNotIn("logo.clearbit.com", app_js)
 
+    def test_standalone_login_fallback_yields_to_app_auth(self):
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertIn("if (window.__APP_JS_LOADED && window.CRMAppAuth)", html)
+        guard_pos = html.index("if (window.__APP_JS_LOADED && window.CRMAppAuth)")
+        prevent_pos = html.index("event.preventDefault();", guard_pos)
+        self.assertLess(guard_pos, prevent_pos)
+
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/*.bak_*", gitignore)
