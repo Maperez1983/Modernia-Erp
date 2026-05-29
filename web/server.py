@@ -824,6 +824,7 @@ WORKSPACE_TIME_SWEEP_ENABLED = (
     not in ("0", "false", "no", "off")
 )
 WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
+WORKSPACE_TIME_RETENTION_YEARS = max(4, int(os.environ.get("WORKSPACE_TIME_RETENTION_YEARS", "4")))
 WORKSPACE_TIME_SWEEP_STATE = {
     "last_run_at": "",
     "last_error": "",
@@ -35889,6 +35890,95 @@ def find_duplicate_open_time_entry(conn, workspace_id, empresa_id, fecha, person
     ).fetchone()
 
 
+def workspace_time_retention_cutoff_date(now_dt=None):
+    current = now_dt or app_now()
+    if isinstance(current, datetime):
+        current_date = current.date()
+    elif isinstance(current, date):
+        current_date = current
+    else:
+        current_date = app_now().date()
+    try:
+        return current_date.replace(year=current_date.year - WORKSPACE_TIME_RETENTION_YEARS).isoformat()
+    except ValueError:
+        return current_date.replace(year=current_date.year - WORKSPACE_TIME_RETENTION_YEARS, day=28).isoformat()
+
+
+def protected_workspace_time_where(alias=""):
+    prefix = f"{alias}." if alias else ""
+    return f"(TRIM(COALESCE({prefix}fecha, '')) = '' OR substr({prefix}fecha, 1, 10) >= ?)"
+
+
+def count_protected_workspace_time_entries(conn, workspace_id, persona_id=None):
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return 0
+    where = ["workspace_id = ?", protected_workspace_time_where()]
+    params = [ws_id, workspace_time_retention_cutoff_date()]
+    pid = str(persona_id or "").strip()
+    if pid:
+        where.append("persona_id = ?")
+        params.append(pid)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM workspace_registro_horario WHERE {' AND '.join(where)}",
+        params,
+    ).fetchone()
+    return int(row_value(row, "total", 0) or row_value(row, 0) or 0)
+
+
+def fetch_protected_workspace_time_persona_ids(conn, workspace_id, persona_ids=None):
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return set()
+    where = [
+        "workspace_id = ?",
+        "TRIM(COALESCE(persona_id, '')) != ''",
+        protected_workspace_time_where(),
+    ]
+    params = [ws_id, workspace_time_retention_cutoff_date()]
+    ids = [str(item or "").strip() for item in (persona_ids or []) if str(item or "").strip()]
+    if ids:
+        where.append(f"persona_id IN ({','.join('?' for _ in ids)})")
+        params.extend(ids)
+    rows = conn.execute(
+        f"SELECT DISTINCT persona_id FROM workspace_registro_horario WHERE {' AND '.join(where)}",
+        params,
+    ).fetchall()
+    return {
+        str(row_value(row, "persona_id") or row_value(row, 0) or "").strip()
+        for row in (rows or [])
+        if str(row_value(row, "persona_id") or row_value(row, 0) or "").strip()
+    }
+
+
+def soft_deactivate_workspace_personas_for_retention(conn, workspace_id, persona_ids, now):
+    ids = [str(item or "").strip() for item in (persona_ids or []) if str(item or "").strip()]
+    if not workspace_id or not ids:
+        return 0
+    today = (str(now or "")[:10] or app_now().date().isoformat())
+    note = f"Ficha desactivada; registros horarios conservados por retencion legal {WORKSPACE_TIME_RETENTION_YEARS} anos."
+    placeholders = ",".join("?" for _ in ids)
+    cur = conn.execute(
+        f"""
+        UPDATE workspace_registro_personal
+        SET activo = 0,
+            fecha_baja = COALESCE(NULLIF(fecha_baja, ''), ?),
+            notas = CASE
+              WHEN TRIM(COALESCE(notas, '')) = '' THEN ?
+              WHEN instr(COALESCE(notas, ''), ?) > 0 THEN notas
+              ELSE notas || char(10) || ?
+            END,
+            updated_at = datetime(?)
+        WHERE workspace_id = ? AND id IN ({placeholders})
+        """,
+        (today, note, note, note, now, workspace_id, *ids),
+    )
+    try:
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+
+
 def build_workspace_payroll_summary_csv(rows, month=""):
     import io
 
@@ -36102,6 +36192,7 @@ def build_workspace_time_summary(rows, month=""):
 
 
 def build_workspace_time_csv(rows):
+    generated_at = app_now().strftime("%Y-%m-%d %H:%M:%S")
     header = [
         "empresa_id",
         "empresa",
@@ -36132,6 +36223,10 @@ def build_workspace_time_csv(rows):
         "notas",
         "created_at",
         "updated_at",
+        "timezone",
+        "generated_at",
+        "retention_years",
+        "legal_basis",
     ]
     import io
     string_io = io.StringIO()
@@ -36169,6 +36264,10 @@ def build_workspace_time_csv(rows):
                 row.get("notas") or "",
                 row.get("created_at") or "",
                 row.get("updated_at") or "",
+                APP_TIMEZONE,
+                generated_at,
+                WORKSPACE_TIME_RETENTION_YEARS,
+                "art. 34.9 Estatuto de los Trabajadores",
             ]
         )
     return string_io.getvalue().encode("utf-8-sig")
@@ -36219,6 +36318,8 @@ def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, 
     lines.append(["Mes", month or ""])
     lines.append(["Zona horaria", APP_TIMEZONE])
     lines.append(["Generado", app_now().strftime("%Y-%m-%d %H:%M:%S")])
+    lines.append(["Retencion legal", f"{WORKSPACE_TIME_RETENTION_YEARS} anos"])
+    lines.append(["Base legal", "art. 34.9 Estatuto de los Trabajadores"])
     lines.append([])
     lines.append(
         [
@@ -38453,7 +38554,16 @@ def fetch_workspace_time_sweep_status():
 
 
 def build_workspace_time_xml(rows, persona_name="", company_name="", month=""):
-    root = ET.Element("registro_horario", workspace=normalize_lookup_text(persona_name or ""), empresa=company_name or "", mes=month or "")
+    root = ET.Element(
+        "registro_horario",
+        workspace=normalize_lookup_text(persona_name or ""),
+        empresa=company_name or "",
+        mes=month or "",
+        timezone=APP_TIMEZONE,
+        generated_at=app_now().strftime("%Y-%m-%d %H:%M:%S"),
+        retention_years=str(WORKSPACE_TIME_RETENTION_YEARS),
+        legal_basis="art. 34.9 Estatuto de los Trabajadores",
+    )
     for row in rows:
         entry = ET.SubElement(root, "entrada")
         ET.SubElement(entry, "fecha").text = row.get("fecha") or ""
@@ -55326,38 +55436,80 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 empresa_prev = None
             try:
-                # Cascada best-effort: limpiamos tablas RRHH y registro asociadas a la persona.
-                for sql, params in (
-                    ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                    ("DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
-                ):
-                    try:
-                        conn.execute(sql, params)
-                    except Exception:
-                        pass
-                conn.execute(
-                    "DELETE FROM workspace_registro_personal WHERE id = ? AND workspace_id = ?",
-                    (persona_id, workspace_id),
-                )
-                log_workspace_registro_audit(
-                    conn,
-                    workspace_id,
-                    empresa_id=empresa_prev,
-                    persona_id=persona_id,
-                    entity_type="persona",
-                    entity_id=persona_id,
-                    action="delete",
-                    actor=session,
-                    before=dict(prev) if prev else None,
-                    after=None,
-                    now=now_ts,
-                )
+                protected_entries = count_protected_workspace_time_entries(conn, workspace_id, persona_id=persona_id)
+                if protected_entries:
+                    # Cumplimiento registro horario: los fichajes de los últimos 4 años no se eliminan.
+                    # La ficha queda inactiva para no aparecer como empleado activo, pero sigue enlazando el histórico.
+                    soft_deactivate_workspace_personas_for_retention(conn, workspace_id, [persona_id], now_ts)
+                    for sql, params in (
+                        ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ):
+                        try:
+                            conn.execute(sql, params)
+                        except Exception:
+                            pass
+                    after = conn.execute(
+                        "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                        (persona_id, workspace_id),
+                    ).fetchone()
+                    log_workspace_registro_audit(
+                        conn,
+                        workspace_id,
+                        empresa_id=empresa_prev,
+                        persona_id=persona_id,
+                        entity_type="persona",
+                        entity_id=persona_id,
+                        action="retention_soft_delete",
+                        actor=session,
+                        before=dict(prev) if prev else None,
+                        after=dict(after) if after else None,
+                        now=now_ts,
+                    )
+                    conn.commit()
+                    json_response(
+                        self,
+                        {
+                            "ok": True,
+                            "id": persona_id,
+                            "soft_deleted": True,
+                            "retention_protected_entries": protected_entries,
+                        },
+                    )
+                    return
+                else:
+                    # Cascada best-effort: limpiamos tablas RRHH y registro asociadas a la persona.
+                    for sql, params in (
+                        ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                        ("DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ):
+                        try:
+                            conn.execute(sql, params)
+                        except Exception:
+                            pass
+                    conn.execute(
+                        "DELETE FROM workspace_registro_personal WHERE id = ? AND workspace_id = ?",
+                        (persona_id, workspace_id),
+                    )
+                    log_workspace_registro_audit(
+                        conn,
+                        workspace_id,
+                        empresa_id=empresa_prev,
+                        persona_id=persona_id,
+                        entity_type="persona",
+                        entity_id=persona_id,
+                        action="delete",
+                        actor=session,
+                        before=dict(prev) if prev else None,
+                        after=None,
+                        now=now_ts,
+                    )
                 conn.commit()
             except Exception as exc:
                 try:
@@ -55428,6 +55580,9 @@ class Handler(BaseHTTPRequestHandler):
             delete_members_flag = str(payload.get("delete_users") or "").strip().lower() in {"1", "true", "si", "sí", "on"}
             user_id = str(session.get("user_id") or "").strip() if session else ""
             try:
+                protected_persona_ids = fetch_protected_workspace_time_persona_ids(conn, workspace_id)
+                protected_placeholders = ",".join("?" for _ in protected_persona_ids)
+                cutoff = workspace_time_retention_cutoff_date()
                 # Borra toda la operativa RRHH/registro asociada al workspace.
                 for sql, params in (
                     ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ?", (workspace_id,)),
@@ -55435,14 +55590,26 @@ class Handler(BaseHTTPRequestHandler):
                     ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ?", (workspace_id,)),
-                    ("DELETE FROM workspace_registro_horario WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND TRIM(COALESCE(fecha, '')) != '' AND substr(fecha, 1, 10) < ?", (workspace_id, cutoff)),
                     ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ?", (workspace_id,)),
-                    ("DELETE FROM workspace_registro_audit WHERE workspace_id = ?", (workspace_id,)),
-                    ("DELETE FROM workspace_registro_personal WHERE workspace_id = ?", (workspace_id,)),
                 ):
                     try:
                         conn.execute(sql, params)
+                    except Exception:
+                        pass
+                if protected_persona_ids:
+                    soft_deactivate_workspace_personas_for_retention(conn, workspace_id, sorted(protected_persona_ids), now)
+                    try:
+                        conn.execute(
+                            f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({protected_placeholders})",
+                            (workspace_id, *sorted(protected_persona_ids)),
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        conn.execute("DELETE FROM workspace_registro_personal WHERE workspace_id = ?", (workspace_id,))
                     except Exception:
                         pass
                 # Opcional (seguro): desvincula miembros del workspace (NO borra cuentas globales).
@@ -55478,7 +55645,15 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 json_response(self, {"error": str(exc) or "No se pudo resetear RRHH"}, status=500)
                 return
-            json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_members": int(deleted_members or 0)})
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "workspace_id": workspace_id,
+                    "deleted_members": int(deleted_members or 0),
+                    "retention_protected_personas": len(protected_persona_ids),
+                },
+            )
             return
         elif parsed.path == "/api/workspace_rrhh_cleanup":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -55520,12 +55695,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Ninguna persona a mantener existe en este workspace."}, status=400)
                 return
             keep_ids = sorted(keep_ids_existing)
+            protected_persona_ids = fetch_protected_workspace_time_persona_ids(conn, workspace_id)
+            protected_removed_ids = sorted(protected_persona_ids - set(keep_ids))
+            if protected_removed_ids:
+                soft_deactivate_workspace_personas_for_retention(conn, workspace_id, protected_removed_ids, now)
+            effective_keep_ids = sorted(set(keep_ids) | protected_persona_ids)
+            cutoff = workspace_time_retention_cutoff_date()
             placeholders = ",".join("?" for _ in keep_ids)
+            effective_placeholders = ",".join("?" for _ in effective_keep_ids)
             removed_personas = 0
             try:
                 removed_row = conn.execute(
-                    f"SELECT COUNT(*) AS total FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})",
-                    (workspace_id, *keep_ids),
+                    f"SELECT COUNT(*) AS total FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({effective_placeholders})",
+                    (workspace_id, *effective_keep_ids),
                 ).fetchone()
                 removed_personas = int(row_value(removed_row, "total", 0) or row_value(removed_row, 0) or 0)
             except Exception:
@@ -55533,16 +55715,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 # Borra RRHH/registro asociado a personas NO incluidas.
                 statements = [
-                    (f"DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_rrhh_turnos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
-                    (f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({placeholders})", (workspace_id, *keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_turnos WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (
+                        f"DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id NOT IN ({effective_placeholders}) AND TRIM(COALESCE(fecha, '')) != '' AND substr(fecha, 1, 10) < ?",
+                        (workspace_id, *effective_keep_ids, cutoff),
+                    ),
+                    (f"DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND COALESCE(persona_id,'') <> '' AND persona_id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
+                    (f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({effective_placeholders})", (workspace_id, *effective_keep_ids)),
                 ]
                 for sql, params in statements:
                     try:
@@ -55563,6 +55748,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "workspace_id": workspace_id,
                     "kept": keep_ids,
+                    "retention_kept": protected_removed_ids,
                     "removed_personas": int(removed_personas or 0),
                 },
             )

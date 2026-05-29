@@ -1,9 +1,15 @@
 import sqlite3
 import unittest
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from web.server import (
+    build_workspace_time_csv,
+    build_workspace_time_xml,
+    count_protected_workspace_time_entries,
+    fetch_protected_workspace_time_persona_ids,
     find_duplicate_open_time_entry,
+    workspace_time_retention_cutoff_date,
     workspace_time_company_allowed,
 )
 
@@ -147,6 +153,51 @@ class RegistroHorarioSweepTimezoneTests(unittest.TestCase):
         self.conn.execute("INSERT INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at) VALUES ('we1','w1','e1','operativa',datetime('now'),datetime('now'))")
         self.assertTrue(workspace_time_company_allowed(self.conn, "w1", "e1"))
         self.assertFalse(workspace_time_company_allowed(self.conn, "w1", "e2"))
+
+    def test_retention_cutoff_keeps_four_year_window(self):
+        self.assertEqual(workspace_time_retention_cutoff_date(datetime(2026, 5, 29, 12, 0, 0)), "2022-05-29")
+
+    def test_retention_helpers_protect_recent_and_unknown_dates(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_registro_horario (
+              id, workspace_id, empresa_id, persona_id, fecha, hora_inicio, hora_fin
+            ) VALUES
+              ('recent', 'w1', 'e1', 'p1', ?, '09:00', '17:00'),
+              ('old', 'w1', 'e1', 'p2', '2001-01-01', '09:00', '17:00'),
+              ('unknown', 'w1', 'e1', 'p3', '', '09:00', '17:00')
+            """,
+            (workspace_time_retention_cutoff_date(),),
+        )
+        self.assertEqual(count_protected_workspace_time_entries(self.conn, "w1"), 2)
+        self.assertEqual(count_protected_workspace_time_entries(self.conn, "w1", persona_id="p2"), 0)
+        self.assertEqual(fetch_protected_workspace_time_persona_ids(self.conn, "w1"), {"p1", "p3"})
+
+    def test_time_csv_includes_compliance_metadata_columns(self):
+        csv_text = build_workspace_time_csv(
+            [
+                {
+                    "empresa_id": "e1",
+                    "empresa_nombre": "Empresa",
+                    "persona_id": "p1",
+                    "persona_nombre": "Irene",
+                    "fecha": "2026-04-01",
+                    "hora_inicio": "09:00",
+                    "hora_fin": "17:00",
+                    "minutos_trabajados": 480,
+                }
+            ]
+        ).decode("utf-8-sig")
+        self.assertIn("timezone", csv_text.splitlines()[0])
+        self.assertIn("retention_years", csv_text.splitlines()[0])
+        self.assertIn("art. 34.9 Estatuto de los Trabajadores", csv_text)
+
+    def test_time_xml_includes_compliance_metadata(self):
+        xml_bytes = build_workspace_time_xml([], persona_name="Irene", company_name="Empresa", month="2026-04")
+        root = ET.fromstring(xml_bytes)
+        self.assertEqual(root.attrib.get("timezone"), "Europe/Madrid")
+        self.assertEqual(root.attrib.get("retention_years"), "4")
+        self.assertEqual(root.attrib.get("legal_basis"), "art. 34.9 Estatuto de los Trabajadores")
 
 
 if __name__ == "__main__":
