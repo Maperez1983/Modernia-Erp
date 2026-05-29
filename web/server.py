@@ -67381,6 +67381,27 @@ class Handler(BaseHTTPRequestHandler):
             if not current:
                 json_response(self, {"error": "Acción no encontrada"}, status=404)
                 return
+            current_service = normalize_service_key(current["servicio"] or "")
+            payload_service = normalize_service_key(payload.get("servicio") or "")
+            if payload_service and current_service and payload_service != current_service:
+                json_response(self, {"error": "La acción no pertenece al servicio indicado"}, status=403)
+                return
+            allowed_services = self._auth_allowed_services()
+            if allowed_services is not None:
+                service_allowed = current_service in allowed_services
+                if current_service in {"financiaciones", "hipotecas"}:
+                    service_allowed = "financiaciones" in allowed_services or "hipotecas" in allowed_services
+                if not service_allowed:
+                    json_response(self, {"error": "Sin permisos para este servicio"}, status=403)
+                    return
+            try:
+                payload_ws = str(payload.get("workspace_id") or "").strip()
+                current_ws = str(current["workspace_id"] or "").strip() if "workspace_id" in current.keys() else ""
+                if payload_ws and current_ws and payload_ws != current_ws:
+                    json_response(self, {"error": "La acción pertenece a otro workspace"}, status=403)
+                    return
+            except Exception:
+                pass
             updates = {}
             for key in (
                 "fecha",
@@ -67783,6 +67804,27 @@ class Handler(BaseHTTPRequestHandler):
             if not current:
                 json_response(self, {"error": "Acción no encontrada"}, status=404)
                 return
+            current_service = normalize_service_key(current["servicio"] or "")
+            payload_service = normalize_service_key(payload.get("servicio") or "")
+            if payload_service and current_service and payload_service != current_service:
+                json_response(self, {"error": "La acción no pertenece al servicio indicado"}, status=403)
+                return
+            allowed_services = self._auth_allowed_services()
+            if allowed_services is not None:
+                service_allowed = current_service in allowed_services
+                if current_service in {"financiaciones", "hipotecas"}:
+                    service_allowed = "financiaciones" in allowed_services or "hipotecas" in allowed_services
+                if not service_allowed:
+                    json_response(self, {"error": "Sin permisos para este servicio"}, status=403)
+                    return
+            try:
+                payload_ws = str(payload.get("workspace_id") or "").strip()
+                current_ws = str(current["workspace_id"] or "").strip() if "workspace_id" in current.keys() else ""
+                if payload_ws and current_ws and payload_ws != current_ws:
+                    json_response(self, {"error": "La acción pertenece a otro workspace"}, status=403)
+                    return
+            except Exception:
+                pass
             actor = str(payload.get("usuario") or "").strip()
             try:
                 trash_backup_row(

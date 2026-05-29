@@ -52890,16 +52890,6 @@ const renderCrmAgendaWorkspace = () => {
       ? (Array.isArray(state.crmAgendaRowsFiltered) ? state.crmAgendaRowsFiltered : all)
       : (Array.isArray(state.crmAgendaRowsCalendarFiltered) ? state.crmAgendaRowsCalendarFiltered : all);
 
-  // Failsafe: evita “agenda vacía” por preset/filters. Si hay datos, muéstralos.
-  if (!filtered.length && all.length) {
-    filtered = all.slice();
-    if (view === "list") {
-      state.crmAgendaRowsFiltered = filtered;
-    } else {
-      state.crmAgendaRowsCalendarFiltered = filtered;
-    }
-  }
-
   if (view === "list") {
     if (crmAgendaTable) {
       crmAgendaTable.innerHTML = "";
@@ -55993,19 +55983,14 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
         const ok = window.confirm("¿Borrar esta cita/acción? Esta acción no se puede deshacer.");
         if (!ok) return;
         try {
-	          const res = await fetch("/api/acciones_delete", {
-	            method: "POST",
-	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify({
-	              id,
-	              servicio: "inmobiliaria",
-	              empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
-	              usuario: getCurrentUser(),
-	            }),
-	          });
-          const data = await res.json();
-          if (!res.ok || data?.error) {
-            alert(data?.error || `HTTP ${res.status}`);
+          const data = await apiPost("/api/acciones_delete", {
+            id,
+            servicio: "inmobiliaria",
+            empresa_nombre: resolveCurrentInmuebleEmpresaNombre(),
+            usuario: getCurrentUser(),
+          });
+          if (data?.error) {
+            alert(data.error);
             return;
           }
           loadInmuebleActividad(inmuebleId, empresaId);
@@ -56046,12 +56031,7 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
 
 const closeInmuebleWorkflowAction = (row, empresaId) => {
   const submitClosePayload = (payload, type, resultado) => {
-    fetch("/api/acciones_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones_update", payload)
       .then((data) => {
         if (data?.error) {
           alert(data.error);
@@ -61424,12 +61404,7 @@ const loadSegurosAlertas = () => {
             estado: "Pendiente",
             notas: `Renovación póliza ${poliza}`,
           };
-          fetch("/api/acciones", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-            .then((res) => res.json())
+          apiPost("/api/acciones", payload)
             .then(() => loadSegurosCrm())
             .catch(() => {});
         });
@@ -64748,12 +64723,7 @@ const saveFinActionResolution = async (row, result, estado = "Hecho") => {
     estado,
     resultado_cierre: result || "",
   };
-  const res = await fetch("/api/acciones_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
+  const data = await apiPost("/api/acciones_update", payload);
   if (data.error) throw new Error(data.error);
 };
 
@@ -64866,13 +64836,41 @@ const createRecommendedFinAction = async () => {
     responsable: row.asesor || "",
     notas: next.hint,
   };
-  const res = await fetch("/api/acciones", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
+  const data = await apiPost("/api/acciones", payload);
   if (data.error) throw new Error(data.error);
+};
+
+const resolveAgendaEmpresaIdForService = (servicio = "") => {
+  const key = normalizeSimple(servicio || "");
+  if (key === "gestoria") return resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa());
+  if (key === "seguros") return resolveLegacyEmpresaId(resolveCrmSegurosEmpresa());
+  if (key === "financiaciones" || key === "hipotecas") return resolveLegacyEmpresaId(resolveCrmFinEmpresa());
+  if (key === "inmobiliaria") return resolveLegacyEmpresaId(resolveCrmInmoEmpresa());
+  return "";
+};
+
+const buildAgendaActionParams = (servicio, extra = {}) => {
+  const params = new URLSearchParams({ servicio: String(servicio || "").trim() });
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    const raw = String(value ?? "").trim();
+    if (raw) params.set(key, raw);
+  });
+  if (isTenantWorkspaceMode()) {
+    const ws =
+      String(state.currentWorkspaceId || "").trim()
+      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.homeTimeStatus?.workspace_id || "").trim()
+      || (() => {
+        try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
+      })();
+    if (ws && !params.get("workspace_id")) params.set("workspace_id", ws);
+    const wcId = String(state.currentWorkspaceCompanyWsId || "").trim();
+    if (wcId && !params.get("workspace_company_id")) params.set("workspace_company_id", wcId);
+  } else if (!params.get("empresa_id")) {
+    const empresaId = resolveAgendaEmpresaIdForService(servicio);
+    if (empresaId) params.set("empresa_id", empresaId);
+  }
+  return params;
 };
 
 const loadAcciones = (servicio, empresaId, container, infoEl) => {
@@ -64880,7 +64878,7 @@ const loadAcciones = (servicio, empresaId, container, infoEl) => {
     return;
   }
   container.dataset.service = servicio || "";
-  const params = new URLSearchParams({ servicio });
+  const params = buildAgendaActionParams(servicio, empresaId ? { empresa_id: empresaId } : {});
   if (isTenantWorkspaceMode()) {
     // En tenant, la agenda siempre debe ir acotada por workspace. En algunos flujos
     // (deep-link / no admin) `state.currentWorkspaceId` puede no estar aún hidratado.
@@ -64898,8 +64896,6 @@ const loadAcciones = (servicio, empresaId, container, infoEl) => {
       infoEl.textContent = "";
       return;
     }
-  } else {
-    params.set("empresa_id", empresaId);
   }
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
@@ -68385,15 +68381,15 @@ const loadAgendaGeneral = () => {
   };
   if (fincas) {
     if (allowService("gestoria")) {
-      tasks.push(api(`/api/acciones?servicio=gestoria&empresa_id=${fincas.id}`));
+      tasks.push(api(`/api/acciones?${buildAgendaActionParams("gestoria", { empresa_id: fincas.id }).toString()}`));
     }
     if (allowService("seguros")) {
-      tasks.push(api(`/api/acciones?servicio=seguros&empresa_id=${fincas.id}`));
+      tasks.push(api(`/api/acciones?${buildAgendaActionParams("seguros", { empresa_id: fincas.id }).toString()}`));
     }
   }
   if (fin) {
     if (allowService("financiaciones")) {
-      tasks.push(api(`/api/acciones?servicio=financiaciones&empresa_id=${fin.id}`));
+      tasks.push(api(`/api/acciones?${buildAgendaActionParams("financiaciones", { empresa_id: fin.id }).toString()}`));
     }
   }
   if (!tasks.length) {
@@ -68941,7 +68937,7 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     ? serviciosAgenda
     : ["seguros", "gestoria", "financiaciones", "inmobiliaria"];
   const accionesReqs = agendaServices.map((servicio) =>
-    api(`/api/acciones?servicio=${encodeURIComponent(servicio)}&cliente_id=${encodeURIComponent(clienteId)}`)
+    api(`/api/acciones?${buildAgendaActionParams(servicio, { cliente_id: clienteId }).toString()}`)
       .catch(() => ({ rows: [] }))
   );
   const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`)
@@ -69398,16 +69394,16 @@ const loadClienteTrabajosPlanificados = async (clienteId, empresas = []) => {
         ? api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] }),
       hasGestoria
-        ? api(`/api/acciones?servicio=gestoria&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        ? api(`/api/acciones?${buildAgendaActionParams("gestoria", { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] }),
       hasSeguros
-        ? api(`/api/acciones?servicio=seguros&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        ? api(`/api/acciones?${buildAgendaActionParams("seguros", { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] }),
       hasFin
-        ? api(`/api/acciones?servicio=financiaciones&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        ? api(`/api/acciones?${buildAgendaActionParams("financiaciones", { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] }),
       hasInmo
-        ? api(`/api/acciones?servicio=inmobiliaria&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        ? api(`/api/acciones?${buildAgendaActionParams("inmobiliaria", { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] }))
         : Promise.resolve({ rows: [] }),
     ]);
     const cfg = gestoriaCfg.row || {};
@@ -73258,12 +73254,7 @@ if (crmAgendaForm) {
     if ("id" in payload) delete payload.id;
     payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     payload.servicio = "inmobiliaria";
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (crmAgendaStatus) crmAgendaStatus.textContent = data.error || "Guardado.";
         if (data.error) return;
@@ -73750,26 +73741,19 @@ if (actionModalSave) {
     }
     const ctx = state.actionModalContext;
     if (ctx && typeof ctx === "object") {
-      // Al editar una cita existente, no debemos “pisar” relaciones (inmueble/related)
-      // con el contexto actual del módulo, porque puede reasignar la cita y hacer que
-      // el usuario perciba que “cambia otras” (al mover citas entre inmuebles).
-      ["asesoramiento_id", "inmueble_id", "related_id", "related_tipo"].forEach((key) => {
-        const value = ctx[key];
-        if (value === undefined || value === null) return;
-        if (!String(value).trim()) return;
-        if (!editId) {
+      if (!editId) {
+        ["asesoramiento_id", "inmueble_id", "related_id", "related_tipo"].forEach((key) => {
+          const value = ctx[key];
+          if (value === undefined || value === null) return;
+          if (!String(value).trim()) return;
           payload[key] = value;
-          return;
+        });
+        if (!payload.cliente_id && ctx.cliente_id) {
+          payload.cliente_id = ctx.cliente_id;
         }
-        if (payload[key] === undefined || payload[key] === null || !String(payload[key]).trim()) {
-          payload[key] = value;
+        if (!payload.cliente_nombre && ctx.cliente_nombre) {
+          payload.cliente_nombre = ctx.cliente_nombre;
         }
-      });
-      if (!payload.cliente_id && ctx.cliente_id) {
-        payload.cliente_id = ctx.cliente_id;
-      }
-      if (!payload.cliente_nombre && ctx.cliente_nombre) {
-        payload.cliente_nombre = ctx.cliente_nombre;
       }
     }
     const conflict = lastAgendaEvents.find((ev) => {
@@ -80790,12 +80774,7 @@ if (gestoriaClienteAgendaForm) {
     payload.cliente_id = state.currentClienteId;
     payload.empresa_nombre = empresa.nombre;
     payload.servicio = "gestoria";
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (gestoriaClienteAgendaStatus) {
           gestoriaClienteAgendaStatus.textContent = data.error || "Guardado.";
@@ -80986,24 +80965,7 @@ if (inmuebleActividadForm) {
     }
     payload.servicio = "inmobiliaria";
     payload.inmueble_id = state.currentInmuebleId;
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then(async (res) => {
-        let data = null;
-        try {
-          data = await res.json();
-        } catch {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || "Respuesta no válida del servidor.");
-        }
-        if (!res.ok && data?.error) {
-          throw new Error(data.error);
-        }
-        return data;
-      })
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (inmuebleActividadStatus) {
           const extra = data?._workflow_error ? ` (workflow: ${data._workflow_error})` : "";
@@ -81265,11 +81227,7 @@ if (gestoriaTrabajoForm) {
             estado: "Pendiente",
             servicio: "gestoria",
           };
-          fetch("/api/acciones", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(accionPayload),
-          }).catch(() => {});
+          apiPost("/api/acciones", accionPayload).catch(() => {});
         }
         gestoriaTrabajoForm.reset();
         loadGestoriaTrabajosOverview();
@@ -81301,12 +81259,7 @@ if (gestoriaAgendaForm) {
     );
     payload.empresa_nombre = empresa.nombre;
     payload.servicio = "gestoria";
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (data.error) {
           if (gestoriaAgendaStatus) {
@@ -81869,12 +81822,7 @@ if (segurosAgendaForm) {
     );
     payload.empresa_nombre = empresa.nombre;
     payload.servicio = "seguros";
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (data.error) {
           if (segurosAgendaStatus) {
@@ -81958,15 +81906,8 @@ if (segurosCadenciaForm) {
           related_id: cadence.relatedId || "",
           related_tipo: cadence.relatedTipo || "",
         };
-        const res = await fetch("/api/acciones", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.error) {
-          throw new Error(data?.error || `HTTP ${res.status}`);
-        }
+        const data = await apiPost("/api/acciones", payload);
+        if (data?.error) throw new Error(data.error);
       }
       if (segurosCadenciaStatus) segurosCadenciaStatus.textContent = "Cadencia creada.";
       loadAcciones("seguros", resolveLegacyEmpresaId(empresa), segurosAgendaTable, segurosAgendaInfo);
@@ -81991,12 +81932,7 @@ if (finAgendaForm) {
     );
     payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     payload.servicio = "financiaciones";
-    fetch("/api/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    apiPost("/api/acciones", payload)
       .then((data) => {
         if (data.error) {
           if (finAgendaStatus) {
