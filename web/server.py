@@ -35848,6 +35848,47 @@ def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, 
     return {"rows": [dict(row) for row in rows]}
 
 
+def workspace_time_company_allowed(conn, workspace_id, empresa_id):
+    ws_id = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not ws_id or not eid:
+        return False
+    try:
+        return eid in {str(item) for item in resolve_workspace_company_ids(conn, ws_id, empresa_id=eid)}
+    except Exception:
+        return False
+
+
+def find_duplicate_open_time_entry(conn, workspace_id, empresa_id, fecha, persona_id=None, exclude_id=None):
+    ws_id = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    day = str(fecha or "").strip()
+    pid = str(persona_id or "").strip()
+    excluded = str(exclude_id or "").strip()
+    if not ws_id or not eid or not day:
+        return None
+    where = [
+        "workspace_id = ?",
+        "empresa_id = ?",
+        "fecha = ?",
+        "COALESCE(persona_id, '') = ?",
+        "COALESCE(hora_fin, '') = ''",
+    ]
+    params = [ws_id, eid, day, pid]
+    if excluded:
+        where.append("id != ?")
+        params.append(excluded)
+    return conn.execute(
+        f"""
+        SELECT id
+        FROM workspace_registro_horario
+        WHERE {' AND '.join(where)}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+
+
 def build_workspace_payroll_summary_csv(rows, month=""):
     import io
 
@@ -54285,6 +54326,9 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
                 json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
                 return
+            if not workspace_time_company_allowed(conn, workspace_id, empresa_id):
+                json_response(self, {"error": "empresa_id no pertenece a este workspace"}, status=400)
+                return
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
                 json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para editar fichajes."}, status=409)
                 return
@@ -54322,6 +54366,9 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT * FROM workspace_registro_horario WHERE id = ? AND workspace_id = ? LIMIT 1",
                     (record_id, workspace_id),
                 ).fetchone()
+                if not existing_row:
+                    json_response(self, {"error": "fichaje no encontrado"}, status=404)
+                    return
                 audit_before = dict(existing_row) if existing_row else None
             if hora_fin:
                 start_min = parse_hhmm_to_minutes(hora_inicio)
@@ -54332,17 +54379,15 @@ class Handler(BaseHTTPRequestHandler):
             elif normalize_lookup_text(payload.get("estado")) in {"validado", "cerrado"}:
                 json_response(self, {"error": "hora_fin requerida para cerrar o validar un fichaje"}, status=400)
                 return
-            if not record_id:
-                duplicate_open = conn.execute(
-                    """
-                    SELECT id
-                    FROM workspace_registro_horario
-                    WHERE workspace_id = ? AND empresa_id = ? AND fecha = ? AND COALESCE(persona_id, '') = COALESCE(?, '')
-                      AND COALESCE(hora_fin, '') = ''
-                    LIMIT 1
-                    """,
-                    (workspace_id, empresa_id, fecha, persona_id or None),
-                ).fetchone()
+            if not hora_fin:
+                duplicate_open = find_duplicate_open_time_entry(
+                    conn,
+                    workspace_id,
+                    empresa_id,
+                    fecha,
+                    persona_id=persona_id,
+                    exclude_id=record_id,
+                )
                 if duplicate_open:
                     json_response(self, {"error": "Ya existe un fichaje abierto para esa persona en esa fecha"}, status=409)
                     return
@@ -54554,7 +54599,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
             now_dt = app_now()
             fecha = now_dt.date().isoformat()
-            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=str(persona_row["empresa_id"] or "").strip()):
+            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
                 json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para fichar."}, status=409)
                 return
             now_hhmm = now_dt.strftime("%H:%M")
@@ -54777,6 +54822,7 @@ class Handler(BaseHTTPRequestHandler):
             geo_lon = _geo_float("lon")
             geo_acc = _geo_float("acc")
             geo_source = str(geo.get("source") or "").strip() or None
+            geo_has = 1 if (geo_lat is not None or geo_lon is not None or geo_acc is not None or geo_source) else 0
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
