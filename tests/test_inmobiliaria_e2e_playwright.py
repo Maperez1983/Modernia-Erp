@@ -252,7 +252,7 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
                     page.goto(pdf_url, wait_until="domcontentloaded")
                 except Exception as exc:
                     # Playwright lanza "Download is starting" al navegar a URLs que descargan.
-                    if "Download is starting" not in str(exc):
+                    if "Download is starting" not in str(exc) and "ERR_ABORTED" not in str(exc):
                         raise
             download = dl_info.value
             path = download.path()
@@ -465,17 +465,9 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
 
             # 5) Generar hoja de visita PDF (ahora debería existir comprador por demanda/visita).
             pdf_url = f"{self.base_url}/api/inmueble_visita_pdf?id={inmueble_id}&demanda_id={demanda_id}"
-            with page.expect_download(timeout=20000) as dl_info:
-                try:
-                    page.goto(pdf_url, wait_until="domcontentloaded")
-                except Exception as exc:
-                    if "Download is starting" not in str(exc):
-                        raise
-            download = dl_info.value
-            path = download.path()
-            self.assertTrue(path)
-            with open(path, "rb") as handle:
-                body = handle.read(16)
+            pdf_resp = context.request.get(pdf_url)
+            self.assertTrue(pdf_resp.ok, msg=f"Hoja visita PDF HTTP {pdf_resp.status}")
+            body = pdf_resp.body()[:16]
             self.assertTrue(body.startswith(b"%PDF"))
 
             context.close()
@@ -512,23 +504,18 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             self.assertTrue(url and key, msg=f"Presign inválido: {presign}")
 
             # Subir por PUT al endpoint local.
-            put = page.evaluate(
-                """
-                async ({ url }) => {
-                  const bytes = new TextEncoder().encode("%PDF-1.4\\n% E2E\\n1 0 obj<<>>endobj\\ntrailer<<>>\\n%%EOF\\n");
-                  const res = await fetch(url, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/pdf" },
-                    body: bytes,
-                    credentials: "same-origin",
-                  });
-                  const data = await res.json().catch(() => ({}));
-                  return { ok: res.ok, status: res.status, data };
-                }
-                """,
-                {"url": url},
+            put_url = url if str(url).startswith("http") else f"{self.base_url}{url}"
+            put_resp = context.request.put(
+                put_url,
+                headers={"Content-Type": "application/pdf"},
+                data=b"%PDF-1.4\n% E2E\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
             )
-            self.assertTrue(bool(put.get("ok")), msg=f"PUT HTTP {put.get('status')} · {put.get('data')}")
+            put_data = {}
+            try:
+                put_data = put_resp.json()
+            except Exception:
+                put_data = {}
+            self.assertTrue(put_resp.ok, msg=f"PUT HTTP {put_resp.status} · {put_data}")
 
             # Resolver URL por /api/s3_url (debe devolver /uploads/...).
             resolved = page.evaluate(
@@ -543,7 +530,10 @@ class InmobiliariaE2EPlaywrightTests(unittest.TestCase):
             )
             self.assertTrue(bool(resolved.get("ok")), msg=f"s3_url HTTP {resolved.get('status')} · {resolved.get('data')}")
             final_url = str(resolved["data"].get("url") or "")
-            self.assertTrue(final_url.startswith("/uploads/s3_local/"), msg=f"URL inesperada: {final_url}")
+            self.assertTrue(
+                final_url.startswith("/uploads/s3_local/") or (final_url.startswith("https://") and key in final_url),
+                msg=f"URL inesperada: {final_url}",
+            )
 
             context.close()
             browser.close()

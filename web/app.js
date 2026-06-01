@@ -19734,7 +19734,7 @@ const renderHomeTimePunchModal = () => {
   _homeTimePunchBody.querySelector("[data-home-time-checkout]")?.addEventListener("click", () => runToggle("checkout"));
 };
 
-	const openHomeTimePunchModal = ({ persist = false } = {}) => {
+const openHomeTimePunchModal = ({ persist = false } = {}) => {
 	  ensureHomeTimePunchModal();
 	  const refresh = async () => {
 	    try {
@@ -19750,9 +19750,11 @@ const renderHomeTimePunchModal = () => {
 	  // Refresca siempre (best-effort) para que el modal y el botón no "dependan" del orden de carga.
 	  // Evita que desaparezca el acceso a fichaje cuando /api/home_time_status falla temporalmente.
 	  refresh().then(() => {
+	    if (!persist && state.currentPage !== "home") return;
 	    renderHomeTimePunchModal();
 	    renderCompanyCards();
 	  });
+	  if (!persist && state.currentPage !== "home") return;
 	  renderHomeTimePunchModal();
 	  _homeTimePunchModal?.classList.remove("hidden");
 	  document.body.classList.add("modal-open");
@@ -19765,6 +19767,8 @@ const renderHomeTimePunchModal = () => {
 const maybeAutoShowHomeTimePunchModal = () => {
   try {
     if (state.currentPage !== "home") return;
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.has("crm")) return;
     if (Date.now() - Number(_homeTimePunchLastActionAt || 0) < 60_000) return;
     const user = getAuthScopeUser();
     const uid = String(user?.id || "").trim();
@@ -24870,6 +24874,9 @@ try {
 } catch (e) {}
 
 const openCrmInmobiliario = () => {
+  try {
+    closeHomeTimePunchModal({ persist: false });
+  } catch (e) {}
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
     try {
@@ -25102,6 +25109,9 @@ const setCrmQuickNewOpen = (open = false, options = {}) => {
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
 			  if (next) {
+			    try {
+			      syncCrmInsertOptionsForVertical(resolveCrmTecnocloudVertical());
+			    } catch (e) {}
 			    const anchorEl = options && options.anchorEl ? options.anchorEl : null;
 			    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
 			    const preferAnchored = viewportW >= 821; // iPad+ / escritorio: menú flotante, móvil: modal completo
@@ -32669,7 +32679,22 @@ const openInmuebleVisitSheetPdf = () => {
   if (demandaId) {
     params.set("demanda_id", demandaId);
   }
-  window.open(`/api/inmueble_visita_pdf?${params.toString()}`, "_blank", "noopener");
+  const target = window.open("about:blank", "_blank", "noopener");
+  api(`/api/inmueble_visita_docs?${params.toString()}`)
+    .catch((error) => {
+      console.warn("No se pudo generar el paquete documental de visita", error);
+    })
+    .finally(() => {
+      const url = `/api/inmueble_visita_pdf?${params.toString()}`;
+      if (target) {
+        target.location = url;
+      } else {
+        window.open(url, "_blank", "noopener");
+      }
+      if (state.currentInmuebleId) {
+        loadInmuebleDocs(state.currentInmuebleId);
+      }
+    });
 };
 
 const openInmuebleConsumoPdf = (kind) => {

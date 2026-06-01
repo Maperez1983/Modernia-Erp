@@ -870,6 +870,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/build_info",
     "/api/me",
     "/api/auth_invite_status",
+    "/api/portal_inmuebles",
+    "/api/portal_inmueble",
     "/api/workspace_portal_public",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_kiosk_status",
@@ -22184,6 +22186,8 @@ def ensure_pending_inmueble_stage_actions(conn, empresa_id, inmueble_id, etapa, 
     defaults = {
         "Inmueble": [("Seguimiento", "Completar ficha y cualificar")],
         "Noticia": [("Llamada", "Primera llamada de contacto")],
+        "Valoración": [("Seguimiento", "Preparar valoración"), ("Seguimiento", "Compartir valoración con propietario")],
+        "Adquisición": [("Cita de adquisición", "Concertar cita de adquisición")],
         "Encargo": [("Seguimiento", "Firmar encargo"), ("Seguimiento", "Preparar anuncio")],
         "Propuesta": [("Seguimiento", "Revisar propuesta/oferta")],
         "Reservado": [("Seguimiento", "Subir reserva firmada")],
@@ -25820,6 +25824,323 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia
         seen.add(signature)
         deduped.append(item)
     return deduped
+
+
+def fetch_inmueble_for_empresa(conn, inmueble_id, empresa_id):
+    iid = str(inmueble_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not iid or not eid:
+        return None
+    return conn.execute(
+        "SELECT * FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+        (iid, eid),
+    ).fetchone()
+
+
+def fetch_demanda_for_empresa(conn, demanda_id, empresa_id):
+    did = str(demanda_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not did or not eid:
+        return None
+    return conn.execute(
+        "SELECT * FROM demandas WHERE id = ? AND empresa_id = ? LIMIT 1",
+        (did, eid),
+    ).fetchone()
+
+
+def _inmo_match_text(value):
+    return normalize_lookup_text(value or "")
+
+
+def _inmo_match_contains(haystack, needle):
+    hay = _inmo_match_text(haystack)
+    ned = _inmo_match_text(needle)
+    if not hay or not ned:
+        return True
+    return ned in hay or hay in ned
+
+
+def score_inmobiliaria_demanda_inmueble_match(demanda, inmueble):
+    demanda = dict(demanda or {})
+    inmueble = dict(inmueble or {})
+    reasons = []
+    score = 0
+    active = 0
+
+    estado_inmueble = _inmo_match_text(inmueble.get("estado") or inmueble.get("situacion_comercial"))
+    if estado_inmueble in {"vendido", "alquilado", "cerrado", "cerrada", "historico vendido", "histórico vendido"}:
+        return {"score": -1, "reasons": ["inmueble_cerrado"]}
+
+    demanda_estado = _inmo_match_text(demanda.get("estado"))
+    demanda_fase = _inmo_match_text(demanda.get("fase"))
+    if demanda_estado in {"cerrada", "cerrado", "descartada", "descartado"} or demanda_fase in {"cerrada", "cerrado", "no interesante"}:
+        return {"score": -1, "reasons": ["demanda_cerrada"]}
+
+    demanda_tipo = _inmo_match_text(demanda.get("tipo"))
+    inmueble_operacion = _inmo_match_text(inmueble.get("tipo_operacion"))
+    if demanda_tipo in {"compra", "comprar", "venta"} and inmueble_operacion and inmueble_operacion not in {"venta", "compraventa"}:
+        return {"score": -1, "reasons": ["operacion_incompatible"]}
+    if demanda_tipo in {"alquiler", "arrendamiento", "renta"} and inmueble_operacion and inmueble_operacion not in {"alquiler", "arrendamiento", "renta"}:
+        return {"score": -1, "reasons": ["operacion_incompatible"]}
+    if demanda_tipo:
+        score += 4
+        reasons.append("operacion")
+
+    tipologia = demanda.get("tipologia")
+    inmueble_tipo = inmueble.get("tipo_inmueble") or inmueble.get("tipologia")
+    if str(tipologia or "").strip() and str(inmueble_tipo or "").strip():
+        active += 1
+        if _inmo_match_contains(inmueble_tipo, tipologia):
+            score += 18
+            reasons.append("tipologia")
+        else:
+            return {"score": -1, "reasons": ["tipologia_incompatible"]}
+
+    subtipologia = demanda.get("subtipologia")
+    inmueble_sub = inmueble.get("subtipologia")
+    if str(subtipologia or "").strip() and str(inmueble_sub or "").strip():
+        active += 1
+        if _inmo_match_contains(inmueble_sub, subtipologia):
+            score += 8
+            reasons.append("subtipologia")
+        else:
+            return {"score": -1, "reasons": ["subtipologia_incompatible"]}
+
+    zona = demanda.get("zona") or demanda.get("focalizacion")
+    inmueble_zona = inmueble.get("zona") or inmueble.get("focalizacion") or inmueble.get("poblacion") or inmueble.get("localidad")
+    if str(zona or "").strip() and str(inmueble_zona or "").strip():
+        active += 1
+        if _inmo_match_contains(inmueble_zona, zona):
+            score += 22
+            reasons.append("zona")
+        else:
+            return {"score": -1, "reasons": ["zona_incompatible"]}
+
+    precio_max = parse_money_value(demanda.get("precio_max"))
+    precio = parse_money_value(
+        inmueble.get("precio_encargo")
+        or inmueble.get("precio_objetivo")
+        or inmueble.get("precio_pedido_cliente")
+        or inmueble.get("precio_valoracion")
+    )
+    if precio_max and precio:
+        active += 1
+        if precio <= precio_max:
+            ratio = max(0.0, min(1.0, float(precio) / float(precio_max)))
+            score += 28 + int((1.0 - ratio) * 8)
+            reasons.append("precio")
+        else:
+            return {"score": -1, "reasons": ["precio_superior"]}
+    else:
+        score += 5
+
+    m2_min = parse_optional_float(demanda.get("m2_min"))
+    m2 = parse_optional_float(inmueble.get("m2"))
+    if m2_min and m2:
+        active += 1
+        if m2 >= m2_min:
+            score += 12
+            reasons.append("m2")
+        else:
+            return {"score": -1, "reasons": ["m2_insuficiente"]}
+
+    habitaciones_min = parse_optional_int(demanda.get("habitaciones_min"))
+    habitaciones = parse_optional_int(inmueble.get("habitaciones"))
+    if habitaciones_min and habitaciones is not None:
+        active += 1
+        if habitaciones >= habitaciones_min:
+            score += 8
+            reasons.append("habitaciones")
+        else:
+            return {"score": -1, "reasons": ["habitaciones_insuficientes"]}
+
+    banos_min = parse_optional_int(demanda.get("banos_min"))
+    banos = parse_optional_int(inmueble.get("banos"))
+    if banos_min and banos is not None:
+        active += 1
+        if banos >= banos_min:
+            score += 6
+            reasons.append("banos")
+        else:
+            return {"score": -1, "reasons": ["banos_insuficientes"]}
+
+    if active == 0:
+        score = max(score, 25)
+        reasons.append("sin_restricciones")
+    elif score > 100:
+        score = 100
+    return {"score": int(score), "reasons": reasons}
+
+
+def fetch_inmueble_matches_for_demanda(conn, empresa_id, demanda_id, limit=50):
+    demanda = fetch_demanda_for_empresa(conn, demanda_id, empresa_id)
+    if not demanda:
+        return None
+    limit_val = max(1, min(int(limit or 50), 200))
+    rows = conn.execute(
+        """
+        SELECT id, referencia, direccion, zona, focalizacion, poblacion, localidad, provincia,
+               tipo_inmueble, subtipologia, precio_objetivo, precio_encargo,
+               precio_pedido_cliente, precio_valoracion, m2, habitaciones, banos, estado,
+               created_at, updated_at
+        FROM inmuebles
+        WHERE empresa_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1000
+        """,
+        (empresa_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        payload = dict(row)
+        match = score_inmobiliaria_demanda_inmueble_match(dict(demanda), payload)
+        if int(match.get("score", -1)) < 0:
+            continue
+        payload["score"] = int(match.get("score") or 0)
+        payload["match_reasons"] = match.get("reasons") or []
+        out.append(payload)
+    out.sort(key=lambda item: (-int(item.get("score") or 0), str(item.get("updated_at") or item.get("created_at") or "")), reverse=False)
+    return out[:limit_val]
+
+
+def fetch_demanda_matches_for_inmueble(conn, inmueble_id, limit=100):
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        return None
+    limit_val = max(1, min(int(limit or 100), 300))
+    rows = conn.execute(
+        """
+        SELECT d.id,
+               d.id AS demanda_id,
+               d.cliente_id,
+               d.focalizacion,
+               d.pedido,
+               d.tipo,
+               d.zona,
+               d.tipologia,
+               d.subtipologia,
+               d.precio_max,
+               d.m2_min,
+               d.habitaciones_min,
+               d.banos_min,
+               d.estado,
+               d.fase,
+               d.prioridad,
+               d.estado_contacto,
+               d.responsable,
+               d.notas,
+               d.created_at,
+               d.updated_at,
+               c.nombre AS cliente
+        FROM demandas d
+        LEFT JOIN clientes c ON c.id = d.cliente_id
+        WHERE d.empresa_id = ?
+        ORDER BY d.updated_at DESC, d.created_at DESC
+        LIMIT 1000
+        """,
+        (inmueble["empresa_id"],),
+    ).fetchall()
+    out = []
+    inmueble_payload = dict(inmueble)
+    for row in rows:
+        payload = dict(row)
+        match = score_inmobiliaria_demanda_inmueble_match(payload, inmueble_payload)
+        if int(match.get("score", -1)) < 0:
+            continue
+        payload["score"] = int(match.get("score") or 0)
+        payload["match_reasons"] = match.get("reasons") or []
+        out.append(payload)
+    out.sort(key=lambda item: (-int(item.get("score") or 0), str(item.get("updated_at") or item.get("created_at") or "")), reverse=False)
+    return out[:limit_val]
+
+
+def _portal_inmueble_photo_expr(conn, alias="i"):
+    # Primera foto vigente del inmueble. Funciona en SQLite y Postgres con subquery escalar.
+    return (
+        "SELECT d.url FROM inmueble_docs d "
+        f"WHERE d.inmueble_id = {alias}.id "
+        "AND LOWER(COALESCE(d.estado, 'Vigente')) != 'reemplazado' "
+        "AND (LOWER(COALESCE(d.tipo, '')) LIKE '%foto%' OR LOWER(COALESCE(d.url, '')) LIKE '%.jpg' "
+        "OR LOWER(COALESCE(d.url, '')) LIKE '%.jpeg' OR LOWER(COALESCE(d.url, '')) LIKE '%.png' "
+        "OR LOWER(COALESCE(d.url, '')) LIKE '%.webp') "
+        "ORDER BY d.created_at ASC LIMIT 1"
+    )
+
+
+def portal_inmueble_row_to_public(row):
+    data = dict(row or {})
+    price = data.get("precio_encargo") or data.get("precio_objetivo") or data.get("precio_pedido_cliente") or data.get("precio_valoracion")
+    return {
+        "id": data.get("id"),
+        "referencia": data.get("referencia"),
+        "titulo": data.get("titulo") or data.get("direccion") or "Inmueble Verifika2",
+        "direccion": data.get("direccion"),
+        "zona": data.get("zona"),
+        "poblacion": data.get("poblacion") or data.get("localidad"),
+        "provincia": data.get("provincia"),
+        "tipo_operacion": data.get("tipo_operacion") or "venta",
+        "tipo_inmueble": data.get("tipo_inmueble"),
+        "subtipologia": data.get("subtipologia"),
+        "m2": data.get("m2"),
+        "habitaciones": data.get("habitaciones"),
+        "banos": data.get("banos"),
+        "precio": price,
+        "estado": data.get("estado"),
+        "descripcion": data.get("descripcion"),
+        "lat": data.get("lat"),
+        "lon": data.get("lon"),
+        "foto": data.get("foto"),
+        "certificado": int(data.get("certificado") or 0),
+        "verificado": int(data.get("noticia_verificada") or 0),
+        "publicado_at": data.get("portal_publicado_at"),
+    }
+
+
+def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
+    try:
+        ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "inmuebles", "portal_publicado_at", "portal_publicado_at TEXT")
+        ensure_column(conn, "inmuebles", "portal_retirado_at", "portal_retirado_at TEXT")
+        ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+    photo_expr = _portal_inmueble_photo_expr(conn, "i")
+    where = [
+        "COALESCE(i.portal_publicado, 0) = 1",
+        """
+        EXISTS (
+          SELECT 1
+          FROM captaciones cv
+          WHERE cv.inmueble_id = i.id
+            AND COALESCE(cv.noticia_verificada, 0) = 1
+        )
+        """,
+        "LOWER(TRIM(COALESCE(i.estado, ''))) NOT IN ('vendido', 'alquilado', 'cerrado negativamente', 'historico vendido', 'histórico vendido')",
+    ]
+    values = []
+    if listing_id:
+        where.append("i.id = ?")
+        values.append(str(listing_id).strip())
+    limit_val = max(1, min(int(limit or 100), 300))
+    rows = conn.execute(
+        f"""
+        SELECT
+          i.id, i.referencia, i.titulo, i.direccion, i.zona, i.localidad, i.poblacion, i.provincia,
+          i.tipo_operacion, i.tipo_inmueble, i.subtipologia, i.m2, i.habitaciones, i.banos,
+          i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, i.precio_valoracion,
+          i.estado, i.descripcion, i.lat, i.lon, i.certificado, i.portal_publicado_at,
+          MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
+          ({photo_expr}) AS foto
+        FROM inmuebles i
+        LEFT JOIN captaciones c ON c.inmueble_id = i.id
+        WHERE {' AND '.join(where)}
+        GROUP BY i.id
+        ORDER BY COALESCE(NULLIF(i.portal_publicado_at, ''), i.updated_at, i.created_at) DESC
+        LIMIT ?
+        """,
+        (*values, limit_val),
+    ).fetchall()
+    return [portal_inmueble_row_to_public(row) for row in rows]
 
 
 def infer_operacion_estado_documental(payload):
@@ -32231,6 +32552,10 @@ def ensure_tables(db_path):
         "planificado": "planificado INTEGER NOT NULL DEFAULT 0",
         "fecha_planificacion": "fecha_planificacion TEXT",
         "con_inquilino": "con_inquilino INTEGER NOT NULL DEFAULT 0",
+        "portal_publicado": "portal_publicado INTEGER NOT NULL DEFAULT 0",
+        "portal_publicado_at": "portal_publicado_at TEXT",
+        "portal_retirado_at": "portal_retirado_at TEXT",
+        "certificado": "certificado INTEGER NOT NULL DEFAULT 0",
     }.items():
         try:
             ensure_column(conn, "inmuebles", col_name, col_sql)
@@ -33409,6 +33734,45 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_contratos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          servicio TEXT,
+          template_key TEXT,
+          titulo TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Borrador',
+          fecha TEXT,
+          body_json TEXT,
+          doc_url TEXT,
+          doc_key TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    for col_name, col_type in {
+        "empresa_id": "TEXT",
+        "cliente_id": "TEXT",
+        "servicio": "TEXT",
+        "template_key": "TEXT",
+        "estado": "TEXT NOT NULL DEFAULT 'Borrador'",
+        "fecha": "TEXT",
+        "body_json": "TEXT",
+        "doc_url": "TEXT",
+        "doc_key": "TEXT",
+        "notas": "TEXT",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "workspace_contratos", col_name, f"{col_name} {col_type}")
+        except Exception:
+            pass
     for col_name, col_type in {
         "fecha_seguimiento": "TEXT",
         "motivo_estado": "TEXT",
@@ -46828,6 +47192,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_set_password",
             "/api/me",
             "/api/auth_invite_status",
+            "/api/portal_inmuebles",
+            "/api/portal_inmueble",
             "/api/workspace_portal_public",
             "/api/workspace_factura_pdf_public",
             "/api/workspace_portal_upload",
@@ -47817,6 +48183,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_delete",
             "/api/captacion_convert",
             "/api/compraventas",
+            "/api/portal_publish_update",
             "/api/inmueble_catastro_lookup",
             "/api/inmueble_catastro_sync",
             "/api/inmueble_update",
@@ -48028,6 +48395,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/captacion_delete": "inmobiliaria",
                         "/api/captacion_convert": "inmobiliaria",
                         "/api/compraventas": "inmobiliaria",
+                        "/api/portal_publish_update": "inmobiliaria",
                         "/api/inmueble_update": "inmobiliaria",
                         "/api/inmueble_delete": "inmobiliaria",
                         "/api/inmueble_docs": "inmobiliaria",
@@ -48399,6 +48767,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_library_documents",
                 "/api/legal_radar_auto_status",
                 "/api/legal_radar_counts",
+                "/api/portal_publish_update",
                 "/api/admin_seed_modernia_users",
             }
         )
@@ -48427,6 +48796,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional_update",
             "/api/cliente_profesional_delete",
             "/api/compraventas",
+            "/api/portal_publish_update",
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
@@ -63416,6 +63786,72 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
             return
+        elif parsed.path == "/api/portal_publish_update":
+            listing_id = str(payload.get("listing_id") or payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not listing_id:
+                json_response(self, {"error": "listing_id requerido"}, status=400)
+                return
+            try:
+                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+                ensure_column(conn, "inmuebles", "portal_publicado_at", "portal_publicado_at TEXT")
+                ensure_column(conn, "inmuebles", "portal_retirado_at", "portal_retirado_at TEXT")
+                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+            inmueble = conn.execute(
+                "SELECT id, empresa_id, estado FROM inmuebles WHERE id = ? LIMIT 1",
+                (listing_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            published = 1 if str(payload.get("published") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if published:
+                conn.execute(
+                    """
+                    UPDATE inmuebles
+                    SET portal_publicado = 1,
+                        portal_publicado_at = COALESCE(NULLIF(portal_publicado_at, ''), ?),
+                        portal_retirado_at = NULL,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now_iso, now_iso, listing_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE inmuebles
+                    SET portal_publicado = 0,
+                        portal_retirado_at = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now_iso, now_iso, listing_id),
+                )
+            visible = bool(fetch_portal_inmuebles_public(conn, listing_id=listing_id, limit=1))
+            try:
+                audit_event(
+                    conn,
+                    inmueble["empresa_id"],
+                    "inmueble",
+                    listing_id,
+                    "Actualizar portal inmobiliario",
+                    usuario=payload.get("usuario"),
+                    detalles={"published": published, "visible": visible},
+                    now=now_iso,
+                )
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "id": listing_id, "published": published, "visible": visible})
+            return
         elif parsed.path == "/api/inmueble_renovar":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
             if not inmueble_id:
@@ -65614,13 +66050,17 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/inmueble_docs":
-            inmueble_id = payload.get("inmueble_id")
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
             nombre = payload.get("nombre") or ""
             tipo = payload.get("tipo") or ""
             s3_key = str(payload.get("s3_key") or "").strip()
             data_uri = payload.get("file_base64") or payload.get("data") or ""
             if not inmueble_id or (not data_uri and not s3_key):
                 json_response(self, {"error": "inmueble_id y archivo requeridos"}, status=400)
+                return
+            inmueble = fetch_inmueble_for_empresa(conn, inmueble_id, empresa["id"])
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
             inmueble_folder = re.sub(r"[^A-Za-z0-9_-]+", "_", str(inmueble_id)).strip("_") or "inmueble"
             doc_id = os.urandom(16).hex()
@@ -65675,7 +66115,26 @@ class Handler(BaseHTTPRequestHandler):
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         elif parsed.path == "/api/demandas":
             ws_id = str(payload.get("workspace_id") or "").strip()
+            if ws_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             cliente_id = payload.get("cliente_id")
+            if cliente_id:
+                cliente_row = conn.execute(
+                    "SELECT id FROM clientes WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (cliente_id, empresa["id"]),
+                ).fetchone()
+                if not cliente_row:
+                    cliente_row = conn.execute(
+                        "SELECT id FROM clientes WHERE id = ? LIMIT 1",
+                        (cliente_id,),
+                    ).fetchone()
+                    if not cliente_row:
+                        json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                        return
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -65767,6 +66226,24 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif parsed.path == "/api/visitas":
             ws_id = str(payload.get("workspace_id") or "").strip()
+            if ws_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            demanda_id = str(payload.get("demanda_id") or "").strip()
+            if inmueble_id and not fetch_inmueble_for_empresa(conn, inmueble_id, empresa["id"]):
+                exists = conn.execute("SELECT id FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+                if not exists:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
+            if demanda_id and not fetch_demanda_for_empresa(conn, demanda_id, empresa["id"]):
+                exists = conn.execute("SELECT id FROM demandas WHERE id = ? LIMIT 1", (demanda_id,)).fetchone()
+                if not exists:
+                    json_response(self, {"error": "Demanda no encontrada"}, status=404)
+                    return
             v_cols = table_columns(conn, "visitas") or set()
             has_ws = "workspace_id" in v_cols
             cols = [
@@ -65788,8 +66265,8 @@ class Handler(BaseHTTPRequestHandler):
                 os.urandom(16).hex(),
                 empresa["id"],
             ] + ([ws_id] if has_ws else []) + [
-                payload.get("inmueble_id"),
-                payload.get("demanda_id"),
+                inmueble_id or None,
+                demanda_id or None,
                 payload.get("fecha"),
                 payload.get("hora"),
                 payload.get("estado"),
@@ -65803,6 +66280,20 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
         elif parsed.path == "/api/clientes":
+            if not empresa:
+                try:
+                    eid = str(payload.get("empresa_id") or "").strip()
+                except Exception:
+                    eid = ""
+                if not eid:
+                    try:
+                        eid = str(get_platform_empresa_id(conn) or "").strip()
+                    except Exception:
+                        eid = ""
+                if eid:
+                    empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (eid,)).fetchone()
+            if not empresa:
+                empresa = conn.execute("SELECT id FROM empresas ORDER BY created_at ASC LIMIT 1").fetchone()
             nombre = payload.get("nombre")
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
@@ -65927,6 +66418,9 @@ class Handler(BaseHTTPRequestHandler):
             if "workspace_id" in cols:
                 insert_cols.insert(1, "workspace_id")
                 values.insert(1, workspace_id or None)
+            if "empresa_id" in cols:
+                insert_cols.insert(1, "empresa_id")
+                values.insert(1, empresa["id"])
             placeholders = ", ".join(["?"] * len(insert_cols))
             conn.execute(
                 f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
@@ -75722,6 +76216,28 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows]})
             return
 
+        if path == "/api/portal_inmuebles":
+            limit = params.get("limit", ["100"])[0]
+            try:
+                limit_val = int(str(limit or "100").strip())
+            except Exception:
+                limit_val = 100
+            rows = fetch_portal_inmuebles_public(conn, limit=limit_val)
+            json_response(self, {"rows": rows, "count": len(rows)})
+            return
+
+        if path == "/api/portal_inmueble":
+            listing_id = (params.get("id", [""])[0] or "").strip()
+            if not listing_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            rows = fetch_portal_inmuebles_public(conn, listing_id=listing_id, limit=1)
+            if not rows:
+                json_response(self, {"error": "Inmueble no publicado"}, status=404)
+                return
+            json_response(self, {"row": rows[0]})
+            return
+
         if path == "/api/inmuebles":
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
@@ -75789,11 +76305,20 @@ class Handler(BaseHTTPRequestHandler):
                   i.habitaciones,
                   i.banos,
                   i.precio_objetivo,
+                  i.precio_encargo,
+                  i.precio_pedido_cliente,
+                  i.precio_valoracion,
+                  i.portal_publicado,
+                  i.portal_publicado_at,
+                  i.portal_retirado_at,
+                  i.certificado,
                   i.estado,
+                  COALESCE(MAX(cap.noticia_verificada), 0) AS noticia_verificada,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
                 LEFT JOIN inmueble_propietarios ip ON ip.inmueble_id = i.id
                 LEFT JOIN clientes c ON c.id = ip.cliente_id
+                LEFT JOIN captaciones cap ON cap.inmueble_id = i.id
                 WHERE {where_clause}
                 GROUP BY i.id
                 ORDER BY i.created_at DESC
@@ -76489,6 +77014,179 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
+        if path == "/api/inmueble_visita_docs":
+            now = datetime.now(timezone.utc).isoformat()
+            inmueble_id = params.get("id", [""])[0]
+            demanda_id = params.get("demanda_id", [""])[0].strip()
+            if not inmueble_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            if status != "encargo":
+                json_response(self, {"error": "La documentación de visita solo está disponible para inmuebles en Encargo"}, status=400)
+                return
+            buyer = resolve_inmobiliaria_contact_candidate(
+                conn,
+                inmueble["empresa_id"],
+                {},
+                demanda_id=demanda_id,
+                inmueble_id=inmueble_id,
+            )
+            if not buyer.get("cliente_id") and not buyer.get("nombre"):
+                json_response(self, {"error": "No hay comprador vinculado por demanda o visita para generar la documentación"}, status=400)
+                return
+            demanda = None
+            if demanda_id:
+                demanda = conn.execute(
+                    "SELECT * FROM demandas WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (demanda_id, inmueble["empresa_id"]),
+                ).fetchone()
+            owners = get_inmueble_propietarios(conn, inmueble_id)
+            existing_docs = conn.execute(
+                """
+                SELECT nombre, url, tipo, estado, version, plantilla_clave
+                FROM inmueble_docs
+                WHERE inmueble_id = ?
+                ORDER BY version DESC, created_at DESC
+                """,
+                (inmueble_id,),
+            ).fetchall()
+            company_payload = dict(empresa) if empresa else {}
+            inmueble_payload = dict(inmueble)
+            captacion_payload = dict(captacion)
+            docs_payload = [dict(r) for r in existing_docs]
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            generated = []
+
+            def persist_bundle_doc(tipo, nombre, pdf_bytes, filename_base, plantilla_clave, origen_id=None, payload_json=None):
+                row = persist_generated_inmueble_pdf(
+                    conn,
+                    inmueble_id,
+                    tipo,
+                    nombre,
+                    pdf_bytes,
+                    filename_base,
+                    now,
+                    replace_existing=True,
+                    empresa_id=inmueble["empresa_id"],
+                    plantilla_clave=plantilla_clave,
+                    origen_tipo="visita_docs",
+                    origen_id=origen_id or demanda_id or buyer.get("cliente_id") or inmueble_id,
+                    payload_json=payload_json or {},
+                )
+                if row:
+                    generated.append(row)
+                return row
+
+            tipo_operacion = normalize_lookup_text(inmueble["tipo_operacion"] or captacion["tipo_operacion"] or "venta")
+            if tipo_operacion in {"alquiler", "arrendamiento", "renta"}:
+                dia_pdf = build_inmueble_consumo_rental_dia_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                persist_bundle_doc(
+                    "DIA alquiler",
+                    f"DIA alquiler · {inmueble['direccion'] or safe_ref}",
+                    dia_pdf,
+                    f"dia_alquiler_{safe_ref}",
+                    "alquiler_dia",
+                    payload_json={"kind": "alquiler_dia"},
+                )
+            else:
+                dia_pdf = build_inmueble_consumo_sale_sheet_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                persist_bundle_doc(
+                    "Documento informativo abreviado",
+                    f"Documento informativo abreviado · {inmueble['direccion'] or safe_ref}",
+                    dia_pdf,
+                    f"dia_venta_{safe_ref}",
+                    "venta_ficha",
+                    payload_json={"kind": "venta_ficha"},
+                )
+                price_pdf = build_inmueble_consumo_sale_price_note_pdf(company_payload, inmueble_payload, captacion_payload)
+                persist_bundle_doc(
+                    "Justificación de precio",
+                    f"Justificación de precio · {inmueble['direccion'] or safe_ref}",
+                    price_pdf,
+                    f"justificacion_precio_{safe_ref}",
+                    "venta_precio",
+                    payload_json={"kind": "venta_precio"},
+                )
+
+            visita_pdf = build_inmueble_visit_sheet_pdf(
+                company_payload,
+                inmueble_payload,
+                captacion_payload,
+                owners,
+                buyer,
+                dict(demanda) if demanda else None,
+            )
+            persist_bundle_doc(
+                "Hoja de visita",
+                f"Hoja de visita · {inmueble['direccion'] or safe_ref}",
+                visita_pdf,
+                f"hoja_visita_{safe_ref}",
+                "hoja_visita",
+                payload_json={"demanda_id": demanda_id, "cliente_id": buyer.get("cliente_id")},
+            )
+
+            action_payload = {
+                "id": demanda_id or buyer.get("cliente_id") or inmueble_id,
+                "inmueble_id": inmueble_id,
+                "cliente_id": buyer.get("cliente_id"),
+                "documento_tipo": "Reconocimiento de honorarios",
+                "importe_propuesta": inmueble["precio_objetivo"] or captacion["precio_objetivo"],
+                "fecha": datetime.now(timezone.utc).date().isoformat(),
+            }
+            honorarios_pdf = build_inmueble_honorarios_ack_pdf_editable(
+                company_payload,
+                inmueble_payload,
+                buyer,
+                action_payload,
+                extra={
+                    "honorarios_importe": params.get("honorarios_importe", [""])[0],
+                    "iva_pct": params.get("iva_pct", [""])[0] or "21",
+                    "lugar_firma": params.get("lugar_firma", [""])[0],
+                    "condiciones": params.get("condiciones", [""])[0],
+                },
+            )
+            persist_bundle_doc(
+                "Reconocimiento de honorarios",
+                f"Reconocimiento de honorarios · {str(buyer.get('nombre') or '').strip() or 'interesado'} · {inmueble['direccion'] or safe_ref}",
+                honorarios_pdf,
+                f"reconocimiento_honorarios_{safe_ref}",
+                "reconocimiento_honorarios",
+                payload_json={"demanda_id": demanda_id, "cliente_id": buyer.get("cliente_id")},
+            )
+
+            conn.commit()
+            json_response(self, {"ok": True, "rows": generated, "count": len(generated)})
+            return
+
         if path == "/api/inmueble_negociacion_pdf":
             action_id = params.get("action_id", [""])[0].strip()
             if not action_id:
@@ -76718,6 +77416,18 @@ class Handler(BaseHTTPRequestHandler):
             inmueble_id = params.get("inmueble_id", [""])[0]
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             rows = conn.execute(
                 """
@@ -77017,8 +77727,14 @@ class Handler(BaseHTTPRequestHandler):
             where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
-                SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
-                       d.habitaciones_min, d.banos_min, d.estado, d.prioridad,
+                SELECT d.id, d.focalizacion, d.pedido, d.tipo, d.zona,
+                       d.tipologia, d.subtipologia, d.precio_max, d.m2_min,
+                       d.habitaciones_min, d.banos_min, d.estado, d.fase, d.prioridad,
+                       d.motivo, d.agencia_insercion, d.origen, d.pedido_web,
+                       d.anuncio_mi_cartera, d.presentacion_servicio, d.fecha_insercion,
+                       d.motivo_ultimo_contacto, d.fecha_ultimo_contacto_interno,
+                       d.fecha_prox_act_cita, d.fecha_ultima_cita_venta_red,
+                       d.estado_contacto, d.responsable, d.notas, d.created_at, d.updated_at,
                        d.cliente_id,
                        c.nombre AS cliente
                 FROM demandas d
@@ -77111,42 +77827,11 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id or not demanda_id:
                 json_response(self, {"error": "empresa_id y demanda_id requeridos"}, status=400)
                 return
-            demanda = conn.execute(
-                "SELECT * FROM demandas WHERE id = ? AND empresa_id = ?",
-                (demanda_id, empresa_id),
-            ).fetchone()
-            if not demanda:
+            matches = fetch_inmueble_matches_for_demanda(conn, empresa_id, demanda_id, limit=50)
+            if matches is None:
                 json_response(self, {"error": "Demanda no encontrada"}, status=404)
                 return
-            where = ["empresa_id = ?"]
-            values = [empresa_id]
-            if demanda["zona"]:
-                where.append("LOWER(zona) LIKE ?")
-                values.append(f"%{demanda['zona'].lower()}%")
-            if demanda["precio_max"]:
-                where.append("precio_objetivo <= ?")
-                values.append(demanda["precio_max"])
-            if demanda["m2_min"]:
-                where.append("m2 >= ?")
-                values.append(demanda["m2_min"])
-            if demanda["habitaciones_min"]:
-                where.append("habitaciones >= ?")
-                values.append(demanda["habitaciones_min"])
-            if demanda["banos_min"]:
-                where.append("banos >= ?")
-                values.append(demanda["banos_min"])
-            where_clause = " AND ".join(where)
-            rows = conn.execute(
-                f"""
-                SELECT id, referencia, direccion, zona, precio_objetivo, m2, habitaciones, banos, estado
-                FROM inmuebles
-                WHERE {where_clause}
-                ORDER BY created_at DESC
-                LIMIT 50
-                """,
-                values,
-            ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            json_response(self, {"rows": matches})
             return
 
         if path == "/api/inmueble_matching":
@@ -77154,49 +77839,11 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
-            inmueble = conn.execute(
-                "SELECT * FROM inmuebles WHERE id = ?",
-                (inmueble_id,),
-            ).fetchone()
-            if not inmueble:
+            matches = fetch_demanda_matches_for_inmueble(conn, inmueble_id, limit=100)
+            if matches is None:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
-            where = ["d.empresa_id = ?"]
-            values = [inmueble["empresa_id"]]
-            if inmueble["zona"]:
-                where.append("LOWER(d.zona) LIKE ?")
-                values.append(f"%{inmueble['zona'].lower()}%")
-            if inmueble["precio_objetivo"]:
-                where.append("(d.precio_max IS NULL OR d.precio_max >= ?)")
-                values.append(inmueble["precio_objetivo"])
-            if inmueble["m2"]:
-                where.append("(d.m2_min IS NULL OR d.m2_min <= ?)")
-                values.append(inmueble["m2"])
-            if inmueble["habitaciones"]:
-                where.append("(d.habitaciones_min IS NULL OR d.habitaciones_min <= ?)")
-                values.append(inmueble["habitaciones"])
-            if inmueble["banos"]:
-                where.append("(d.banos_min IS NULL OR d.banos_min <= ?)")
-                values.append(inmueble["banos"])
-            where_clause = " AND ".join(where)
-            rows = conn.execute(
-                f"""
-                SELECT d.id,
-                       d.id AS demanda_id,
-                       d.cliente_id,
-                       d.tipo, d.zona, d.precio_max, d.m2_min,
-                       d.habitaciones_min, d.banos_min, d.estado,
-                       d.fase,
-                       c.nombre AS cliente
-                FROM demandas d
-                LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE {where_clause}
-                ORDER BY d.created_at DESC
-                LIMIT 100
-                """,
-                values,
-            ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            json_response(self, {"rows": matches})
             return
 
         if path == "/api/inmueble_compradores":
