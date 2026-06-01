@@ -22683,6 +22683,57 @@ def create_inmueble_signature_request(
     }
 
 
+def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url="", reminder=False, now=None):
+    row = dict(request_row) if request_row else {}
+    email = normalize_email(row.get("signer_email") or "")
+    if not email:
+        return {"sent": False, "reason": "sin_email"}
+    if not (os.environ.get("SMTP_HOST") or "").strip():
+        record_signature_event(
+            conn,
+            row.get("id"),
+            "email_skipped",
+            details={"reason": "smtp_no_configurado", "email": _mask_email(email)},
+            now=now,
+        )
+        return {"sent": False, "reason": "smtp_no_configurado"}
+    base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
+    public_url = f"/?firma_inmo={urllib.parse.quote(str(token or ''))}"
+    full_url = f"{base}{public_url}" if base else public_url
+    subject = "Recordatorio de firma electrónica" if reminder else "Solicitud de firma electrónica"
+    doc_name = str(row.get("doc_nombre") or "documento").strip()
+    signer = str(row.get("signer_nombre") or "").strip()
+    otp_line = f"\nCódigo OTP: {otp}\n" if otp else ""
+    text_body = (
+        f"Hola {signer or ''},\n\n"
+        f"Tienes pendiente la firma electrónica del documento: {doc_name}.\n\n"
+        f"Accede desde este enlace:\n{full_url}\n"
+        f"{otp_line}\n"
+        "Si no esperabas esta solicitud, contacta con la oficina.\n"
+    )
+    html_body = (
+        f"<p>Hola {html.escape(signer or '')},</p>"
+        f"<p>Tienes pendiente la firma electrónica del documento: <strong>{html.escape(doc_name)}</strong>.</p>"
+        f"<p><a href=\"{html.escape(full_url)}\">Abrir solicitud de firma</a></p>"
+        f"{f'<p><strong>Código OTP:</strong> {html.escape(str(otp))}</p>' if otp else ''}"
+        "<p>Si no esperabas esta solicitud, contacta con la oficina.</p>"
+    )
+    try:
+        send_mail_smtp(subject, email, text_body, html_body=html_body)
+        event = "email_reminder_sent" if reminder else "email_sent"
+        record_signature_event(conn, row.get("id"), event, details={"email": _mask_email(email)}, now=now)
+        return {"sent": True, "email": _mask_email(email), "url": full_url}
+    except Exception as exc:
+        record_signature_event(
+            conn,
+            row.get("id"),
+            "email_failed",
+            details={"email": _mask_email(email), "error": str(exc)[:300]},
+            now=now,
+        )
+        return {"sent": False, "reason": str(exc)}
+
+
 def build_signature_evidence_pdf(request_row, evidence):
     row = dict(request_row)
     evidence = evidence or {}
@@ -48970,6 +49021,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_lead",
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
+            "/api/inmueble_signature_remind",
             "/api/inmueble_signature_sign",
             "/api/inmueble_signature_reject",
             "/api/inmueble_catastro_lookup",
@@ -49187,6 +49239,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/portal_lead": "inmobiliaria",
                         "/api/inmueble_anuncio_generate": "inmobiliaria",
                         "/api/inmueble_signature_request": "inmobiliaria",
+                        "/api/inmueble_signature_remind": "inmobiliaria",
                         "/api/inmueble_update": "inmobiliaria",
                         "/api/inmueble_delete": "inmobiliaria",
                         "/api/inmueble_docs": "inmobiliaria",
@@ -49562,6 +49615,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/portal_lead",
                 "/api/inmueble_anuncio_generate",
                 "/api/inmueble_signature_request",
+                "/api/inmueble_signature_remind",
                 "/api/inmueble_signature_sign",
                 "/api/inmueble_signature_reject",
                 "/api/admin_seed_modernia_users",
@@ -49596,6 +49650,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_lead",
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
+            "/api/inmueble_signature_remind",
             "/api/inmueble_signature_sign",
             "/api/inmueble_signature_reject",
             "/api/usuarios",
@@ -64771,12 +64826,118 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
+            email_result = {"sent": False, "reason": "no_solicitado"}
+            try:
+                request_row = conn.execute(
+                    "SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1",
+                    (result.get("id"),),
+                ).fetchone()
+                email_result = send_inmueble_signature_email(
+                    conn,
+                    request_row,
+                    token=result.get("token") or "",
+                    otp=result.get("otp") or "",
+                    base_url=self._external_base_url(),
+                    reminder=False,
+                    now=datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception as exc:
+                email_result = {"sent": False, "reason": str(exc)}
+            if result.get("otp") and not email_result.get("sent"):
+                try:
+                    conn.execute(
+                        """
+                        UPDATE inmueble_signature_requests
+                        SET otp_required = 0, otp_hash = '', updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (datetime.now(timezone.utc).isoformat(), result.get("id")),
+                    )
+                    record_signature_event(
+                        conn,
+                        result.get("id"),
+                        "otp_disabled",
+                        details={"reason": "email_no_enviado"},
+                        now=datetime.now(timezone.utc).isoformat(),
+                    )
+                    result["otp"] = ""
+                except Exception:
+                    pass
             conn.commit()
             response = dict(result)
+            response["email"] = email_result
             if os.environ.get("RENDER"):
                 response.pop("otp", None)
                 response.pop("token", None)
             json_response(self, {"ok": True, **response})
+            return
+        elif parsed.path == "/api/inmueble_signature_remind":
+            ensure_inmueble_signature_schema(conn)
+            request_id = str(payload.get("id") or payload.get("request_id") or "").strip()
+            if not request_id:
+                json_response(self, {"error": "request_id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (request_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Solicitud no encontrada"}, status=404)
+                return
+            data = dict(row)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, data.get("empresa_id"), write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if str(data.get("status") or "").strip().lower() in {"signed", "rejected", "expired"}:
+                json_response(self, {"error": "La solicitud ya está cerrada"}, status=409)
+                return
+            token = make_signature_token()
+            otp = f"{secrets.randbelow(1000000):06d}" if int(data.get("otp_required") or 0) else ""
+            now_value = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """
+                UPDATE inmueble_signature_requests
+                SET token_hash = ?,
+                    otp_hash = ?,
+                    sent_at = datetime(?),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (hash_signature_token(token), hash_signature_token(otp) if otp else "", now_value, now_value, request_id),
+            )
+            row = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (request_id,)).fetchone()
+            email_result = send_inmueble_signature_email(
+                conn,
+                row,
+                token=token,
+                otp=otp,
+                base_url=self._external_base_url(),
+                reminder=True,
+                now=now_value,
+            )
+            if otp and not email_result.get("sent"):
+                conn.execute(
+                    """
+                    UPDATE inmueble_signature_requests
+                    SET otp_required = 0, otp_hash = '', updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now_value, request_id),
+                )
+                record_signature_event(conn, request_id, "otp_disabled", details={"reason": "email_no_enviado"}, now=now_value)
+                otp = ""
+            record_signature_event(conn, request_id, "reminder_created", details={"email": email_result}, now=now_value)
+            conn.commit()
+            response = {
+                "ok": True,
+                "id": request_id,
+                "public_url": f"/?firma_inmo={urllib.parse.quote(token)}",
+                "email": email_result,
+            }
+            if not os.environ.get("RENDER"):
+                response["token"] = token
+                if otp:
+                    response["otp"] = otp
+            json_response(self, response)
             return
         elif parsed.path == "/api/inmueble_renovar":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
@@ -78268,6 +78429,148 @@ class Handler(BaseHTTPRequestHandler):
                 payload_json={"demanda_id": demanda_id, "cliente_id": buyer.get("cliente_id")},
             )
 
+            conn.commit()
+            json_response(self, {"ok": True, "rows": generated, "count": len(generated)})
+            return
+
+        if path == "/api/inmueble_expediente_docs":
+            now_value = datetime.now(timezone.utc).isoformat()
+            inmueble_id = params.get("id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (inmueble["empresa_id"],)).fetchone()
+            captacion = conn.execute(
+                "SELECT * FROM captaciones WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            if status != "encargo":
+                json_response(self, {"error": "El expediente completo solo está disponible para inmuebles en Encargo"}, status=400)
+                return
+            owners = get_inmueble_propietarios(conn, inmueble_id)
+            docs = conn.execute(
+                """
+                SELECT nombre, url, tipo, estado, version, plantilla_clave
+                FROM inmueble_docs
+                WHERE inmueble_id = ?
+                ORDER BY version DESC, created_at DESC
+                """,
+                (inmueble_id,),
+            ).fetchall()
+            company_payload = dict(empresa) if empresa else {}
+            inmueble_payload = dict(inmueble)
+            captacion_payload = dict(captacion)
+            docs_payload = [dict(r) for r in docs]
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            generated = []
+
+            def persist_expediente_doc(tipo, nombre, pdf_bytes, filename_base, plantilla_clave, payload_json=None):
+                row = persist_generated_inmueble_pdf(
+                    conn,
+                    inmueble_id,
+                    tipo,
+                    nombre,
+                    pdf_bytes,
+                    filename_base,
+                    now_value,
+                    replace_existing=True,
+                    empresa_id=inmueble["empresa_id"],
+                    plantilla_clave=plantilla_clave,
+                    origen_tipo="expediente_completo",
+                    origen_id=inmueble_id,
+                    payload_json=payload_json or {},
+                )
+                if row:
+                    generated.append(row)
+                return row
+
+            tipo_operacion = normalize_lookup_text(inmueble["tipo_operacion"] or captacion["tipo_operacion"] or "venta")
+            is_alquiler = tipo_operacion in {"alquiler", "arrendamiento", "renta"}
+            extra_encargo = {
+                "tipo_operacion": "alquiler" if is_alquiler else "venta",
+                "precio_venta": inmueble["precio_encargo"] or inmueble["precio_objetivo"] or captacion["precio_objetivo"] or "",
+                "renta_mensual": inmueble["precio_encargo"] or inmueble["precio_objetivo"] or captacion["precio_objetivo"] or "",
+                "honorarios_pct": inmueble["honorarios"] or "4",
+                "honorarios_mensualidades": inmueble["honorarios"] or "1",
+                "iva_pct": "21",
+                "fecha_inicio": datetime.now(timezone.utc).date().isoformat(),
+                "fecha_fin": _add_months_safe(datetime.now(timezone.utc).date(), 6).isoformat(),
+                "destino_arrendamiento": "vivienda",
+                "fianza_tipo": "una",
+                "lugar_firma": inmueble["poblacion"] or inmueble["provincia"] or "",
+            }
+            try:
+                encargo_pdf = build_inmueble_nota_encargo_pdf_final(
+                    company_payload,
+                    inmueble_payload,
+                    captacion_payload,
+                    owners,
+                    extra=extra_encargo,
+                )
+            except Exception:
+                encargo_pdf = build_inmueble_nota_encargo_pdf(company_payload, inmueble_payload, captacion_payload, owners, extra=extra_encargo)
+            persist_expediente_doc(
+                "Nota de encargo (PDF final)",
+                f"Nota de encargo (final) · {inmueble['direccion'] or safe_ref}",
+                encargo_pdf,
+                f"nota_encargo_final_{safe_ref}",
+                "nota_encargo_final",
+                payload_json=extra_encargo,
+            )
+            if is_alquiler:
+                dia_pdf = build_inmueble_consumo_rental_dia_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                persist_expediente_doc(
+                    "DIA alquiler",
+                    f"DIA alquiler · {inmueble['direccion'] or safe_ref}",
+                    dia_pdf,
+                    f"dia_alquiler_{safe_ref}",
+                    "alquiler_dia",
+                    payload_json={"kind": "alquiler_dia"},
+                )
+            else:
+                ficha_pdf = build_inmueble_consumo_sale_sheet_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                persist_expediente_doc(
+                    "Documento informativo abreviado",
+                    f"Documento informativo abreviado · {inmueble['direccion'] or safe_ref}",
+                    ficha_pdf,
+                    f"dia_venta_{safe_ref}",
+                    "venta_ficha",
+                    payload_json={"kind": "venta_ficha"},
+                )
+                precio_pdf = build_inmueble_consumo_sale_price_note_pdf(company_payload, inmueble_payload, captacion_payload)
+                persist_expediente_doc(
+                    "Justificación de precio",
+                    f"Justificación de precio · {inmueble['direccion'] or safe_ref}",
+                    precio_pdf,
+                    f"justificacion_precio_{safe_ref}",
+                    "venta_precio",
+                    payload_json={"kind": "venta_precio"},
+                )
+            try:
+                audit_event(
+                    conn,
+                    inmueble["empresa_id"],
+                    "inmueble",
+                    inmueble_id,
+                    "Generar expediente documental",
+                    usuario=(getattr(self, "auth_session", None) or {}).get("usuario"),
+                    detalles={"count": len(generated), "tipo_operacion": "alquiler" if is_alquiler else "venta"},
+                    now=now_value,
+                )
+            except Exception:
+                pass
             conn.commit()
             json_response(self, {"ok": True, "rows": generated, "count": len(generated)})
             return

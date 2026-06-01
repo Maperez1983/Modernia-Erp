@@ -3571,6 +3571,7 @@ const inmuebleVisitaPdfBtn = document.getElementById("inmuebleVisitaPdfBtn");
 const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfBtn");
 const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
 const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
+const inmuebleExpedienteDocsBtn = document.getElementById("inmuebleExpedienteDocsBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 	const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 	const inmuebleManualSaveBtn = document.getElementById("inmuebleManualSaveBtn");
@@ -32918,6 +32919,7 @@ const refreshInmuebleVisitSheetButton = () => {
   // Documentación de venta: solo cuando ya es Encargo.
   inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !isEncargo);
   inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !isEncargo);
+  inmuebleExpedienteDocsBtn?.classList.toggle("hidden", !isEncargo);
   inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !isAlquiler);
 };
 
@@ -32998,6 +33000,19 @@ const openInmuebleConsumoPdf = (kind) => {
   if (!state.currentInmuebleId || !kind) return;
   const params = new URLSearchParams({ id: state.currentInmuebleId, kind });
   window.open(`/api/inmueble_consumo_pdf?${params.toString()}`, "_blank", "noopener");
+};
+
+const generateInmuebleExpedienteDocs = async () => {
+  if (!state.currentInmuebleId) return;
+  const params = new URLSearchParams({ id: state.currentInmuebleId });
+  if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = "Generando expediente...";
+  try {
+    const data = await api(`/api/inmueble_expediente_docs?${params.toString()}`);
+    if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = `Expediente generado (${data.count || 0} documentos).`;
+    loadInmuebleDocs(state.currentInmuebleId);
+  } catch (error) {
+    if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = error?.message || "No se pudo generar el expediente.";
+  }
 };
 
 const openInmuebleNotaEncargoPdf = () => {
@@ -55851,7 +55866,7 @@ const renderInmuebleDocs = (rows = []) => {
       signer_nif: signerNif.trim(),
       signer_email: signerEmail.trim(),
       purpose: `Firma de ${docRow?.nombre || "documento inmobiliario"}`,
-      otp_required: false,
+      otp_required: Boolean(signerEmail.trim()),
       usuario: getCurrentUser(),
     };
     try {
@@ -55865,7 +55880,10 @@ const renderInmuebleDocs = (rows = []) => {
       try {
         await navigator.clipboard?.writeText(fullUrl);
       } catch (e) {}
-      alert(`Solicitud creada. Enlace copiado:\n${fullUrl}`);
+      const emailInfo = res.body?.email?.sent
+        ? "\nEmail enviado al firmante."
+        : `\nEmail no enviado: ${res.body?.email?.reason || "sin configuración SMTP o sin email"}.`;
+      alert(`Solicitud creada. Enlace copiado:\n${fullUrl}${emailInfo}`);
     } catch (err) {
       alert(err?.message || "No se pudo solicitar la firma.");
     }
@@ -79124,6 +79142,12 @@ if (inmuebleVentaPrecioPdfBtn) {
 if (inmuebleEncargoPdfBtn) {
   inmuebleEncargoPdfBtn.addEventListener("click", () => {
     openInmuebleNotaEncargoPdf();
+  });
+}
+
+if (inmuebleExpedienteDocsBtn) {
+  inmuebleExpedienteDocsBtn.addEventListener("click", () => {
+    generateInmuebleExpedienteDocs();
   });
 }
 
