@@ -872,6 +872,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
     "/api/portal_inmueble",
+    "/api/inmueble_portal_feed",
     "/api/inmueble_signature_public",
     "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
@@ -22732,6 +22733,73 @@ def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url=
             now=now,
         )
         return {"sent": False, "reason": str(exc)}
+
+
+def _mask_phone(value):
+    digits = re.sub(r"\D+", "", str(value or ""))
+    if len(digits) <= 4:
+        return "*" * len(digits)
+    return "*" * max(0, len(digits) - 4) + digits[-4:]
+
+
+def send_signature_webhook_message(conn, request_row, *, token, otp="", base_url="", channel="sms", reminder=False, now=None):
+    row = dict(request_row) if request_row else {}
+    phone = str(row.get("signer_telefono") or "").strip()
+    if not phone:
+        return {"sent": False, "reason": "sin_telefono", "channel": channel}
+    channel_key = "SIGNATURE_WHATSAPP_WEBHOOK_URL" if channel == "whatsapp" else "SIGNATURE_SMS_WEBHOOK_URL"
+    url = str(os.environ.get(channel_key) or "").strip()
+    if not url:
+        record_signature_event(
+            conn,
+            row.get("id"),
+            f"{channel}_skipped",
+            details={"reason": "webhook_no_configurado", "phone": _mask_phone(phone)},
+            now=now,
+        )
+        return {"sent": False, "reason": "webhook_no_configurado", "channel": channel}
+    base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
+    public_url = f"/?firma_inmo={urllib.parse.quote(str(token or ''))}"
+    full_url = f"{base}{public_url}" if base else public_url
+    message = f"Firma pendiente: {row.get('doc_nombre') or 'documento'}. Enlace: {full_url}"
+    if otp:
+        message += f" OTP: {otp}"
+    payload = {
+        "to": phone,
+        "channel": channel,
+        "message": message,
+        "url": full_url,
+        "otp": otp or "",
+        "request_id": row.get("id") or "",
+        "reminder": bool(reminder),
+    }
+    headers = {"Content-Type": "application/json", "User-Agent": "Verifika2Signature/1.0"}
+    secret = str(os.environ.get("SIGNATURE_WEBHOOK_SECRET") or "").strip()
+    if secret:
+        headers["Authorization"] = f"Bearer {secret}"
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status = getattr(resp, "status", 200)
+            if status >= 400:
+                raise RuntimeError(f"HTTP {status}")
+        record_signature_event(
+            conn,
+            row.get("id"),
+            f"{channel}_sent",
+            details={"phone": _mask_phone(phone), "reminder": bool(reminder)},
+            now=now,
+        )
+        return {"sent": True, "phone": _mask_phone(phone), "channel": channel, "url": full_url}
+    except Exception as exc:
+        record_signature_event(
+            conn,
+            row.get("id"),
+            f"{channel}_failed",
+            details={"phone": _mask_phone(phone), "error": str(exc)[:300]},
+            now=now,
+        )
+        return {"sent": False, "reason": str(exc), "channel": channel}
 
 
 def build_signature_evidence_pdf(request_row, evidence):
@@ -48023,6 +48091,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_invite_status",
             "/api/portal_inmuebles",
             "/api/portal_inmueble",
+            "/api/inmueble_portal_feed",
             "/api/portal_lead",
             "/api/inmueble_signature_public",
             "/api/inmueble_signature_document",
@@ -64827,6 +64896,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             email_result = {"sent": False, "reason": "no_solicitado"}
+            sms_result = {"sent": False, "reason": "no_solicitado", "channel": "sms"}
+            whatsapp_result = {"sent": False, "reason": "no_solicitado", "channel": "whatsapp"}
             try:
                 request_row = conn.execute(
                     "SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1",
@@ -64841,9 +64912,30 @@ class Handler(BaseHTTPRequestHandler):
                     reminder=False,
                     now=datetime.now(timezone.utc).isoformat(),
                 )
+                sms_result = send_signature_webhook_message(
+                    conn,
+                    request_row,
+                    token=result.get("token") or "",
+                    otp=result.get("otp") or "",
+                    base_url=self._external_base_url(),
+                    channel="sms",
+                    reminder=False,
+                    now=datetime.now(timezone.utc).isoformat(),
+                )
+                whatsapp_result = send_signature_webhook_message(
+                    conn,
+                    request_row,
+                    token=result.get("token") or "",
+                    otp=result.get("otp") or "",
+                    base_url=self._external_base_url(),
+                    channel="whatsapp",
+                    reminder=False,
+                    now=datetime.now(timezone.utc).isoformat(),
+                )
             except Exception as exc:
                 email_result = {"sent": False, "reason": str(exc)}
-            if result.get("otp") and not email_result.get("sent"):
+            any_sent = bool(email_result.get("sent") or sms_result.get("sent") or whatsapp_result.get("sent"))
+            if result.get("otp") and not any_sent:
                 try:
                     conn.execute(
                         """
@@ -64866,6 +64958,8 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             response = dict(result)
             response["email"] = email_result
+            response["sms"] = sms_result
+            response["whatsapp"] = whatsapp_result
             if os.environ.get("RENDER"):
                 response.pop("otp", None)
                 response.pop("token", None)
@@ -64914,7 +65008,28 @@ class Handler(BaseHTTPRequestHandler):
                 reminder=True,
                 now=now_value,
             )
-            if otp and not email_result.get("sent"):
+            sms_result = send_signature_webhook_message(
+                conn,
+                row,
+                token=token,
+                otp=otp,
+                base_url=self._external_base_url(),
+                channel="sms",
+                reminder=True,
+                now=now_value,
+            )
+            whatsapp_result = send_signature_webhook_message(
+                conn,
+                row,
+                token=token,
+                otp=otp,
+                base_url=self._external_base_url(),
+                channel="whatsapp",
+                reminder=True,
+                now=now_value,
+            )
+            any_sent = bool(email_result.get("sent") or sms_result.get("sent") or whatsapp_result.get("sent"))
+            if otp and not any_sent:
                 conn.execute(
                     """
                     UPDATE inmueble_signature_requests
@@ -64925,13 +65040,21 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 record_signature_event(conn, request_id, "otp_disabled", details={"reason": "email_no_enviado"}, now=now_value)
                 otp = ""
-            record_signature_event(conn, request_id, "reminder_created", details={"email": email_result}, now=now_value)
+            record_signature_event(
+                conn,
+                request_id,
+                "reminder_created",
+                details={"email": email_result, "sms": sms_result, "whatsapp": whatsapp_result},
+                now=now_value,
+            )
             conn.commit()
             response = {
                 "ok": True,
                 "id": request_id,
                 "public_url": f"/?firma_inmo={urllib.parse.quote(token)}",
                 "email": email_result,
+                "sms": sms_result,
+                "whatsapp": whatsapp_result,
             }
             if not os.environ.get("RENDER"):
                 response["token"] = token
@@ -77447,6 +77570,74 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = 100
             rows = fetch_portal_inmuebles_public(conn, limit=limit_val)
             json_response(self, {"rows": rows, "count": len(rows)})
+            return
+
+        if path == "/api/inmueble_portal_feed":
+            expected_token = str(os.environ.get("INMO_EXTERNAL_FEED_TOKEN") or "").strip()
+            provided_token = (params.get("token", [""])[0] or "").strip()
+            if expected_token and not _ct_eq(expected_token, provided_token):
+                json_response(self, {"error": "token inválido"}, status=403)
+                return
+            try:
+                limit_val = max(1, min(500, int(str(params.get("limit", ["200"])[0] or "200").strip())))
+            except Exception:
+                limit_val = 200
+            rows = fetch_portal_inmuebles_public(conn, limit=limit_val)
+            fmt = str(params.get("format", ["xml"])[0] or "xml").strip().lower()
+            if fmt == "json":
+                json_response(self, {"rows": rows, "count": len(rows), "source": "Verifika2"})
+                return
+            root = ET.Element("properties", {"source": "Verifika2"})
+            for row in rows:
+                item = ET.SubElement(root, "property")
+                fields = {
+                    "id": row.get("id"),
+                    "title": row.get("titulo") or row.get("direccion"),
+                    "price": row.get("precio"),
+                    "type": row.get("tipo_inmueble"),
+                    "operation": row.get("tipo_operacion"),
+                    "address": row.get("direccion"),
+                    "zone": row.get("zona"),
+                    "city": row.get("poblacion"),
+                    "province": row.get("provincia"),
+                    "surface": row.get("m2"),
+                    "rooms": row.get("habitaciones"),
+                    "bathrooms": row.get("banos"),
+                    "description": row.get("descripcion") or row.get("descripcion_larga") or row.get("descripcion_corta"),
+                    "url": f"{self._external_base_url()}/?portal_inmo=1&id={urllib.parse.quote(str(row.get('id') or ''))}",
+                    "image": row.get("foto"),
+                    "verified": "1" if row.get("verificado") else "0",
+                }
+                for key, value in fields.items():
+                    child = ET.SubElement(item, key)
+                    child.text = "" if value is None else str(value)
+            xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            binary_response(self, xml_bytes, content_type="application/xml; charset=utf-8", filename="verifika2_inmuebles.xml")
+            return
+
+        if path == "/api/inmueble_signature_config":
+            config = {
+                "smtp": bool((os.environ.get("SMTP_HOST") or "").strip()),
+                "sms_webhook": bool((os.environ.get("SIGNATURE_SMS_WEBHOOK_URL") or "").strip()),
+                "whatsapp_webhook": bool((os.environ.get("SIGNATURE_WHATSAPP_WEBHOOK_URL") or "").strip()),
+                "webhook_secret": bool((os.environ.get("SIGNATURE_WEBHOOK_SECRET") or "").strip()),
+                "external_signature": bool((os.environ.get("SIGNATURE_PROVIDER") or "").strip()),
+                "external_feed": bool((os.environ.get("INMO_EXTERNAL_FEED_TOKEN") or "").strip()),
+            }
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "config": config,
+                    "env_required": {
+                        "smtp": ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"],
+                        "sms": ["SIGNATURE_SMS_WEBHOOK_URL", "SIGNATURE_WEBHOOK_SECRET"],
+                        "whatsapp": ["SIGNATURE_WHATSAPP_WEBHOOK_URL", "SIGNATURE_WEBHOOK_SECRET"],
+                        "feed": ["INMO_EXTERNAL_FEED_TOKEN"],
+                        "external_signature": ["SIGNATURE_PROVIDER"],
+                    },
+                },
+            )
             return
 
         if path == "/api/portal_inmueble":

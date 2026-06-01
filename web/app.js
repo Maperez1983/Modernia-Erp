@@ -55859,14 +55859,16 @@ const renderInmuebleDocs = (rows = []) => {
     if (!signerNombre.trim()) return;
     const signerNif = window.prompt("NIF/CIF del firmante", "") || "";
     const signerEmail = window.prompt("Email del firmante (opcional)", "") || "";
+    const signerTelefono = window.prompt("Teléfono del firmante para SMS/WhatsApp (opcional)", "") || "";
     const payload = {
       inmueble_id: inmuebleId,
       doc_id: docId,
       signer_nombre: signerNombre.trim(),
       signer_nif: signerNif.trim(),
       signer_email: signerEmail.trim(),
+      signer_telefono: signerTelefono.trim(),
       purpose: `Firma de ${docRow?.nombre || "documento inmobiliario"}`,
-      otp_required: Boolean(signerEmail.trim()),
+      otp_required: Boolean(signerEmail.trim() || signerTelefono.trim()),
       usuario: getCurrentUser(),
     };
     try {
@@ -55883,7 +55885,9 @@ const renderInmuebleDocs = (rows = []) => {
       const emailInfo = res.body?.email?.sent
         ? "\nEmail enviado al firmante."
         : `\nEmail no enviado: ${res.body?.email?.reason || "sin configuración SMTP o sin email"}.`;
-      alert(`Solicitud creada. Enlace copiado:\n${fullUrl}${emailInfo}`);
+      const smsInfo = res.body?.sms?.sent ? "\nSMS enviado." : "";
+      const whatsappInfo = res.body?.whatsapp?.sent ? "\nWhatsApp enviado." : "";
+      alert(`Solicitud creada. Enlace copiado:\n${fullUrl}${emailInfo}${smsInfo}${whatsappInfo}`);
     } catch (err) {
       alert(err?.message || "No se pudo solicitar la firma.");
     }
