@@ -1,6 +1,16 @@
 (function () {
   function handleRoute(deps) {
     const params = new URLSearchParams(window.location.search);
+    if (params.has("firma_inmo")) {
+      deps.openInmuebleSignaturePublic?.(params.get("firma_inmo") || "");
+      deps.ui?.refreshContext(deps.state);
+      return;
+    }
+    if (params.has("portal_inmo")) {
+      deps.openInmobiliariaPortalPublic?.(params.get("id") || "");
+      deps.ui?.refreshContext(deps.state);
+      return;
+    }
     if (params.has("portal_token")) {
       deps.openWorkspacePortalPublic(params.get("portal_token") || "");
       deps.ui?.refreshContext(deps.state);

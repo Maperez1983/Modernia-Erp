@@ -24155,7 +24155,7 @@ const setPage = (page) => {
   try {
     if (page === "home" && isDebugEnabled()) {
       const params = new URLSearchParams(window.location.search || "");
-      const hasDeepLink = ["holding", "crm", "clientes", "cliente", "poliza", "empresa", "agenda", "admin", "portal_token"]
+      const hasDeepLink = ["holding", "crm", "clientes", "cliente", "poliza", "empresa", "agenda", "admin", "portal_token", "portal_inmo", "firma_inmo"]
         .some((key) => params.has(key));
       if (hasDeepLink) {
         setUiToast("Routing: volvió a Home", `URL actual: ${window.location.href}`);
@@ -28315,6 +28315,281 @@ const openWorkspacePortalPublic = async (token) => {
   }
 };
 
+const openInmobiliariaPortalPublic = async (listingId = "") => {
+  setCrmMode("");
+  setModule("empresas");
+  explorerSection?.classList.add("hidden");
+  setPage("portal-public");
+  if (!workspacePortalPublicContent) return;
+  workspacePortalPublicContent.innerHTML = "<p class='muted'>Cargando inmuebles...</p>";
+  try {
+    const id = String(listingId || "").trim();
+    if (id) {
+      const data = await api(`/api/portal_inmueble?id=${encodeURIComponent(id)}`);
+      const row = data?.row || {};
+      const title = row.titulo || row.direccion || "Inmueble Verifika2";
+      const highlights = String(row.destacados || "")
+        .split("|")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      workspacePortalPublicContent.innerHTML = `
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h2>${escapeHtml(title)}</h2>
+              <p class="muted">${escapeHtml([row.zona, row.poblacion, row.provincia].filter(Boolean).join(" · ") || "Verifika2")}</p>
+            </div>
+            <button type="button" class="secondary ghost" data-portal-inmo-back>Ver inmuebles</button>
+          </div>
+          ${row.foto ? `<img src="${escapeHtml(row.foto)}" alt="${escapeHtml(title)}" style="width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin:10px 0;" />` : ""}
+          <div class="workspace-mini-kpis">
+            <div class="workspace-mini-kpi"><span>Precio</span><strong>${row.precio ? euroFormatter.format(Number(row.precio || 0)) : "-"}</strong></div>
+            <div class="workspace-mini-kpi"><span>Superficie</span><strong>${row.m2 || "-"} m²</strong></div>
+            <div class="workspace-mini-kpi"><span>Dormitorios</span><strong>${row.habitaciones || "-"}</strong></div>
+            <div class="workspace-mini-kpi"><span>Baños</span><strong>${row.banos || "-"}</strong></div>
+            <div class="workspace-mini-kpi"><span>Verificación</span><strong>${row.verificado ? "Verificado" : "Pendiente"}</strong></div>
+          </div>
+          ${highlights.length ? `<div class="inmueble-summary-badges" style="margin-top:12px;">${highlights.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+          <p style="white-space:pre-line;margin-top:16px;">${escapeHtml(row.descripcion || row.descripcion_corta || "")}</p>
+        </div>
+        <div class="form-card">
+          <h3>Contactar</h3>
+          <form id="portalInmoLeadForm" class="form-grid">
+            <label>Nombre <input name="nombre" required /></label>
+            <label>Teléfono <input name="telefono" /></label>
+            <label class="span-2">Email <input name="email" type="email" /></label>
+            <label class="span-2">Mensaje <textarea name="mensaje" rows="3">Quiero más información sobre este inmueble.</textarea></label>
+            <div class="form-actions span-2">
+              <button type="submit">Enviar solicitud</button>
+              <span id="portalInmoLeadStatus" class="muted"></span>
+            </div>
+          </form>
+        </div>
+      `;
+      workspacePortalPublicContent.querySelector("[data-portal-inmo-back]")?.addEventListener("click", () => openInmobiliariaPortalPublic(""));
+      const form = document.getElementById("portalInmoLeadForm");
+      const status = document.getElementById("portalInmoLeadStatus");
+      form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fd = new FormData(form);
+        if (status) status.textContent = "Enviando...";
+        try {
+          const res = await fetch("/api/portal_lead", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              listing_id: id,
+              nombre: String(fd.get("nombre") || "").trim(),
+              telefono: String(fd.get("telefono") || "").trim(),
+              email: String(fd.get("email") || "").trim(),
+              mensaje: String(fd.get("mensaje") || "").trim(),
+            }),
+          }).then((r) => r.json());
+          if (res?.error) throw new Error(res.error);
+          if (status) status.textContent = "Solicitud enviada.";
+          form.reset();
+        } catch (err) {
+          if (status) status.textContent = err?.message || "No se pudo enviar.";
+        }
+      });
+    } else {
+      const data = await api("/api/portal_inmuebles?limit=120");
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      workspacePortalPublicContent.innerHTML = `
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h2>Verifika2</h2>
+              <p class="muted">Inmuebles publicados y verificados documentalmente.</p>
+            </div>
+          </div>
+          <div class="workspace-document-list">
+            ${
+              rows.length
+                ? rows
+                    .map(
+                      (row) => `
+                        <div class="workspace-document-row">
+                          <div>
+                            <strong>${escapeHtml(row.titulo || row.direccion || "Inmueble")}</strong>
+                            <div class="muted">${escapeHtml([row.zona, row.poblacion, row.tipo_inmueble].filter(Boolean).join(" · "))}</div>
+                          </div>
+                          <div class="workspace-document-meta">
+                            <span>${row.precio ? euroFormatter.format(Number(row.precio || 0)) : "-"}</span>
+                            <button type="button" class="secondary ghost" data-portal-inmo-open="${escapeHtml(row.id || "")}">Ver</button>
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join("")
+                : "<p class='muted'>No hay inmuebles publicados.</p>"
+            }
+          </div>
+        </div>
+      `;
+      workspacePortalPublicContent.querySelectorAll("[data-portal-inmo-open]").forEach((btn) => {
+        btn.addEventListener("click", () => openInmobiliariaPortalPublic(btn.dataset.portalInmoOpen || ""));
+      });
+    }
+    window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
+  } catch (error) {
+    workspacePortalPublicContent.innerHTML = `<p class='muted'>${escapeHtml(error?.message || "No se pudo abrir el portal inmobiliario.")}</p>`;
+  }
+};
+
+const openInmuebleSignaturePublic = async (token = "") => {
+  setCrmMode("");
+  setModule("empresas");
+  explorerSection?.classList.add("hidden");
+  setPage("portal-public");
+  if (!workspacePortalPublicContent) return;
+  const cleanToken = String(token || "").trim();
+  workspacePortalPublicContent.innerHTML = "<p class='muted'>Cargando solicitud de firma...</p>";
+  try {
+    if (!cleanToken) throw new Error("Token de firma requerido.");
+    const data = await api(`/api/inmueble_signature_public?token=${encodeURIComponent(cleanToken)}`);
+    const req = data?.request || {};
+    const isSigned = String(req.status || "").toLowerCase() === "signed";
+    const isClosed = ["signed", "rejected", "expired"].includes(String(req.status || "").toLowerCase());
+    workspacePortalPublicContent.innerHTML = `
+      <div class="form-card">
+        <div class="section-head">
+          <div>
+            <h2>Firma electrónica</h2>
+            <p class="muted">${escapeHtml(req.purpose || "Firma de documento inmobiliario")}</p>
+          </div>
+          <span class="pill">${escapeHtml(req.status || "pendiente")}</span>
+        </div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Documento</span><strong>${escapeHtml(req.doc_nombre || "Documento")}</strong></div>
+          <div class="workspace-mini-kpi"><span>Firmante</span><strong>${escapeHtml(req.signer_nombre || "-")}</strong></div>
+          <div class="workspace-mini-kpi"><span>NIF</span><strong>${escapeHtml(req.signer_nif || "-")}</strong></div>
+          <div class="workspace-mini-kpi"><span>Caduca</span><strong>${escapeHtml(formatDateTime(req.expires_at) || "-")}</strong></div>
+        </div>
+        <div class="form-actions" style="margin-top:12px;">
+          ${req.doc_public_url ? `<button type="button" class="secondary" data-sign-open-doc>Ver documento</button>` : ""}
+          ${isSigned && req.signed_doc_url ? `<button type="button" class="secondary" data-sign-open-evidence>Ver justificante</button>` : ""}
+        </div>
+      </div>
+      ${
+        isClosed
+          ? `<div class="form-card"><p class="muted">${isSigned ? "La solicitud ya está firmada." : "La solicitud ya no está disponible para firma."}</p></div>`
+          : `<div class="form-card">
+              <h3>Firmar documento</h3>
+              <form id="inmuebleSignatureForm" class="form-grid">
+                <label>Nombre completo <input name="signed_name" required value="${escapeHtml(req.signer_nombre || "")}" /></label>
+                <label>NIF/CIF <input name="signed_nif" required value="${escapeHtml(req.signer_nif || "")}" /></label>
+                ${req.otp_required ? `<label class="span-2">Código OTP <input name="otp" inputmode="numeric" autocomplete="one-time-code" required /></label>` : ""}
+                <label class="span-2">Firma manuscrita
+                  <canvas id="inmuebleSignatureCanvas" style="width:100%;height:150px;border:1px solid var(--border);border-radius:8px;background:#fff;"></canvas>
+                </label>
+                <label class="span-2"><input type="checkbox" name="accept" required /> Acepto y firmo electrónicamente este documento, dejando constancia de la trazabilidad técnica de la operación.</label>
+                <div class="form-actions span-2">
+                  <button type="submit">Firmar</button>
+                  <button type="button" class="secondary ghost" id="inmuebleSignatureClear">Limpiar firma</button>
+                  <span id="inmuebleSignatureStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>`
+      }
+    `;
+    workspacePortalPublicContent.querySelector("[data-sign-open-doc]")?.addEventListener("click", () => {
+      openExternalUrl(req.doc_public_url);
+    });
+    workspacePortalPublicContent.querySelector("[data-sign-open-evidence]")?.addEventListener("click", () => {
+      openExternalUrl(buildPhotoSrc(req.signed_doc_url));
+    });
+
+    const canvas = document.getElementById("inmuebleSignatureCanvas");
+    const clearBtn = document.getElementById("inmuebleSignatureClear");
+    let hasInk = false;
+    if (canvas) {
+      const resizeCanvas = () => {
+        const ratio = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.max(320, Math.floor(rect.width * ratio));
+        canvas.height = Math.max(120, Math.floor(rect.height * ratio));
+        const ctx = canvas.getContext("2d");
+        ctx.scale(ratio, ratio);
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#111827";
+      };
+      resizeCanvas();
+      let drawing = false;
+      const pos = (ev) => {
+        const rect = canvas.getBoundingClientRect();
+        const point = ev.touches?.[0] || ev;
+        return { x: point.clientX - rect.left, y: point.clientY - rect.top };
+      };
+      const start = (ev) => {
+        drawing = true;
+        const ctx = canvas.getContext("2d");
+        const p = pos(ev);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ev.preventDefault?.();
+      };
+      const move = (ev) => {
+        if (!drawing) return;
+        const ctx = canvas.getContext("2d");
+        const p = pos(ev);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        hasInk = true;
+        ev.preventDefault?.();
+      };
+      const stop = () => {
+        drawing = false;
+      };
+      canvas.addEventListener("mousedown", start);
+      canvas.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", stop, { once: false });
+      canvas.addEventListener("touchstart", start, { passive: false });
+      canvas.addEventListener("touchmove", move, { passive: false });
+      canvas.addEventListener("touchend", stop);
+      clearBtn?.addEventListener("click", () => {
+        canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+        hasInk = false;
+      });
+    }
+
+    const form = document.getElementById("inmuebleSignatureForm");
+    const status = document.getElementById("inmuebleSignatureStatus");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fd = new FormData(form);
+      if (!hasInk) {
+        if (status) status.textContent = "Dibuja la firma antes de continuar.";
+        return;
+      }
+      if (status) status.textContent = "Firmando...";
+      try {
+        const res = await fetch("/api/inmueble_signature_sign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: cleanToken,
+            signed_name: String(fd.get("signed_name") || "").trim(),
+            signed_nif: String(fd.get("signed_nif") || "").trim(),
+            otp: String(fd.get("otp") || "").trim(),
+            acceptance_text: "Acepto y firmo electrónicamente este documento.",
+            signature_data_url: canvas ? canvas.toDataURL("image/png") : "",
+          }),
+        }).then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })));
+        if (!res.ok || res.body?.error) throw new Error(res.body?.error || `HTTP ${res.status}`);
+        if (status) status.textContent = "Documento firmado.";
+        await openInmuebleSignaturePublic(cleanToken);
+      } catch (err) {
+        if (status) status.textContent = err?.message || "No se pudo firmar.";
+      }
+    });
+    window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
+  } catch (error) {
+    workspacePortalPublicContent.innerHTML = `<p class='muted'>${escapeHtml(error?.message || "No se pudo abrir la firma.")}</p>`;
+  }
+};
+
 const openAdmin = () => {
   const user = getAuthScopeUser();
   if (!canAccessAdminPanel(user)) return;
@@ -28408,6 +28683,8 @@ const handleRoute = () => {
     openFinCrm,
     openFinServiceTab,
     openWorkspacePortalPublic,
+    openInmobiliariaPortalPublic,
+    openInmuebleSignaturePublic,
     openClienteDetail,
     openSeguroById,
     openCompany,
@@ -28425,6 +28702,16 @@ const handleRoute = () => {
   // con la query `?holding=...` sin aplicar. Replicamos el routing mínimo.
   try {
     const params = new URLSearchParams(window.location.search);
+    if (params.has("firma_inmo")) {
+      openInmuebleSignaturePublic(params.get("firma_inmo") || "");
+      UI?.refreshContext(state);
+      return;
+    }
+    if (params.has("portal_inmo")) {
+      openInmobiliariaPortalPublic(params.get("id") || "");
+      UI?.refreshContext(state);
+      return;
+    }
     if (params.has("portal_token")) {
       openWorkspacePortalPublic(params.get("portal_token") || "");
       UI?.refreshContext(state);
@@ -30676,6 +30963,11 @@ const INMUEBLE_FIELDS = [
   { key: "habitaciones", label: "Habitaciones", type: "number", section: "Características" },
   { key: "banos", label: "Baños", type: "number", section: "Características" },
   { key: "descripcion", label: "Descripción / notas", type: "textarea", section: "Notas internas" },
+  { key: "titulo_anuncio", label: "Título anuncio", type: "text", section: "Anuncio portal" },
+  { key: "descripcion_corta", label: "Descripción corta", type: "textarea", section: "Anuncio portal" },
+  { key: "descripcion_larga", label: "Descripción larga", type: "textarea", section: "Anuncio portal" },
+  { key: "destacados", label: "Destacados", type: "textarea", section: "Anuncio portal" },
+  { key: "seo_slug", label: "Slug SEO", type: "text", section: "Anuncio portal" },
 ];
 
 // En la ficha de Encargo solo mostramos lo esencial (evita duplicidades con la sección de Captación).
@@ -30719,6 +31011,11 @@ const INMUEBLE_FIELDS_ENCARGO = [
   "banos",
   // Nota interna breve
   "descripcion",
+  "titulo_anuncio",
+  "descripcion_corta",
+  "descripcion_larga",
+  "destacados",
+  "seo_slug",
 ]
   .map((key) => INMUEBLE_FIELDS_MAP[key])
   .filter(Boolean);
@@ -33241,6 +33538,30 @@ const saveInmuebleFields = async (updates = {}) => {
 	    setInmuebleSaveStatus(error?.message || "Error al guardar.");
 	    return { error: error?.message || "Error al guardar." };
 	  }
+};
+
+const generateCurrentInmuebleAnuncio = async () => {
+  const inmuebleId = String(state.currentInmuebleId || state.currentInmuebleContext?.inmueble?.id || "").trim();
+  if (!inmuebleId) return;
+  setInmuebleSaveStatus("Generando texto de anuncio...");
+  try {
+    const data = await postJsonWithDbRetry(
+      "/api/inmueble_anuncio_generate",
+      { inmueble_id: inmuebleId },
+      { maxRetries: 4, baseDelayMs: 300, timeoutMs: 20000 }
+    );
+    if (data?.error) throw new Error(data.error);
+    ["titulo_anuncio", "descripcion_corta", "descripcion_larga", "destacados", "seo_slug", "anuncio_generado_at"].forEach((field) => {
+      if (state.currentInmueble) state.currentInmueble[field] = data[field] || "";
+      if (state.currentInmuebleContext?.inmueble) state.currentInmuebleContext.inmueble[field] = data[field] || "";
+    });
+    rerenderCurrentInmuebleGrids();
+    refreshCurrentInmuebleProfile();
+    loadCrmInmuebles();
+    setInmuebleSaveStatus("Texto de anuncio generado.");
+  } catch (error) {
+    setInmuebleSaveStatus(error?.message || "No se pudo generar el anuncio.");
+  }
 };
 
 const syncInmuebleArchivePendingButton = () => {
@@ -48217,6 +48538,87 @@ const renderCrmInicioInmoDashboard = ({ force = false } = {}) => {
             ? `Mediana: ${Number(kpis.tiempo_venta_median_dias || 0).toFixed(1)} días`
             : "Sin dato suficiente.",
       });
+      addKpi({
+        title: "Publicables",
+        value: numberFormatter.format(Number(kpis.calidad_publicables || 0)),
+        note: `${numberFormatter.format(Number(kpis.calidad_no_publicables || 0))} inmuebles con requisitos pendientes · ${numberFormatter.format(Number(kpis.portal_publicados || 0))} publicados`,
+      });
+      addKpi({
+        title: "Alertas demanda-oferta",
+        value: numberFormatter.format(Number(kpis.demandas_con_matches || 0)),
+        note: "Demandas activas con inmuebles compatibles.",
+      });
+
+      const quality = payload?.quality || {};
+      const qCounts = quality?.counts || {};
+      const qIssues = Array.isArray(quality?.issues) ? quality.issues : [];
+      const alerts = payload?.alerts || {};
+      const demandaAlerts = Array.isArray(alerts?.demanda_oferta) ? alerts.demanda_oferta : [];
+      const panel = document.createElement("div");
+      panel.className = "card kpi-card";
+      panel.style.gridColumn = "1 / -1";
+      panel.innerHTML = `
+        <h3>Calidad de cartera y alertas</h3>
+        <div class="workspace-mini-kpis" style="margin-top:10px;">
+          <div class="workspace-mini-kpi"><span>Sin foto</span><strong>${numberFormatter.format(Number(qCounts.sin_foto || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sin texto</span><strong>${numberFormatter.format(Number(qCounts.sin_texto || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sin precio</span><strong>${numberFormatter.format(Number(qCounts.sin_precio || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sin propietario</span><strong>${numberFormatter.format(Number(qCounts.sin_propietario || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sin documentación</span><strong>${numberFormatter.format(Number(qCounts.sin_documentacion || 0))}</strong></div>
+        </div>
+        <div class="workspace-central-layout" style="margin-top:12px;">
+          <div>
+            <strong>Inmuebles a completar</strong>
+            ${
+              qIssues.length
+                ? `<div class="workspace-billing-list" style="margin-top:8px;">${qIssues
+                    .slice(0, 6)
+                    .map(
+                      (row) => `
+                        <div class="workspace-billing-row">
+                          <div>
+                            <strong>${escapeHtml(row.direccion || row.id || "Inmueble")}</strong>
+                            <div class="muted">${escapeHtml((row.missing || []).join(" · ") || row.estado || "")}</div>
+                          </div>
+                          <button type="button" class="secondary ghost button-inline" data-dashboard-open-inmueble="${escapeHtml(row.id || "")}">Abrir</button>
+                        </div>
+                      `
+                    )
+                    .join("")}</div>`
+                : "<p class='muted'>Sin incidencias de publicación.</p>"
+            }
+          </div>
+          <div>
+            <strong>Demandas con oferta compatible</strong>
+            ${
+              demandaAlerts.length
+                ? `<div class="workspace-billing-list" style="margin-top:8px;">${demandaAlerts
+                    .slice(0, 6)
+                    .map((row) => {
+                      const first = Array.isArray(row.matches) && row.matches.length ? row.matches[0] : {};
+                      return `
+                        <div class="workspace-billing-row">
+                          <div>
+                            <strong>${escapeHtml([row.tipo, row.zona].filter(Boolean).join(" · ") || row.demanda_id || "Demanda")}</strong>
+                            <div class="muted">${escapeHtml(first.direccion || "")}${first.score ? ` · ${escapeHtml(String(first.score))}%` : ""}</div>
+                          </div>
+                          ${first.id ? `<button type="button" class="secondary ghost button-inline" data-dashboard-open-inmueble="${escapeHtml(first.id || "")}">Ver match</button>` : ""}
+                        </div>
+                      `;
+                    })
+                    .join("")}</div>`
+                : "<p class='muted'>Sin alertas de cruce.</p>"
+            }
+          </div>
+        </div>
+      `;
+      crmInicioDashboardKpis.appendChild(panel);
+      panel.querySelectorAll("[data-dashboard-open-inmueble]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = String(btn.dataset.dashboardOpenInmueble || "").trim();
+          if (id) openInmuebleDetail(id, "dashboard");
+        });
+      });
 
       const series = payload?.series || {};
 
@@ -49770,6 +50172,9 @@ const refreshCurrentInmuebleProfile = () => {
           <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmueblePortalToggleBtn">
             ${isPublished ? "Ocultar" : "Publicar"}
           </button>
+          <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmuebleAnuncioGenerateBtn">
+            Generar anuncio
+          </button>
           <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
             ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
           </span>
@@ -49805,6 +50210,22 @@ const refreshCurrentInmuebleProfile = () => {
           if (portalStatus) portalStatus.textContent = err?.message || "No se pudo actualizar el portal.";
         } finally {
           portalBtn.disabled = false;
+        }
+      };
+    }
+    const anuncioBtn = inmuebleSummaryCard.querySelector("#inmuebleAnuncioGenerateBtn");
+    if (anuncioBtn) {
+      anuncioBtn.onclick = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        anuncioBtn.disabled = true;
+        const oldLabel = anuncioBtn.textContent;
+        anuncioBtn.textContent = "Generando...";
+        try {
+          await generateCurrentInmuebleAnuncio();
+        } finally {
+          anuncioBtn.disabled = false;
+          anuncioBtn.textContent = oldLabel || "Generar anuncio";
         }
       };
     }
@@ -55412,6 +55833,44 @@ const renderInmuebleDocs = (rows = []) => {
     }
   };
 
+  const requestDocSignature = async (docRow) => {
+    const docId = String(docRow?.id || "").trim();
+    const inmuebleId = String(state.currentInmuebleId || state.currentInmuebleContext?.inmueble?.id || docRow?.inmueble_id || "").trim();
+    if (!docId || !inmuebleId) {
+      alert("No se pudo preparar la solicitud de firma.");
+      return;
+    }
+    const signerNombre = window.prompt("Nombre del firmante", "") || "";
+    if (!signerNombre.trim()) return;
+    const signerNif = window.prompt("NIF/CIF del firmante", "") || "";
+    const signerEmail = window.prompt("Email del firmante (opcional)", "") || "";
+    const payload = {
+      inmueble_id: inmuebleId,
+      doc_id: docId,
+      signer_nombre: signerNombre.trim(),
+      signer_nif: signerNif.trim(),
+      signer_email: signerEmail.trim(),
+      purpose: `Firma de ${docRow?.nombre || "documento inmobiliario"}`,
+      otp_required: false,
+      usuario: getCurrentUser(),
+    };
+    try {
+      const res = await fetch("/api/inmueble_signature_request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })));
+      if (!res.ok || res.body?.error) throw new Error(res.body?.error || `HTTP ${res.status}`);
+      const fullUrl = new URL(res.body.public_url || `/?firma_inmo=${encodeURIComponent(res.body.token || "")}`, window.location.origin).href;
+      try {
+        await navigator.clipboard?.writeText(fullUrl);
+      } catch (e) {}
+      alert(`Solicitud creada. Enlace copiado:\n${fullUrl}`);
+    } catch (err) {
+      alert(err?.message || "No se pudo solicitar la firma.");
+    }
+  };
+
   const isPhotoRow = (row) => {
     const tipo = normalizeSimple(row?.tipo || "");
     if (tipo.includes("foto")) return true;
@@ -55540,6 +55999,9 @@ const renderInmuebleDocs = (rows = []) => {
         const trackingBtn = createIconButton("timeline", "Ver tracking");
         trackingBtn.addEventListener("click", () => openDocTracking(row));
         actions.appendChild(trackingBtn);
+        const signBtn = createIconButton("edit", "Solicitar firma");
+        signBtn.addEventListener("click", () => requestDocSignature(row));
+        actions.appendChild(signBtn);
 
         item.appendChild(left);
         item.appendChild(badges);

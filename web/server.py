@@ -872,6 +872,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
     "/api/portal_inmueble",
+    "/api/inmueble_signature_public",
+    "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_kiosk_status",
@@ -881,6 +883,9 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
     "/api/auth_set_password",
+    "/api/portal_lead",
+    "/api/inmueble_signature_sign",
+    "/api/inmueble_signature_reject",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -22427,6 +22432,451 @@ def persist_generated_inmueble_pdf(
     return {"id": doc_id, "url": url, "path": str(file_path), "version": next_version, "estado": "Vigente"}
 
 
+def ensure_inmueble_signature_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_signature_requests (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          inmueble_id TEXT,
+          doc_id TEXT,
+          doc_url TEXT,
+          doc_nombre TEXT,
+          signer_nombre TEXT,
+          signer_nif TEXT,
+          signer_email TEXT,
+          signer_telefono TEXT,
+          purpose TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          token_hash TEXT NOT NULL,
+          otp_hash TEXT,
+          otp_required INTEGER NOT NULL DEFAULT 0,
+          expires_at TEXT,
+          sent_at TEXT,
+          opened_at TEXT,
+          signed_at TEXT,
+          rejected_at TEXT,
+          signed_name TEXT,
+          signed_nif TEXT,
+          acceptance_text TEXT,
+          signature_data_url TEXT,
+          evidence_json TEXT,
+          document_sha256 TEXT,
+          signed_doc_id TEXT,
+          signed_doc_url TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_signature_events (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          event TEXT NOT NULL,
+          ip TEXT,
+          user_agent TEXT,
+          details_json TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_inmueble_signature_token ON inmueble_signature_requests (token_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inmueble_signature_inmueble ON inmueble_signature_requests (inmueble_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inmueble_signature_events_req ON inmueble_signature_events (request_id, created_at)")
+    except Exception:
+        pass
+
+
+def hash_signature_token(raw):
+    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
+
+
+def make_signature_token():
+    return secrets.token_urlsafe(32)
+
+
+def _signature_request_row_by_token(conn, token):
+    ensure_inmueble_signature_schema(conn)
+    token_hash = hash_signature_token(token)
+    return conn.execute(
+        "SELECT * FROM inmueble_signature_requests WHERE token_hash = ? LIMIT 1",
+        (token_hash,),
+    ).fetchone()
+
+
+def _signature_url_to_local_path(url):
+    raw = str(url or "").strip()
+    if not raw.startswith("/uploads/"):
+        return None
+    candidate = (UPLOADS.parent / raw.lstrip("/")).resolve()
+    try:
+        uploads_root = UPLOADS.resolve()
+        if uploads_root in candidate.parents or candidate == uploads_root:
+            return candidate
+    except Exception:
+        return None
+    return None
+
+
+def compute_signature_document_sha256(url):
+    path = _signature_url_to_local_path(url)
+    if not path or not path.exists() or not path.is_file():
+        return ""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def record_signature_event(conn, request_id, event, handler=None, details=None, now=None):
+    if not request_id or not event:
+        return
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    ip = ""
+    ua = ""
+    if handler is not None:
+        try:
+            ip = _get_client_ip(handler)
+        except Exception:
+            ip = ""
+        try:
+            ua = str(handler.headers.get("User-Agent") or "")[:500]
+        except Exception:
+            ua = ""
+    details_text = ""
+    if details:
+        try:
+            details_text = json.dumps(details, ensure_ascii=False)
+        except Exception:
+            details_text = str(details)
+    conn.execute(
+        """
+        INSERT INTO inmueble_signature_events (id, request_id, event, ip, user_agent, details_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime(?))
+        """,
+        (os.urandom(16).hex(), request_id, event, ip, ua, details_text, now_value),
+    )
+
+
+def signature_request_public_payload(row, token=""):
+    if not row:
+        return None
+    data = dict(row)
+    public = {
+        "id": data.get("id") or "",
+        "inmueble_id": data.get("inmueble_id") or "",
+        "doc_nombre": data.get("doc_nombre") or "Documento",
+        "doc_url": data.get("doc_url") or "",
+        "signer_nombre": data.get("signer_nombre") or "",
+        "signer_nif": data.get("signer_nif") or "",
+        "signer_email": data.get("signer_email") or "",
+        "purpose": data.get("purpose") or "Firma electrónica interna",
+        "status": data.get("status") or "pending",
+        "otp_required": bool(int(data.get("otp_required") or 0)),
+        "expires_at": data.get("expires_at") or "",
+        "opened_at": data.get("opened_at") or "",
+        "signed_at": data.get("signed_at") or "",
+        "signed_doc_url": data.get("signed_doc_url") or "",
+    }
+    if token:
+        public["token"] = token
+        public["doc_public_url"] = f"/api/inmueble_signature_document?token={urllib.parse.quote(token)}"
+    return public
+
+
+def create_inmueble_signature_request(
+    conn,
+    *,
+    empresa_id,
+    inmueble_id,
+    doc_id="",
+    doc_url="",
+    doc_nombre="",
+    signer_nombre="",
+    signer_nif="",
+    signer_email="",
+    signer_telefono="",
+    purpose="",
+    otp_required=False,
+    expires_days=15,
+    created_by="",
+    now=None,
+):
+    ensure_inmueble_signature_schema(conn)
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    doc_row = None
+    if doc_id:
+        doc_row = conn.execute(
+            """
+            SELECT d.id, d.inmueble_id, d.nombre, d.url, i.empresa_id
+            FROM inmueble_docs d
+            JOIN inmuebles i ON i.id = d.inmueble_id
+            WHERE d.id = ?
+            LIMIT 1
+            """,
+            (doc_id,),
+        ).fetchone()
+        if not doc_row:
+            raise ValueError("Documento no encontrado")
+        empresa_id = str(doc_row["empresa_id"] or empresa_id or "").strip()
+        inmueble_id = str(doc_row["inmueble_id"] or inmueble_id or "").strip()
+        doc_url = str(doc_row["url"] or doc_url or "").strip()
+        doc_nombre = str(doc_row["nombre"] or doc_nombre or "").strip()
+    if not empresa_id or not inmueble_id:
+        raise ValueError("empresa_id e inmueble_id requeridos")
+    if not doc_url and not doc_id:
+        raise ValueError("Documento requerido")
+    try:
+        days = max(1, min(90, int(expires_days or 15)))
+    except Exception:
+        days = 15
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    token = make_signature_token()
+    otp = f"{secrets.randbelow(1000000):06d}" if otp_required else ""
+    request_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO inmueble_signature_requests (
+          id, empresa_id, inmueble_id, doc_id, doc_url, doc_nombre,
+          signer_nombre, signer_nif, signer_email, signer_telefono, purpose,
+          status, token_hash, otp_hash, otp_required, expires_at, sent_at,
+          document_sha256, created_by, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, datetime(?), ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            request_id,
+            empresa_id,
+            inmueble_id,
+            doc_id or None,
+            doc_url or "",
+            doc_nombre or "Documento",
+            signer_nombre or "",
+            signer_nif or "",
+            signer_email or "",
+            signer_telefono or "",
+            purpose or "Firma electrónica interna",
+            hash_signature_token(token),
+            hash_signature_token(otp) if otp else "",
+            1 if otp_required else 0,
+            expires_at,
+            now_value,
+            compute_signature_document_sha256(doc_url),
+            created_by or "",
+            now_value,
+            now_value,
+        ),
+    )
+    record_signature_event(conn, request_id, "created", details={"otp_required": bool(otp_required)}, now=now_value)
+    return {
+        "id": request_id,
+        "token": token,
+        "public_url": f"/?firma_inmo={urllib.parse.quote(token)}",
+        "otp": otp,
+        "expires_at": expires_at,
+    }
+
+
+def build_signature_evidence_pdf(request_row, evidence):
+    row = dict(request_row)
+    evidence = evidence or {}
+    if rl_canvas is None or rl_colors is None:
+        body = [
+            f"Solicitud: {row.get('id') or '-'}",
+            f"Documento: {row.get('doc_nombre') or '-'}",
+            f"URL documento: {row.get('doc_url') or '-'}",
+            f"Hash SHA-256 documento: {row.get('document_sha256') or evidence.get('document_sha256') or '-'}",
+            f"Finalidad: {row.get('purpose') or '-'}",
+            f"Firmante previsto: {row.get('signer_nombre') or '-'} · {row.get('signer_nif') or '-'}",
+            f"Firmado como: {row.get('signed_name') or evidence.get('signed_name') or '-'} · {row.get('signed_nif') or evidence.get('signed_nif') or '-'}",
+            f"Fecha envío: {row.get('sent_at') or '-'}",
+            f"Fecha apertura: {row.get('opened_at') or '-'}",
+            f"Fecha firma: {row.get('signed_at') or evidence.get('signed_at') or '-'}",
+            f"OTP requerido: {'Sí' if int(row.get('otp_required') or 0) else 'No'}",
+            f"IP firma: {evidence.get('ip') or '-'}",
+            f"Navegador: {evidence.get('user_agent') or '-'}",
+            f"Texto aceptado: {row.get('acceptance_text') or evidence.get('acceptance_text') or '-'}",
+            "Resultado: Documento aceptado y firmado electrónicamente dentro del CRM.",
+        ]
+        return build_branded_text_document_pdf(
+            "JUSTIFICANTE DE FIRMA ELECTRÓNICA INTERNA",
+            "Evidencias técnicas registradas por el CRM Verifika2.",
+            body,
+            ["Este justificante acredita trazabilidad interna; no sustituye por sí solo a un prestador cualificado eIDAS."],
+        )
+    buf = BytesIO()
+    w, h = (595.27, 841.89)
+    c = rl_canvas.Canvas(buf, pagesize=(w, h))
+    primary = rl_colors.HexColor("#0B1D33")
+    accent = rl_colors.HexColor("#C8A24A")
+    muted = rl_colors.HexColor("#6B7280")
+    ink = rl_colors.HexColor("#111827")
+    c.setFillColor(primary)
+    c.rect(0, h - 100, w, 100, stroke=0, fill=1)
+    c.setFillColor(rl_colors.white)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(42, h - 45, "JUSTIFICANTE DE FIRMA ELECTRÓNICA INTERNA")
+    c.setFont("Helvetica", 9)
+    c.drawString(42, h - 68, "Evidencias técnicas registradas por el CRM Verifika2.")
+    c.setFillColor(accent)
+    c.rect(42, h - 88, 160, 5, stroke=0, fill=1)
+
+    y = h - 132
+
+    def line(label, value):
+        nonlocal y
+        if y < 70:
+            c.showPage()
+            y = h - 52
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(42, y, str(label or "").upper())
+        c.setFillColor(ink)
+        c.setFont("Helvetica", 10)
+        text = str(value or "-")
+        for part in textwrap.wrap(text, width=92) or ["-"]:
+            c.drawString(178, y, part)
+            y -= 14
+        y -= 4
+
+    line("Solicitud", row.get("id"))
+    line("Documento", row.get("doc_nombre"))
+    line("URL documento", row.get("doc_url"))
+    line("Hash SHA-256 documento", row.get("document_sha256") or evidence.get("document_sha256"))
+    line("Finalidad", row.get("purpose"))
+    line("Firmante previsto", f"{row.get('signer_nombre') or '-'} · {row.get('signer_nif') or '-'}")
+    line("Firmado como", f"{row.get('signed_name') or evidence.get('signed_name') or '-'} · {row.get('signed_nif') or evidence.get('signed_nif') or '-'}")
+    line("Fecha envío", row.get("sent_at"))
+    line("Fecha apertura", row.get("opened_at"))
+    line("Fecha firma", row.get("signed_at") or evidence.get("signed_at"))
+    line("OTP requerido", "Sí" if int(row.get("otp_required") or 0) else "No")
+    line("IP firma", evidence.get("ip"))
+    line("Navegador", evidence.get("user_agent"))
+    line("Texto aceptado", row.get("acceptance_text") or evidence.get("acceptance_text"))
+    line("Resultado", "Documento aceptado y firmado electrónicamente dentro del CRM.")
+    c.setFillColor(muted)
+    c.setFont("Helvetica", 8)
+    c.drawString(42, 38, "Este justificante acredita trazabilidad interna; no sustituye por sí solo a un prestador cualificado eIDAS.")
+    c.save()
+    return buf.getvalue()
+
+
+def sign_inmueble_signature_request(conn, token, payload, *, handler=None, now=None):
+    ensure_inmueble_signature_schema(conn)
+    row = _signature_request_row_by_token(conn, token)
+    if not row:
+        return {"error": "Solicitud no encontrada"}, 404
+    data = dict(row)
+    status = str(data.get("status") or "").strip().lower()
+    if status == "signed":
+        return {"error": "Solicitud ya firmada", "signed_doc_url": data.get("signed_doc_url") or ""}, 409
+    if status == "rejected":
+        return {"error": "Solicitud rechazada"}, 409
+    expires_dt = _parse_iso_dt_utc(data.get("expires_at"))
+    if expires_dt and expires_dt < datetime.now(timezone.utc):
+        conn.execute(
+            "UPDATE inmueble_signature_requests SET status = 'expired', updated_at = datetime(?) WHERE id = ?",
+            (now or datetime.now(timezone.utc).isoformat(), data["id"]),
+        )
+        record_signature_event(conn, data["id"], "expired", handler=handler, now=now)
+        return {"error": "Solicitud caducada"}, 410
+    if int(data.get("otp_required") or 0):
+        otp = str(payload.get("otp") or "").strip()
+        if not otp or hash_signature_token(otp) != str(data.get("otp_hash") or ""):
+            record_signature_event(conn, data["id"], "otp_failed", handler=handler, now=now)
+            return {"error": "Código OTP inválido"}, 403
+    signed_name = str(payload.get("signed_name") or "").strip()
+    signed_nif = str(payload.get("signed_nif") or "").strip()
+    acceptance_text = str(payload.get("acceptance_text") or "").strip()
+    signature_data_url = str(payload.get("signature_data_url") or "").strip()
+    if not signed_name or not signed_nif:
+        return {"error": "Nombre y NIF requeridos"}, 400
+    if "acepto" not in acceptance_text.lower() and "firmo" not in acceptance_text.lower():
+        return {"error": "Texto de aceptación requerido"}, 400
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    try:
+        ip = _get_client_ip(handler) if handler is not None else ""
+    except Exception:
+        ip = ""
+    try:
+        ua = str(handler.headers.get("User-Agent") or "")[:500] if handler is not None else ""
+    except Exception:
+        ua = ""
+    document_sha = data.get("document_sha256") or compute_signature_document_sha256(data.get("doc_url"))
+    evidence = {
+        "request_id": data["id"],
+        "signed_at": now_value,
+        "signed_name": signed_name,
+        "signed_nif": signed_nif,
+        "acceptance_text": acceptance_text,
+        "document_sha256": document_sha,
+        "ip": ip,
+        "user_agent": ua,
+    }
+    conn.execute(
+        """
+        UPDATE inmueble_signature_requests
+        SET status = 'signed',
+            signed_at = datetime(?),
+            signed_name = ?,
+            signed_nif = ?,
+            acceptance_text = ?,
+            signature_data_url = ?,
+            evidence_json = ?,
+            document_sha256 = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (
+            now_value,
+            signed_name,
+            signed_nif,
+            acceptance_text,
+            signature_data_url[:250000],
+            json.dumps(evidence, ensure_ascii=False),
+            document_sha or "",
+            now_value,
+            data["id"],
+        ),
+    )
+    row_after = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (data["id"],)).fetchone()
+    pdf_bytes = build_signature_evidence_pdf(row_after, evidence)
+    doc = persist_generated_inmueble_pdf(
+        conn,
+        data.get("inmueble_id") or "",
+        "Firma electrónica",
+        f"Justificante firma · {data.get('doc_nombre') or 'Documento'}",
+        pdf_bytes,
+        f"justificante_firma_{data['id']}",
+        now_value,
+        replace_existing=False,
+        empresa_id=data.get("empresa_id") or "",
+        plantilla_clave="firma_electronica_interna",
+        origen_tipo="signature_request",
+        origen_id=data["id"],
+        payload_json=evidence,
+    )
+    if doc:
+        conn.execute(
+            """
+            UPDATE inmueble_signature_requests
+            SET signed_doc_id = ?, signed_doc_url = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (doc.get("id"), doc.get("url"), now_value, data["id"]),
+        )
+        evidence["signed_doc_id"] = doc.get("id")
+        evidence["signed_doc_url"] = doc.get("url")
+    record_signature_event(conn, data["id"], "signed", handler=handler, details=evidence, now=now_value)
+    return {"ok": True, "id": data["id"], "signed_doc_url": (doc or {}).get("url") or ""}, 200
+
+
 INMO_ACTION_RESULT_OPTIONS = {
     "cita_adquisicion": {"Positivo", "Negativo", "Reprogramar", "No realizada"},
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
@@ -24606,6 +25056,17 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
             """,
             (demanda_id, empresa_id),
         ).fetchone()
+        if not demanda:
+            demanda = conn.execute(
+                """
+                SELECT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+                FROM demandas d
+                LEFT JOIN clientes c ON c.id = d.cliente_id
+                WHERE d.id = ?
+                LIMIT 1
+                """,
+                (demanda_id,),
+            ).fetchone()
         if demanda and (demanda["cliente_id"] or demanda["nombre"]):
             return {
                 "cliente_id": demanda["cliente_id"],
@@ -24629,6 +25090,19 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
             """,
             (empresa_id, inmueble_id),
         ).fetchall()
+        if not rows:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+                FROM visitas v
+                JOIN demandas d ON d.id = v.demanda_id
+                LEFT JOIN clientes c ON c.id = d.cliente_id
+                WHERE v.inmueble_id = ?
+                  AND d.cliente_id IS NOT NULL
+                ORDER BY v.created_at DESC
+                """,
+                (inmueble_id,),
+            ).fetchall()
         unique = []
         seen = set()
         for row in rows:
@@ -26070,10 +26544,13 @@ def _portal_inmueble_photo_expr(conn, alias="i"):
 def portal_inmueble_row_to_public(row):
     data = dict(row or {})
     price = data.get("precio_encargo") or data.get("precio_objetivo") or data.get("precio_pedido_cliente") or data.get("precio_valoracion")
+    title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
+    description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
-        "titulo": data.get("titulo") or data.get("direccion") or "Inmueble Verifika2",
+        "titulo": title,
+        "titulo_anuncio": data.get("titulo_anuncio"),
         "direccion": data.get("direccion"),
         "zona": data.get("zona"),
         "poblacion": data.get("poblacion") or data.get("localidad"),
@@ -26086,7 +26563,11 @@ def portal_inmueble_row_to_public(row):
         "banos": data.get("banos"),
         "precio": price,
         "estado": data.get("estado"),
-        "descripcion": data.get("descripcion"),
+        "descripcion": description,
+        "descripcion_corta": data.get("descripcion_corta"),
+        "descripcion_larga": data.get("descripcion_larga"),
+        "destacados": data.get("destacados"),
+        "seo_slug": data.get("seo_slug"),
         "lat": data.get("lat"),
         "lon": data.get("lon"),
         "foto": data.get("foto"),
@@ -26102,6 +26583,11 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
         ensure_column(conn, "inmuebles", "portal_publicado_at", "portal_publicado_at TEXT")
         ensure_column(conn, "inmuebles", "portal_retirado_at", "portal_retirado_at TEXT")
         ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "inmuebles", "titulo_anuncio", "titulo_anuncio TEXT")
+        ensure_column(conn, "inmuebles", "descripcion_corta", "descripcion_corta TEXT")
+        ensure_column(conn, "inmuebles", "descripcion_larga", "descripcion_larga TEXT")
+        ensure_column(conn, "inmuebles", "destacados", "destacados TEXT")
+        ensure_column(conn, "inmuebles", "seo_slug", "seo_slug TEXT")
     except Exception:
         pass
     photo_expr = _portal_inmueble_photo_expr(conn, "i")
@@ -26129,6 +26615,7 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
           i.tipo_operacion, i.tipo_inmueble, i.subtipologia, i.m2, i.habitaciones, i.banos,
           i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, i.precio_valoracion,
           i.estado, i.descripcion, i.lat, i.lon, i.certificado, i.portal_publicado_at,
+          i.titulo_anuncio, i.descripcion_corta, i.descripcion_larga, i.destacados, i.seo_slug,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
         FROM inmuebles i
@@ -26141,6 +26628,290 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
         (*values, limit_val),
     ).fetchall()
     return [portal_inmueble_row_to_public(row) for row in rows]
+
+
+def build_inmueble_anuncio_copy(inmueble):
+    data = dict(inmueble or {})
+
+    def text(*keys):
+        for key in keys:
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def num(key):
+        try:
+            value = float(data.get(key) or 0)
+        except Exception:
+            value = 0.0
+        return int(value) if value and value.is_integer() else value
+
+    tipo = text("tipo_inmueble") or "Inmueble"
+    subtipo = text("subtipologia")
+    operacion = normalize_lookup_text(text("tipo_operacion") or "venta")
+    zona = text("zona")
+    poblacion = text("poblacion", "localidad")
+    provincia = text("provincia")
+    ubicacion = " en ".join([part for part in [zona, poblacion] if part]) or poblacion or provincia
+    location_phrase = f" en {ubicacion}" if ubicacion else ""
+    m2 = num("m2")
+    habitaciones = num("habitaciones")
+    banos = num("banos")
+    estado = text("estado_inmueble", "estado")
+    ocupacion = text("situacion_ocupacion")
+    precio = data.get("precio_encargo") or data.get("precio_objetivo") or data.get("precio_pedido_cliente") or data.get("precio_valoracion")
+
+    tipo_label = f"{subtipo} {tipo}".strip() if subtipo and subtipo.lower() not in tipo.lower() else tipo
+    op_label = "alquiler" if operacion in {"alquiler", "arrendamiento", "renta"} else "venta"
+    title_parts = [tipo_label, location_phrase.strip()]
+    title = " ".join([part for part in title_parts if part]).strip()
+    if not title:
+        title = text("titulo") or text("direccion") or "Inmueble Verifika2"
+    title = title[:120]
+
+    feature_bits = []
+    if m2:
+        feature_bits.append(f"{m2} m2")
+    if habitaciones:
+        feature_bits.append(f"{habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}")
+    if banos:
+        feature_bits.append(f"{banos} baño{'s' if int(banos) != 1 else ''}")
+    if estado:
+        feature_bits.append(f"estado {estado.lower()}")
+    if ocupacion:
+        feature_bits.append(f"ocupacion: {ocupacion.lower()}")
+
+    short = f"{tipo_label}{location_phrase}"
+    if feature_bits:
+        short = f"{short} con {', '.join(feature_bits[:3])}"
+    if precio:
+        short = f"{short}. Precio de {op_label} disponible en ficha."
+    else:
+        short = f"{short}. Solicita mas informacion y visita."
+
+    paragraphs = [
+        f"Verifika2 presenta este {tipo_label.lower()}{location_phrase}, una oportunidad pensada para quienes buscan una operacion de {op_label} con informacion clara y contrastada.",
+    ]
+    if feature_bits:
+        paragraphs.append(f"La vivienda cuenta con {', '.join(feature_bits)}.")
+    base_desc = text("descripcion")
+    if base_desc:
+        paragraphs.append(base_desc)
+    paragraphs.append("Contacta con nuestro equipo para ampliar informacion, resolver dudas y coordinar una visita.")
+    long = "\n\n".join(paragraphs).strip()
+
+    highlights = []
+    if m2:
+        highlights.append(f"{m2} m2 construidos")
+    if habitaciones:
+        highlights.append(f"{habitaciones} dormitorios")
+    if banos:
+        highlights.append(f"{banos} banos")
+    if ubicacion:
+        highlights.append(ubicacion)
+    if estado:
+        highlights.append(estado)
+    if not highlights:
+        highlights.append("Inmueble verificado")
+
+    slug_source = " ".join([title, poblacion, provincia]).strip() or text("referencia") or text("id")
+    return {
+        "titulo_anuncio": title,
+        "descripcion_corta": short[:280],
+        "descripcion_larga": long[:4000],
+        "destacados": " | ".join(highlights[:8]),
+        "seo_slug": slugify_text(slug_source)[:140],
+    }
+
+
+def validate_portal_publication_requirements(conn, inmueble_id):
+    inmueble_id = str(inmueble_id or "").strip()
+    if not inmueble_id:
+        return {"ok": False, "missing": ["inmueble_id"], "checks": {}, "row": None}
+    try:
+        for col_name, col_sql in {
+            "portal_publicado": "portal_publicado INTEGER NOT NULL DEFAULT 0",
+            "certificado": "certificado INTEGER NOT NULL DEFAULT 0",
+            "titulo_anuncio": "titulo_anuncio TEXT",
+            "descripcion_corta": "descripcion_corta TEXT",
+            "descripcion_larga": "descripcion_larga TEXT",
+            "destacados": "destacados TEXT",
+            "seo_slug": "seo_slug TEXT",
+        }.items():
+            ensure_column(conn, "inmuebles", col_name, col_sql)
+    except Exception:
+        pass
+    row = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not row:
+        return {"ok": False, "missing": ["inmueble"], "checks": {}, "row": None}
+    captacion = conn.execute(
+        """
+        SELECT COALESCE(MAX(noticia_verificada), 0) AS noticia_verificada
+        FROM captaciones
+        WHERE inmueble_id = ?
+        """,
+        (inmueble_id,),
+    ).fetchone()
+    photo = conn.execute(
+        """
+        SELECT id
+        FROM inmueble_docs
+        WHERE inmueble_id = ?
+          AND LOWER(COALESCE(estado, 'Vigente')) NOT IN ('eliminado', 'borrado')
+          AND (
+            LOWER(COALESCE(tipo, '')) LIKE '%foto%'
+            OR LOWER(COALESCE(nombre, '')) LIKE '%.jpg'
+            OR LOWER(COALESCE(nombre, '')) LIKE '%.jpeg'
+            OR LOWER(COALESCE(nombre, '')) LIKE '%.png'
+            OR LOWER(COALESCE(nombre, '')) LIKE '%.webp'
+            OR LOWER(COALESCE(url, '')) LIKE '%.jpg'
+            OR LOWER(COALESCE(url, '')) LIKE '%.jpeg'
+            OR LOWER(COALESCE(url, '')) LIKE '%.png'
+            OR LOWER(COALESCE(url, '')) LIKE '%.webp'
+          )
+        LIMIT 1
+        """,
+        (inmueble_id,),
+    ).fetchone()
+    price = row["precio_encargo"] or row["precio_objetivo"] or row["precio_pedido_cliente"] or row["precio_valoracion"]
+    state_norm = normalize_lookup_text(row["estado"])
+    description = str(row["descripcion_larga"] or row["descripcion_corta"] or row["descripcion"] or "").strip()
+    noticia_verificada = 0
+    if captacion:
+        try:
+            noticia_verificada = int(row_value(captacion, "noticia_verificada", 0) or 0)
+        except Exception:
+            noticia_verificada = 0
+    checks = {
+        "verificado": noticia_verificada == 1,
+        "estado_publicable": state_norm not in {"vendido", "alquilado", "cerrado negativamente", "historico vendido", "histórico vendido"},
+        "precio": parse_money_value(price) > 0,
+        "ubicacion": bool(str(row["direccion"] or "").strip() and (str(row["poblacion"] or row["localidad"] or row["zona"] or "").strip())),
+        "tipo": bool(str(row["tipo_inmueble"] or "").strip()),
+        "descripcion": bool(description),
+        "foto": bool(photo),
+    }
+    labels = {
+        "verificado": "Noticia verificada",
+        "estado_publicable": "Estado publicable",
+        "precio": "Precio",
+        "ubicacion": "Ubicación",
+        "tipo": "Tipo de inmueble",
+        "descripcion": "Texto/descripción de anuncio",
+        "foto": "Foto principal",
+    }
+    missing = [labels[key] for key, ok in checks.items() if not ok]
+    return {"ok": not missing, "missing": missing, "checks": checks, "row": row}
+
+
+def create_portal_inmueble_lead(conn, payload, now):
+    listing_id = str(payload.get("listing_id") or payload.get("inmueble_id") or payload.get("id") or "").strip()
+    if not listing_id:
+        return {"error": "listing_id requerido"}, 400
+    listing_rows = fetch_portal_inmuebles_public(conn, listing_id=listing_id, limit=1)
+    if not listing_rows:
+        return {"error": "Inmueble no publicado"}, 404
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (listing_id,)).fetchone()
+    if not inmueble:
+        return {"error": "Inmueble no encontrado"}, 404
+    nombre = normalize_person_name(payload.get("nombre") or payload.get("name"))
+    telefono = str(payload.get("telefono") or payload.get("phone") or "").strip()
+    email = normalize_email(payload.get("email"))
+    notas = str(payload.get("mensaje") or payload.get("notas") or payload.get("message") or "").strip()
+    if not nombre and not telefono and not email:
+        return {"error": "nombre, teléfono o email requerido"}, 400
+    empresa_id = inmueble["empresa_id"]
+    cliente_id = ensure_cliente_for_inmobiliaria(
+        conn,
+        empresa_id,
+        nombre or email or telefono,
+        payload.get("nif"),
+        now,
+        {"telefono": telefono, "email": email},
+    )
+    demanda_id = os.urandom(16).hex()
+    d_cols = table_columns(conn, "demandas") or set()
+    demanda_payload = {
+        "id": demanda_id,
+        "empresa_id": empresa_id,
+        "cliente_id": cliente_id,
+        "focalizacion": "Portal Verifika2",
+        "pedido": f"Lead portal Verifika2 · {inmueble['direccion'] or inmueble['referencia'] or listing_id}",
+        "tipo": "Compra" if normalize_lookup_text(inmueble["tipo_operacion"]) not in {"alquiler", "arrendamiento", "renta"} else "Alquiler",
+        "zona": inmueble["zona"] or inmueble["poblacion"] or inmueble["localidad"],
+        "tipologia": inmueble["tipo_inmueble"],
+        "subtipologia": inmueble["subtipologia"],
+        "precio_max": inmueble["precio_encargo"] or inmueble["precio_objetivo"] or inmueble["precio_pedido_cliente"],
+        "m2_min": inmueble["m2"],
+        "habitaciones_min": inmueble["habitaciones"],
+        "banos_min": inmueble["banos"],
+        "estado": "Activa",
+        "fase": "Portal",
+        "prioridad": "Alta",
+        "origen": "Portal Verifika2",
+        "pedido_web": 1,
+        "anuncio_mi_cartera": 1,
+        "presentacion_servicio": 0,
+        "fecha_insercion": datetime.now(timezone.utc).date().isoformat(),
+        "estado_contacto": "Pendiente",
+        "notas": f"{notas}\nInmueble: {listing_id}".strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    keys = [key for key in demanda_payload if key in d_cols]
+    conn.execute(
+        f"INSERT INTO demandas ({', '.join(keys)}) VALUES ({', '.join(['?'] * len(keys))})",
+        [demanda_payload[key] for key in keys],
+    )
+    ic_cols = table_columns(conn, "inmueble_compradores") or set()
+    if ic_cols:
+        ic_payload = {
+            "id": os.urandom(16).hex(),
+            "empresa_id": empresa_id,
+            "inmueble_id": listing_id,
+            "demanda_id": demanda_id,
+            "cliente_id": cliente_id,
+            "estado": "Pendiente",
+            "fecha_ultimo_contacto": datetime.now(timezone.utc).date().isoformat(),
+            "notas": "Lead recibido desde portal Verifika2",
+            "created_at": now,
+            "updated_at": now,
+        }
+        ic_keys = [key for key in ic_payload if key in ic_cols]
+        conn.execute(
+            f"INSERT INTO inmueble_compradores ({', '.join(ic_keys)}) VALUES ({', '.join(['?'] * len(ic_keys))})",
+            [ic_payload[key] for key in ic_keys],
+        )
+    try:
+        conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, demanda_id, cliente_nombre,
+              fecha, hora, tipo, asunto, estado, notas, created_at, updated_at
+            ) VALUES (
+              ?, ?, 'inmobiliaria', ?, ?, ?, ?, date('now'), '10:00', 'Lead portal',
+              ?, 'Pendiente', ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                empresa_id,
+                cliente_id,
+                listing_id,
+                demanda_id,
+                nombre or email or telefono,
+                f"Lead portal · {inmueble['direccion'] or inmueble['referencia'] or listing_id}",
+                notas or "Contacto recibido desde portal Verifika2",
+                now,
+                now,
+            ),
+        )
+    except Exception:
+        pass
+    audit_event(conn, empresa_id, "portal_leads", demanda_id, "Lead portal Verifika2", usuario="Portal", detalles={"inmueble_id": listing_id}, now=now)
+    conn.commit()
+    return {"ok": True, "listing_id": listing_id, "cliente_id": cliente_id, "demanda_id": demanda_id}, 200
 
 
 def infer_operacion_estado_documental(payload):
@@ -32436,6 +33207,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "inmueble_docs", "payload_json", "payload_json TEXT")
     ensure_column(conn, "inmueble_docs", "reviewed_at", "reviewed_at TEXT")
     ensure_column(conn, "inmueble_docs", "reviewed_by", "reviewed_by TEXT")
+    ensure_inmueble_signature_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS legal_radar_items (
@@ -32529,6 +33301,12 @@ def ensure_tables(db_path):
         "subtipologia": "subtipologia TEXT",
         "responsable": "responsable TEXT",
         "descripcion": "descripcion TEXT",
+        "titulo_anuncio": "titulo_anuncio TEXT",
+        "descripcion_corta": "descripcion_corta TEXT",
+        "descripcion_larga": "descripcion_larga TEXT",
+        "destacados": "destacados TEXT",
+        "seo_slug": "seo_slug TEXT",
+        "anuncio_generado_at": "anuncio_generado_at TEXT",
         "categoria": "categoria TEXT",
         "anio_reforma": "anio_reforma INTEGER",
         "propietario_telefono": "propietario_telefono TEXT",
@@ -47194,6 +47972,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_invite_status",
             "/api/portal_inmuebles",
             "/api/portal_inmueble",
+            "/api/portal_lead",
+            "/api/inmueble_signature_public",
+            "/api/inmueble_signature_document",
+            "/api/inmueble_signature_sign",
+            "/api/inmueble_signature_reject",
             "/api/workspace_portal_public",
             "/api/workspace_factura_pdf_public",
             "/api/workspace_portal_upload",
@@ -48184,6 +48967,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_convert",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/portal_lead",
+            "/api/inmueble_anuncio_generate",
+            "/api/inmueble_signature_request",
+            "/api/inmueble_signature_sign",
+            "/api/inmueble_signature_reject",
             "/api/inmueble_catastro_lookup",
             "/api/inmueble_catastro_sync",
             "/api/inmueble_update",
@@ -48396,6 +49184,9 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/captacion_convert": "inmobiliaria",
                         "/api/compraventas": "inmobiliaria",
                         "/api/portal_publish_update": "inmobiliaria",
+                        "/api/portal_lead": "inmobiliaria",
+                        "/api/inmueble_anuncio_generate": "inmobiliaria",
+                        "/api/inmueble_signature_request": "inmobiliaria",
                         "/api/inmueble_update": "inmobiliaria",
                         "/api/inmueble_delete": "inmobiliaria",
                         "/api/inmueble_docs": "inmobiliaria",
@@ -48768,6 +49559,11 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_radar_auto_status",
                 "/api/legal_radar_counts",
                 "/api/portal_publish_update",
+                "/api/portal_lead",
+                "/api/inmueble_anuncio_generate",
+                "/api/inmueble_signature_request",
+                "/api/inmueble_signature_sign",
+                "/api/inmueble_signature_reject",
                 "/api/admin_seed_modernia_users",
             }
         )
@@ -48797,6 +49593,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional_delete",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/portal_lead",
+            "/api/inmueble_anuncio_generate",
+            "/api/inmueble_signature_request",
+            "/api/inmueble_signature_sign",
+            "/api/inmueble_signature_reject",
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
@@ -48908,6 +49709,36 @@ class Handler(BaseHTTPRequestHandler):
 
         conn = get_db(self.db_path)
         self._track_conn(conn)
+        if parsed.path == "/api/inmueble_signature_sign":
+            result, status = sign_inmueble_signature_request(
+                conn,
+                payload.get("token") or "",
+                payload,
+                handler=self,
+                now=datetime.now(timezone.utc).isoformat(),
+            )
+            conn.commit()
+            json_response(self, result, status=status)
+            return
+        if parsed.path == "/api/inmueble_signature_reject":
+            token = str(payload.get("token") or "").strip()
+            row = _signature_request_row_by_token(conn, token)
+            if not row:
+                json_response(self, {"error": "Solicitud no encontrada"}, status=404)
+                return
+            now_value = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """
+                UPDATE inmueble_signature_requests
+                SET status = 'rejected', rejected_at = datetime(?), updated_at = datetime(?)
+                WHERE id = ? AND status NOT IN ('signed', 'rejected')
+                """,
+                (now_value, now_value, row["id"]),
+            )
+            record_signature_event(conn, row["id"], "rejected", handler=self, details={"reason": payload.get("reason") or ""}, now=now_value)
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         if parsed.path in (
             "/api/login",
             "/api/auth_set_password",
@@ -49159,6 +49990,10 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+        if parsed.path == "/api/portal_lead":
+            result, status = create_portal_inmueble_lead(conn, payload, now)
+            json_response(self, result, status=status)
+            return
         if parsed.path == "/api/iivtnu_municipios":
             scope = str(payload.get("scope") or "all").strip().lower()
             q = str(payload.get("q") or "").strip()
@@ -63813,6 +64648,18 @@ class Handler(BaseHTTPRequestHandler):
             published = 1 if str(payload.get("published") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             now_iso = datetime.now(timezone.utc).isoformat()
             if published:
+                validation = validate_portal_publication_requirements(conn, listing_id)
+                if not validation.get("ok"):
+                    json_response(
+                        self,
+                        {
+                            "error": "El inmueble no cumple requisitos de publicación",
+                            "missing": validation.get("missing") or [],
+                            "checks": validation.get("checks") or {},
+                        },
+                        status=400,
+                    )
+                    return
                 conn.execute(
                     """
                     UPDATE inmuebles
@@ -63851,6 +64698,85 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             conn.commit()
             json_response(self, {"ok": True, "id": listing_id, "published": published, "visible": visible})
+            return
+        elif parsed.path == "/api/inmueble_signature_request":
+            ensure_inmueble_signature_schema(conn)
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            doc_id = str(payload.get("doc_id") or "").strip()
+            doc_url = str(payload.get("doc_url") or "").strip()
+            doc_nombre = str(payload.get("doc_nombre") or "").strip()
+            if doc_id:
+                doc_row = conn.execute(
+                    """
+                    SELECT d.id, d.inmueble_id, d.nombre, d.url, i.empresa_id
+                    FROM inmueble_docs d
+                    JOIN inmuebles i ON i.id = d.inmueble_id
+                    WHERE d.id = ?
+                    LIMIT 1
+                    """,
+                    (doc_id,),
+                ).fetchone()
+                if not doc_row:
+                    json_response(self, {"error": "Documento no encontrado"}, status=404)
+                    return
+                inmueble_id = str(doc_row["inmueble_id"] or inmueble_id or "").strip()
+                doc_url = str(doc_row["url"] or doc_url or "").strip()
+                doc_nombre = str(doc_row["nombre"] or doc_nombre or "").strip()
+                empresa_id = str(doc_row["empresa_id"] or "").strip()
+            else:
+                inmueble = conn.execute(
+                    "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+                if not inmueble:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
+                empresa_id = str(inmueble["empresa_id"] or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                result = create_inmueble_signature_request(
+                    conn,
+                    empresa_id=empresa_id,
+                    inmueble_id=inmueble_id,
+                    doc_id=doc_id,
+                    doc_url=doc_url,
+                    doc_nombre=doc_nombre,
+                    signer_nombre=str(payload.get("signer_nombre") or "").strip(),
+                    signer_nif=str(payload.get("signer_nif") or "").strip(),
+                    signer_email=str(payload.get("signer_email") or "").strip(),
+                    signer_telefono=str(payload.get("signer_telefono") or "").strip(),
+                    purpose=str(payload.get("purpose") or "Firma de documento inmobiliario").strip(),
+                    otp_required=bool(payload.get("otp_required")),
+                    expires_days=payload.get("expires_days") or 15,
+                    created_by=str(payload.get("usuario") or "").strip(),
+                    now=datetime.now(timezone.utc).isoformat(),
+                )
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                audit_event(
+                    conn,
+                    empresa_id,
+                    "inmueble_signature_requests",
+                    result.get("id"),
+                    "Solicitar firma electrónica",
+                    usuario=payload.get("usuario"),
+                    detalles={"inmueble_id": inmueble_id, "doc_id": doc_id, "otp_required": bool(payload.get("otp_required"))},
+                    now=datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception:
+                pass
+            conn.commit()
+            response = dict(result)
+            if os.environ.get("RENDER"):
+                response.pop("otp", None)
+                response.pop("token", None)
+            json_response(self, {"ok": True, **response})
             return
         elif parsed.path == "/api/inmueble_renovar":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
@@ -65265,6 +66191,73 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 json_response(self, {"error": f"captacion_convert_error: {type(exc).__name__}: {exc}"}, status=500)
                 return
+        elif parsed.path == "/api/inmueble_anuncio_generate":
+            inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            try:
+                for col_name, col_sql in {
+                    "titulo_anuncio": "titulo_anuncio TEXT",
+                    "descripcion_corta": "descripcion_corta TEXT",
+                    "descripcion_larga": "descripcion_larga TEXT",
+                    "destacados": "destacados TEXT",
+                    "seo_slug": "seo_slug TEXT",
+                    "anuncio_generado_at": "anuncio_generado_at TEXT",
+                }.items():
+                    ensure_column(conn, "inmuebles", col_name, col_sql)
+            except Exception:
+                pass
+            inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            except Exception:
+                pass
+            copy_payload = build_inmueble_anuncio_copy(inmueble)
+            now_value = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """
+                UPDATE inmuebles
+                SET titulo_anuncio = ?,
+                    descripcion_corta = ?,
+                    descripcion_larga = ?,
+                    destacados = ?,
+                    seo_slug = ?,
+                    anuncio_generado_at = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    copy_payload["titulo_anuncio"],
+                    copy_payload["descripcion_corta"],
+                    copy_payload["descripcion_larga"],
+                    copy_payload["destacados"],
+                    copy_payload["seo_slug"],
+                    now_value,
+                    now,
+                    inmueble_id,
+                ),
+            )
+            audit_event(
+                conn,
+                inmueble["empresa_id"],
+                "inmuebles",
+                inmueble_id,
+                "Generar texto anuncio",
+                usuario=payload.get("usuario"),
+                detalles={"seo_slug": copy_payload.get("seo_slug")},
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": inmueble_id, **copy_payload, "anuncio_generado_at": now_value})
+            return
         elif parsed.path == "/api/inmueble_update":
             inmueble_id = payload.get("inmueble_id")
             if not inmueble_id:
@@ -65327,6 +66320,11 @@ class Handler(BaseHTTPRequestHandler):
                 "asesor",
                 "responsable",
                 "descripcion",
+                "titulo_anuncio",
+                "descripcion_corta",
+                "descripcion_larga",
+                "destacados",
+                "seo_slug",
                 "categoria",
                 "situacion_ocupacion",
                 "ocupado_por",
@@ -70980,6 +71978,70 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, payload)
             return
 
+        if path == "/api/inmueble_signature_public":
+            token = params.get("token", [""])[0]
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            ensure_inmueble_signature_schema(conn)
+            row = _signature_request_row_by_token(conn, token)
+            if not row:
+                json_response(self, {"error": "Solicitud no encontrada"}, status=404)
+                return
+            data = dict(row)
+            expires_dt = _parse_iso_dt_utc(data.get("expires_at"))
+            now_value = datetime.now(timezone.utc).isoformat()
+            if expires_dt and expires_dt < datetime.now(timezone.utc) and data.get("status") not in {"signed", "rejected", "expired"}:
+                conn.execute(
+                    "UPDATE inmueble_signature_requests SET status = 'expired', updated_at = datetime(?) WHERE id = ?",
+                    (now_value, data["id"]),
+                )
+                record_signature_event(conn, data["id"], "expired", handler=self, now=now_value)
+                conn.commit()
+                row = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (data["id"],)).fetchone()
+                data = dict(row)
+            if str(data.get("status") or "").strip().lower() == "pending" and not str(data.get("opened_at") or "").strip():
+                conn.execute(
+                    """
+                    UPDATE inmueble_signature_requests
+                    SET status = 'opened', opened_at = datetime(?), updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now_value, now_value, data["id"]),
+                )
+                record_signature_event(conn, data["id"], "opened", handler=self, now=now_value)
+                conn.commit()
+                row = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (data["id"],)).fetchone()
+            json_response(self, {"ok": True, "request": signature_request_public_payload(row, token=token)})
+            return
+
+        if path == "/api/inmueble_signature_document":
+            token = params.get("token", [""])[0]
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            ensure_inmueble_signature_schema(conn)
+            row = _signature_request_row_by_token(conn, token)
+            if not row:
+                json_response(self, {"error": "Solicitud no encontrada"}, status=404)
+                return
+            data = dict(row)
+            if str(data.get("status") or "").strip().lower() in {"rejected", "expired"}:
+                json_response(self, {"error": "Solicitud no disponible"}, status=410)
+                return
+            expires_dt = _parse_iso_dt_utc(data.get("expires_at"))
+            if expires_dt and expires_dt < datetime.now(timezone.utc):
+                json_response(self, {"error": "Solicitud caducada"}, status=410)
+                return
+            path_obj = _signature_url_to_local_path(data.get("doc_url"))
+            if not path_obj or not path_obj.exists():
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            record_signature_event(conn, data["id"], "document_viewed", handler=self, now=datetime.now(timezone.utc).isoformat())
+            conn.commit()
+            send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.pdf"))
+            return
+
         if path == "/api/workspace_portal_facturas_excel":
             token = (params.get("token", [""])[0] or "").strip()
             if not token:
@@ -76236,6 +77298,29 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Inmueble no publicado"}, status=404)
                 return
             json_response(self, {"row": rows[0]})
+            return
+
+        if path == "/api/portal_publish_preview":
+            listing_id = (params.get("id", [""])[0] or params.get("listing_id", [""])[0] or "").strip()
+            if not listing_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            validation = validate_portal_publication_requirements(conn, listing_id)
+            row = validation.pop("row", None)
+            if not row:
+                json_response(self, {"error": "Inmueble no encontrado", **validation}, status=404)
+                return
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_empresa_membership(conn, session, row["empresa_id"])
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            except Exception:
+                pass
+            public_rows = fetch_portal_inmuebles_public(conn, listing_id=listing_id, limit=1)
+            public_payload = public_rows[0] if public_rows else portal_inmueble_row_to_public(row)
+            json_response(self, {"ok": True, "can_publish": validation["ok"], **validation, "row": public_payload})
             return
 
         if path == "/api/inmuebles":
@@ -81516,6 +82601,96 @@ class Handler(BaseHTTPRequestHandler):
             tiempo_avg = round(float(sum(vals_selected) / len(vals_selected)), 1) if vals_selected else 0.0
             tiempo_med = round(_median(vals_selected), 1) if vals_selected else 0.0
 
+            inmuebles_scope = _q_all(
+                f"""
+                SELECT id, estado, portal_publicado
+                FROM inmuebles
+                WHERE empresa_id IN ({placeholders})
+                """,
+                empresa_ids,
+            )
+            quality_counts = {
+                "total": 0,
+                "publicados": 0,
+                "publicables": 0,
+                "no_publicables": 0,
+                "sin_foto": 0,
+                "sin_texto": 0,
+                "sin_precio": 0,
+                "sin_propietario": 0,
+                "sin_documentacion": 0,
+            }
+            quality_issues = []
+            for inm_row in inmuebles_scope or []:
+                iid = str(row_value(inm_row, "id") or "").strip()
+                if not iid:
+                    continue
+                state_norm = normalize_lookup_text(row_value(inm_row, "estado") or "")
+                if state_norm in {"vendido", "alquilado", "cerrado negativamente", "historico vendido", "histórico vendido"}:
+                    continue
+                quality_counts["total"] += 1
+                if int(row_value(inm_row, "portal_publicado") or 0) == 1:
+                    quality_counts["publicados"] += 1
+                validation = validate_portal_publication_requirements(conn, iid)
+                if validation.get("ok"):
+                    quality_counts["publicables"] += 1
+                else:
+                    quality_counts["no_publicables"] += 1
+                    missing = validation.get("missing") or []
+                    missing_norm = " | ".join(missing).lower()
+                    if "foto" in missing_norm:
+                        quality_counts["sin_foto"] += 1
+                    if "texto" in missing_norm or "descripción" in missing_norm or "descripcion" in missing_norm:
+                        quality_counts["sin_texto"] += 1
+                    if "precio" in missing_norm:
+                        quality_counts["sin_precio"] += 1
+                    if len(quality_issues) < 12:
+                        row = validation.get("row")
+                        quality_issues.append(
+                            {
+                                "id": iid,
+                                "direccion": row_value(row, "direccion", "") if row else "",
+                                "estado": row_value(row, "estado", "") if row else "",
+                                "missing": missing,
+                            }
+                        )
+                owners_row = _q_one("SELECT COUNT(*) AS total FROM inmueble_propietarios WHERE inmueble_id = ?", [iid])
+                docs_row = _q_one("SELECT COUNT(*) AS total FROM inmueble_docs WHERE inmueble_id = ?", [iid])
+                if int(row_value(owners_row, "total") or 0) <= 0:
+                    quality_counts["sin_propietario"] += 1
+                if int(row_value(docs_row, "total") or 0) <= 0:
+                    quality_counts["sin_documentacion"] += 1
+
+            demanda_alerts = []
+            active_demands = _q_all(
+                f"""
+                SELECT id, cliente_id, zona, tipo, estado
+                FROM demandas
+                WHERE empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(estado, '')) IN ('activa', 'activo', 'en gestión', 'en gestion', 'portal')
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT 50
+                """,
+                empresa_ids,
+            )
+            for demand in active_demands or []:
+                demanda_id = str(row_value(demand, "id") or "").strip()
+                empresa_for_match = empresa_ids[0] if empresa_ids else ""
+                if not demanda_id or not empresa_for_match:
+                    continue
+                matches = fetch_inmueble_matches_for_demanda(conn, empresa_for_match, demanda_id, limit=3)
+                if matches:
+                    demanda_alerts.append(
+                        {
+                            "demanda_id": demanda_id,
+                            "zona": row_value(demand, "zona", ""),
+                            "tipo": row_value(demand, "tipo", ""),
+                            "matches": matches[:3],
+                        }
+                    )
+                if len(demanda_alerts) >= 10:
+                    break
+
             payload = {
                 "mode": "inmo_inicio",
                 "year": year_str,
@@ -81535,12 +82710,24 @@ class Handler(BaseHTTPRequestHandler):
                     "ratio_cita_propuesta": round(ratio_cita_propuesta, 4),
                     "tiempo_venta_avg_dias": tiempo_avg,
                     "tiempo_venta_median_dias": tiempo_med,
+                    "calidad_total": quality_counts["total"],
+                    "calidad_publicables": quality_counts["publicables"],
+                    "calidad_no_publicables": quality_counts["no_publicables"],
+                    "portal_publicados": quality_counts["publicados"],
+                    "demandas_con_matches": len(demanda_alerts),
                 },
                 "series": {
                     "ventas_por_responsable": [dict(r) for r in (ventas_by_resp or [])],
                     "facturado_por_responsable": [dict(r) for r in (facturado_by_resp or [])],
                     "encargos_por_responsable": [dict(r) for r in (encargos_by_resp or [])],
                     "tiempo_venta_por_anio": tiempo_venta_series,
+                },
+                "quality": {
+                    "counts": quality_counts,
+                    "issues": quality_issues,
+                },
+                "alerts": {
+                    "demanda_oferta": demanda_alerts,
                 },
             }
             json_response(self, payload)

@@ -144,6 +144,87 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
         )
         self.assertTrue(doc_row and doc_row.get("url"))
 
+    def test_internal_signature_flow_creates_traceable_evidence_document(self):
+        now = _now_iso()
+        inmueble_id = server.ensure_inmueble_for_compraventa(
+            self.conn,
+            self.empresa_id,
+            {
+                "direccion": "Calle Firma 7",
+                "referencia_catastral": "SIG-001",
+                "precio_encargo": "210000",
+                "tipo_inmueble": "Piso",
+            },
+            now=now,
+        )
+        doc_row = server.persist_generated_inmueble_pdf(
+            self.conn,
+            inmueble_id=inmueble_id,
+            tipo="Encargo",
+            nombre="Encargo de venta",
+            pdf_bytes=_make_pdf_bytes("Encargo venta"),
+            filename_base="encargo_firma_smoke",
+            now=now,
+            replace_existing=False,
+            empresa_id=self.empresa_id,
+            usuario="smoke",
+            plantilla_clave="encargo_venta",
+            origen_tipo="smoke",
+            origen_id=inmueble_id,
+        )
+        result = server.create_inmueble_signature_request(
+            self.conn,
+            empresa_id=self.empresa_id,
+            inmueble_id=inmueble_id,
+            doc_id=doc_row["id"],
+            signer_nombre="María Firma",
+            signer_nif="12345678Z",
+            signer_email="firma@example.com",
+            purpose="Firma encargo venta",
+            otp_required=True,
+            created_by="smoke",
+            now=now,
+        )
+        self.assertTrue(result.get("token"))
+        self.assertTrue(result.get("otp"))
+
+        public_row = server._signature_request_row_by_token(self.conn, result["token"])
+        public_payload = server.signature_request_public_payload(public_row, token=result["token"])
+        self.assertEqual(public_payload["doc_nombre"], "Encargo de venta")
+        self.assertTrue(public_payload["otp_required"])
+        self.assertIn("firma_inmo", result["public_url"])
+
+        sign_result, status = server.sign_inmueble_signature_request(
+            self.conn,
+            result["token"],
+            {
+                "otp": result["otp"],
+                "signed_name": "María Firma",
+                "signed_nif": "12345678Z",
+                "acceptance_text": "Acepto y firmo electrónicamente este documento.",
+                "signature_data_url": "data:image/png;base64,",
+            },
+            now=now,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(sign_result.get("signed_doc_url"))
+        signed = server._signature_request_row_by_token(self.conn, result["token"])
+        self.assertEqual(signed["status"], "signed")
+        self.assertTrue(signed["document_sha256"])
+        evidence_doc = self.conn.execute(
+            """
+            SELECT id, nombre, plantilla_clave, origen_tipo, origen_id
+            FROM inmueble_docs
+            WHERE inmueble_id = ? AND tipo = 'Firma electrónica'
+            LIMIT 1
+            """,
+            (inmueble_id,),
+        ).fetchone()
+        self.assertIsNotNone(evidence_doc)
+        self.assertEqual(evidence_doc["plantilla_clave"], "firma_electronica_interna")
+        self.assertEqual(evidence_doc["origen_tipo"], "signature_request")
+        self.assertEqual(evidence_doc["origen_id"], signed["id"])
+
     def test_scoped_inmueble_and_demanda_helpers_reject_other_empresa(self):
         now = _now_iso()
         other_empresa = "emp-other"
@@ -498,6 +579,7 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
             UPDATE inmuebles
             SET estado = 'Encargo', portal_publicado = 1, portal_publicado_at = datetime(?),
                 m2 = 90, habitaciones = 3, banos = 2, descripcion = 'Piso publicado en Verifika2',
+                zona = 'Centro', poblacion = 'Málaga', provincia = 'Málaga',
                 certificado = 1, updated_at = datetime(?)
             WHERE id = ?
             """,
@@ -547,6 +629,35 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
         )
         self.conn.commit()
 
+        generated = server.build_inmueble_anuncio_copy(
+            self.conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (published_id,)).fetchone()
+        )
+        self.assertIn("Piso", generated["titulo_anuncio"])
+        self.assertIn("90 m2", generated["descripcion_corta"])
+        self.assertTrue(generated["seo_slug"])
+        self.conn.execute(
+            """
+            UPDATE inmuebles
+            SET titulo_anuncio = ?,
+                descripcion_corta = ?,
+                descripcion_larga = ?,
+                destacados = ?,
+                seo_slug = ?,
+                anuncio_generado_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                generated["titulo_anuncio"],
+                generated["descripcion_corta"],
+                generated["descripcion_larga"],
+                generated["destacados"],
+                generated["seo_slug"],
+                now,
+                published_id,
+            ),
+        )
+        self.conn.commit()
+
         rows = server.fetch_portal_inmuebles_public(self.conn)
         ids = {row["id"] for row in rows}
         self.assertIn(published_id, ids)
@@ -559,8 +670,44 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
         self.assertEqual(row["foto"], "/uploads/inmuebles/portal/foto.jpg")
         self.assertEqual(row["certificado"], 1)
         self.assertEqual(row["verificado"], 1)
+        self.assertEqual(row["titulo"], generated["titulo_anuncio"])
+        self.assertEqual(row["descripcion"], generated["descripcion_larga"])
+        self.assertEqual(row["descripcion_corta"], generated["descripcion_corta"])
+        self.assertEqual(row["destacados"], generated["destacados"])
+        self.assertEqual(row["seo_slug"], generated["seo_slug"])
         self.assertNotIn("propietarios", row)
         self.assertNotIn("cliente", row)
+
+        validation = server.validate_portal_publication_requirements(self.conn, published_id)
+        self.assertTrue(validation["ok"], validation)
+
+        lead, status = server.create_portal_inmueble_lead(
+            self.conn,
+            {
+                "listing_id": published_id,
+                "nombre": "COMPRADOR PORTAL",
+                "telefono": "699999999",
+                "email": "portalbuyer@test.local",
+                "mensaje": "Quiero visitar este inmueble",
+            },
+            now,
+        )
+        self.assertEqual(status, 200, lead)
+        self.assertTrue(lead.get("cliente_id"))
+        self.assertTrue(lead.get("demanda_id"))
+        demanda = self.conn.execute(
+            "SELECT origen, pedido_web, anuncio_mi_cartera, cliente_id FROM demandas WHERE id = ? LIMIT 1",
+            (lead["demanda_id"],),
+        ).fetchone()
+        self.assertEqual(demanda["origen"], "Portal Verifika2")
+        self.assertEqual(int(demanda["pedido_web"] or 0), 1)
+        self.assertEqual(int(demanda["anuncio_mi_cartera"] or 0), 1)
+        self.assertEqual(demanda["cliente_id"], lead["cliente_id"])
+        linked = self.conn.execute(
+            "SELECT id FROM inmueble_compradores WHERE inmueble_id = ? AND demanda_id = ? LIMIT 1",
+            (published_id, lead["demanda_id"]),
+        ).fetchone()
+        self.assertIsNotNone(linked)
 
     def test_encargo_and_visit_pdfs_are_generated_with_real_case_data(self):
         now = _now_iso()
