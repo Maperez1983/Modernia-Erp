@@ -38805,6 +38805,10 @@ const updateEstudioAltaTabs = () => {
 	  }
 	};
 
+try {
+  window.openCrmWorkspaceView = (view) => setCrmWorkspaceView(view);
+} catch (e) {}
+
 function mountCrmVerticalViews() {
   const vertical = resolveCrmTecnocloudVertical();
   try {

@@ -61,7 +61,7 @@ def main():
 
         page.evaluate(
             """() => {
-              try { if (typeof setCrmWorkspaceView === 'function') setCrmWorkspaceView('agenda'); } catch (e) {}
+              try { if (typeof window.openCrmWorkspaceView === 'function') window.openCrmWorkspaceView('agenda'); } catch (e) {}
               const btn = Array.from(document.querySelectorAll('[data-crm-view="agenda"]')).find((el) => !!el.offsetParent);
               if (btn) btn.click();
             }"""
