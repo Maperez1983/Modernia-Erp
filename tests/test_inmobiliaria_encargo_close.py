@@ -247,6 +247,127 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.assertEqual(inm["estado"], "Inmueble")
         self.assertEqual(int(inm["portal_publicado"] or 0), 0)
 
+    def test_create_inmueble_convert_to_encargo_contract_appointment_and_close_sale(self):
+        now = _now_iso()
+        owner_id = server.ensure_cliente_for_inmobiliaria(
+            self.conn,
+            self.empresa_id,
+            "VENDEDOR PRUEBA CIERRE",
+            "33333333C",
+            now,
+            {"telefono": "600333333", "email": "seller-close@example.test"},
+        )
+        buyer_id = server.ensure_cliente_for_inmobiliaria(
+            self.conn,
+            self.empresa_id,
+            "COMPRADOR PRUEBA CIERRE",
+            "44444444D",
+            now,
+            {"telefono": "600444444", "email": "buyer-close@example.test"},
+        )
+        inmueble_id = server.ensure_inmueble_for_compraventa(
+            self.conn,
+            self.empresa_id,
+            payload={
+                "tipo_inmueble": "Piso",
+                "direccion": "CALLE PRUEBA CIERRE 10",
+                "referencia_catastral": "9999999UF7699S0001ZZ",
+                "precio_encargo": "300000",
+            },
+            now=now,
+        )
+        server.ensure_inmueble_propietario_link(self.conn, inmueble_id, owner_id, now)
+        server.sync_inmueble_stage_for_action(self.conn, inmueble_id, "noticia", now)
+        server.sync_inmueble_stage_for_action(self.conn, inmueble_id, "encargo", now)
+        self.conn.commit()
+
+        encargo = self.conn.execute(
+            """
+            SELECT i.estado, c.etapa
+            FROM inmuebles i
+            LEFT JOIN captaciones c ON c.inmueble_id = i.id
+            WHERE i.id = ?
+            LIMIT 1
+            """,
+            (inmueble_id,),
+        ).fetchone()
+        self.assertEqual(encargo["estado"], "Encargo")
+        self.assertEqual(encargo["etapa"], "Encargo")
+        self.assertIsNone(server.validate_inmo_action_result("Cita contrato privado", "Completada", "Firmado"))
+        self.assertIsNone(server.validate_inmo_action_result("Cita notaria", "Completada", "Firmada"))
+
+        action_id = os.urandom(16).hex()
+        self.conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+              fecha, hora, asunto, tipo, responsable, estado, resultado_cierre,
+              importe_propuesta, created_at, updated_at
+            ) VALUES (
+              ?, ?, 'inmobiliaria', ?, ?, 'COMPRADOR PRUEBA CIERRE',
+              '2026-06-10', '10:00', 'Firma contrato privado', 'Cita contrato privado',
+              'tester', 'Completada', 'Firmado', 295000, datetime(?), datetime(?)
+            )
+            """,
+            (action_id, self.empresa_id, buyer_id, inmueble_id, now, now),
+        )
+
+        res = server.close_inmueble_encargo_positive(
+            self.conn,
+            self.empresa_id,
+            inmueble_id,
+            now,
+            usuario="tester",
+            fecha_cierre="2026-06-10",
+            importe_final=295000,
+            honorarios=9000,
+            numero_citas=1,
+            tipo="Vendido",
+            notas="Cierre desde contrato privado firmado",
+            nuevo_propietario={
+                "nombre": "COMPRADOR PRUEBA CIERRE",
+                "nif": "44444444D",
+                "telefono": "600444444",
+                "email": "buyer-close@example.test",
+            },
+            archive_pending=True,
+        )
+        self.conn.commit()
+
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("tipo"), "Vendido")
+        self.assertTrue(res.get("operacion_id"))
+        self.assertEqual(res.get("nuevo_propietario_id"), buyer_id)
+
+        final_inmueble = self.conn.execute(
+            "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        self.assertEqual(final_inmueble["estado"], "Inmueble")
+
+        propietario = self.conn.execute(
+            "SELECT cliente_id FROM inmueble_propietarios WHERE inmueble_id = ? LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        self.assertEqual(propietario["cliente_id"], buyer_id)
+
+        operacion = self.conn.execute(
+            "SELECT * FROM operaciones_inmobiliarias WHERE id = ? LIMIT 1",
+            (res["operacion_id"],),
+        ).fetchone()
+        self.assertEqual(operacion["tipo_operacion"], "venta")
+        self.assertEqual(operacion["propietario1_id"], owner_id)
+        self.assertEqual(operacion["contraparte1_id"], buyer_id)
+        self.assertAlmostEqual(float(operacion["precio_escritura"]), 295000.0, places=2)
+        self.assertAlmostEqual(float(operacion["honorarios"]), 9000.0, places=2)
+
+        cita = self.conn.execute(
+            "SELECT estado, resultado_cierre FROM acciones WHERE id = ? LIMIT 1",
+            (action_id,),
+        ).fetchone()
+        self.assertEqual(cita["estado"], "Completada")
+        self.assertEqual(cita["resultado_cierre"], "Firmado")
+
 
 if __name__ == "__main__":
     unittest.main()
