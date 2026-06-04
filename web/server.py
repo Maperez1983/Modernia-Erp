@@ -22076,7 +22076,207 @@ def retire_inmueble_from_portal(conn, empresa_id, inmueble_id, now, usuario=None
     return True
 
 
-def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True):
+def ensure_inmueble_cierres_schema(conn):
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS inmueble_cierres (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT NOT NULL,
+              inmueble_id TEXT NOT NULL,
+              tipo TEXT NOT NULL,
+              fecha_cierre TEXT,
+              importe_final REAL,
+              honorarios REAL,
+              numero_citas INTEGER,
+              motivo_cierre TEXT,
+              nuevo_propietario_id TEXT,
+              nuevo_propietario_nombre TEXT,
+              nuevo_propietario_nif TEXT,
+              nuevo_propietario_telefono TEXT,
+              nuevo_propietario_email TEXT,
+              operacion_id TEXT,
+              notas TEXT,
+              usuario TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+    except Exception:
+        pass
+    for col_name, col_sql in {
+        "honorarios": "honorarios REAL",
+        "motivo_cierre": "motivo_cierre TEXT",
+        "nuevo_propietario_id": "nuevo_propietario_id TEXT",
+        "nuevo_propietario_nombre": "nuevo_propietario_nombre TEXT",
+        "nuevo_propietario_nif": "nuevo_propietario_nif TEXT",
+        "nuevo_propietario_telefono": "nuevo_propietario_telefono TEXT",
+        "nuevo_propietario_email": "nuevo_propietario_email TEXT",
+        "operacion_id": "operacion_id TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "inmueble_cierres", col_name, col_sql)
+        except Exception:
+            pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inmueble_cierres_inmueble ON inmueble_cierres (inmueble_id, created_at)")
+    except Exception:
+        pass
+
+
+def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_label, now, *, fecha_cierre=None, importe_final=None, honorarios=None, numero_citas=None, nuevo_propietario_id=None, nuevo_propietario=None, notas=None):
+    if tipo_label not in {"Vendido", "Alquiler"}:
+        return None
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        return None
+    captacion = conn.execute(
+        """
+        SELECT *
+        FROM captaciones
+        WHERE inmueble_id = ? AND empresa_id = ?
+        ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC
+        LIMIT 1
+        """,
+        (inmueble_id, empresa_id),
+    ).fetchone()
+    propietarios = get_inmueble_propietarios(conn, inmueble_id)
+    prop1 = propietarios[0] if propietarios else {}
+    prop2 = propietarios[1] if len(propietarios) > 1 else {}
+    fecha = str(fecha_cierre or "").strip() or now
+    parsed_fecha = parse_iso_date(fecha)
+    anio = parsed_fecha.year if parsed_fecha else None
+    mes = iso_month_label(fecha)
+    precio_encargo = parse_money_value(row_value(captacion, "precio_objetivo", None))
+    if not precio_encargo:
+        precio_encargo = parse_money_value(row_value(inmueble, "precio_objetivo", None))
+    importe_num = float(importe_final or 0) if importe_final is not None else None
+    honorarios_num = float(honorarios or 0) if honorarios is not None else None
+    fecha_encargo = str(row_value(captacion, "fecha", "") or row_value(captacion, "fecha_encargo", "") or "").strip() or None
+    dias_hasta_venta = None
+    if fecha_encargo:
+        start = parse_iso_date(fecha_encargo)
+        end = parse_iso_date(fecha)
+        if start and end:
+            try:
+                dias_hasta_venta = max((end - start).days, 0)
+            except Exception:
+                dias_hasta_venta = None
+    direccion = (
+        str(row_value(inmueble, "direccion", "") or "").strip()
+        or str(row_value(captacion, "direccion", "") or "").strip()
+        or str(row_value(inmueble, "referencia", "") or "").strip()
+    )
+    responsable = (
+        str(row_value(captacion, "asesor", "") or "").strip()
+        or str(row_value(captacion, "responsable", "") or "").strip()
+        or str(row_value(inmueble, "asesor", "") or "").strip()
+        or str(row_value(inmueble, "responsable", "") or "").strip()
+    )
+    oficina = str(row_value(captacion, "oficina", "") or row_value(inmueble, "oficina", "") or "").strip()
+    nuevo_propietario = nuevo_propietario or {}
+    op_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO operaciones_inmobiliarias (
+          id, empresa_id, tipo_operacion, estado, origen, origen_inmueble, anio, mes,
+          inmueble_id, direccion, referencia_catastral,
+          propietario1_id, propietario1_nombre, propietario1_nif, propietario1_telefono, propietario1_email,
+          propietario2_id, propietario2_nombre, propietario2_nif, propietario2_telefono, propietario2_email,
+          contraparte1_id, contraparte_nombre, contraparte_nif, contraparte_telefono, contraparte_email,
+          fecha_encargo, fecha_escritura, fecha_operacion, precio_encargo, precio_escritura, precio_renta,
+          dias_hasta_venta, num_visitas, honorarios, agente, responsable_gestion, oficina,
+          estado_documental, notas, datos_extraidos_json, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            op_id,
+            empresa_id,
+            "alquiler" if tipo_label == "Alquiler" else "venta",
+            "Cerrada",
+            "cierre_encargo",
+            "CRM inmobiliario",
+            anio,
+            mes,
+            inmueble_id,
+            direccion or None,
+            str(row_value(inmueble, "referencia_catastral", "") or "").strip() or None,
+            prop1.get("id"),
+            prop1.get("nombre"),
+            prop1.get("nif"),
+            prop1.get("telefono"),
+            prop1.get("email"),
+            prop2.get("id"),
+            prop2.get("nombre"),
+            prop2.get("nif"),
+            prop2.get("telefono"),
+            prop2.get("email"),
+            nuevo_propietario_id,
+            str(nuevo_propietario.get("nombre") or "").strip() or None,
+            str(nuevo_propietario.get("nif") or "").strip() or None,
+            str(nuevo_propietario.get("telefono") or "").strip() or None,
+            str(nuevo_propietario.get("email") or "").strip() or None,
+            fecha_encargo,
+            fecha if tipo_label == "Vendido" else None,
+            fecha,
+            precio_encargo or None,
+            importe_num if tipo_label == "Vendido" else None,
+            importe_num if tipo_label == "Alquiler" else None,
+            dias_hasta_venta,
+            int(numero_citas) if numero_citas is not None else None,
+            honorarios_num,
+            responsable or None,
+            responsable or None,
+            oficina or None,
+            "Pendiente de cierre documental",
+            str(notas or "").strip() or None,
+            json.dumps({"cierre_tipo": tipo_label, "fuente": "inmueble_encargo_close"}, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+    if tipo_label == "Alquiler":
+        try:
+            conn.execute(
+                """
+                INSERT INTO alquileres (
+                  id, empresa_id, fecha, direccion, propietario, telefono, precio, comision,
+                  importe_comision, total, inquilino, telefono2, agente, numero_alquileres, tipo, oficina,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    empresa_id,
+                    fecha,
+                    direccion or None,
+                    prop1.get("nombre"),
+                    prop1.get("telefono"),
+                    importe_num,
+                    str(honorarios_num or "") if honorarios_num is not None else None,
+                    honorarios_num,
+                    honorarios_num,
+                    str(nuevo_propietario.get("nombre") or "").strip() or None,
+                    str(nuevo_propietario.get("telefono") or "").strip() or None,
+                    responsable or None,
+                    1,
+                    "Cierre encargo",
+                    oficina or None,
+                    now,
+                    now,
+                ),
+            )
+        except Exception:
+            pass
+    return op_id
+
+
+def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None):
     empresa_id = str(empresa_id or "").strip()
     inmueble_id = str(inmueble_id or "").strip()
     if not empresa_id or not inmueble_id:
@@ -22105,13 +22305,44 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         row = conn.execute("SELECT tipo_operacion FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
         op = normalize_lookup_text((row["tipo_operacion"] if row else "") or "")
         tipo_label = "Alquiler" if op == "alquiler" else "Vendido"
+    ensure_inmueble_cierres_schema(conn)
+    nuevo_propietario = nuevo_propietario or {}
+    nuevo_propietario_id = None
+    if tipo_label in {"Vendido", "Alquiler"}:
+        nuevo_propietario_id = ensure_cliente_for_inmobiliaria(
+            conn,
+            empresa_id,
+            nuevo_propietario.get("nombre"),
+            nuevo_propietario.get("nif"),
+            now,
+            {
+                "telefono": nuevo_propietario.get("telefono"),
+                "email": nuevo_propietario.get("email"),
+            },
+        )
+    operacion_id = create_operacion_for_inmueble_cierre(
+        conn,
+        empresa_id,
+        inmueble_id,
+        tipo_label,
+        now,
+        fecha_cierre=fecha_cierre,
+        importe_final=importe_final,
+        honorarios=honorarios,
+        numero_citas=numero_citas,
+        nuevo_propietario_id=nuevo_propietario_id,
+        nuevo_propietario=nuevo_propietario,
+        notas=notas,
+    )
     cierre_id = os.urandom(16).hex()
     conn.execute(
         """
         INSERT INTO inmueble_cierres (
-          id, empresa_id, inmueble_id, tipo, fecha_cierre, importe_final, numero_citas, notas, usuario, created_at, updated_at
+          id, empresa_id, inmueble_id, tipo, fecha_cierre, importe_final, honorarios, numero_citas,
+          motivo_cierre, nuevo_propietario_id, nuevo_propietario_nombre, nuevo_propietario_nif,
+          nuevo_propietario_telefono, nuevo_propietario_email, operacion_id, notas, usuario, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -22121,15 +22352,24 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
             tipo_label,
             str(fecha_cierre or "").strip() or None,
             float(importe_final) if importe_final is not None else None,
+            float(honorarios) if honorarios is not None else None,
             int(numero_citas) if numero_citas is not None else None,
+            str(motivo_cierre or "").strip() or None,
+            nuevo_propietario_id,
+            str(nuevo_propietario.get("nombre") or "").strip() or None,
+            str(nuevo_propietario.get("nif") or "").strip() or None,
+            str(nuevo_propietario.get("telefono") or "").strip() or None,
+            str(nuevo_propietario.get("email") or "").strip() or None,
+            operacion_id,
             str(notas or "").strip() or None,
             str(usuario or "").strip() or None,
             now,
             now,
         ),
     )
-    # Mueve la etapa del inmueble/captación.
-    sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
+    if nuevo_propietario_id:
+        conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
+        ensure_inmueble_propietario_link(conn, inmueble_id, nuevo_propietario_id, now)
     portal_retired = retire_inmueble_from_portal(
         conn,
         empresa_id,
@@ -22138,6 +22378,9 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         usuario=usuario,
         reason=f"Cierre {tipo_label}",
     )
+    # Registra el cierre y devuelve la ficha al inventario base, conservando el histórico.
+    sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
+    sync_inmueble_stage_for_action(conn, inmueble_id, "Inmueble", now)
     archived = 0
     if archive_pending:
         try:
@@ -22156,12 +22399,26 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
             "fecha_cierre": str(fecha_cierre or "").strip() or "",
             "importe_final": float(importe_final) if importe_final is not None else None,
             "numero_citas": int(numero_citas) if numero_citas is not None else None,
+            "honorarios": float(honorarios) if honorarios is not None else None,
+            "motivo_cierre": str(motivo_cierre or "").strip() or "",
+            "nuevo_propietario_id": nuevo_propietario_id,
+            "operacion_id": operacion_id,
             "archived": archived,
             "portal_retired": portal_retired,
+            "estado_final": "Inmueble",
         },
         now=now,
     )
-    return {"ok": True, "tipo": tipo_label, "archived": archived, "portal_retired": portal_retired, "cierre_id": cierre_id}
+    return {
+        "ok": True,
+        "tipo": tipo_label,
+        "archived": archived,
+        "portal_retired": portal_retired,
+        "cierre_id": cierre_id,
+        "operacion_id": operacion_id,
+        "nuevo_propietario_id": nuevo_propietario_id,
+        "estado_final": "Inmueble",
+    }
 
 
 INMO_STAGE_CHECKLISTS = {
@@ -67385,8 +67642,18 @@ class Handler(BaseHTTPRequestHandler):
             tipo = str(payload.get("tipo") or "").strip() or None
             fecha_cierre = str(payload.get("fecha_cierre") or "").strip() or None
             numero_citas = parse_optional_int(payload.get("numero_citas"))
-            importe_final = parse_money_value(payload.get("importe_final"))
+            importe_raw = str(payload.get("importe_final") or "").strip()
+            honorarios_raw = str(payload.get("honorarios") or "").strip()
+            importe_final = parse_money_value(importe_raw) if importe_raw else None
+            honorarios = parse_money_value(honorarios_raw) if honorarios_raw else None
+            motivo_cierre = str(payload.get("motivo_cierre") or "").strip() or None
             notas = str(payload.get("notas") or "").strip() or None
+            nuevo_propietario = {
+                "nombre": str(payload.get("nuevo_propietario_nombre") or "").strip(),
+                "nif": str(payload.get("nuevo_propietario_nif") or "").strip(),
+                "telefono": str(payload.get("nuevo_propietario_telefono") or "").strip(),
+                "email": str(payload.get("nuevo_propietario_email") or "").strip(),
+            }
             result = close_inmueble_encargo_positive(
                 conn,
                 inmueble["empresa_id"],
@@ -67399,6 +67666,9 @@ class Handler(BaseHTTPRequestHandler):
                 tipo=tipo,
                 notas=notas,
                 archive_pending=True,
+                honorarios=honorarios,
+                motivo_cierre=motivo_cierre,
+                nuevo_propietario=nuevo_propietario,
             )
             if not result.get("ok"):
                 json_response(self, {"error": result.get("error") or "No se pudo cerrar"}, status=400)

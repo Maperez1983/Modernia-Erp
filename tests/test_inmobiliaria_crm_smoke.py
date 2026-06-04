@@ -367,8 +367,8 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
             "SELECT etapa FROM captaciones WHERE inmueble_id = ? LIMIT 1",
             (inmueble_id,),
         ).fetchone()
-        self.assertEqual(final_inmueble["estado"], "Vendido")
-        self.assertEqual(final_captacion["etapa"], "Vendido")
+        self.assertEqual(final_inmueble["estado"], "Inmueble")
+        self.assertEqual(final_captacion["etapa"], "Inmueble")
         pending = self.conn.execute(
             """
             SELECT COUNT(*) AS total

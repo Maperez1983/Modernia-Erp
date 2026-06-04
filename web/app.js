@@ -3613,6 +3613,18 @@ const inmuebleEncargoCloseTipo = document.getElementById("inmuebleEncargoCloseTi
 const inmuebleEncargoCloseFecha = document.getElementById("inmuebleEncargoCloseFecha");
 const inmuebleEncargoCloseImporte = document.getElementById("inmuebleEncargoCloseImporte");
 const inmuebleEncargoCloseNumCitas = document.getElementById("inmuebleEncargoCloseNumCitas");
+const inmuebleEncargoCloseHonorarios = document.getElementById("inmuebleEncargoCloseHonorarios");
+const inmuebleEncargoCloseHonorariosWrap = document.getElementById("inmuebleEncargoCloseHonorariosWrap");
+const inmuebleEncargoCloseNewOwnerName = document.getElementById("inmuebleEncargoCloseNewOwnerName");
+const inmuebleEncargoCloseNewOwnerNif = document.getElementById("inmuebleEncargoCloseNewOwnerNif");
+const inmuebleEncargoCloseNewOwnerPhone = document.getElementById("inmuebleEncargoCloseNewOwnerPhone");
+const inmuebleEncargoCloseNewOwnerEmail = document.getElementById("inmuebleEncargoCloseNewOwnerEmail");
+const inmuebleEncargoCloseNewOwnerNameWrap = document.getElementById("inmuebleEncargoCloseNewOwnerNameWrap");
+const inmuebleEncargoCloseNewOwnerNifWrap = document.getElementById("inmuebleEncargoCloseNewOwnerNifWrap");
+const inmuebleEncargoCloseNewOwnerPhoneWrap = document.getElementById("inmuebleEncargoCloseNewOwnerPhoneWrap");
+const inmuebleEncargoCloseNewOwnerEmailWrap = document.getElementById("inmuebleEncargoCloseNewOwnerEmailWrap");
+const inmuebleEncargoCloseMotivo = document.getElementById("inmuebleEncargoCloseMotivo");
+const inmuebleEncargoCloseMotivoWrap = document.getElementById("inmuebleEncargoCloseMotivoWrap");
 const inmuebleEncargoCloseNotas = document.getElementById("inmuebleEncargoCloseNotas");
 const inmuebleEncargoCloseSubmitBtn = document.getElementById("inmuebleEncargoCloseSubmitBtn");
 const inmuebleEncargoCloseStatus = document.getElementById("inmuebleEncargoCloseStatus");
@@ -55289,10 +55301,36 @@ const openInmuebleEncargoCloseModal = () => {
   if (inmuebleEncargoCloseImporte) inmuebleEncargoCloseImporte.value = "";
   if (inmuebleEncargoCloseNumCitas) inmuebleEncargoCloseNumCitas.value = "";
   if (inmuebleEncargoCloseNotas) inmuebleEncargoCloseNotas.value = "";
+  if (inmuebleEncargoCloseHonorarios) inmuebleEncargoCloseHonorarios.value = "";
+  if (inmuebleEncargoCloseNewOwnerName) inmuebleEncargoCloseNewOwnerName.value = "";
+  if (inmuebleEncargoCloseNewOwnerNif) inmuebleEncargoCloseNewOwnerNif.value = "";
+  if (inmuebleEncargoCloseNewOwnerPhone) inmuebleEncargoCloseNewOwnerPhone.value = "";
+  if (inmuebleEncargoCloseNewOwnerEmail) inmuebleEncargoCloseNewOwnerEmail.value = "";
+  if (inmuebleEncargoCloseMotivo) inmuebleEncargoCloseMotivo.value = "";
+  syncInmuebleEncargoCloseModalFields();
   if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = "";
   inmuebleEncargoCloseModal.classList.remove("hidden");
   inmuebleEncargoCloseModal.classList.add("open");
   document.body.classList.add("modal-open");
+};
+
+const syncInmuebleEncargoCloseModalFields = () => {
+  const tipo = String(inmuebleEncargoCloseTipo?.value || "").trim();
+  const isNegative = normalizeSimple(tipo) === "cerrado negativamente";
+  const positiveWraps = [
+    inmuebleEncargoCloseHonorariosWrap,
+    inmuebleEncargoCloseNewOwnerNameWrap,
+    inmuebleEncargoCloseNewOwnerNifWrap,
+    inmuebleEncargoCloseNewOwnerPhoneWrap,
+    inmuebleEncargoCloseNewOwnerEmailWrap,
+  ];
+  positiveWraps.forEach((el) => {
+    if (el) el.classList.toggle("hidden", isNegative);
+  });
+  if (inmuebleEncargoCloseMotivoWrap) inmuebleEncargoCloseMotivoWrap.classList.toggle("hidden", !isNegative);
+  if (inmuebleEncargoCloseTitle) {
+    inmuebleEncargoCloseTitle.textContent = `Cierre de encargo · ${tipo || ""}`;
+  }
 };
 
 const closeInmuebleEncargoCloseModal = () => {
@@ -55317,9 +55355,7 @@ if (inmuebleEncargoCloseBtn) {
 
 if (inmuebleEncargoCloseTipo) {
   inmuebleEncargoCloseTipo.addEventListener("change", () => {
-    if (inmuebleEncargoCloseTitle) {
-      inmuebleEncargoCloseTitle.textContent = `Cierre de encargo · ${inmuebleEncargoCloseTipo.value || ""}`;
-    }
+    syncInmuebleEncargoCloseModalFields();
   });
 }
 
@@ -55330,6 +55366,12 @@ if (inmuebleEncargoCloseSubmitBtn) {
     const fecha = String(inmuebleEncargoCloseFecha?.value || "").trim();
     const importe = String(inmuebleEncargoCloseImporte?.value || "").trim();
     const numCitas = String(inmuebleEncargoCloseNumCitas?.value || "").trim();
+    const honorarios = String(inmuebleEncargoCloseHonorarios?.value || "").trim();
+    const nuevoPropietarioNombre = String(inmuebleEncargoCloseNewOwnerName?.value || "").trim();
+    const nuevoPropietarioNif = String(inmuebleEncargoCloseNewOwnerNif?.value || "").trim();
+    const nuevoPropietarioTelefono = String(inmuebleEncargoCloseNewOwnerPhone?.value || "").trim();
+    const nuevoPropietarioEmail = String(inmuebleEncargoCloseNewOwnerEmail?.value || "").trim();
+    const motivoCierre = String(inmuebleEncargoCloseMotivo?.value || "").trim();
     const notas = String(inmuebleEncargoCloseNotas?.value || "").trim();
     inmuebleEncargoCloseSubmitBtn.disabled = true;
     if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = "Cerrando encargo...";
@@ -55342,6 +55384,12 @@ if (inmuebleEncargoCloseSubmitBtn) {
           fecha_cierre: fecha,
           importe_final: importe,
           numero_citas: numCitas,
+          honorarios,
+          motivo_cierre: motivoCierre,
+          nuevo_propietario_nombre: nuevoPropietarioNombre,
+          nuevo_propietario_nif: nuevoPropietarioNif,
+          nuevo_propietario_telefono: nuevoPropietarioTelefono,
+          nuevo_propietario_email: nuevoPropietarioEmail,
           notas,
         },
         { maxRetries: 4, baseDelayMs: 350, timeoutMs: 20000 }
@@ -55349,7 +55397,8 @@ if (inmuebleEncargoCloseSubmitBtn) {
       if (res?.error) throw new Error(res.error);
       if (inmuebleEncargoCloseStatus) {
         const portalText = res?.portal_retired ? " Retirado del portal." : "";
-        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Acciones archivadas: ${Number(res?.archived || 0)}.${portalText}`;
+        const opText = res?.operacion_id ? " Operación económica registrada." : "";
+        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Vuelve a Inmueble. Acciones archivadas: ${Number(res?.archived || 0)}.${portalText}${opText}`;
       }
       closeInmuebleEncargoCloseModal();
       // Refresca ficha y agenda.
@@ -55358,6 +55407,8 @@ if (inmuebleEncargoCloseSubmitBtn) {
         if (empresaId) {
           loadInmuebleDetail(state.currentInmuebleId, { keepTab: true });
           loadCrmAgenda();
+          if (typeof loadCrmCompraventas === "function") loadCrmCompraventas();
+          if (typeof loadCrmAlquileres === "function") loadCrmAlquileres();
         }
       } catch (e) {}
     } catch (err) {

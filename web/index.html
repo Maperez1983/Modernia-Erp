@@ -10917,7 +10917,7 @@
 		          <button type="button" id="inmuebleEncargoCloseModalClose" class="ghost">✕</button>
 		        </div>
 		        <div class="modal-body">
-		          <p class="muted">Registra el cierre para dejar el encargo inactivo y guardar histórico.</p>
+		          <p class="muted">Registra el cierre, conserva el histórico y devuelve la ficha al inventario base.</p>
 		          <div class="form-grid">
 		            <label>
 		              Resultado
@@ -10938,6 +10938,30 @@
 		            <label>
 		              Nº citas
 		              <input type="number" step="1" min="0" id="inmuebleEncargoCloseNumCitas" placeholder="0" />
+		            </label>
+		            <label id="inmuebleEncargoCloseHonorariosWrap">
+		              Comisión / honorarios
+		              <input type="number" step="0.01" id="inmuebleEncargoCloseHonorarios" placeholder="0,00" />
+		            </label>
+		            <label id="inmuebleEncargoCloseNewOwnerNameWrap">
+		              Nuevo propietario / inquilino
+		              <input type="text" id="inmuebleEncargoCloseNewOwnerName" placeholder="Nombre completo" />
+		            </label>
+		            <label id="inmuebleEncargoCloseNewOwnerNifWrap">
+		              NIF
+		              <input type="text" id="inmuebleEncargoCloseNewOwnerNif" placeholder="DNI/NIE/CIF" />
+		            </label>
+		            <label id="inmuebleEncargoCloseNewOwnerPhoneWrap">
+		              Teléfono
+		              <input type="tel" id="inmuebleEncargoCloseNewOwnerPhone" placeholder="+34..." />
+		            </label>
+		            <label id="inmuebleEncargoCloseNewOwnerEmailWrap">
+		              Email
+		              <input type="email" id="inmuebleEncargoCloseNewOwnerEmail" placeholder="email@dominio.com" />
+		            </label>
+		            <label class="span-2 hidden" id="inmuebleEncargoCloseMotivoWrap">
+		              Motivo del cierre negativo
+		              <textarea id="inmuebleEncargoCloseMotivo" rows="2" placeholder="Motivo por el que se cierra sin venta/alquiler..."></textarea>
 		            </label>
 		            <label class="span-2">
 		              Notas (opcional)
