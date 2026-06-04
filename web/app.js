@@ -46470,6 +46470,7 @@ const INMO_WORKFLOW_RESULT_OPTIONS = {
   "Cita propuesta": ["Rechazada", "Aprobada", "En negociación"],
   "Cita aceptación propietarios": ["Aceptada", "Rechazada", "Contraoferta"],
   "Cita aceptación contraoferta": ["Aceptada", "Rechazada"],
+  "Cita contrato privado": ["Firmado", "Reprogramar", "No realizada"],
   "Cita notaria": ["Firmada", "Reprogramar", "No realizada"],
 };
 
@@ -46481,6 +46482,7 @@ const getInmuebleActividadClienteScope = (type) => {
     || key.includes("contraoferta")
     || key.includes("visita")
     || key.includes("notaria")
+    || key.includes("contrato privado")
   ) {
     return "demandas";
   }
@@ -52121,12 +52123,15 @@ const normalizeInmoActionType = (value) => {
     "cita de propietarios": "cita_propietarios",
     "cita aceptación propietarios": "cita_propietarios",
     "cita aceptacion propietarios": "cita_propietarios",
-    "cita contraoferta": "cita_contraoferta",
-    "cita aceptacion contraoferta": "cita_contraoferta",
-    "cita aceptación contraoferta": "cita_contraoferta",
-    "cita notaria": "cita_notaria",
-    "cita de notaria": "cita_notaria",
-    "post-aceptacion": "cita_notaria",
+  "cita contraoferta": "cita_contraoferta",
+  "cita aceptacion contraoferta": "cita_contraoferta",
+  "cita aceptación contraoferta": "cita_contraoferta",
+  "cita contrato privado": "cita_contrato_privado",
+  "cita de contrato privado": "cita_contrato_privado",
+  "contrato privado": "cita_contrato_privado",
+  "cita notaria": "cita_notaria",
+  "cita de notaria": "cita_notaria",
+  "post-aceptacion": "cita_notaria",
     "post aceptacion": "cita_notaria",
     "estudio financiero": "estudio_financiero",
   };
@@ -52141,6 +52146,7 @@ const INMO_ACTION_RESULT_OPTIONS = {
   cita_propuesta: ["Rechazada", "En negociación", "Aprobada"],
   cita_propietarios: ["Aceptada", "Rechazada", "Contraoferta"],
   cita_contraoferta: ["Aceptada", "Rechazada"],
+  cita_contrato_privado: ["Firmado", "Reprogramar", "No realizada"],
   cita_notaria: ["Firmada", "Reprogramar", "No realizada"],
   estudio_financiero: ["Viable", "No viable", "Pendiente documentación"],
 };
@@ -55281,32 +55287,35 @@ if (inmuebleArchivePendingBtn) {
   });
 }
 
-const openInmuebleEncargoCloseModal = () => {
+const openInmuebleEncargoCloseModal = (options = {}) => {
   if (!inmuebleEncargoCloseModal) return;
   const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
   const captacion = state.currentInmuebleContext?.captacion || {};
   const stage = resolveInmuebleMainEtapa(inmueble, captacion);
-  if (stage !== "Encargo") {
-    alert("Este cierre solo está disponible en fase Encargo.");
+  const allowedStages = new Set(["Encargo", "Propuesta", "Reservado", "Contrato de arras", "Alquiler"]);
+  if (!allowedStages.has(stage)) {
+    alert("Este cierre está disponible desde Encargo o desde citas de contrato/notaría en fases avanzadas.");
     return;
   }
   const op = normalizeSimple(inmueble.tipo_operacion || "");
-  const defaultTipo = op === "alquiler" ? "Alquiler" : "Vendido";
+  const defaultTipo = String(options.tipo || "").trim() || (op === "alquiler" ? "Alquiler" : "Vendido");
   if (inmuebleEncargoCloseTipo) inmuebleEncargoCloseTipo.value = defaultTipo;
   if (inmuebleEncargoCloseTitle) {
     inmuebleEncargoCloseTitle.textContent = `Cierre de encargo · ${defaultTipo}`;
   }
   const today = new Date();
-  if (inmuebleEncargoCloseFecha) inmuebleEncargoCloseFecha.value = today.toISOString().slice(0, 10);
-  if (inmuebleEncargoCloseImporte) inmuebleEncargoCloseImporte.value = "";
-  if (inmuebleEncargoCloseNumCitas) inmuebleEncargoCloseNumCitas.value = "";
+  if (inmuebleEncargoCloseFecha) inmuebleEncargoCloseFecha.value = String(options.fecha_cierre || "").trim() || today.toISOString().slice(0, 10);
+  if (inmuebleEncargoCloseImporte) inmuebleEncargoCloseImporte.value = String(options.importe_final || "").trim();
+  if (inmuebleEncargoCloseNumCitas) inmuebleEncargoCloseNumCitas.value = String(options.numero_citas || "").trim();
   if (inmuebleEncargoCloseNotas) inmuebleEncargoCloseNotas.value = "";
-  if (inmuebleEncargoCloseHonorarios) inmuebleEncargoCloseHonorarios.value = "";
-  if (inmuebleEncargoCloseNewOwnerName) inmuebleEncargoCloseNewOwnerName.value = "";
-  if (inmuebleEncargoCloseNewOwnerNif) inmuebleEncargoCloseNewOwnerNif.value = "";
-  if (inmuebleEncargoCloseNewOwnerPhone) inmuebleEncargoCloseNewOwnerPhone.value = "";
-  if (inmuebleEncargoCloseNewOwnerEmail) inmuebleEncargoCloseNewOwnerEmail.value = "";
-  if (inmuebleEncargoCloseMotivo) inmuebleEncargoCloseMotivo.value = "";
+  if (inmuebleEncargoCloseHonorarios) inmuebleEncargoCloseHonorarios.value = String(options.honorarios || "").trim();
+  const nextOwner = options.nuevo_propietario || {};
+  if (inmuebleEncargoCloseNewOwnerName) inmuebleEncargoCloseNewOwnerName.value = String(nextOwner.nombre || "").trim();
+  if (inmuebleEncargoCloseNewOwnerNif) inmuebleEncargoCloseNewOwnerNif.value = String(nextOwner.nif || "").trim();
+  if (inmuebleEncargoCloseNewOwnerPhone) inmuebleEncargoCloseNewOwnerPhone.value = String(nextOwner.telefono || "").trim();
+  if (inmuebleEncargoCloseNewOwnerEmail) inmuebleEncargoCloseNewOwnerEmail.value = String(nextOwner.email || "").trim();
+  if (inmuebleEncargoCloseMotivo) inmuebleEncargoCloseMotivo.value = String(options.motivo_cierre || "").trim();
+  if (inmuebleEncargoCloseNotas) inmuebleEncargoCloseNotas.value = String(options.notas || "").trim();
   syncInmuebleEncargoCloseModalFields();
   if (inmuebleEncargoCloseStatus) inmuebleEncargoCloseStatus.textContent = "";
   inmuebleEncargoCloseModal.classList.remove("hidden");
@@ -56595,6 +56604,39 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
 };
 
 const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const shouldOpenEncargoCloseFromAction = (typeKey, resultado) => {
+    const resultKey = normalizeSimple(resultado || "");
+    if (typeKey === "cita_notaria") return resultKey === "firmada";
+    if (typeKey === "cita_contrato_privado") return resultKey === "firmado";
+    return false;
+  };
+
+  const buildEncargoClosePrefillFromAction = (rowSnapshot = {}) => {
+    const ctx = state.currentInmuebleContext || {};
+    const inmueble = ctx.inmueble || state.currentInmueble || {};
+    const captacion = ctx.captacion || {};
+    const tipoOperacion =
+      state.currentInmuebleOperacionTipo
+      || resolveInmuebleTipoOperacion(inmueble || {}, captacion || {}, ctx.docs || []);
+    const clienteBase = findInmoClientContext(rowSnapshot.cliente_id, rowSnapshot.cliente || rowSnapshot.cliente_nombre || "");
+    return {
+      tipo: tipoOperacion === "alquiler" ? "Alquiler" : "Vendido",
+      fecha_cierre: rowSnapshot.fecha || "",
+      importe_final:
+        rowSnapshot.importe_propuesta
+        || inmueble.precio_objetivo
+        || captacion.precio_objetivo
+        || "",
+      nuevo_propietario: {
+        nombre: clienteBase.nombre || rowSnapshot.cliente || rowSnapshot.cliente_nombre || "",
+        nif: clienteBase.nif || "",
+        telefono: clienteBase.telefono || "",
+        email: clienteBase.email || "",
+      },
+      notas: `Cierre iniciado desde cita: ${rowSnapshot.tipo || ""}`.trim(),
+    };
+  };
+
   const submitClosePayload = (payload, type, resultado) => {
     apiPost("/api/acciones_update", payload)
       .then((data) => {
@@ -56641,6 +56683,12 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         if (state.currentInmuebleId && empresaId) {
           loadInmuebleActividad(state.currentInmuebleId, empresaId);
           openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+        }
+        const typeKey = normalizeInmoActionType(type);
+        if (shouldOpenEncargoCloseFromAction(typeKey, resultado) && data?.inmueble_id) {
+          window.setTimeout(() => {
+            openInmuebleEncargoCloseModal(buildEncargoClosePrefillFromAction({ ...row, ...payload }));
+          }, 300);
         }
       })
       .catch(() => {
@@ -57123,6 +57171,12 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
       },
       cita_contraoferta: {
         options: INMO_ACTION_RESULT_OPTIONS.cita_contraoferta,
+      },
+      cita_contrato_privado: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_contrato_privado,
+      },
+      cita_notaria: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_notaria,
       },
     };
     const workflow = workflows[normType];

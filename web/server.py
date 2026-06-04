@@ -22624,6 +22624,9 @@ def normalize_inmo_action_type(value):
         "cita contraoferta": "cita_contraoferta",
         "cita aceptacion contraoferta": "cita_contraoferta",
         "cita de aceptacion contraoferta": "cita_contraoferta",
+        "cita contrato privado": "cita_contrato_privado",
+        "cita de contrato privado": "cita_contrato_privado",
+        "contrato privado": "cita_contrato_privado",
         "cita notaria": "cita_notaria",
         "cita de notaria": "cita_notaria",
     }
@@ -23344,6 +23347,7 @@ INMO_ACTION_RESULT_OPTIONS = {
     "cita_propuesta": {"Aprobada", "En negociación", "Rechazada", "Se realiza propuesta", "No se realiza"},
     "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
     "cita_contraoferta": {"Aceptada", "Rechazada"},
+    "cita_contrato_privado": {"Firmado", "Reprogramar", "No realizada"},
     "cita_notaria": {"Firmada", "Reprogramar", "No realizada"},
     "estudio_financiero": {"Viable", "No viable", "Pendiente documentación"},
 }
