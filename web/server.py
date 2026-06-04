@@ -26666,18 +26666,8 @@ def portal_inmueble_row_to_public(row):
     title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
     description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
     empresa_id = data.get("empresa_id")
-    empresa_nombre = str(data.get("empresa_nombre") or "").strip()
-    empresa_nombre_norm = normalize_lookup_text(empresa_nombre)
-    if empresa_nombre_norm.startswith("estudio velazquez"):
-        empresa_nombre_publico = "Estudio Velazquez"
-        empresa_logo_publico = ""
-    else:
-        empresa_nombre_publico = re.sub(r"\s+(20\d{2})?\s*,?\s*S\.?\s*L\.?U?\.?\s*$", "", empresa_nombre, flags=re.I).strip() or empresa_nombre
-        empresa_logo_publico = (
-            f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}"
-            if empresa_id and data.get("empresa_logo")
-            else ""
-        )
+    empresa_nombre_publico = "Grupo Modernia"
+    empresa_logo_publico = "/assets/grupo_modernia_logo.png"
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
@@ -26753,7 +26743,7 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
           i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, i.precio_valoracion,
           i.estado, i.descripcion, i.lat, i.lon, i.certificado, i.portal_publicado_at,
           i.titulo_anuncio, i.descripcion_corta, i.descripcion_larga, i.destacados, i.seo_slug,
-          e.nombre AS empresa_nombre, e.logo_url AS empresa_logo,
+          MAX(e.nombre) AS empresa_nombre, MAX(e.logo_url) AS empresa_logo,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
         FROM inmuebles i
