@@ -67107,6 +67107,35 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             try:
+                for svc in conn.execute("SELECT id FROM inmueble_servicios WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    svc_id = str(row_value(svc, "id", "") or "").strip()
+                    if svc_id:
+                        trash_backup_row(conn, "inmueble_servicios", svc_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                for buyer in conn.execute("SELECT id FROM inmueble_compradores WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    buyer_id = str(row_value(buyer, "id", "") or "").strip()
+                    if buyer_id:
+                        trash_backup_row(conn, "inmueble_compradores", buyer_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                for cierre in conn.execute("SELECT id FROM inmueble_cierres WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    cierre_id = str(row_value(cierre, "id", "") or "").strip()
+                    if cierre_id:
+                        trash_backup_row(conn, "inmueble_cierres", cierre_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                ensure_inmueble_signature_schema(conn)
+                for sig in conn.execute("SELECT id FROM inmueble_signature_requests WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    sig_id = str(row_value(sig, "id", "") or "").strip()
+                    if sig_id:
+                        trash_backup_row(conn, "inmueble_signature_requests", sig_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
                 # Docs de gestoría vinculados a docs del inmueble.
                 doc_rows = conn.execute(
                     """
@@ -67133,11 +67162,40 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id,),
             )
             conn.execute("DELETE FROM inmueble_checklist WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmueble_servicios WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmueble_compradores WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmueble_cierres WHERE inmueble_id = ?", (inmueble_id,))
+            try:
+                ensure_inmueble_signature_schema(conn)
+                conn.execute(
+                    """
+                    DELETE FROM inmueble_signature_events
+                    WHERE request_id IN (
+                      SELECT id FROM inmueble_signature_requests WHERE inmueble_id = ?
+                    )
+                    """,
+                    (inmueble_id,),
+                )
+                conn.execute("DELETE FROM inmueble_signature_requests WHERE inmueble_id = ?", (inmueble_id,))
+            except Exception:
+                pass
             conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM captaciones WHERE inmueble_id = ?", (inmueble_id,))
+            try:
+                conn.execute("UPDATE operaciones_inmobiliarias SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
+            except Exception:
+                pass
+            try:
+                conn.execute("UPDATE gestoria_contabilidad SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
+            except Exception:
+                pass
+            try:
+                conn.execute("UPDATE asesoramientos_financiacion SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
+            except Exception:
+                pass
             conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
             conn.commit()
             json_response(self, {"ok": True, "id": inmueble_id})
