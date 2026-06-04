@@ -55407,7 +55407,8 @@ if (inmuebleEncargoCloseSubmitBtn) {
       if (inmuebleEncargoCloseStatus) {
         const portalText = res?.portal_retired ? " Retirado del portal." : "";
         const opText = res?.operacion_id ? " Operación económica registrada." : "";
-        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Vuelve a Inmueble. Acciones archivadas: ${Number(res?.archived || 0)}.${portalText}${opText}`;
+        const finalStageText = res?.estado_final ? ` Queda en ${res.estado_final}.` : "";
+        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}.${finalStageText} Acciones archivadas: ${Number(res?.archived || 0)}.${portalText}${opText}`;
       }
       closeInmuebleEncargoCloseModal();
       // Refresca ficha y agenda.

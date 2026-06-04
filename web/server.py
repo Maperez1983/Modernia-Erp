@@ -22378,9 +22378,10 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         usuario=usuario,
         reason=f"Cierre {tipo_label}",
     )
-    # Registra el cierre y devuelve la ficha al inventario base, conservando el histórico.
+    final_stage = "Noticia" if tipo_label == "Alquiler" else "Inmueble"
+    # Registra el cierre y deja la ficha en la fase operativa correspondiente, conservando el histórico.
     sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
-    sync_inmueble_stage_for_action(conn, inmueble_id, "Inmueble", now)
+    sync_inmueble_stage_for_action(conn, inmueble_id, final_stage, now)
     archived = 0
     if archive_pending:
         try:
@@ -22405,7 +22406,7 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
             "operacion_id": operacion_id,
             "archived": archived,
             "portal_retired": portal_retired,
-            "estado_final": "Inmueble",
+            "estado_final": final_stage,
         },
         now=now,
     )
@@ -22417,7 +22418,7 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         "cierre_id": cierre_id,
         "operacion_id": operacion_id,
         "nuevo_propietario_id": nuevo_propietario_id,
-        "estado_final": "Inmueble",
+        "estado_final": final_stage,
     }
 
 

@@ -342,12 +342,19 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.assertEqual(res.get("tipo"), "Alquiler")
         self.assertTrue(res.get("operacion_id"))
         self.assertEqual(res.get("nuevo_propietario_id"), tenant_id)
+        self.assertEqual(res.get("estado_final"), "Noticia")
 
         final_inmueble = self.conn.execute(
             "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
             (inmueble_id,),
         ).fetchone()
-        self.assertEqual(final_inmueble["estado"], "Inmueble")
+        self.assertEqual(final_inmueble["estado"], "Noticia")
+
+        final_captacion = self.conn.execute(
+            "SELECT etapa FROM captaciones WHERE inmueble_id = ? LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        self.assertEqual(final_captacion["etapa"], "Noticia")
 
         propietario = self.conn.execute(
             "SELECT cliente_id FROM inmueble_propietarios WHERE inmueble_id = ? LIMIT 1",
