@@ -22033,6 +22033,49 @@ def archive_pending_inmueble_actions(conn, empresa_id, inmueble_id, now, usuario
     return len(pending)
 
 
+def retire_inmueble_from_portal(conn, empresa_id, inmueble_id, now, usuario=None, reason=None):
+    empresa_id = str(empresa_id or "").strip()
+    inmueble_id = str(inmueble_id or "").strip()
+    if not inmueble_id:
+        return False
+    try:
+        ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "inmuebles", "portal_retirado_at", "portal_retirado_at TEXT")
+    except Exception:
+        pass
+    row = conn.execute(
+        "SELECT id, empresa_id, portal_publicado FROM inmuebles WHERE id = ? LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    if not row:
+        return False
+    if not empresa_id:
+        empresa_id = str(row["empresa_id"] or "").strip()
+    if int(row["portal_publicado"] or 0) != 1:
+        return False
+    conn.execute(
+        """
+        UPDATE inmuebles
+        SET portal_publicado = 0,
+            portal_retirado_at = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (now, now, inmueble_id),
+    )
+    audit_event(
+        conn,
+        empresa_id or None,
+        "inmueble",
+        inmueble_id,
+        "Retirar del portal",
+        usuario=usuario,
+        detalles={"motivo": str(reason or "").strip() or "Cierre de encargo"},
+        now=now,
+    )
+    return True
+
+
 def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True):
     empresa_id = str(empresa_id or "").strip()
     inmueble_id = str(inmueble_id or "").strip()
@@ -22087,6 +22130,14 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
     )
     # Mueve la etapa del inmueble/captación.
     sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
+    portal_retired = retire_inmueble_from_portal(
+        conn,
+        empresa_id,
+        inmueble_id,
+        now,
+        usuario=usuario,
+        reason=f"Cierre {tipo_label}",
+    )
     archived = 0
     if archive_pending:
         try:
@@ -22106,10 +22157,11 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
             "importe_final": float(importe_final) if importe_final is not None else None,
             "numero_citas": int(numero_citas) if numero_citas is not None else None,
             "archived": archived,
+            "portal_retired": portal_retired,
         },
         now=now,
     )
-    return {"ok": True, "tipo": tipo_label, "archived": archived, "cierre_id": cierre_id}
+    return {"ok": True, "tipo": tipo_label, "archived": archived, "portal_retired": portal_retired, "cierre_id": cierre_id}
 
 
 INMO_STAGE_CHECKLISTS = {
@@ -49223,6 +49275,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
+            "/api/inmueble_archive_pending_actions",
+            "/api/inmueble_encargo_close",
             "/api/demandas",
             "/api/visitas",
             "/api/usuarios",
@@ -49857,6 +49911,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
+            "/api/inmueble_archive_pending_actions",
+            "/api/inmueble_encargo_close",
             "/api/gestoria_modelos",
             "/api/gestoria_trabajos",
             "/api/gestoria_docs",
@@ -50184,6 +50240,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_abort",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
+            "/api/inmueble_archive_pending_actions",
+            "/api/inmueble_encargo_close",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",

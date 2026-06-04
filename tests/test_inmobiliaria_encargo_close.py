@@ -44,9 +44,10 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.conn.execute(
             """
             INSERT INTO inmuebles (
-              id, empresa_id, referencia, direccion, tipo_operacion, tipo_inmueble, precio_objetivo, estado, created_at, updated_at
+              id, empresa_id, referencia, direccion, tipo_operacion, tipo_inmueble, precio_objetivo,
+              estado, portal_publicado, portal_publicado_at, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime(?), datetime(?), datetime(?)
             )
             """,
             (
@@ -58,6 +59,7 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
                 "Piso",
                 100000.0,
                 "Encargo",
+                now,
                 now,
                 now,
             ),
@@ -98,6 +100,7 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.assertEqual(res.get("tipo"), "Vendido")
         # Puede archivar también acciones "auto" creadas al mover etapa (checklist/pending defaults).
         self.assertGreaterEqual(int(res.get("archived") or 0), 2)
+        self.assertTrue(res.get("portal_retired"))
         self.assertTrue(res.get("cierre_id"))
 
         cierre = self.conn.execute(
@@ -112,10 +115,12 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.assertEqual(cierre["usuario"], "tester")
 
         inm = self.conn.execute(
-            "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+            "SELECT estado, portal_publicado, portal_retirado_at FROM inmuebles WHERE id = ? LIMIT 1",
             (inmueble_id,),
         ).fetchone()
         self.assertEqual((inm["estado"] if inm else None), "Vendido")
+        self.assertEqual(int(inm["portal_publicado"] or 0), 0)
+        self.assertTrue(inm["portal_retirado_at"])
 
         capt = self.conn.execute(
             "SELECT etapa FROM captaciones WHERE inmueble_id = ? AND empresa_id = ? LIMIT 1",

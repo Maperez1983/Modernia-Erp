@@ -55348,7 +55348,8 @@ if (inmuebleEncargoCloseSubmitBtn) {
       );
       if (res?.error) throw new Error(res.error);
       if (inmuebleEncargoCloseStatus) {
-        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Acciones archivadas: ${Number(res?.archived || 0)}.`;
+        const portalText = res?.portal_retired ? " Retirado del portal." : "";
+        inmuebleEncargoCloseStatus.textContent = `Cerrado como ${res?.tipo || tipo}. Acciones archivadas: ${Number(res?.archived || 0)}.${portalText}`;
       }
       closeInmuebleEncargoCloseModal();
       // Refresca ficha y agenda.
