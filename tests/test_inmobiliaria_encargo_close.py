@@ -247,20 +247,20 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.assertEqual(inm["estado"], "Inmueble")
         self.assertEqual(int(inm["portal_publicado"] or 0), 0)
 
-    def test_create_inmueble_convert_to_encargo_contract_appointment_and_close_sale(self):
+    def test_create_inmueble_convert_to_encargo_contract_appointment_and_close_rental(self):
         now = _now_iso()
         owner_id = server.ensure_cliente_for_inmobiliaria(
             self.conn,
             self.empresa_id,
-            "VENDEDOR PRUEBA CIERRE",
+            "ARRENDADOR PRUEBA CIERRE",
             "33333333C",
             now,
             {"telefono": "600333333", "email": "seller-close@example.test"},
         )
-        buyer_id = server.ensure_cliente_for_inmobiliaria(
+        tenant_id = server.ensure_cliente_for_inmobiliaria(
             self.conn,
             self.empresa_id,
-            "COMPRADOR PRUEBA CIERRE",
+            "INQUILINO PRUEBA CIERRE",
             "44444444D",
             now,
             {"telefono": "600444444", "email": "buyer-close@example.test"},
@@ -272,9 +272,13 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
                 "tipo_inmueble": "Piso",
                 "direccion": "CALLE PRUEBA CIERRE 10",
                 "referencia_catastral": "9999999UF7699S0001ZZ",
-                "precio_encargo": "300000",
+                "precio_encargo": "1200",
             },
             now=now,
+        )
+        self.conn.execute(
+            "UPDATE inmuebles SET tipo_operacion = 'alquiler', updated_at = datetime(?) WHERE id = ?",
+            (now, inmueble_id),
         )
         server.ensure_inmueble_propietario_link(self.conn, inmueble_id, owner_id, now)
         server.sync_inmueble_stage_for_action(self.conn, inmueble_id, "noticia", now)
@@ -304,12 +308,12 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
               fecha, hora, asunto, tipo, responsable, estado, resultado_cierre,
               importe_propuesta, created_at, updated_at
             ) VALUES (
-              ?, ?, 'inmobiliaria', ?, ?, 'COMPRADOR PRUEBA CIERRE',
-              '2026-06-10', '10:00', 'Firma contrato privado', 'Cita contrato privado',
-              'tester', 'Completada', 'Firmado', 295000, datetime(?), datetime(?)
+              ?, ?, 'inmobiliaria', ?, ?, 'INQUILINO PRUEBA CIERRE',
+              '2026-06-10', '10:00', 'Firma contrato privado alquiler', 'Cita contrato privado',
+              'tester', 'Completada', 'Firmado', 1200, datetime(?), datetime(?)
             )
             """,
-            (action_id, self.empresa_id, buyer_id, inmueble_id, now, now),
+            (action_id, self.empresa_id, tenant_id, inmueble_id, now, now),
         )
 
         res = server.close_inmueble_encargo_positive(
@@ -319,13 +323,13 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
             now,
             usuario="tester",
             fecha_cierre="2026-06-10",
-            importe_final=295000,
-            honorarios=9000,
+            importe_final=1200,
+            honorarios=1200,
             numero_citas=1,
-            tipo="Vendido",
-            notas="Cierre desde contrato privado firmado",
+            tipo="Alquiler",
+            notas="Cierre de alquiler desde contrato privado firmado",
             nuevo_propietario={
-                "nombre": "COMPRADOR PRUEBA CIERRE",
+                "nombre": "INQUILINO PRUEBA CIERRE",
                 "nif": "44444444D",
                 "telefono": "600444444",
                 "email": "buyer-close@example.test",
@@ -335,9 +339,9 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
         self.conn.commit()
 
         self.assertTrue(res.get("ok"))
-        self.assertEqual(res.get("tipo"), "Vendido")
+        self.assertEqual(res.get("tipo"), "Alquiler")
         self.assertTrue(res.get("operacion_id"))
-        self.assertEqual(res.get("nuevo_propietario_id"), buyer_id)
+        self.assertEqual(res.get("nuevo_propietario_id"), tenant_id)
 
         final_inmueble = self.conn.execute(
             "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
@@ -349,17 +353,25 @@ class InmobiliariaEncargoCloseTests(unittest.TestCase):
             "SELECT cliente_id FROM inmueble_propietarios WHERE inmueble_id = ? LIMIT 1",
             (inmueble_id,),
         ).fetchone()
-        self.assertEqual(propietario["cliente_id"], buyer_id)
+        self.assertEqual(propietario["cliente_id"], owner_id)
 
         operacion = self.conn.execute(
             "SELECT * FROM operaciones_inmobiliarias WHERE id = ? LIMIT 1",
             (res["operacion_id"],),
         ).fetchone()
-        self.assertEqual(operacion["tipo_operacion"], "venta")
+        self.assertEqual(operacion["tipo_operacion"], "alquiler")
         self.assertEqual(operacion["propietario1_id"], owner_id)
-        self.assertEqual(operacion["contraparte1_id"], buyer_id)
-        self.assertAlmostEqual(float(operacion["precio_escritura"]), 295000.0, places=2)
-        self.assertAlmostEqual(float(operacion["honorarios"]), 9000.0, places=2)
+        self.assertEqual(operacion["contraparte1_id"], tenant_id)
+        self.assertAlmostEqual(float(operacion["precio_renta"]), 1200.0, places=2)
+        self.assertAlmostEqual(float(operacion["honorarios"]), 1200.0, places=2)
+
+        alquiler = self.conn.execute(
+            "SELECT * FROM alquileres WHERE empresa_id = ? AND direccion = ? LIMIT 1",
+            (self.empresa_id, "CALLE PRUEBA CIERRE 10"),
+        ).fetchone()
+        self.assertIsNotNone(alquiler)
+        self.assertEqual(alquiler["inquilino"], "INQUILINO PRUEBA CIERRE")
+        self.assertAlmostEqual(float(alquiler["importe_comision"]), 1200.0, places=2)
 
         cita = self.conn.execute(
             "SELECT estado, resultado_cierre FROM acciones WHERE id = ? LIMIT 1",

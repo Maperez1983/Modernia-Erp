@@ -56604,10 +56604,21 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
 };
 
 const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const resolveActionPropertyOperationType = () => {
+    const ctx = state.currentInmuebleContext || {};
+    return (
+      state.currentInmuebleOperacionTipo
+      || resolveInmuebleTipoOperacion(ctx.inmueble || state.currentInmueble || {}, ctx.captacion || {}, ctx.docs || [])
+      || ""
+    );
+  };
+
   const shouldOpenEncargoCloseFromAction = (typeKey, resultado) => {
     const resultKey = normalizeSimple(resultado || "");
     if (typeKey === "cita_notaria") return resultKey === "firmada";
-    if (typeKey === "cita_contrato_privado") return resultKey === "firmado";
+    if (typeKey === "cita_contrato_privado") {
+      return resultKey === "firmado" && resolveActionPropertyOperationType() === "alquiler";
+    }
     return false;
   };
 
@@ -56615,12 +56626,10 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     const ctx = state.currentInmuebleContext || {};
     const inmueble = ctx.inmueble || state.currentInmueble || {};
     const captacion = ctx.captacion || {};
-    const tipoOperacion =
-      state.currentInmuebleOperacionTipo
-      || resolveInmuebleTipoOperacion(inmueble || {}, captacion || {}, ctx.docs || []);
+    const tipoOperacion = resolveActionPropertyOperationType();
     const clienteBase = findInmoClientContext(rowSnapshot.cliente_id, rowSnapshot.cliente || rowSnapshot.cliente_nombre || "");
     return {
-      tipo: tipoOperacion === "alquiler" ? "Alquiler" : "Vendido",
+      tipo: normalizeInmoActionType(rowSnapshot.tipo || "") === "cita_contrato_privado" ? "Alquiler" : (tipoOperacion === "alquiler" ? "Alquiler" : "Vendido"),
       fecha_cierre: rowSnapshot.fecha || "",
       importe_final:
         rowSnapshot.importe_propuesta

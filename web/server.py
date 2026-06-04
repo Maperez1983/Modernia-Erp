@@ -22367,7 +22367,7 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
             now,
         ),
     )
-    if nuevo_propietario_id:
+    if nuevo_propietario_id and tipo_label == "Vendido":
         conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
         ensure_inmueble_propietario_link(conn, inmueble_id, nuevo_propietario_id, now)
     portal_retired = retire_inmueble_from_portal(
