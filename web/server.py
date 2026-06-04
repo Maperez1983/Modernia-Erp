@@ -884,6 +884,8 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
     "/api/auth_set_password",
+    "/api/leads",
+    "/api/portal_leads",
     "/api/portal_lead",
     "/api/inmueble_signature_sign",
     "/api/inmueble_signature_reject",
@@ -21395,6 +21397,8 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     extra = extra or {}
     nombre_norm = normalize_person_name(nombre)
     nif_norm = normalize_nif(nif)
+    email_norm = normalize_email(extra.get("email"))
+    telefono_norm = str(extra.get("telefono") or "").strip()
     cliente = None
     if nif_norm:
         cliente = conn.execute(
@@ -21407,6 +21411,31 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             """,
             (nif_norm,),
         ).fetchone()
+    if not cliente and email_norm:
+        cliente = conn.execute(
+            """
+            SELECT *
+            FROM clientes
+            WHERE LOWER(COALESCE(email, '')) = LOWER(?)
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (email_norm,),
+        ).fetchone()
+    if not cliente and telefono_norm:
+        phone_digits = re.sub(r"\D+", "", telefono_norm)
+        if phone_digits:
+            cliente = conn.execute(
+                """
+                SELECT *
+                FROM clientes
+                WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
+                   OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(movil, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (phone_digits, phone_digits),
+            ).fetchone()
     if not cliente and nombre_norm:
         cliente = conn.execute(
             """
@@ -21458,7 +21487,7 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             tipo_persona,
             nif_norm or None,
             (extra.get("telefono") or "").strip() or None,
-            normalize_email(extra.get("email")) or None,
+            email_norm or None,
             (extra.get("fecha_nacimiento") or "").strip() or None,
             (extra.get("direccion") or "").strip() or None,
             "",
@@ -26935,7 +26964,16 @@ def validate_portal_publication_requirements(conn, inmueble_id):
 
 
 def create_portal_inmueble_lead(conn, payload, now):
-    listing_id = str(payload.get("listing_id") or payload.get("inmueble_id") or payload.get("id") or "").strip()
+    if not isinstance(payload, dict):
+        return {"error": "payload inválido"}, 400
+    listing_payload = payload.get("listing") if isinstance(payload.get("listing"), dict) else {}
+    listing_id = str(
+        payload.get("listing_id")
+        or payload.get("inmueble_id")
+        or payload.get("id")
+        or listing_payload.get("id")
+        or ""
+    ).strip()
     if not listing_id:
         return {"error": "listing_id requerido"}, 400
     listing_rows = fetch_portal_inmuebles_public(conn, listing_id=listing_id, limit=1)
@@ -26944,10 +26982,15 @@ def create_portal_inmueble_lead(conn, payload, now):
     inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (listing_id,)).fetchone()
     if not inmueble:
         return {"error": "Inmueble no encontrado"}, 404
+    contact = str(payload.get("contact") or "").strip()
     nombre = normalize_person_name(payload.get("nombre") or payload.get("name"))
     telefono = str(payload.get("telefono") or payload.get("phone") or "").strip()
     email = normalize_email(payload.get("email"))
-    notas = str(payload.get("mensaje") or payload.get("notas") or payload.get("message") or "").strip()
+    if contact and "@" in contact and not email:
+        email = normalize_email(contact)
+    elif contact and not telefono:
+        telefono = contact
+    notas = str(payload.get("mensaje") or payload.get("notas") or payload.get("message") or payload.get("note") or "").strip()
     if not nombre and not telefono and not email:
         return {"error": "nombre, teléfono o email requerido"}, 400
     empresa_id = inmueble["empresa_id"]
@@ -26959,6 +27002,61 @@ def create_portal_inmueble_lead(conn, payload, now):
         now,
         {"telefono": telefono, "email": email},
     )
+    existing = conn.execute(
+        """
+        SELECT
+          ic.id AS comprador_id,
+          ic.demanda_id,
+          d.id AS demanda_id_resolved
+        FROM inmueble_compradores ic
+        LEFT JOIN demandas d ON d.id = ic.demanda_id
+        WHERE ic.inmueble_id = ?
+          AND COALESCE(ic.cliente_id, d.cliente_id) = ?
+        ORDER BY ic.updated_at DESC
+        LIMIT 1
+        """,
+        (listing_id, cliente_id),
+    ).fetchone()
+    if existing:
+        demanda_id = str(existing["demanda_id"] or existing["demanda_id_resolved"] or "").strip()
+        conn.execute(
+            """
+            UPDATE inmueble_compradores
+            SET estado = COALESCE(NULLIF(estado, ''), 'Pendiente'),
+                fecha_ultimo_contacto = date('now'),
+                notas = ?,
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                notas or "Nuevo contacto recibido desde portal Verifika2",
+                now,
+                existing["comprador_id"],
+            ),
+        )
+        if demanda_id:
+            conn.execute(
+                """
+                UPDATE demandas
+                SET estado = COALESCE(NULLIF(estado, ''), 'Activa'),
+                    fase = CASE
+                      WHEN COALESCE(NULLIF(fase, ''), '') = '' THEN 'Portal'
+                      ELSE fase
+                    END,
+                    estado_contacto = 'Pendiente',
+                    notas = CASE
+                      WHEN ? = '' THEN notas
+                      WHEN COALESCE(notas, '') = '' THEN ?
+                      ELSE notas || char(10) || ?
+                    END,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (notas, notas, f"Nuevo contacto portal: {notas}", now, demanda_id),
+            )
+        conn.commit()
+        return {"ok": True, "listing_id": listing_id, "cliente_id": cliente_id, "demanda_id": demanda_id, "updated": True}, 200
+
     demanda_id = os.urandom(16).hex()
     d_cols = table_columns(conn, "demandas") or set()
     demanda_payload = {
@@ -26984,7 +27082,15 @@ def create_portal_inmueble_lead(conn, payload, now):
         "presentacion_servicio": 0,
         "fecha_insercion": datetime.now(timezone.utc).date().isoformat(),
         "estado_contacto": "Pendiente",
-        "notas": f"{notas}\nInmueble: {listing_id}".strip(),
+        "notas": "\n".join(
+            part
+            for part in [
+                notas,
+                f"Inmueble: {listing_id}",
+                f"Lead Hub: {payload.get('hub_lead_id')}" if payload.get("hub_lead_id") else "",
+            ]
+            if str(part or "").strip()
+        ).strip(),
         "created_at": now,
         "updated_at": now,
     }
@@ -48102,6 +48208,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_inmuebles",
             "/api/portal_inmueble",
             "/api/inmueble_portal_feed",
+            "/api/leads",
+            "/api/portal_leads",
             "/api/portal_lead",
             "/api/inmueble_signature_public",
             "/api/inmueble_signature_document",
@@ -49097,6 +49205,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_convert",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/leads",
+            "/api/portal_leads",
             "/api/portal_lead",
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
@@ -49315,6 +49425,8 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/captacion_convert": "inmobiliaria",
                         "/api/compraventas": "inmobiliaria",
                         "/api/portal_publish_update": "inmobiliaria",
+                        "/api/leads": "inmobiliaria",
+                        "/api/portal_leads": "inmobiliaria",
                         "/api/portal_lead": "inmobiliaria",
                         "/api/inmueble_anuncio_generate": "inmobiliaria",
                         "/api/inmueble_signature_request": "inmobiliaria",
@@ -49691,6 +49803,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_radar_auto_status",
                 "/api/legal_radar_counts",
                 "/api/portal_publish_update",
+                "/api/leads",
+                "/api/portal_leads",
                 "/api/portal_lead",
                 "/api/inmueble_anuncio_generate",
                 "/api/inmueble_signature_request",
@@ -49726,6 +49840,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional_delete",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/leads",
+            "/api/portal_leads",
             "/api/portal_lead",
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
@@ -50124,7 +50240,7 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-        if parsed.path == "/api/portal_lead":
+        if parsed.path in ("/api/portal_lead", "/api/portal_leads", "/api/leads"):
             result, status = create_portal_inmueble_lead(conn, payload, now)
             json_response(self, result, status=status)
             return

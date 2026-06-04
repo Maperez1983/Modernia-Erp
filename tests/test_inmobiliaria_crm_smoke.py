@@ -709,6 +709,31 @@ class InmobiliariaCrmSmokeTests(unittest.TestCase):
         ).fetchone()
         self.assertIsNotNone(linked)
 
+        retry, retry_status = server.create_portal_inmueble_lead(
+            self.conn,
+            {
+                "hub_lead_id": "hub-smoke-1",
+                "contact": "portalbuyer@test.local",
+                "note": "Segundo contacto desde Lead Hub",
+                "listing": {"id": published_id, "title": "CALLE PORTAL 1"},
+            },
+            now,
+        )
+        self.assertEqual(retry_status, 200, retry)
+        self.assertTrue(retry.get("updated"))
+        self.assertEqual(retry["cliente_id"], lead["cliente_id"])
+        self.assertEqual(retry["demanda_id"], lead["demanda_id"])
+        demanda_count = self.conn.execute(
+            "SELECT COUNT(*) AS total FROM demandas WHERE cliente_id = ?",
+            (lead["cliente_id"],),
+        ).fetchone()
+        compradores_count = self.conn.execute(
+            "SELECT COUNT(*) AS total FROM inmueble_compradores WHERE inmueble_id = ? AND cliente_id = ?",
+            (published_id, lead["cliente_id"]),
+        ).fetchone()
+        self.assertEqual(int(demanda_count["total"] or 0), 1)
+        self.assertEqual(int(compradores_count["total"] or 0), 1)
+
     def test_encargo_and_visit_pdfs_are_generated_with_real_case_data(self):
         now = _now_iso()
         owner_id = server.ensure_cliente_for_inmobiliaria(
