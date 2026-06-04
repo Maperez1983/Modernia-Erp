@@ -26666,6 +26666,18 @@ def portal_inmueble_row_to_public(row):
     title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
     description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
     empresa_id = data.get("empresa_id")
+    empresa_nombre = str(data.get("empresa_nombre") or "").strip()
+    empresa_nombre_norm = normalize_lookup_text(empresa_nombre)
+    if empresa_nombre_norm.startswith("estudio velazquez"):
+        empresa_nombre_publico = "Estudio Velazquez"
+        empresa_logo_publico = ""
+    else:
+        empresa_nombre_publico = re.sub(r"\s+(20\d{2})?\s*,?\s*S\.?\s*L\.?U?\.?\s*$", "", empresa_nombre, flags=re.I).strip() or empresa_nombre
+        empresa_logo_publico = (
+            f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}"
+            if empresa_id and data.get("empresa_logo")
+            else ""
+        )
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
@@ -26692,10 +26704,10 @@ def portal_inmueble_row_to_public(row):
         "lon": data.get("lon"),
         "foto": data.get("foto"),
         "empresa_id": empresa_id,
-        "empresa_nombre": data.get("empresa_nombre"),
-        "empresa_logo": f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}" if empresa_id and data.get("empresa_logo") else "",
-        "inmobiliaria_nombre": data.get("empresa_nombre"),
-        "inmobiliaria_logo": f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}" if empresa_id and data.get("empresa_logo") else "",
+        "empresa_nombre": empresa_nombre_publico,
+        "empresa_logo": empresa_logo_publico,
+        "inmobiliaria_nombre": empresa_nombre_publico,
+        "inmobiliaria_logo": empresa_logo_publico,
         "certificado": int(data.get("certificado") or 0),
         "verificado": int(data.get("noticia_verificada") or 0),
         "publicado_at": data.get("portal_publicado_at"),
