@@ -26665,6 +26665,7 @@ def portal_inmueble_row_to_public(row):
     price = data.get("precio_encargo") or data.get("precio_objetivo") or data.get("precio_pedido_cliente") or data.get("precio_valoracion")
     title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
     description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
+    empresa_id = data.get("empresa_id")
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
@@ -26690,6 +26691,11 @@ def portal_inmueble_row_to_public(row):
         "lat": data.get("lat"),
         "lon": data.get("lon"),
         "foto": data.get("foto"),
+        "empresa_id": empresa_id,
+        "empresa_nombre": data.get("empresa_nombre"),
+        "empresa_logo": f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}" if empresa_id and data.get("empresa_logo") else "",
+        "inmobiliaria_nombre": data.get("empresa_nombre"),
+        "inmobiliaria_logo": f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}" if empresa_id and data.get("empresa_logo") else "",
         "certificado": int(data.get("certificado") or 0),
         "verificado": int(data.get("noticia_verificada") or 0),
         "publicado_at": data.get("portal_publicado_at"),
@@ -26730,15 +26736,17 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
     rows = conn.execute(
         f"""
         SELECT
-          i.id, i.referencia, i.titulo, i.direccion, i.zona, i.localidad, i.poblacion, i.provincia,
+          i.id, i.empresa_id, i.referencia, i.titulo, i.direccion, i.zona, i.localidad, i.poblacion, i.provincia,
           i.tipo_operacion, i.tipo_inmueble, i.subtipologia, i.m2, i.habitaciones, i.banos,
           i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, i.precio_valoracion,
           i.estado, i.descripcion, i.lat, i.lon, i.certificado, i.portal_publicado_at,
           i.titulo_anuncio, i.descripcion_corta, i.descripcion_larga, i.destacados, i.seo_slug,
+          e.nombre AS empresa_nombre, e.logo_url AS empresa_logo,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
         FROM inmuebles i
         LEFT JOIN captaciones c ON c.inmueble_id = i.id
+        LEFT JOIN empresas e ON e.id = i.empresa_id
         WHERE {' AND '.join(where)}
         GROUP BY i.id
         ORDER BY COALESCE(NULLIF(i.portal_publicado_at, ''), i.updated_at, i.created_at) DESC
@@ -77570,6 +77578,59 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = 100
             rows = fetch_portal_inmuebles_public(conn, limit=limit_val)
             json_response(self, {"rows": rows, "count": len(rows)})
+            return
+
+        if path == "/api/portal_empresa_logo":
+            empresa_id = (params.get("id", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT e.logo_url
+                FROM empresas e
+                WHERE e.id = ?
+                  AND EXISTS (
+                    SELECT 1
+                    FROM inmuebles i
+                    WHERE i.empresa_id = e.id
+                      AND COALESCE(i.portal_publicado, 0) = 1
+                    LIMIT 1
+                  )
+                LIMIT 1
+                """,
+                (empresa_id,),
+            ).fetchone()
+            logo_url = str(row_value(row, "logo_url") or "").strip() if row else ""
+            if not logo_url:
+                self.send_error(404, "Not found")
+                return
+            raw_bytes = None
+            content_type = "image/png"
+            if logo_url.startswith("s3://"):
+                safe_key = _normalize_s3_key(logo_url)
+                if safe_key and safe_key.startswith("company_logos/"):
+                    raw_bytes, _err = s3_get_object_bytes(safe_key)
+            elif logo_url.startswith("/uploads/s3_local/"):
+                safe_name = os.path.basename(logo_url)
+                target = safe_resolve_under(UPLOADS / "s3_local", safe_name)
+                if target and target.exists():
+                    raw_bytes = target.read_bytes()
+            elif logo_url.startswith("/assets/"):
+                safe_path = safe_resolve_under(ASSETS, logo_url.replace("/assets/", "", 1))
+                if safe_path and safe_path.exists():
+                    raw_bytes = safe_path.read_bytes()
+            if not raw_bytes:
+                self.send_error(404, "Not found")
+                return
+            lower = logo_url.lower()
+            if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+                content_type = "image/jpeg"
+            elif lower.endswith(".svg"):
+                content_type = "image/svg+xml"
+            elif lower.endswith(".webp"):
+                content_type = "image/webp"
+            binary_response(self, raw_bytes, content_type=content_type)
             return
 
         if path == "/api/inmueble_portal_feed":
