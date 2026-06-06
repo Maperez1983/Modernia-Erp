@@ -27347,6 +27347,41 @@ def create_portal_inmueble_lead(conn, payload, now):
     if not nombre and not telefono and not email:
         return {"error": "nombre, teléfono o email requerido"}, 400
     empresa_id = inmueble["empresa_id"]
+    workspace_id = str(
+        payload.get("workspace_id")
+        or listing_payload.get("workspace_id")
+        or row_value(inmueble, "workspace_id")
+        or ""
+    ).strip()
+    if not workspace_id:
+        try:
+            rows = conn.execute(
+                """
+                SELECT workspace_id
+                FROM workspace_companies
+                WHERE legacy_empresa_id = ?
+                  AND COALESCE(activo, 1) = 1
+                UNION
+                SELECT workspace_id
+                FROM workspace_empresas
+                WHERE empresa_id = ?
+                """,
+                (empresa_id, empresa_id),
+            ).fetchall()
+            candidates = [
+                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+                for r in (rows or [])
+            ]
+            candidates = [c for c in candidates if c]
+            if len(set(candidates)) == 1:
+                workspace_id = candidates[0]
+        except Exception:
+            workspace_id = ""
+    if not workspace_id:
+        workspace_id = str(os.environ.get("PORTAL_LEADS_WORKSPACE_ID") or "").strip()
+    if not workspace_id:
+        # Workspace de producción del CRM inmobiliario de Grupo Modernia.
+        workspace_id = "6e63e1d1205c4c2a85dde7e20d5409f0"
     cliente_id = ensure_cliente_for_inmobiliaria(
         conn,
         empresa_id,
@@ -27416,6 +27451,7 @@ def create_portal_inmueble_lead(conn, payload, now):
         "id": demanda_id,
         "empresa_id": empresa_id,
         "cliente_id": cliente_id,
+        "workspace_id": workspace_id,
         "focalizacion": "Portal Verifika2",
         "pedido": f"Lead portal Verifika2 · {inmueble['direccion'] or inmueble['referencia'] or listing_id}",
         "tipo": "Compra" if normalize_lookup_text(inmueble["tipo_operacion"]) not in {"alquiler", "arrendamiento", "renta"} else "Alquiler",
@@ -27457,6 +27493,7 @@ def create_portal_inmueble_lead(conn, payload, now):
         ic_payload = {
             "id": os.urandom(16).hex(),
             "empresa_id": empresa_id,
+            "workspace_id": workspace_id,
             "inmueble_id": listing_id,
             "demanda_id": demanda_id,
             "cliente_id": cliente_id,
