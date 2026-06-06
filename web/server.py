@@ -33153,6 +33153,7 @@ def ensure_tables(db_path):
         ensure_column(conn, "gestoria_docs", "referencia_id", "referencia_id TEXT")
         ensure_column(conn, "gestoria_docs", "calidad_ocr", "calidad_ocr TEXT")
         ensure_column(conn, "gestoria_docs", "campos_ocr", "campos_ocr TEXT")
+        ensure_column(conn, "gestoria_docs", "archivo_hash", "archivo_hash TEXT")
     except Exception:
         pass
     conn.execute(

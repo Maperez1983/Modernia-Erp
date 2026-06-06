@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -110,6 +111,17 @@ def build_s3_key(prefix: str, filename: str) -> str:
     rand = os.urandom(4).hex()
     pref = (prefix or "gestoria/rentas").strip().strip("/")
     return f"{pref}/{stamp}_{rand}_{safe_filename(filename)}"
+
+
+def file_sha256(path: Path) -> str:
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return ""
 
 
 def norm_text(value: object) -> str:
@@ -2242,6 +2254,10 @@ def ensure_gestoria_renta_docs(
     ).fetchone()
     if not docs_table:
         return
+    try:
+        conn.execute("ALTER TABLE gestoria_docs ADD COLUMN archivo_hash TEXT")
+    except sqlite3.OperationalError:
+        pass
     ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
     estado_presentacion = detect_renta_doc_status(
         estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
@@ -2253,10 +2269,14 @@ def ensure_gestoria_renta_docs(
             continue
         doc_name = f"Renta {ejercicio} · {estado_presentacion} · {Path(source_text).name}"
         source_url = source_text if source_text.startswith("/uploads/") or source_text.startswith("http") else ""
+        source_path = Path(source_text).expanduser()
+        archivo_hash = ""
+        if source_text.lower().endswith(".pdf") and (source_text.startswith("/") or re.match(r"^[A-Za-z]:\\\\", source_text) is not None):
+            archivo_hash = file_sha256(source_path) if source_path.exists() else ""
         uploaded_key = ""
         if not source_url and source_text.lower().endswith(".pdf") and (source_text.startswith("/") or re.match(r"^[A-Za-z]:\\\\", source_text) is not None):
             if s3_bucket_name and s3:
-                src_path = Path(source_text).expanduser()
+                src_path = source_path
                 if src_path.exists():
                     uploaded_key = build_s3_key(s3_prefix, doc_name or src_path.name)
                     try:
@@ -2269,7 +2289,20 @@ def ensure_gestoria_renta_docs(
                     except Exception as exc:
                         uploaded_key = ""
                         print(f"[warn] S3 upload falló ({type(exc).__name__}): {exc}", file=sys.stderr)
-        if source_url:
+        existing = None
+        if archivo_hash:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_docs
+                WHERE cliente_id = ?
+                  AND LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+                  AND COALESCE(archivo_hash, '') = ?
+                LIMIT 1
+                """,
+                (cliente_id, archivo_hash),
+            ).fetchone()
+        if (not existing) and source_url:
             existing = conn.execute(
                 """
                 SELECT id
@@ -2284,7 +2317,7 @@ def ensure_gestoria_renta_docs(
                 """,
                 (cliente_id, source_url, doc_name),
             ).fetchone()
-        else:
+        elif not existing:
             existing = conn.execute(
                 """
                 SELECT id
@@ -2307,6 +2340,7 @@ def ensure_gestoria_renta_docs(
                     notas = COALESCE(NULLIF(?, ''), notas),
                     doc_key = COALESCE(NULLIF(?, ''), doc_key),
                     doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                    archivo_hash = COALESCE(NULLIF(?, ''), archivo_hash),
                     updated_at = datetime(?)
                 WHERE id = ?
                 """,
@@ -2318,6 +2352,7 @@ def ensure_gestoria_renta_docs(
                     source_text,
                     uploaded_key,
                     source_url,
+                    archivo_hash,
                     now,
                     existing["id"],
                 ),
@@ -2328,9 +2363,9 @@ def ensure_gestoria_renta_docs(
             INSERT INTO gestoria_docs (
               id, empresa_id, cliente_id, referencia_tipo, referencia_id,
               nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-              calidad_ocr, campos_ocr, created_at, updated_at
+              calidad_ocr, campos_ocr, archivo_hash, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -2347,6 +2382,7 @@ def ensure_gestoria_renta_docs(
                 source_url or None,
                 record.get("text_source") or "",
                 ",".join(sorted(k for k, v in record.items() if v not in (None, "", [], {}))),
+                archivo_hash or None,
                 now,
                 now,
             ),

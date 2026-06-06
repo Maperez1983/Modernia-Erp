@@ -343,6 +343,24 @@ def create_test_schema(db_path: Path) -> None:
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
+            CREATE TABLE gestoria_docs (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              referencia_tipo TEXT,
+              referencia_id TEXT,
+              nombre TEXT,
+              tipo TEXT,
+              fecha TEXT,
+              estado TEXT,
+              notas TEXT,
+              doc_key TEXT,
+              doc_url TEXT,
+              calidad_ocr TEXT,
+              campos_ocr TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             CREATE TABLE asesoramientos_financiacion (
               id TEXT PRIMARY KEY,
               empresa_id TEXT,
@@ -796,6 +814,46 @@ class RentasImportTests(unittest.TestCase):
             self.assertEqual(dudoso_count, 0)
             self.assertEqual(servicio, "gestoria")
             self.assertIn('"entries"', renta_detalles)
+
+    def test_apply_to_db_deduplicates_renta_docs_by_file_hash(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            db_path = tmp_path / "rentas.sqlite"
+            create_test_schema(db_path)
+            pdf_a = tmp_path / "modelo-original.pdf"
+            pdf_b = tmp_path / "modelo-renombrado.pdf"
+            pdf_a.write_bytes(b"%PDF-1.4\nsame-renta-content\n%%EOF\n")
+            pdf_b.write_bytes(pdf_a.read_bytes())
+            record = finalize_record(
+                {
+                    "cliente_nombre": "TRUJILLO GONZALEZ CRISTOBAL",
+                    "cliente_nombre_source": "modelo_100",
+                    "cliente_nif": "74822580S",
+                    "cliente_fecha_nacimiento": "1977-03-19",
+                    "ingresos_principales_total": 33471.49,
+                    "rendimientos_trabajo_total": 33471.49,
+                    "resultado_declaracion": -576.37,
+                    "source_types": ["modelo_100"],
+                    "source_files": [str(pdf_a), str(pdf_b)],
+                }
+            )
+            result = apply_to_db(db_path, [record], "Fincas Velazquez", ejercicio="2024")
+            self.assertEqual(result["records_upserted"], 1)
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                docs_count = conn.execute("SELECT COUNT(*) FROM gestoria_docs").fetchone()[0]
+                hash_count = conn.execute(
+                    "SELECT COUNT(DISTINCT archivo_hash) FROM gestoria_docs WHERE COALESCE(archivo_hash, '') != ''"
+                ).fetchone()[0]
+                doc_row = conn.execute("SELECT nombre, notas, archivo_hash FROM gestoria_docs LIMIT 1").fetchone()
+            finally:
+                conn.close()
+
+            self.assertEqual(docs_count, 1)
+            self.assertEqual(hash_count, 1)
+            self.assertIn("modelo-renombrado.pdf", doc_row[1])
+            self.assertTrue(doc_row[2])
 
 
 class RentaRecordKeyTests(unittest.TestCase):
