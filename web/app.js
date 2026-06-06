@@ -50144,17 +50144,27 @@ const refreshCurrentInmuebleProfile = () => {
     if (isRental) {
       return {
         status: "No aplicable",
+        tone: "neutral",
+        headline: "Inmueble de alquiler: no requiere estudio hipotecario de compra.",
         note: "Informe hipotecario no aplicable a inmuebles de alquiler.",
         rows: [["Tipo operación", "Alquiler"], ["Base usada", "No aplica"]],
         kpis: [],
+        segments: [],
+        scenarios: [],
+        copyText: "",
       };
     }
     if (!price || price <= 0) {
       return {
         status: "Pendiente",
+        tone: "warning",
+        headline: "Falta el precio del anuncio para calcular la viabilidad financiera.",
         note: "Añade precio de anuncio para calcular entrada, gastos y tasación.",
         rows: [["Precio del anuncio", "Pendiente"], ["Base usada", "Solo precio publicado"]],
         kpis: [],
+        segments: [],
+        scenarios: [],
+        copyText: "",
       };
     }
     const mortgagePct = 0.8;
@@ -50178,8 +50188,26 @@ const refreshCurrentInmuebleProfile = () => {
     const appraisalGap = Math.max(0, mortgageAmount - maxMortgageLowAppraisal);
     const cashNeededLowAppraisal = cashNeeded + appraisalGap;
     const status = cashNeeded <= price * 0.32 ? "Viabilidad inicial alta" : cashNeeded <= price * 0.38 ? "Revisar entrada" : "Entrada exigente";
+    const tone = status === "Viabilidad inicial alta" ? "good" : status === "Revisar entrada" ? "warning" : "alert";
+    const headline = `El comprador necesita aproximadamente ${formatEuros(cashNeeded)} disponibles para comprar este inmueble.`;
+    const segmentTotal = mortgageAmount + downPayment + totalCosts;
+    const pct = (value) => `${Math.max(4, Math.min(100, Math.round((value / segmentTotal) * 100)))}%`;
+    const copyText = [
+      "Informe orientativo de hipoteca y gastos",
+      `Precio del anuncio: ${formatEuros(price)}`,
+      `Hipoteca estimada 80%: ${formatEuros(mortgageAmount)}`,
+      `Entrada mínima: ${formatEuros(downPayment)}`,
+      `Gastos compra estimados: ${formatEuros(totalCosts)}`,
+      `Dinero necesario aproximado: ${formatEuros(cashNeeded)}`,
+      `Cuota orientativa: ${formatEuros(monthlyPayment)} / mes`,
+      `Ingresos recomendados: ${formatEuros(recommendedIncome)} / mes`,
+      `Si tasación baja 5%: ${formatEuros(cashNeededLowAppraisal)} necesarios`,
+      "Informe orientativo: depende de perfil comprador, banco, tasación y documentación.",
+    ].join("\n");
     return {
       status,
+      tone,
+      headline,
       note: "Orientativo. No sustituye estudio bancario: depende de perfil comprador, banco, tasación y documentación.",
       rows: [
         ["Precio del anuncio", formatEuros(price)],
@@ -50198,6 +50226,16 @@ const refreshCurrentInmuebleProfile = () => {
         { label: "Caja necesaria", value: formatEuros(cashNeeded) },
         { label: "Cuota", value: formatEuros(monthlyPayment) },
       ],
+      segments: [
+        { label: "Hipoteca", value: formatEuros(mortgageAmount), width: pct(mortgageAmount), className: "mortgage" },
+        { label: "Entrada", value: formatEuros(downPayment), width: pct(downPayment), className: "down" },
+        { label: "Gastos", value: formatEuros(totalCosts), width: pct(totalCosts), className: "costs" },
+      ],
+      scenarios: [
+        { title: "Escenario base", value: formatEuros(cashNeeded), detail: "Entrada + gastos estimados" },
+        { title: "Tasación -5%", value: formatEuros(cashNeededLowAppraisal), detail: appraisalGap ? `Aportación extra: ${formatEuros(appraisalGap)}` : "Sin aportación extra estimada" },
+      ],
+      copyText,
     };
   };
 
@@ -50428,14 +50466,18 @@ const refreshCurrentInmuebleProfile = () => {
 	        ],
 	      },
     ];
+    const canOpenFinancing = userCanAccessService("financiaciones");
     const mortgageReportHtml = `
-      <section class="inmueble-fact-card inmueble-finance-card">
+      <section class="inmueble-fact-card inmueble-finance-card tone-${escapeHtml(mortgageReport.tone || "neutral")}">
         <div class="inmueble-finance-head">
           <div>
             <h4>Hipoteca y gastos</h4>
             <p>Informe basado solo en el precio del anuncio.</p>
           </div>
           <span class="inmueble-finance-status">${escapeHtml(mortgageReport.status)}</span>
+        </div>
+        <div class="inmueble-finance-hero">
+          <strong>${escapeHtml(mortgageReport.headline || "Informe financiero orientativo del inmueble.")}</strong>
         </div>
         ${mortgageReport.kpis.length ? `
           <div class="inmueble-finance-kpis">
@@ -50447,6 +50489,31 @@ const refreshCurrentInmuebleProfile = () => {
             `).join("")}
           </div>
         ` : ""}
+        ${mortgageReport.segments.length ? `
+          <div class="inmueble-finance-split" aria-label="Reparto financiero">
+            <div class="inmueble-finance-bar">
+              ${mortgageReport.segments.map((item) => `
+                <span class="inmueble-finance-bar-segment ${escapeHtml(item.className)}" style="width:${escapeHtml(item.width)}"></span>
+              `).join("")}
+            </div>
+            <div class="inmueble-finance-legend">
+              ${mortgageReport.segments.map((item) => `
+                <span><i class="${escapeHtml(item.className)}"></i>${escapeHtml(item.label)} · <strong>${escapeHtml(item.value)}</strong></span>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
+        ${mortgageReport.scenarios.length ? `
+          <div class="inmueble-finance-scenarios">
+            ${mortgageReport.scenarios.map((item) => `
+              <div class="inmueble-finance-scenario">
+                <span>${escapeHtml(item.title)}</span>
+                <strong>${escapeHtml(item.value)}</strong>
+                <small>${escapeHtml(item.detail)}</small>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
         <div class="inmueble-fact-list inmueble-finance-list">
           ${mortgageReport.rows.map(([label, value]) => `
             <div class="inmueble-fact-row">
@@ -50454,6 +50521,11 @@ const refreshCurrentInmuebleProfile = () => {
               <strong>${escapeHtml(value)}</strong>
             </div>
           `).join("")}
+        </div>
+        <div class="inmueble-finance-actions">
+          ${mortgageReport.copyText ? `<button type="button" class="secondary ghost button-inline inmueble-finance-action" id="inmuebleFinanceCopyBtn">Copiar resumen</button>` : ""}
+          ${canOpenFinancing ? `<button type="button" class="secondary ghost button-inline inmueble-finance-action" id="inmuebleFinanceOpenBtn">Abrir financiación</button>` : ""}
+          <span class="inmueble-finance-action-status" id="inmuebleFinanceActionStatus"></span>
         </div>
         <p class="inmueble-finance-note">${escapeHtml(mortgageReport.note)}</p>
       </section>
@@ -50479,6 +50551,30 @@ const refreshCurrentInmuebleProfile = () => {
         `
       )
       .join("") + mortgageReportHtml;
+    const financeCopyBtn = inmuebleFactsPanel.querySelector("#inmuebleFinanceCopyBtn");
+    const financeOpenBtn = inmuebleFactsPanel.querySelector("#inmuebleFinanceOpenBtn");
+    const financeActionStatus = inmuebleFactsPanel.querySelector("#inmuebleFinanceActionStatus");
+    if (financeCopyBtn) {
+      financeCopyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard?.writeText(mortgageReport.copyText || "");
+          if (financeActionStatus) financeActionStatus.textContent = "Resumen copiado.";
+        } catch (e) {
+          if (financeActionStatus) financeActionStatus.textContent = "No se pudo copiar.";
+        }
+      };
+    }
+    if (financeOpenBtn) {
+      financeOpenBtn.onclick = () => {
+        try {
+          setCrmMode("fin");
+          setCrmWorkspaceView("fin");
+          if (financeActionStatus) financeActionStatus.textContent = "Abriendo financiación.";
+        } catch (e) {
+          if (financeActionStatus) financeActionStatus.textContent = "No se pudo abrir financiación.";
+        }
+      };
+    }
   }
 
   renderInmuebleTecnocloudPanels({

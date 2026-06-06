@@ -8270,6 +8270,28 @@ body.crm-context-inmo .crm-resumen-compact-note {
     linear-gradient(135deg, rgba(11, 29, 51, 0.96), rgba(35, 48, 72, 0.96)),
     #0b1d33;
   color: #fff;
+  position: relative;
+  overflow: hidden;
+}
+
+.inmueble-finance-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: #f2c14e;
+}
+
+.inmueble-finance-card.tone-good::before {
+  background: #22c55e;
+}
+
+.inmueble-finance-card.tone-warning::before {
+  background: #f2c14e;
+}
+
+.inmueble-finance-card.tone-alert::before {
+  background: #fb7185;
 }
 
 .inmueble-finance-head {
@@ -8307,6 +8329,33 @@ body.crm-context-inmo .crm-resumen-compact-note {
   white-space: nowrap;
 }
 
+.inmueble-finance-card.tone-good .inmueble-finance-status {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.42);
+  color: #86efac;
+}
+
+.inmueble-finance-card.tone-alert .inmueble-finance-status {
+  background: rgba(251, 113, 133, 0.16);
+  border-color: rgba(251, 113, 133, 0.42);
+  color: #fda4af;
+}
+
+.inmueble-finance-hero {
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  margin-bottom: 8px;
+}
+
+.inmueble-finance-hero strong {
+  display: block;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
 .inmueble-finance-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -8335,6 +8384,93 @@ body.crm-context-inmo .crm-resumen-compact-note {
   font-size: 12px;
 }
 
+.inmueble-finance-split {
+  display: grid;
+  gap: 7px;
+  margin: 8px 0;
+}
+
+.inmueble-finance-bar {
+  height: 12px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.inmueble-finance-bar-segment {
+  display: block;
+  min-width: 4px;
+}
+
+.inmueble-finance-bar-segment.mortgage,
+.inmueble-finance-legend i.mortgage {
+  background: #60a5fa;
+}
+
+.inmueble-finance-bar-segment.down,
+.inmueble-finance-legend i.down {
+  background: #f2c14e;
+}
+
+.inmueble-finance-bar-segment.costs,
+.inmueble-finance-legend i.costs {
+  background: #fb7185;
+}
+
+.inmueble-finance-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 10px;
+}
+
+.inmueble-finance-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.inmueble-finance-legend strong {
+  color: #fff;
+}
+
+.inmueble-finance-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.inmueble-finance-scenarios {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.inmueble-finance-scenario {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.inmueble-finance-scenario span,
+.inmueble-finance-scenario small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 10px;
+}
+
+.inmueble-finance-scenario strong {
+  color: #fff;
+  font-size: 14px;
+}
+
 .inmueble-finance-list .inmueble-fact-row {
   border-bottom-color: rgba(255, 255, 255, 0.12);
 }
@@ -8349,6 +8485,24 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .inmueble-finance-note {
   margin-top: 8px;
+}
+
+.inmueble-finance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.inmueble-finance-action {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.inmueble-finance-action-status {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 10px;
 }
 
 .inmueble-media-grid {
@@ -8427,6 +8581,10 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
   .inmueble-finance-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inmueble-finance-scenarios {
+    grid-template-columns: 1fr;
   }
 }
 
