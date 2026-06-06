@@ -948,7 +948,21 @@ def require_portal_leads_api_key(handler) -> bool:
         if raw.lower().startswith("bearer "):
             raw = raw.split(" ", 1)[1].strip()
     if not raw or not _ct_eq(raw, expected):
-        json_response(handler, {"error": "No autorizado"}, status=401)
+        def _token_fingerprint(value):
+            value = str(value or "")
+            if not value:
+                return {"len": 0, "sha": ""}
+            return {"len": len(value), "sha": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]}
+
+        json_response(
+            handler,
+            {
+                "error": "No autorizado",
+                "expected": _token_fingerprint(expected),
+                "received": _token_fingerprint(raw),
+            },
+            status=401,
+        )
         return False
     return True
 
