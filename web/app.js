@@ -50151,6 +50151,9 @@ const refreshCurrentInmuebleProfile = () => {
         kpis: [],
         segments: [],
         scenarios: [],
+        score: "",
+        scoreLabel: "",
+        highlights: [],
         copyText: "",
       };
     }
@@ -50164,6 +50167,12 @@ const refreshCurrentInmuebleProfile = () => {
         kpis: [],
         segments: [],
         scenarios: [],
+        score: "",
+        scoreLabel: "",
+        highlights: [
+          { label: "Acción", value: "Completar precio" },
+          { label: "Base", value: "Precio publicado" },
+        ],
         copyText: "",
       };
     }
@@ -50190,6 +50199,9 @@ const refreshCurrentInmuebleProfile = () => {
     const status = cashNeeded <= price * 0.32 ? "Viabilidad inicial alta" : cashNeeded <= price * 0.38 ? "Revisar entrada" : "Entrada exigente";
     const tone = status === "Viabilidad inicial alta" ? "good" : status === "Revisar entrada" ? "warning" : "alert";
     const headline = `El comprador necesita aproximadamente ${formatEuros(cashNeeded)} disponibles para comprar este inmueble.`;
+    const cashRatio = cashNeeded / price;
+    const score = cashRatio <= 0.32 ? 84 : cashRatio <= 0.38 ? 66 : 48;
+    const scoreLabel = cashRatio <= 0.32 ? "Alta" : cashRatio <= 0.38 ? "Media" : "Exigente";
     const segmentTotal = mortgageAmount + downPayment + totalCosts;
     const pct = (value) => `${Math.max(4, Math.min(100, Math.round((value / segmentTotal) * 100)))}%`;
     const copyText = [
@@ -50234,6 +50246,13 @@ const refreshCurrentInmuebleProfile = () => {
       scenarios: [
         { title: "Escenario base", value: formatEuros(cashNeeded), detail: "Entrada + gastos estimados" },
         { title: "Tasación -5%", value: formatEuros(cashNeededLowAppraisal), detail: appraisalGap ? `Aportación extra: ${formatEuros(appraisalGap)}` : "Sin aportación extra estimada" },
+      ],
+      score,
+      scoreLabel,
+      highlights: [
+        { label: "Fondos propios", value: `${Math.round(cashRatio * 100)}% del precio` },
+        { label: "Financiación", value: "80% estimado" },
+        { label: "Tasación", value: "Incluida" },
       ],
       copyText,
     };
@@ -50467,18 +50486,41 @@ const refreshCurrentInmuebleProfile = () => {
 	      },
     ];
     const canOpenFinancing = userCanAccessService("financiaciones");
+    const financeScoreStyle = mortgageReport.score ? ` style="--score:${escapeHtml(String(mortgageReport.score))}"` : "";
     const mortgageReportHtml = `
       <section class="inmueble-fact-card inmueble-finance-card tone-${escapeHtml(mortgageReport.tone || "neutral")}">
         <div class="inmueble-finance-head">
-          <div>
-            <h4>Hipoteca y gastos</h4>
-            <p>Informe basado solo en el precio del anuncio.</p>
+          <div class="inmueble-finance-brand">
+            <img src="/assets/verifika2/verifika2_wordmark_traced.svg" alt="Verifika²" loading="lazy" />
+            <div>
+              <h4>Hipoteca y gastos</h4>
+              <p>Informe basado solo en el precio del anuncio.</p>
+            </div>
           </div>
           <span class="inmueble-finance-status">${escapeHtml(mortgageReport.status)}</span>
         </div>
         <div class="inmueble-finance-hero">
-          <strong>${escapeHtml(mortgageReport.headline || "Informe financiero orientativo del inmueble.")}</strong>
+          <div>
+            <span>Informe financiero orientativo</span>
+            <strong>${escapeHtml(mortgageReport.headline || "Informe financiero orientativo del inmueble.")}</strong>
+          </div>
+          ${mortgageReport.score ? `
+            <div class="inmueble-finance-score"${financeScoreStyle}>
+              <strong>${escapeHtml(String(mortgageReport.score))}</strong>
+              <span>${escapeHtml(mortgageReport.scoreLabel || "Viabilidad")}</span>
+            </div>
+          ` : ""}
         </div>
+        ${mortgageReport.highlights?.length ? `
+          <div class="inmueble-finance-highlights">
+            ${mortgageReport.highlights.map((item) => `
+              <div>
+                <span>${escapeHtml(item.label)}</span>
+                <strong>${escapeHtml(item.value)}</strong>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
         ${mortgageReport.kpis.length ? `
           <div class="inmueble-finance-kpis">
             ${mortgageReport.kpis.map((item) => `
