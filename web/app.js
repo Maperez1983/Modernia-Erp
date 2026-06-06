@@ -50116,6 +50116,90 @@ const refreshCurrentInmuebleProfile = () => {
     return Number(inmueble.precio_encargo || 0) || Number(inmueble.precio_objetivo || 0) || Number(inmueble.precio_pedido_cliente || 0) || 0;
   };
   const getInmoPrimaryPriceLabel = () => (isInmoEarlyStage(resolveInmoStageKey()) ? "Precio propietario" : "Precio encargo");
+  const parseInmoMoney = (value) => {
+    if (value === null || value === undefined || value === "") return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    let text = String(value).trim().replace(/[^\d.,-]/g, "");
+    if (!text) return 0;
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+    if (hasComma && hasDot) text = text.replace(/\./g, "").replace(",", ".");
+    else if (hasComma) text = text.replace(",", ".");
+    else if (hasDot) {
+      const parts = text.split(".");
+      if (parts.length > 1 && parts.slice(1).every((part) => part.length === 3)) text = parts.join("");
+    }
+    const num = Number(text);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const getInmoAdvertisedPrice = () =>
+    parseInmoMoney(inmueble.precio_encargo)
+    || parseInmoMoney(inmueble.precio_objetivo)
+    || parseInmoMoney(inmueble.precio_pedido_cliente)
+    || 0;
+  const buildInmoMortgageReport = () => {
+    const operationKey = normalizeSimple(inmueble.tipo_operacion || captacion.tipo_operacion || "");
+    const isRental = operationKey.includes("alquiler") || operationKey.includes("arrend") || operationKey.includes("renta");
+    const price = getInmoAdvertisedPrice();
+    if (isRental) {
+      return {
+        status: "No aplicable",
+        note: "Informe hipotecario no aplicable a inmuebles de alquiler.",
+        rows: [["Tipo operación", "Alquiler"], ["Base usada", "No aplica"]],
+        kpis: [],
+      };
+    }
+    if (!price || price <= 0) {
+      return {
+        status: "Pendiente",
+        note: "Añade precio de anuncio para calcular entrada, gastos y tasación.",
+        rows: [["Precio del anuncio", "Pendiente"], ["Base usada", "Solo precio publicado"]],
+        kpis: [],
+      };
+    }
+    const mortgagePct = 0.8;
+    const itpPct = 0.07;
+    const adminPct = 0.012;
+    const appraisalCost = 450;
+    const mortgageAmount = Math.round(price * mortgagePct);
+    const downPayment = Math.max(0, price - mortgageAmount);
+    const taxes = Math.round(price * itpPct);
+    const purchaseAdminCosts = Math.round(price * adminPct);
+    const totalCosts = taxes + purchaseAdminCosts + appraisalCost;
+    const cashNeeded = downPayment + totalCosts;
+    const annualRate = 0.0325;
+    const years = 30;
+    const months = years * 12;
+    const monthlyRate = annualRate / 12;
+    const monthlyPayment = Math.round(mortgageAmount * (monthlyRate / (1 - Math.pow(1 + monthlyRate, -months))));
+    const recommendedIncome = Math.round(monthlyPayment / 0.35);
+    const lowAppraisal = Math.round(price * 0.95);
+    const maxMortgageLowAppraisal = Math.round(lowAppraisal * mortgagePct);
+    const appraisalGap = Math.max(0, mortgageAmount - maxMortgageLowAppraisal);
+    const cashNeededLowAppraisal = cashNeeded + appraisalGap;
+    const status = cashNeeded <= price * 0.32 ? "Viabilidad inicial alta" : cashNeeded <= price * 0.38 ? "Revisar entrada" : "Entrada exigente";
+    return {
+      status,
+      note: "Orientativo. No sustituye estudio bancario: depende de perfil comprador, banco, tasación y documentación.",
+      rows: [
+        ["Precio del anuncio", formatEuros(price)],
+        ["Hipoteca estimada 80%", formatEuros(mortgageAmount)],
+        ["Entrada mínima", formatEuros(downPayment)],
+        ["Gastos compra estimados", formatEuros(totalCosts)],
+        ["Dinero necesario", formatEuros(cashNeeded)],
+        ["Tasación", `Necesaria si hay hipoteca · aprox. ${formatEuros(appraisalCost)}`],
+        ["Cuota orientativa", `${formatEuros(monthlyPayment)} / mes · 30 años · 3,25%`],
+        ["Ingresos recomendados", `${formatEuros(recommendedIncome)} / mes`],
+        ["Si tasación baja 5%", `${formatEuros(cashNeededLowAppraisal)} necesarios`],
+      ],
+      kpis: [
+        { label: "Entrada", value: formatEuros(downPayment) },
+        { label: "Gastos", value: formatEuros(totalCosts) },
+        { label: "Caja necesaria", value: formatEuros(cashNeeded) },
+        { label: "Cuota", value: formatEuros(monthlyPayment) },
+      ],
+    };
+  };
 
   if (inmuebleSummaryCard) {
     const address = inmueble.direccion || "Sin dirección";
@@ -50307,6 +50391,7 @@ const refreshCurrentInmuebleProfile = () => {
   if (inmuebleFactsPanel) {
     const stageKey = normalizeSimple(captacion?.situacion_comercial || captacion?.etapa || inmueble?.estado || "");
     const showHonorarios = stageKey && stageKey !== "inmueble";
+    const mortgageReport = buildInmoMortgageReport();
     const cards = [
       {
         title: "Localización",
@@ -50343,6 +50428,36 @@ const refreshCurrentInmuebleProfile = () => {
 	        ],
 	      },
     ];
+    const mortgageReportHtml = `
+      <section class="inmueble-fact-card inmueble-finance-card">
+        <div class="inmueble-finance-head">
+          <div>
+            <h4>Hipoteca y gastos</h4>
+            <p>Informe basado solo en el precio del anuncio.</p>
+          </div>
+          <span class="inmueble-finance-status">${escapeHtml(mortgageReport.status)}</span>
+        </div>
+        ${mortgageReport.kpis.length ? `
+          <div class="inmueble-finance-kpis">
+            ${mortgageReport.kpis.map((item) => `
+              <div class="inmueble-finance-kpi">
+                <span>${escapeHtml(item.label)}</span>
+                <strong>${escapeHtml(item.value)}</strong>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
+        <div class="inmueble-fact-list inmueble-finance-list">
+          ${mortgageReport.rows.map(([label, value]) => `
+            <div class="inmueble-fact-row">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </div>
+          `).join("")}
+        </div>
+        <p class="inmueble-finance-note">${escapeHtml(mortgageReport.note)}</p>
+      </section>
+    `;
     inmuebleFactsPanel.innerHTML = cards
       .map(
         (card) => `
@@ -50363,7 +50478,7 @@ const refreshCurrentInmuebleProfile = () => {
           </section>
         `
       )
-      .join("");
+      .join("") + mortgageReportHtml;
   }
 
   renderInmuebleTecnocloudPanels({
