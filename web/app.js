@@ -50208,6 +50208,9 @@ const refreshCurrentInmuebleProfile = () => {
           <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmuebleAnuncioGenerateBtn">
             Generar anuncio
           </button>
+          <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmuebleOwnerAccessBtn">
+            Acceso propietario
+          </button>
           <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
             ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
           </span>
@@ -50243,6 +50246,43 @@ const refreshCurrentInmuebleProfile = () => {
           if (portalStatus) portalStatus.textContent = err?.message || "No se pudo actualizar el portal.";
         } finally {
           portalBtn.disabled = false;
+        }
+      };
+    }
+    const ownerAccessBtn = inmuebleSummaryCard.querySelector("#inmuebleOwnerAccessBtn");
+    if (ownerAccessBtn) {
+      ownerAccessBtn.onclick = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!ownerNames.length) {
+          if (portalStatus) portalStatus.textContent = "Enlaza primero un propietario al inmueble.";
+          return;
+        }
+        ownerAccessBtn.disabled = true;
+        const oldLabel = ownerAccessBtn.textContent;
+        ownerAccessBtn.textContent = "Creando...";
+        if (portalStatus) portalStatus.textContent = "Generando acceso propietario...";
+        try {
+          const owner = Array.isArray(propietarios) ? propietarios[0] || {} : {};
+          const res = await apiPost("/api/portal_owner_access_create", {
+            listing_id: inmueble.id,
+            name: owner.nombre || ownerPrimary || "",
+            contact: owner.email || owner.telefono || "",
+          });
+          if (res?.error) throw new Error(res.error);
+          const code = String(res?.code || "").trim();
+          const message = code
+            ? `Código propietario: ${code} · Acceso: /owner`
+            : "Acceso propietario creado.";
+          if (portalStatus) portalStatus.textContent = message;
+          if (code) {
+            try { await navigator.clipboard?.writeText(`Acceso propietario Verifika2: /owner · Código: ${code}`); } catch (e) {}
+          }
+        } catch (err) {
+          if (portalStatus) portalStatus.textContent = err?.message || "No se pudo crear el acceso propietario.";
+        } finally {
+          ownerAccessBtn.disabled = false;
+          ownerAccessBtn.textContent = oldLabel || "Acceso propietario";
         }
       };
     }

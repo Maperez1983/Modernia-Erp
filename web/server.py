@@ -25466,6 +25466,54 @@ def get_inmueble_propietarios(conn, inmueble_id):
     return [dict(row) for row in rows]
 
 
+def create_owner_portal_code(owner_name, owner_contact, listing_ids):
+    hub_url = (os.environ.get("LEAD_HUB_URL") or os.environ.get("LEADS_WEBHOOK_URL") or "").strip()
+    hub_token = (os.environ.get("LEAD_HUB_TOKEN") or os.environ.get("LEADS_WEBHOOK_TOKEN") or "").strip()
+    if not hub_url or not hub_token:
+        raise RuntimeError("lead_hub_not_configured")
+    try:
+        origin = urllib.parse.urlparse(hub_url)
+        base = f"{origin.scheme}://{origin.netloc}".rstrip("/")
+    except Exception:
+        base = ""
+    if not base:
+        raise RuntimeError("lead_hub_url_invalid")
+    clean_listing_ids = [str(item or "").strip() for item in (listing_ids or []) if str(item or "").strip()]
+    if not clean_listing_ids:
+        raise RuntimeError("missing_listing_ids")
+    payload = {
+        "name": str(owner_name or "").strip() or None,
+        "contact": str(owner_contact or "").strip() or None,
+        "listing_ids": clean_listing_ids,
+    }
+    req = urllib.request.Request(
+        f"{base}/v1/owners/create_code",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {hub_token}",
+            "User-Agent": "Verifika2CRM/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+            data = json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"lead_hub_failed:{getattr(exc, 'code', '')}:{body[:200]}")
+    except Exception as exc:
+        raise RuntimeError(f"lead_hub_failed:{exc}")
+    if not isinstance(data, dict) or not data.get("ok") or not data.get("code"):
+        raise RuntimeError(str((data or {}).get("error") if isinstance(data, dict) else "") or "lead_hub_failed")
+    return data
+
+
 def ensure_inmueble_servicios_schema(conn):
     try:
         conn.execute(
@@ -49596,6 +49644,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_convert",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/portal_owner_access_create",
             "/api/leads",
             "/api/portal_leads",
             "/api/portal_lead",
@@ -49818,6 +49867,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/captacion_convert": "inmobiliaria",
                         "/api/compraventas": "inmobiliaria",
                         "/api/portal_publish_update": "inmobiliaria",
+                        "/api/portal_owner_access_create": "inmobiliaria",
                         "/api/leads": "inmobiliaria",
                         "/api/portal_leads": "inmobiliaria",
                         "/api/portal_lead": "inmobiliaria",
@@ -50196,6 +50246,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_radar_auto_status",
                 "/api/legal_radar_counts",
                 "/api/portal_publish_update",
+                "/api/portal_owner_access_create",
                 "/api/leads",
                 "/api/portal_leads",
                 "/api/portal_lead",
@@ -50233,6 +50284,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional_delete",
             "/api/compraventas",
             "/api/portal_publish_update",
+            "/api/portal_owner_access_create",
             "/api/leads",
             "/api/portal_leads",
             "/api/portal_lead",
@@ -65353,6 +65405,66 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             conn.commit()
             json_response(self, {"ok": True, "id": listing_id, "published": published, "visible": visible})
+            return
+        elif parsed.path == "/api/portal_owner_access_create":
+            listing_id = str(payload.get("listing_id") or payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not listing_id:
+                json_response(self, {"error": "listing_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? LIMIT 1",
+                (listing_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            owners = get_inmueble_propietarios(conn, listing_id)
+            if not owners:
+                json_response(self, {"error": "El inmueble no tiene propietarios enlazados"}, status=400)
+                return
+            primary = owners[0] or {}
+            owner_name = str(payload.get("name") or primary.get("nombre") or "").strip()
+            owner_contact = str(payload.get("contact") or primary.get("email") or primary.get("telefono") or "").strip()
+            try:
+                data = create_owner_portal_code(owner_name, owner_contact, [listing_id])
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=502)
+                return
+            now_iso = datetime.now(timezone.utc).isoformat()
+            try:
+                audit_event(
+                    conn,
+                    inmueble["empresa_id"],
+                    "inmueble",
+                    listing_id,
+                    "Crear acceso propietario portal",
+                    usuario=payload.get("usuario") or (session or {}).get("usuario"),
+                    detalles={
+                        "owner_name": owner_name,
+                        "owner_contact": owner_contact,
+                        "listing_ids": [listing_id],
+                    },
+                    now=now_iso,
+                )
+                conn.commit()
+            except Exception:
+                pass
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "code": data.get("code"),
+                    "owner": data.get("owner"),
+                    "owner_name": owner_name,
+                    "owner_contact": owner_contact,
+                    "access_path": "/owner",
+                },
+            )
             return
         elif parsed.path == "/api/inmueble_signature_request":
             ensure_inmueble_signature_schema(conn)
