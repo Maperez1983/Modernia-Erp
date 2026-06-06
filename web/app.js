@@ -50191,7 +50191,22 @@ const refreshCurrentInmuebleProfile = () => {
     const months = years * 12;
     const monthlyRate = annualRate / 12;
     const monthlyPayment = Math.round(mortgageAmount * (monthlyRate / (1 - Math.pow(1 + monthlyRate, -months))));
-    const recommendedIncome = Math.round(monthlyPayment / 0.35);
+    const calcPayment = (amount, rate, termYears) => {
+      const termMonths = termYears * 12;
+      const rateMonth = rate / 12;
+      if (!amount || amount <= 0) return 0;
+      if (!rateMonth) return Math.round(amount / termMonths);
+      return Math.round(amount * (rateMonth / (1 - Math.pow(1 + rateMonth, -termMonths))));
+    };
+    const incomeBase = Math.round(monthlyPayment / 0.35);
+    const incomeRecommended = Math.round(calcPayment(mortgageAmount, 0.0375, 30) / 0.32);
+    const incomeConservative = Math.round(calcPayment(mortgageAmount, 0.0425, 25) / 0.3);
+    const incomeRange = {
+      min: incomeBase,
+      recommended: incomeRecommended,
+      conservative: incomeConservative,
+      label: `${formatEuros(incomeBase)} - ${formatEuros(incomeConservative)} / mes`,
+    };
     const lowAppraisal = Math.round(price * 0.95);
     const maxMortgageLowAppraisal = Math.round(lowAppraisal * mortgagePct);
     const appraisalGap = Math.max(0, mortgageAmount - maxMortgageLowAppraisal);
@@ -50212,7 +50227,8 @@ const refreshCurrentInmuebleProfile = () => {
       `Gastos compra estimados: ${formatEuros(totalCosts)}`,
       `Dinero necesario aproximado: ${formatEuros(cashNeeded)}`,
       `Cuota orientativa: ${formatEuros(monthlyPayment)} / mes`,
-      `Ingresos recomendados: ${formatEuros(recommendedIncome)} / mes`,
+      `Ingresos necesarios orientativos: ${incomeRange.label}`,
+      `Ingresos recomendados: ${formatEuros(incomeRecommended)} / mes`,
       `Si tasación baja 5%: ${formatEuros(cashNeededLowAppraisal)} necesarios`,
       "Informe orientativo: depende de perfil comprador, banco, tasación y documentación.",
     ].join("\n");
@@ -50229,14 +50245,15 @@ const refreshCurrentInmuebleProfile = () => {
         ["Dinero necesario", formatEuros(cashNeeded)],
         ["Tasación", `Necesaria si hay hipoteca · aprox. ${formatEuros(appraisalCost)}`],
         ["Cuota orientativa", `${formatEuros(monthlyPayment)} / mes · 30 años · 3,25%`],
-        ["Ingresos recomendados", `${formatEuros(recommendedIncome)} / mes`],
+        ["Ingresos necesarios", incomeRange.label],
+        ["Rango de financiación", `Mín. ${formatEuros(incomeBase)} · recomendado ${formatEuros(incomeRecommended)} · conservador ${formatEuros(incomeConservative)}`],
         ["Si tasación baja 5%", `${formatEuros(cashNeededLowAppraisal)} necesarios`],
       ],
       kpis: [
         { label: "Entrada", value: formatEuros(downPayment) },
         { label: "Gastos", value: formatEuros(totalCosts) },
         { label: "Caja necesaria", value: formatEuros(cashNeeded) },
-        { label: "Cuota", value: formatEuros(monthlyPayment) },
+        { label: "Ingresos", value: incomeRange.label },
       ],
       segments: [
         { label: "Hipoteca", value: formatEuros(mortgageAmount), width: pct(mortgageAmount), className: "mortgage" },
@@ -50246,13 +50263,15 @@ const refreshCurrentInmuebleProfile = () => {
       scenarios: [
         { title: "Escenario base", value: formatEuros(cashNeeded), detail: "Entrada + gastos estimados" },
         { title: "Tasación -5%", value: formatEuros(cashNeededLowAppraisal), detail: appraisalGap ? `Aportación extra: ${formatEuros(appraisalGap)}` : "Sin aportación extra estimada" },
+        { title: "Ingresos mínimos", value: `${formatEuros(incomeBase)} / mes`, detail: "Cuota 3,25% · esfuerzo 35%" },
+        { title: "Ingresos recomendados", value: `${formatEuros(incomeRecommended)} / mes`, detail: "Tipo 3,75% · esfuerzo 32%" },
       ],
       score,
       scoreLabel,
       highlights: [
         { label: "Fondos propios", value: `${Math.round(cashRatio * 100)}% del precio` },
         { label: "Financiación", value: "80% estimado" },
-        { label: "Tasación", value: "Incluida" },
+        { label: "Ingresos", value: incomeRange.label },
       ],
       copyText,
     };

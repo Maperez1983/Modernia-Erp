@@ -8481,6 +8481,8 @@ body.crm-context-inmo .crm-resumen-compact-note {
 .inmueble-finance-kpi strong {
   color: #fff;
   font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .inmueble-finance-split {
