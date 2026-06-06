@@ -4558,7 +4558,7 @@ def ensure_workspace_catalog_modules(conn):
 
 def is_gestoria_dashboard_active_state(value):
     state = normalize_lookup_text(value or "")
-    return state in {"ALTA", "ACTIVO", "ACTIVA", "PENDIENTE"}
+    return state in {"ALTA", "ACTIVO", "ACTIVA"}
 
 
 GESTORIA_TRABAJO_CATEGORY_KEYS = {
@@ -50510,7 +50510,6 @@ class Handler(BaseHTTPRequestHandler):
                     if not ok:
                         json_response(self, {"error": err or "No autorizado"}, status=403)
                         return
-        empresa = None
         if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete"):
             # Service-first: en acciones (agenda) la operativa debe depender de workspace+servicio,
             # no de empresa. Aun así, por legacy, la tabla requiere `empresa_id NOT NULL`,
