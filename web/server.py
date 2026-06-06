@@ -27508,6 +27508,9 @@ def create_portal_inmueble_lead(conn, payload, now):
             f"INSERT INTO inmueble_compradores ({', '.join(ic_keys)}) VALUES ({', '.join(['?'] * len(ic_keys))})",
             [ic_payload[key] for key in ic_keys],
         )
+    # Persistimos el lead antes de crear acciones auxiliares. En Postgres, si una
+    # acción opcional falla, el wrapper hace rollback de la transacción activa.
+    conn.commit()
     try:
         conn.execute(
             """
