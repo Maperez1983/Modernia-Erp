@@ -928,6 +928,31 @@ def require_ingest_api_key(handler) -> bool:
     return True
 
 
+def require_portal_leads_api_key(handler) -> bool:
+    """
+    Autorización machine-to-machine para leads del portal público.
+    Lead Hub envía `Authorization: Bearer <CRM_TOKEN>`; en el CRM aceptamos
+    CRM_LEADS_TOKEN/CRM_TOKEN y, como compatibilidad, APP_INGEST_API_KEY.
+    """
+    expected = (
+        str(os.environ.get("CRM_LEADS_TOKEN") or "").strip()
+        or str(os.environ.get("CRM_TOKEN") or "").strip()
+        or INGEST_API_KEY
+    )
+    if not expected:
+        json_response(handler, {"error": "Portal leads no configurado", "detail": "Configura CRM_LEADS_TOKEN"}, status=400)
+        return False
+    raw = str(handler.headers.get("X-API-Key") or "").strip()
+    if not raw:
+        raw = str(handler.headers.get("Authorization") or "").strip()
+        if raw.lower().startswith("bearer "):
+            raw = raw.split(" ", 1)[1].strip()
+    if not raw or not _ct_eq(raw, expected):
+        json_response(handler, {"error": "No autorizado"}, status=401)
+        return False
+    return True
+
+
 class DbUnavailableError(RuntimeError):
     pass
 
@@ -22567,13 +22592,13 @@ def ensure_pending_inmueble_stage_actions(conn, empresa_id, inmueble_id, etapa, 
             INSERT INTO acciones (
               id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
               fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado,
-              resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, notas, recordatorio_min,
+              resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, entrega_2, notas, recordatorio_min,
               related_id, related_tipo,
               created_at, updated_at
             ) VALUES (
               ?, ?, 'inmobiliaria', NULL, ?, NULL, NULL,
               date('now','localtime'), '10:00', NULL, ?, ?, NULL, ?, 'Pendiente',
-              NULL, NULL, NULL, NULL, NULL, NULL,
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL,
               NULL, NULL,
               datetime(?), datetime(?)
             )
@@ -33743,6 +33768,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
     ensure_column(conn, "acciones", "importe_propuesta", "importe_propuesta REAL")
+    ensure_column(conn, "acciones", "entrega_2", "entrega_2 REAL")
     ensure_column(conn, "acciones", "hora_fin", "hora_fin TEXT")
     ensure_column(conn, "acciones", "asunto", "asunto TEXT")
     ensure_column(conn, "acciones", "modalidad_contacto", "modalidad_contacto TEXT")
@@ -33830,6 +33856,7 @@ def ensure_tables(db_path):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_legal_library_area_topic ON legal_library_documents(area, topic_key, updated_at)")
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
+    ensure_column(conn, "inmuebles", "fecha_encargo", "fecha_encargo TEXT")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
     ensure_column(conn, "inmuebles", "ocupado_por", "ocupado_por TEXT")
     ensure_column(conn, "inmuebles", "anio_construccion", "anio_construccion INTEGER")
@@ -33862,6 +33889,7 @@ def ensure_tables(db_path):
         "propietario_email": "propietario_email TEXT",
         "precio_encargo": "precio_encargo REAL",
         "precio_pedido_cliente": "precio_pedido_cliente REAL",
+        "fecha_encargo": "fecha_encargo TEXT",
         "fecha_valoracion": "fecha_valoracion TEXT",
         "desviacion_pct": "desviacion_pct REAL",
         "planificacion_encargo": "planificacion_encargo TEXT",
@@ -33941,11 +33969,20 @@ def ensure_tables(db_path):
         "fecha_ultima_cita_venta_red": "fecha_ultima_cita_venta_red TEXT",
         "estado_contacto": "estado_contacto TEXT",
         "responsable": "responsable TEXT",
+        "portal_hub_lead_id": "portal_hub_lead_id TEXT",
+        "portal_listing_id": "portal_listing_id TEXT",
+        "portal_lead_contact": "portal_lead_contact TEXT",
+        "portal_lead_payload_json": "portal_lead_payload_json TEXT",
     }.items():
         try:
             ensure_column(conn, "demandas", col_name, col_sql)
         except Exception:
             pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_demandas_portal_hub_lead ON demandas (portal_hub_lead_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_demandas_portal_listing ON demandas (portal_listing_id)")
+    except Exception:
+        pass
     ensure_column(conn, "gestoria_contabilidad", "gestion", "gestion TEXT")
     ensure_column(conn, "gestoria_contabilidad", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
@@ -48493,7 +48530,7 @@ class Handler(BaseHTTPRequestHandler):
         }:
             raw_area = normalize_legal_area(payload.get("area") if payload else (params.get("area", [""])[0] if params else ""))
             return raw_area or "inmobiliaria"
-        if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
+        if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas") or path in {"/api/leads", "/api/portal_leads"}:
             return "inmobiliaria"
         if path in {"/api/acciones", "/api/acciones_update", "/api/acciones_delete"}:
             raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
@@ -50170,6 +50207,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios_invitar",
             "/api/auth_set_password",
             "/api/cliente_gestoria_update",
+            "/api/leads",
+            "/api/portal_leads",
+            "/api/portal_lead",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
@@ -50500,6 +50540,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
+            "/api/leads",
+            "/api/portal_leads",
+            "/api/portal_lead",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
             "/api/inmueble_archive_pending_actions",
@@ -50561,6 +50604,8 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
         if parsed.path in ("/api/portal_lead", "/api/portal_leads", "/api/leads"):
+            if not require_portal_leads_api_key(self):
+                return
             result, status = create_portal_inmueble_lead(conn, payload, now)
             json_response(self, result, status=status)
             return
@@ -66067,20 +66112,45 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE captaciones
-                SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
+                SET etapa = ?, situacion_comercial = ?,
+                    precio_encargo = COALESCE(?, precio_encargo),
+                    planificacion_encargo = COALESCE(?, planificacion_encargo),
+                    proxima_accion = COALESCE(?, proxima_accion),
+                    updated_at = datetime(?)
                 WHERE id = ?
                 """,
-                (etapa, etapa, now, record_id),
+                (
+                    etapa,
+                    etapa,
+                    parse_money_value(payload.get("precio_encargo")) if "precio_encargo" in payload else None,
+                    str(payload.get("planificacion_encargo") or "").strip() or None,
+                    str(payload.get("proxima_accion") or "").strip() or None,
+                    now,
+                    record_id,
+                ),
             )
             conn.execute(
                 """
                 UPDATE inmuebles
-                SET estado = ?, updated_at = datetime(?)
+                SET estado = ?,
+                    precio_encargo = COALESCE(?, precio_encargo),
+                    honorarios = COALESCE(?, honorarios),
+                    fecha_encargo = COALESCE(?, fecha_encargo),
+                    planificacion_encargo = COALESCE(?, planificacion_encargo),
+                    updated_at = datetime(?)
                 WHERE id = (
                   SELECT inmueble_id FROM captaciones WHERE id = ? LIMIT 1
                 )
                 """,
-                (etapa, now, record_id),
+                (
+                    etapa,
+                    parse_money_value(payload.get("precio_encargo")) if "precio_encargo" in payload else None,
+                    parse_money_value(payload.get("honorarios")) if "honorarios" in payload else None,
+                    str(payload.get("fecha_encargo") or "").strip() or None,
+                    str(payload.get("planificacion_encargo") or "").strip() or None,
+                    now,
+                    record_id,
+                ),
             )
             try:
                 inmueble_id = str(prev["inmueble_id"] or "").strip() if prev else ""
@@ -67047,6 +67117,7 @@ class Handler(BaseHTTPRequestHandler):
                 "desviacion_pct",
                 "valor_referencia",
                 "honorarios",
+                "fecha_encargo",
                 "asesor",
                 "responsable",
                 "descripcion",
@@ -69749,11 +69820,11 @@ class Handler(BaseHTTPRequestHandler):
                 INSERT INTO acciones (
                   id, empresa_id, workspace_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
                   fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado,
-                  resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, notas, recordatorio_min,
+                  resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, entrega_2, notas, recordatorio_min,
                   related_id, related_tipo,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -69777,6 +69848,7 @@ class Handler(BaseHTTPRequestHandler):
                     estado_siguiente or None,
                     str(payload.get("documento_tipo") or "").strip() or None,
                     parse_money_value(payload.get("importe_propuesta")) or None,
+                    parse_money_value(payload.get("entrega_2") or payload.get("arras")) or None,
                     payload.get("notas"),
                     parse_optional_int(payload.get("recordatorio_min")),
                     related_id_fk,
@@ -69851,7 +69923,7 @@ class Handler(BaseHTTPRequestHandler):
                       a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                       COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                       a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
-                      a.documento_tipo, a.importe_propuesta,
+                      a.documento_tipo, a.importe_propuesta, a.entrega_2,
                       a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
                       a.related_id, a.related_tipo
                     FROM acciones a
@@ -69941,6 +70013,7 @@ class Handler(BaseHTTPRequestHandler):
                 "estado_siguiente",
                 "documento_tipo",
                 "importe_propuesta",
+                "entrega_2",
                 "notas",
                 "cliente_id",
                 "cliente_nombre",
@@ -69957,6 +70030,8 @@ class Handler(BaseHTTPRequestHandler):
                 updates["recordatorio_min"] = parse_optional_int(updates.get("recordatorio_min"))
             if "importe_propuesta" in updates:
                 updates["importe_propuesta"] = parse_money_value(updates.get("importe_propuesta")) or None
+            if "entrega_2" in updates:
+                updates["entrega_2"] = parse_money_value(updates.get("entrega_2")) or None
             for key in ("cliente_id", "inmueble_id", "asesoramiento_id", "related_id", "related_tipo"):
                 if key in updates and (updates.get(key) is None or str(updates.get(key)).strip() == ""):
                     updates[key] = None
@@ -70025,6 +70100,35 @@ class Handler(BaseHTTPRequestHandler):
                     destino = estado_siguiente_final or "Cerrado negativamente"
                 if destino:
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
+                    if normalize_lookup_text(destino).lower() == "encargo":
+                        precio_encargo_val = parse_money_value(payload.get("precio_encargo")) if "precio_encargo" in payload else None
+                        honorarios_val = parse_money_value(payload.get("honorarios")) if "honorarios" in payload else None
+                        fecha_encargo_val = str(payload.get("fecha_encargo") or "").strip() or None
+                        planificacion_val = str(payload.get("planificacion_encargo") or "").strip() or None
+                        proxima_val = str(payload.get("proxima_accion") or "").strip() or None
+                        conn.execute(
+                            """
+                            UPDATE inmuebles
+                            SET precio_encargo = COALESCE(?, precio_encargo),
+                                honorarios = COALESCE(?, honorarios),
+                                fecha_encargo = COALESCE(?, fecha_encargo),
+                                planificacion_encargo = COALESCE(?, planificacion_encargo),
+                                updated_at = datetime(?)
+                            WHERE id = ?
+                            """,
+                            (precio_encargo_val, honorarios_val, fecha_encargo_val, planificacion_val, now, inmueble_id),
+                        )
+                        conn.execute(
+                            """
+                            UPDATE captaciones
+                            SET precio_encargo = COALESCE(?, precio_encargo),
+                                planificacion_encargo = COALESCE(?, planificacion_encargo),
+                                proxima_accion = COALESCE(?, proxima_accion),
+                                updated_at = datetime(?)
+                            WHERE inmueble_id = ?
+                            """,
+                            (precio_encargo_val, planificacion_val, proxima_val, now, inmueble_id),
+                        )
             elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
                 if normalize_lookup_text(resultado_final).lower() == "interesado":
                     generar_fin = str(payload.get("generar_oportunidad_financiacion") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
@@ -70269,7 +70373,7 @@ class Handler(BaseHTTPRequestHandler):
                       a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                       COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                       a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
-                      a.documento_tipo, a.importe_propuesta,
+                      a.documento_tipo, a.importe_propuesta, a.entrega_2,
                       a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
                       a.related_id, a.related_tipo
                     FROM acciones a
@@ -74324,7 +74428,7 @@ class Handler(BaseHTTPRequestHandler):
                       a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                       COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                       a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
-                      a.documento_tipo, a.importe_propuesta,
+                      a.documento_tipo, a.importe_propuesta, a.entrega_2,
                       a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
                       a.related_id, a.related_tipo
                     FROM acciones a
