@@ -76720,7 +76720,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit_key = 50
             limit_key = max(1, min(200, int(limit_key)))
-            cache_key = (str(workspace_id or "").strip(), str(empresa_id or "").strip(), int(limit_key))
+            cache_key = (str(workspace_id or "").strip(), str(empresa_id or "").strip(), str(service or "").strip(), int(limit_key))
             now_ts = time.time()
             try:
                 with Handler._gestoria_docs_recent_lock:
@@ -76732,6 +76732,25 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             # Service-first: permitir listado por workspace sin empresa explícita.
             scope_clause, scope_values = build_service_scope_filter(conn, "gestoria_docs", "d", workspace_id, empresa_id)
+            service_clause = ""
+            service_values = []
+            if normalize_lookup_text(service) == "GESTORIA":
+                service_clause = """
+                  AND (
+                    LOWER(COALESCE(d.referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
+                    OR LOWER(COALESCE(d.tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta', 'declaración de renta', 'modelo 100', 'renta presentada')
+                    OR LOWER(COALESCE(d.tipo, '')) LIKE 'modelo 100%'
+                    OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
+                  )
+                """
+            elif service:
+                service_clause = """
+                  AND (
+                    LOWER(COALESCE(d.referencia_tipo, '')) = ?
+                    OR LOWER(COALESCE(d.tipo, '')) = ?
+                  )
+                """
+                service_values.extend([service, service])
             rows = conn.execute(
                 f"""
                 SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
@@ -76739,10 +76758,11 @@ class Handler(BaseHTTPRequestHandler):
                 FROM gestoria_docs d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
                 WHERE {scope_clause}
+                {service_clause}
                 ORDER BY d.fecha DESC
                 {limit_clause}
                 """,
-                scope_values,
+                [*scope_values, *service_values],
             ).fetchall()
             payload = {"rows": [dict(r) for r in rows]}
             try:

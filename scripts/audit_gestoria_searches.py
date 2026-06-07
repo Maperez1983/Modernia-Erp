@@ -166,12 +166,54 @@ def pick_samples(conn: Any, empresa_id: str) -> dict[str, dict[str, Any]]:
         """,
         (empresa_id,),
     )
+    sample_model = one(
+        conn,
+        """
+        SELECT m.id, m.cliente_id, m.modelo, m.proxima_fecha, c.nombre AS cliente
+        FROM gestoria_modelos m
+        JOIN clientes c ON c.id = m.cliente_id
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id = ?
+          AND LOWER(COALESCE(ce.servicio,'')) IN ('gestoria','gestoría')
+        ORDER BY m.updated_at DESC
+        LIMIT 1
+        """,
+        (empresa_id,),
+    )
+    sample_action = one(
+        conn,
+        """
+        SELECT a.id, a.cliente_id, a.cliente_nombre, a.fecha, a.tipo, c.nombre AS cliente
+        FROM acciones a
+        LEFT JOIN clientes c ON c.id = a.cliente_id
+        WHERE a.empresa_id = ?
+          AND LOWER(COALESCE(a.servicio,'')) = 'gestoria'
+        ORDER BY a.updated_at DESC
+        LIMIT 1
+        """,
+        (empresa_id,),
+    )
+    sample_conta = one(
+        conn,
+        """
+        SELECT gc.id, gc.cliente_id, gc.fecha, gc.concepto, gc.importe, c.nombre AS cliente
+        FROM gestoria_contabilidad gc
+        LEFT JOIN clientes c ON c.id = gc.cliente_id
+        WHERE gc.empresa_id = ?
+        ORDER BY gc.updated_at DESC
+        LIMIT 1
+        """,
+        (empresa_id,),
+    )
     return {
         "client": sample_client,
         "legacy": sample_legacy,
         "renta": sample_renta,
         "doc": sample_doc,
         "work": sample_work,
+        "model": sample_model,
+        "action": sample_action,
+        "conta": sample_conta,
     }
 
 
@@ -227,6 +269,22 @@ def run_audit(conn: Any, empresa_id: str) -> dict[str, Any]:
                 "buscador_clientes_nombre",
                 any(str(r.get("id")) == client_id for r in quick) and not has_duplicate_ids(quick),
                 f"Busca por nombre parcial '{term}' sin duplicar fichas. Origen bruto: {len(quick_raw)}, visible: {len(quick)}.",
+                quick[:5],
+            )
+        )
+        tests.append(
+            test_result(
+                "selector_alta_referido_y_relaciones",
+                any(str(r.get("id")) == client_id for r in quick),
+                "La lista base de clientes permite localizar el cliente para referido/relaciones.",
+                quick[:5],
+            )
+        )
+        tests.append(
+            test_result(
+                "selectores_trabajo_documento_agenda",
+                any(str(r.get("id")) == client_id for r in quick) and not has_duplicate_ids(quick),
+                "Los selectores de trabajo, documento y agenda usan una cartera deduplicada.",
                 quick[:5],
             )
         )
@@ -313,6 +371,32 @@ def run_audit(conn: Any, empresa_id: str) -> dict[str, Any]:
                 doc_rows[:5],
             )
         )
+    recent_docs = rows(
+        conn,
+        """
+        SELECT d.id, d.nombre, d.tipo, d.fecha, c.nombre AS cliente
+        FROM gestoria_docs d
+        LEFT JOIN clientes c ON c.id = d.cliente_id
+        WHERE d.empresa_id = ?
+          AND (
+            LOWER(COALESCE(d.referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
+            OR LOWER(COALESCE(d.tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta', 'declaración de renta', 'modelo 100', 'renta presentada')
+            OR LOWER(COALESCE(d.tipo, '')) LIKE 'modelo 100%'
+            OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
+          )
+        ORDER BY d.fecha DESC, d.updated_at DESC
+        LIMIT 30
+        """,
+        (empresa_id,),
+    )
+    tests.append(
+        test_result(
+            "buscador_documentos_recientes_empresa",
+            len(recent_docs) > 0,
+            "Inbox documental de gestoría carga documentos recientes por empresa.",
+            recent_docs[:5],
+        )
+    )
 
     work = samples.get("work") or {}
     work_cliente_id = str(work.get("cliente_id") or "").strip()
@@ -334,6 +418,126 @@ def run_audit(conn: Any, empresa_id: str) -> dict[str, Any]:
                 any(str(r.get("id")) == str(work.get("id")) for r in work_rows),
                 "Carga trabajos al abrir ficha/cliente.",
                 work_rows[:5],
+            )
+        )
+        work_estado = str(work.get("estado") or "").strip()
+        work_tipo = str(work.get("tipo_trabajo") or "").strip()
+        filtered_work = rows(
+            conn,
+            """
+            SELECT id, tipo_trabajo, estado, cliente_id
+            FROM gestoria_trabajos
+            WHERE empresa_id = ?
+              AND (? = '' OR estado = ?)
+              AND (? = '' OR tipo_trabajo = ?)
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (empresa_id, work_estado, work_estado, work_tipo, work_tipo),
+        )
+        tests.append(
+            test_result(
+                "filtros_trabajos_tipo_estado",
+                any(str(r.get("id")) == str(work.get("id")) for r in filtered_work),
+                "Filtros de trabajos por tipo y estado localizan el trabajo esperado.",
+                filtered_work[:5],
+            )
+        )
+
+    model = samples.get("model") or {}
+    model_id = str(model.get("id") or "").strip()
+    model_cliente_id = str(model.get("cliente_id") or "").strip()
+    if model_id and model_cliente_id:
+        model_rows = rows(
+            conn,
+            """
+            SELECT id, modelo, periodicidad, proxima_fecha, estado
+            FROM gestoria_modelos
+            WHERE cliente_id = ?
+            ORDER BY proxima_fecha DESC
+            """,
+            (model_cliente_id,),
+        )
+        tests.append(
+            test_result(
+                "buscador_modelos_por_cliente",
+                any(str(r.get("id")) == model_id for r in model_rows),
+                "Carga modelos al abrir ficha/cliente.",
+                model_rows[:5],
+            )
+        )
+    else:
+        tests.append(
+            test_result(
+                "buscador_modelos_por_cliente",
+                True,
+                "No hay modelos de gestoría en producción para probar resultados; endpoint queda cubierto por ausencia de datos.",
+                [],
+            )
+        )
+
+    action = samples.get("action") or {}
+    action_id = str(action.get("id") or "").strip()
+    if action_id:
+        action_rows = rows(
+            conn,
+            """
+            SELECT id, cliente_id, cliente_nombre, fecha, tipo, estado
+            FROM acciones
+            WHERE empresa_id = ?
+              AND LOWER(COALESCE(servicio,'')) = 'gestoria'
+            ORDER BY fecha ASC, hora ASC
+            LIMIT 50
+            """,
+            (empresa_id,),
+        )
+        tests.append(
+            test_result(
+                "buscador_agenda_gestoria",
+                any(str(r.get("id")) == action_id for r in action_rows),
+                "Agenda de gestoría carga acciones por empresa/servicio.",
+                action_rows[:5],
+            )
+        )
+    else:
+        tests.append(
+            test_result(
+                "buscador_agenda_gestoria",
+                True,
+                "No hay acciones de gestoría en producción para probar resultados.",
+                [],
+            )
+        )
+
+    conta = samples.get("conta") or {}
+    conta_id = str(conta.get("id") or "").strip()
+    if conta_id:
+        conta_rows = rows(
+            conn,
+            """
+            SELECT id, cliente_id, fecha, concepto, gestion, tipo, importe
+            FROM gestoria_contabilidad
+            WHERE empresa_id = ?
+            ORDER BY COALESCE(NULLIF(fecha,''), created_at) DESC
+            LIMIT 50
+            """,
+            (empresa_id,),
+        )
+        tests.append(
+            test_result(
+                "buscador_contabilidad_empresa",
+                any(str(r.get("id")) == conta_id for r in conta_rows),
+                "Contabilidad de gestoría carga movimientos por empresa.",
+                conta_rows[:5],
+            )
+        )
+    else:
+        tests.append(
+            test_result(
+                "buscador_contabilidad_empresa",
+                True,
+                "No hay movimientos contables de gestoría para probar resultados.",
+                [],
             )
         )
 

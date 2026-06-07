@@ -37068,7 +37068,7 @@ const loadGestoriaDocsRecent = () => {
     return;
   }
   const empresaId = resolveLegacyEmpresaId(empresa);
-  api(`/api/gestoria_docs?empresa_id=${encodeURIComponent(empresaId)}&limit=30`).then((data) => {
+  api(`/api/gestoria_docs?empresa_id=${encodeURIComponent(empresaId)}&service=gestoria&limit=30`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin documentos recientes.</p>";
