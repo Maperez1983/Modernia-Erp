@@ -2524,6 +2524,7 @@ const clientesDetail = document.getElementById("clientesDetail");
 const clienteDetailTitle = document.getElementById("clienteDetailTitle");
 const clienteDetailSubtitle = document.getElementById("clienteDetailSubtitle");
 const clienteDetailBack = document.getElementById("clienteDetailBack");
+const clientePremiumHeader = document.getElementById("clientePremiumHeader");
 	const clienteSaveBtn = document.getElementById("clienteSaveBtn");
 	const clienteSaveStatus = document.getElementById("clienteSaveStatus");
 	const clienteTabs = document.getElementById("clienteTabs");
@@ -27436,6 +27437,77 @@ const renderClienteRentaDashboardPanel = () => {
 
   clienteDashboardRentaContent.innerHTML = "";
   clienteDashboardRentaContent.appendChild(root);
+};
+
+const renderClientePremiumHeader = (cliente = {}, payload = {}) => {
+  if (!clientePremiumHeader) return;
+  const dashboard = payload.dashboard || {};
+  const gestoria = dashboard.gestoria || {};
+  const empresas = Array.isArray(payload.empresas) ? payload.empresas : [];
+  const servicios = Array.from(
+    new Set(
+      (payload.servicios_activos || empresas.map((row) => row.servicio_key || row.servicio || ""))
+        .map((value) => normalizeSimple(value || ""))
+        .filter(Boolean)
+    )
+  );
+  const status = String(gestoria.status_global || (servicios.includes("gestoria") ? "En curso" : "Sin gestoría")).trim();
+  const statusClass = status === "Al día" ? "ok" : (status === "Sin gestoría" ? "" : "warning");
+  const contactItems = [
+    cliente.nif ? `NIF ${cliente.nif}` : "",
+    cliente.telefono || cliente.movil || "",
+    cliente.email || "",
+    [cliente.poblacion || "", cliente.provincia || ""].filter(Boolean).join(" · "),
+  ].filter(Boolean);
+  const serviceLabels = servicios.map((key) => ({
+    gestoria: "Gestoría",
+    seguros: "Seguros",
+    inmobiliaria: "Inmobiliaria",
+    financiaciones: "Financiación",
+    hipotecas: "Financiación",
+  }[key] || key));
+  clientePremiumHeader.classList.remove("hidden");
+  clientePremiumHeader.innerHTML = `
+    <div class="cliente-premium-main">
+      <div>
+        <div class="cliente-premium-eyebrow">Ficha cliente</div>
+        <h2>${escapeHtml(formatNombreCliente(cliente.nombre || "") || "Cliente")}</h2>
+        <div class="cliente-premium-meta">${contactItems.length ? contactItems.map(escapeHtml).join(" · ") : "Datos de contacto pendientes"}</div>
+      </div>
+      <div class="cliente-premium-status">
+        <span class="status-pill ${statusClass}">${escapeHtml(status)}</span>
+      </div>
+    </div>
+    <div class="cliente-premium-bottom">
+      <div class="cliente-premium-services">
+        ${
+          serviceLabels.length
+            ? serviceLabels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")
+            : "<span>Sin servicios activos</span>"
+        }
+      </div>
+      <div class="cliente-premium-actions">
+        <button type="button" class="secondary ghost" data-cliente-header-action="dashboard">Dashboard</button>
+        <button type="button" class="secondary ghost" data-cliente-header-action="docs">Docs</button>
+        <button type="button" class="secondary ghost" data-cliente-header-action="renta">Renta</button>
+      </div>
+    </div>
+  `;
+  clientePremiumHeader.querySelectorAll("[data-cliente-header-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = String(btn.dataset.clienteHeaderAction || "").trim();
+      if (action === "docs") {
+        setClienteTab("docs");
+        setClienteDocsTab(servicios.includes("gestoria") ? "gestoria" : (servicios[0] || "seguros"));
+      } else if (action === "renta") {
+        setClienteTab("servicios");
+        setClienteOperativaTab("gestoria");
+        setGestoriaClientModuleTab("renta");
+      } else {
+        setClienteTab("dashboard");
+      }
+    });
+  });
 };
 
 const setClienteOperativaTab = (tab) => {
@@ -71573,6 +71645,7 @@ const openClienteDetail = (id) => {
     const cliente = data.cliente || {};
     state.currentClienteData = cliente;
     state.currentClienteDashboard = data.dashboard || null;
+    renderClientePremiumHeader(cliente, data);
     state.clienteContabView = "dashboard";
     state.clienteContabResponsable = "";
     state.clienteLedgerCobroFilter = "priced";
@@ -72095,6 +72168,10 @@ const closeClienteDetail = () => {
   state.clienteLedgerResponsable = "";
   state.currentClienteSegurosRows = [];
   state.currentClienteRamoSelected = "";
+  if (clientePremiumHeader) {
+    clientePremiumHeader.classList.add("hidden");
+    clientePremiumHeader.innerHTML = "";
+  }
   state.currentClienteRelaciones = [];
   const returnPage = state.prevPage && state.prevPage !== "cliente" ? state.prevPage : "empresa";
   const returnModule = state.prevModule || "clientes";
