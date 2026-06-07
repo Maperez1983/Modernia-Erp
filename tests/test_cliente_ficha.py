@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import unittest
 from datetime import datetime, timezone
@@ -314,6 +315,52 @@ class ClienteFichaTests(unittest.TestCase):
             "SELECT COUNT(*) AS n FROM gestoria_docs WHERE cliente_id = 'c1' AND referencia_tipo = 'inmobiliaria' AND referencia_id = 'id1'"
         ).fetchone()
         self.assertEqual(stored["n"], 1)
+
+    def test_build_cliente_ficha_payload_includes_gestoria_summary(self):
+        now = datetime.now(timezone.utc).isoformat()
+        renta_payload = {
+            "entries": [
+                {
+                    "id": "renta-2025-c1",
+                    "ejercicio": "2025",
+                    "estado_presentacion": "Presentada",
+                    "precio_servicio": 120.0,
+                    "cobrada": 0,
+                }
+            ]
+        }
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_renta, mod_registro, mod_trafico, mod_puntuales,
+              renta_detalles, created_at, updated_at
+            ) VALUES ('cg1', 'c1', 'Particular', 1, 0, 0, 0, ?, ?, ?)
+            """,
+            (json.dumps(renta_payload), now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, estado,
+              doc_key, created_at, updated_at
+            ) VALUES (
+              'rd1', 'e1', 'c1', 'renta', 'renta-2025-c1',
+              'Renta 2025 · Presentada.pdf', 'Modelo 100', 'Presentada',
+              'gestoria/rentas/renta.pdf', ?, ?
+            )
+            """,
+            (now, now),
+        )
+        self.conn.commit()
+
+        payload = build_cliente_ficha_payload(self.conn, "c1")
+        gestoria = payload.get("dashboard", {}).get("gestoria") or {}
+
+        self.assertTrue(gestoria["activo"])
+        self.assertEqual(gestoria["latest_renta_year"], "2025")
+        self.assertEqual(gestoria["modelo100_docs_total"], 1)
+        self.assertEqual(gestoria["rentas_pendientes_cobro"], 1)
+        self.assertAlmostEqual(float(gestoria["importe_rentas_pendiente"]), 120.0, places=2)
 
 
 if __name__ == "__main__":

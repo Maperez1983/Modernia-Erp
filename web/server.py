@@ -31193,6 +31193,111 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         gestoria_payload["renta_related_relation_id"] = renta_payload.get("related_relation_id", "")
         gestoria_payload["renta_declaracion_conjunta"] = renta_payload.get("declaracion_conjunta", 0)
         profesionales["gestoria"] = gestoria_payload
+    renta_entries = profesionales.get("gestoria", {}).get("renta_entries") or []
+    renta_docs = [
+        row
+        for row in docs_rows
+        if normalize_service_key(row.get("referencia_tipo") or row.get("tipo")) in {"gestoria", "renta"}
+        and (
+            normalize_lookup_text(row.get("referencia_tipo")) == "RENTA"
+            or "RENTA" in normalize_lookup_text(row.get("tipo"))
+            or "RENTA" in normalize_lookup_text(row.get("nombre"))
+            or "MODELO 100" in normalize_lookup_text(row.get("tipo"))
+            or "MODELO 100" in normalize_lookup_text(row.get("nombre"))
+        )
+    ]
+    modelo100_docs = [
+        row
+        for row in renta_docs
+        if "MODELO 100" in normalize_lookup_text(row.get("tipo"))
+        or "MODELO 100" in normalize_lookup_text(row.get("nombre"))
+        or normalize_lookup_text(row.get("referencia_tipo")) == "RENTA"
+    ]
+
+    def _renta_year_from_doc(row):
+        text = " ".join(
+            str(row.get(key) or "")
+            for key in ("nombre", "tipo", "referencia_id", "notas", "fecha")
+        )
+        match = re.search(r"\b(20[0-9]{2})\b", text)
+        return match.group(1) if match else ""
+
+    renta_years = {
+        str(entry.get("ejercicio") or "").strip()
+        for entry in renta_entries
+        if re.match(r"^20[0-9]{2}$", str(entry.get("ejercicio") or "").strip())
+    }
+    renta_years.update(
+        year
+        for year in (_renta_year_from_doc(row) for row in modelo100_docs)
+        if re.match(r"^20[0-9]{2}$", year or "")
+    )
+    latest_renta_year = sorted(renta_years, reverse=True)[0] if renta_years else ""
+    priced_rentas = [
+        entry
+        for entry in renta_entries
+        if (parse_money_value(entry.get("precio_servicio")) or 0) > 0
+    ]
+    unpaid_rentas = [
+        entry
+        for entry in priced_rentas
+        if str(entry.get("cobrada") or "").strip().lower() not in {"1", "true", "yes", "si", "sí", "on"}
+    ]
+    paid_rentas = [entry for entry in priced_rentas if entry not in unpaid_rentas]
+    renta_pending_presentation = [
+        entry
+        for entry in renta_entries
+        if normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status")) == "Borrador"
+    ]
+    gestoria_open_work = [
+        row
+        for row in trabajos
+        if "FINAL" not in normalize_lookup_text(row.get("estado"))
+        and "CANCEL" not in normalize_lookup_text(row.get("estado"))
+    ]
+    gestoria_open_actions = [
+        row
+        for row in acciones
+        if normalize_service_key(row.get("servicio")) == "gestoria"
+        and all(
+            token not in normalize_lookup_text(row.get("estado"))
+            for token in ("HECHO", "FINAL", "CANCEL")
+        )
+    ]
+    renta_docs_with_file = [row for row in renta_docs if row.get("doc_key") or row.get("doc_url")]
+    renta_docs_without_file = [row for row in renta_docs if not (row.get("doc_key") or row.get("doc_url"))]
+    gestoria_alerts = []
+    if profesionales.get("gestoria") and not modelo100_docs:
+        gestoria_alerts.append({"level": "warning", "label": "Sin Modelo 100 en documentación"})
+    if renta_pending_presentation:
+        gestoria_alerts.append({"level": "warning", "label": f"{len(renta_pending_presentation)} renta(s) pendientes de presentación"})
+    if unpaid_rentas:
+        gestoria_alerts.append({"level": "warning", "label": f"{len(unpaid_rentas)} renta(s) pendientes de cobro"})
+    if gestoria_open_work:
+        gestoria_alerts.append({"level": "info", "label": f"{len(gestoria_open_work)} trabajo(s) abiertos"})
+    if renta_docs_without_file:
+        gestoria_alerts.append({"level": "warning", "label": f"{len(renta_docs_without_file)} documento(s) sin PDF"})
+    gestoria_summary = {
+        "activo": bool(profesionales.get("gestoria")),
+        "mod_renta": int(profesionales.get("gestoria", {}).get("mod_renta") or 0),
+        "latest_renta_year": latest_renta_year,
+        "rentas_total": len(renta_entries),
+        "rentas_presentadas": len([entry for entry in renta_entries if normalize_renta_presentacion_status(entry.get("estado_presentacion") or entry.get("doc_status")) == "Presentada"]),
+        "rentas_pendientes_presentacion": len(renta_pending_presentation),
+        "rentas_con_precio": len(priced_rentas),
+        "rentas_cobradas": len(paid_rentas),
+        "rentas_pendientes_cobro": len(unpaid_rentas),
+        "importe_rentas": sum(parse_money_value(entry.get("precio_servicio")) or 0 for entry in priced_rentas),
+        "importe_rentas_cobrado": sum(parse_money_value(entry.get("precio_servicio")) or 0 for entry in paid_rentas),
+        "importe_rentas_pendiente": sum(parse_money_value(entry.get("precio_servicio")) or 0 for entry in unpaid_rentas),
+        "renta_docs_total": len(renta_docs),
+        "modelo100_docs_total": len(modelo100_docs),
+        "renta_docs_con_pdf": len(renta_docs_with_file),
+        "renta_docs_sin_pdf": len(renta_docs_without_file),
+        "trabajos_abiertos": len(gestoria_open_work),
+        "acciones_abiertas": len(gestoria_open_actions),
+        "alerts": gestoria_alerts[:6],
+    }
     relaciones = fetch_cliente_relaciones(conn, cliente_id)
     asesoramientos_table = conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asesoramientos_financiacion'"
@@ -31242,6 +31347,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
                 [row["fecha"] for row in citas_programadas if row.get("fecha")],
                 default="",
             ),
+            "gestoria": gestoria_summary,
             "series": {
                 "rentabilidad": [
                     {"label": "Realizado", "value": realizado},

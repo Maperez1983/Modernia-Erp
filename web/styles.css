@@ -9794,6 +9794,46 @@ body.crm-context-inmo .crm-resumen-compact-note {
   gap: 10px;
 }
 
+.cliente-gestoria-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, #ffffff 12%);
+}
+
+.cliente-gestoria-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill.warning {
+  border-color: color-mix(in srgb, #d97706 45%, var(--border));
+  background: color-mix(in srgb, #f59e0b 12%, var(--surface));
+  color: #92400e;
+}
+
+.status-pill.ok {
+  border-color: color-mix(in srgb, #16a34a 45%, var(--border));
+  background: color-mix(in srgb, #22c55e 10%, var(--surface));
+  color: #166534;
+}
+
 .cliente-mini-chart {
   display: grid;
   gap: 8px;

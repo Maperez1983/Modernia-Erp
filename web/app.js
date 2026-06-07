@@ -27211,6 +27211,7 @@ const renderClienteRentaDashboardPanel = () => {
 
   const gestoria = state.currentClienteGestoriaData || {};
   const entries = Array.isArray(gestoria.renta_entries) ? gestoria.renta_entries : [];
+  const gestoriaSummary = state.currentClienteDashboard?.gestoria || {};
   const priced = entries.filter((e) => (toNumber(e?.precio_servicio) || 0) > 0);
   const unpaid = priced.filter((e) => Number(e?.cobrada || 0) !== 1);
   const paid = priced.filter((e) => Number(e?.cobrada || 0) === 1);
@@ -27256,6 +27257,47 @@ const renderClienteRentaDashboardPanel = () => {
   const responsableFilterKey = normalizeLookupText(state.clienteContabResponsable || "");
 
   const root = document.createElement("div");
+  if (gestoriaSummary && Object.keys(gestoriaSummary).length) {
+    const summary = document.createElement("div");
+    summary.className = "cliente-gestoria-summary";
+    const latestYear = String(gestoriaSummary.latest_renta_year || "").trim() || "-";
+    const alerts = Array.isArray(gestoriaSummary.alerts) ? gestoriaSummary.alerts : [];
+    summary.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h4>Situación de gestoría</h4>
+          <p class="muted">Último ejercicio ${escapeHtml(latestYear)} · ${numberFormatter.format(Number(gestoriaSummary.modelo100_docs_total || 0))} Modelo 100 · ${numberFormatter.format(Number(gestoriaSummary.renta_docs_con_pdf || 0))} PDF vinculados</p>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="secondary ghost" data-gestoria-summary-action="docs">Documentación</button>
+          <button type="button" class="secondary ghost" data-gestoria-summary-action="renta">Renta</button>
+        </div>
+      </div>
+      <div class="cliente-mini-kpis">
+        <div class="card"><div class="kpi-label">Rentas</div><div class="kpi-value">${numberFormatter.format(Number(gestoriaSummary.rentas_total || 0))}</div></div>
+        <div class="card"><div class="kpi-label">Presentadas</div><div class="kpi-value">${numberFormatter.format(Number(gestoriaSummary.rentas_presentadas || 0))}</div></div>
+        <div class="card"><div class="kpi-label">Pendiente cobro</div><div class="kpi-value">${euroFormatter.format(Number(gestoriaSummary.importe_rentas_pendiente || 0))}</div></div>
+        <div class="card"><div class="kpi-label">Trabajos abiertos</div><div class="kpi-value">${numberFormatter.format(Number(gestoriaSummary.trabajos_abiertos || 0) + Number(gestoriaSummary.acciones_abiertas || 0))}</div></div>
+      </div>
+      <div class="cliente-gestoria-alerts">
+        ${
+          alerts.length
+            ? alerts.map((item) => `<span class="status-pill ${String(item.level || "info") === "warning" ? "warning" : ""}">${escapeHtml(item.label || "")}</span>`).join("")
+            : '<span class="status-pill ok">Sin alertas operativas</span>'
+        }
+      </div>
+    `;
+    summary.querySelector('[data-gestoria-summary-action="docs"]')?.addEventListener("click", () => {
+      setClienteTab("docs");
+      setClienteDocsTab("gestoria");
+    });
+    summary.querySelector('[data-gestoria-summary-action="renta"]')?.addEventListener("click", () => {
+      setClienteTab("servicios");
+      setClienteOperativaTab("gestoria");
+      setGestoriaClientModuleTab("renta");
+    });
+    root.appendChild(summary);
+  }
   const kpis = document.createElement("div");
   kpis.className = "cliente-mini-kpis";
   kpis.appendChild(makeKpiCard("Rentas", numberFormatter.format(entries.length), () => {
@@ -71472,6 +71514,7 @@ const openClienteDetail = (id) => {
     } catch (e) {}
     const cliente = data.cliente || {};
     state.currentClienteData = cliente;
+    state.currentClienteDashboard = data.dashboard || null;
     state.clienteContabView = "dashboard";
     state.clienteContabResponsable = "";
     state.clienteLedgerCobroFilter = "priced";
@@ -71985,6 +72028,7 @@ const closeClienteDetail = () => {
   state.currentClienteEmpresasActivas = [];
   state.currentClienteData = null;
   state.currentClienteEconomicData = null;
+  state.currentClienteDashboard = null;
   state.clienteContabView = "dashboard";
   state.clienteContabServiceTab = "";
   state.clienteContabResponsable = "";
