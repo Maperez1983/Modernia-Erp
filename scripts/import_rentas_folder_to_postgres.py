@@ -27,6 +27,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import unicodedata
 import uuid
@@ -53,6 +55,9 @@ STOP_TOKENS = {
 
 
 PLACEHOLDER_HEX_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+PDFTOTEXT_TIMEOUT_SECONDS = 20
+NIF_RE = re.compile(r"\b([0-9]{8}[A-Z])\b", re.IGNORECASE)
+NIE_RE = re.compile(r"\b([XYZ][0-9]{7}[A-Z])\b", re.IGNORECASE)
 
 
 def load_env_file(path: Path) -> None:
@@ -138,6 +143,61 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def run_pdftotext(pdf_path: Path, max_chars: int = 12000) -> str:
+    cmd = shutil.which("pdftotext") or "/opt/homebrew/bin/pdftotext" or "/usr/local/bin/pdftotext"
+    if not cmd or not os.path.exists(cmd):
+        return ""
+    try:
+        proc = subprocess.run(
+            [cmd, "-layout", "-nopgbrk", str(pdf_path), "-"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=PDFTOTEXT_TIMEOUT_SECONDS,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "")[:max_chars]
+
+
+def is_modelo_100_text(raw_text: str) -> bool:
+    text = norm(raw_text)
+    if not text:
+        return False
+    has_model = "MODELO 100" in text or re.search(r"\b100\s+IRPF\b", text) is not None
+    has_irpf = (
+        "IMPUESTO SOBRE LA RENTA DE LAS PERSONAS FISICAS" in text
+        or "IMPUESTO SOBRE LA RENTA DE LAS PERSONAS FÍSICAS" in text
+        or "IRPF" in text
+    )
+    excluded_support = (
+        "SOLICITUD DE APLAZAMIENTO" in text
+        or "FRACCIONAMIENTO" in text
+        or "MODELO 600" in text
+        or "FACTURA" in text
+        or "DOCUMENTO NACIONAL DE IDENTIDAD" in text
+        or "RECIBO DE PRESENTACION" in text and "APORTAR DOCUMENTACION COMPLEMENTARIA" in text
+    )
+    return bool(has_model and has_irpf and not excluded_support)
+
+
+def normalize_nif(value: object) -> str:
+    return re.sub(r"[^0-9A-Z]+", "", str(value or "").upper())
+
+
+def extract_nifs(value: object) -> list[str]:
+    text = normalize_nif(value)
+    found: list[str] = []
+    for regex in (NIF_RE, NIE_RE):
+        for match in regex.finditer(text):
+            nif = normalize_nif(match.group(1))
+            if nif and nif not in found:
+                found.append(nif)
+    return found
 
 
 def pg_connect(dsn: str):
@@ -448,6 +508,11 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="Aplica cambios (si no, actúa como dry-run).")
     parser.add_argument("--out-review", default="reports/rentas_folder_import_review.json", help="JSON con casos no enlazados.")
     parser.add_argument("--env-file", default=".env", help="Archivo .env local con POSTGRES_URL/DATABASE_URL y S3.")
+    parser.add_argument(
+        "--include-non-modelo100",
+        action="store_true",
+        help="Permite cargar PDFs que no se detecten como Modelo 100. Por defecto se excluyen.",
+    )
     args = parser.parse_args()
 
     load_env_file(Path(args.env_file))
@@ -478,6 +543,7 @@ def main() -> None:
         client_duplicates = audit_duplicate_clients(conn, args.empresa_id)
         clients = fetch_clients(conn, args.empresa_id)
         inv = build_inverted_index(clients)
+        clients_by_nif = {c.nif: c for c in clients if c.nif}
         print(f"[rentas_folder] clientes_indexados={len(clients)}", file=sys.stderr)
 
         pdfs = sorted([p for p in source_dir.rglob("*.pdf") if not p.name.startswith("._")])
@@ -490,15 +556,36 @@ def main() -> None:
         skipped = 0
         already_uploaded = 0
         hash_errors = 0
+        excluded_non_modelo100 = 0
         review: list[dict] = []
 
         for idx, pdf in enumerate(pdfs, start=1):
             if idx == 1 or idx % 200 == 0 or idx == total:
                 print(f"[rentas_folder] {idx}/{total}: {pdf.name}", file=sys.stderr)
 
+            pdf_text = run_pdftotext(pdf)
+            if not args.include_non_modelo100 and not is_modelo_100_text(pdf_text):
+                excluded_non_modelo100 += 1
+                review.append(
+                    {
+                        "pdf": str(pdf),
+                        "error": "excluded_non_modelo100",
+                    }
+                )
+                continue
+
             stem = simplify_filename(pdf.stem)
             tokens = tokenize_name(stem)
-            client, score = best_match(tokens, clients, inv)
+            client = None
+            score = 0.0
+            detected_nifs = extract_nifs(f"{pdf.stem} {pdf_text[:8000]}")
+            for nif in detected_nifs:
+                if nif in clients_by_nif:
+                    client = clients_by_nif[nif]
+                    score = 1.0
+                    break
+            if not client:
+                client, score = best_match(tokens, clients, inv)
             if (not client) or score < float(args.min_score or 0.0):
                 review.append(
                     {
@@ -506,6 +593,7 @@ def main() -> None:
                         "stem": pdf.stem,
                         "simplified": stem,
                         "tokens": sorted(tokens),
+                        "detected_nifs": detected_nifs,
                         "best": {"id": client.id, "nombre": client.nombre, "nif": client.nif, "score": score} if client else None,
                     }
                 )
@@ -515,7 +603,13 @@ def main() -> None:
             referencia_id = f"renta-{compact_spaces(args.ejercicio)}-{client.nif or client.id}"
             tipo = f"Renta {compact_spaces(args.estado)}"
             campos_ocr = json.dumps(
-                {"match_score": score, "match_nombre": client.nombre, "match_nif": client.nif},
+                {
+                    "match_score": score,
+                    "match_nombre": client.nombre,
+                    "match_nif": client.nif,
+                    "detected_nifs": detected_nifs,
+                    "match_method": "nif" if score >= 1.0 else "nombre",
+                },
                 ensure_ascii=False,
             )
             try:
@@ -602,6 +696,7 @@ def main() -> None:
                     "skipped": skipped,
                     "already_uploaded_by_hash": already_uploaded,
                     "hash_errors": hash_errors,
+                    "excluded_non_modelo100": excluded_non_modelo100,
                     **client_duplicates,
                     "review_count": len(review),
                     "review_out": str(out_path),
