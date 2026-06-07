@@ -51,6 +51,12 @@ STOP_TOKENS = {
     "DOS",
     "SAN",
     "SANTA",
+    "DOMICILIADO",
+    "CLIENTE",
+    "RENTA",
+    "DECLARACION",
+    "PRESENTADA",
+    "FIRMA",
 }
 
 
@@ -87,6 +93,8 @@ def norm(value: object) -> str:
 
 def tokenize_name(raw: object) -> set[str]:
     text = norm(raw)
+    text = re.sub(r"\bFCO\b", "FRANCISCO", text)
+    text = re.sub(r"\bMª\b|\bMA\b|\bM\b", "MARIA", text)
     text = re.sub(r"[^A-Z0-9 ]+", " ", text)
     tokens = {t for t in text.split() if t and t not in STOP_TOKENS and len(t) >= 2}
     return tokens
@@ -179,6 +187,8 @@ def is_modelo_100_text(raw_text: str) -> bool:
         or "FRACCIONAMIENTO" in text
         or "MODELO 600" in text
         or "FACTURA" in text
+        or "TRADE REPUBLIC" in text
+        or "INFORME FISCAL" in text and "MODELO 100" not in text
         or "DOCUMENTO NACIONAL DE IDENTIDAD" in text
         or "RECIBO DE PRESENTACION" in text and "APORTAR DOCUMENTACION COMPLEMENTARIA" in text
     )
@@ -190,7 +200,8 @@ def normalize_nif(value: object) -> str:
 
 
 def extract_nifs(value: object) -> list[str]:
-    text = normalize_nif(value)
+    text = norm(value)
+    text = re.sub(r"[^0-9A-Z]+", " ", text)
     found: list[str] = []
     for regex in (NIF_RE, NIE_RE):
         for match in regex.finditer(text):
@@ -198,6 +209,33 @@ def extract_nifs(value: object) -> list[str]:
             if nif and nif not in found:
                 found.append(nif)
     return found
+
+
+def clean_declarante_name(value: object) -> str:
+    text = compact_spaces(value)
+    text = re.sub(r"\s+0{3,4}[0-9]\s*$", "", text)
+    return compact_spaces(text).upper()
+
+
+def parse_modelo100_declarante(raw_text: str) -> tuple[str, str]:
+    text = raw_text or ""
+    nif = ""
+    name = ""
+    match = re.search(r"NIF\s+Presentador\s*:\s*([XYZ]?[0-9][0-9A-Z]{7,9})", text, re.IGNORECASE)
+    if match:
+        nif = normalize_nif(match.group(1))
+    match = re.search(r"Apellidos\s+y\s+Nombre\s*/\s*Raz[oó]n\s+social\s*:\s*(.+)", text, re.IGNORECASE)
+    if match:
+        name = clean_declarante_name(match.group(1))
+    if not nif:
+        match = re.search(r"Primer\s+declarante.*?\bNIF\s+([XYZ]?[0-9][0-9A-Z]{7,9})", text, re.IGNORECASE | re.DOTALL)
+        if match:
+            nif = normalize_nif(match.group(1))
+    if not name:
+        match = re.search(r"Apellidos\s+y\s+nombre\s+(.+?)\s+0{3,4}2", text, re.IGNORECASE)
+        if match:
+            name = clean_declarante_name(match.group(1))
+    return nif, name
 
 
 def pg_connect(dsn: str):
@@ -248,7 +286,11 @@ def best_match(tokens: set[str], clients: list[Client], inv: dict[str, list[int]
     best_score = 0.0
     for idx in candidates:
         c = clients[idx]
-        score = jaccard(tokens, set(c.tokens))
+        client_tokens = set(c.tokens)
+        inter = len(tokens & client_tokens)
+        score = jaccard(tokens, client_tokens)
+        if inter >= 2:
+            score = max(score, inter / max(1, min(len(tokens), len(client_tokens))))
         if score > best_score:
             best_score = score
             best_client = c
@@ -368,6 +410,80 @@ def audit_duplicate_clients(conn, empresa_id: str) -> dict[str, int]:
         "duplicate_nif_groups": int((nif_groups or {}).get("n") or 0),
         "duplicate_name_without_nif_groups": int((name_groups or {}).get("n") or 0),
     }
+
+
+def fetch_client_by_nif_any_company(conn, nif: str) -> Client | None:
+    nif = normalize_nif(nif)
+    if not nif:
+        return None
+    with conn.cursor() as cur:
+        row = cur.execute(
+            """
+            SELECT id, nombre, nif
+            FROM clientes
+            WHERE UPPER(regexp_replace(COALESCE(nif,''), '[^0-9A-Za-z]', '', 'g')) = %s
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (nif,),
+        ).fetchone()
+    if not row:
+        return None
+    name = compact_spaces(row.get("nombre") or "")
+    return Client(id=str(row["id"]), nombre=name, nif=normalize_nif(row.get("nif")), tokens=frozenset(tokenize_name(name)))
+
+
+def ensure_client_for_renta(
+    conn,
+    *,
+    empresa_id: str,
+    nif: str,
+    nombre: str,
+) -> tuple[Client, bool, bool]:
+    nif = normalize_nif(nif)
+    nombre = clean_declarante_name(nombre)
+    existing = fetch_client_by_nif_any_company(conn, nif)
+    created = False
+    linked = False
+    if existing:
+        client = existing
+    else:
+        client_id = uuid.uuid4().hex
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO clientes (id, empresa_id, nombre, nif, estado, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                """,
+                (client_id, empresa_id, nombre, nif, "Activo"),
+            )
+        client = Client(id=client_id, nombre=nombre, nif=nif, tokens=frozenset(tokenize_name(nombre)))
+        created = True
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, fecha_inicio, fecha_fin, created_at, updated_at)
+            SELECT %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+            WHERE NOT EXISTS (
+              SELECT 1 FROM clientes_empresas
+              WHERE cliente_id=%s AND empresa_id=%s AND LOWER(COALESCE(servicio,'')) IN ('gestoria','gestoría')
+            )
+            """,
+            (
+                uuid.uuid4().hex,
+                client.id,
+                empresa_id,
+                "gestoria",
+                "Activo",
+                "",
+                "",
+                client.id,
+                empresa_id,
+            ),
+        )
+        linked = cur.rowcount > 0
+    return client, created, linked
 
 
 def upsert_doc(
@@ -513,6 +629,11 @@ def main() -> None:
         action="store_true",
         help="Permite cargar PDFs que no se detecten como Modelo 100. Por defecto se excluyen.",
     )
+    parser.add_argument(
+        "--create-missing-clients",
+        action="store_true",
+        help="Crea o vincula clientes por NIF/nombre del declarante del Modelo 100 si no están en la empresa destino.",
+    )
     args = parser.parse_args()
 
     load_env_file(Path(args.env_file))
@@ -557,6 +678,8 @@ def main() -> None:
         already_uploaded = 0
         hash_errors = 0
         excluded_non_modelo100 = 0
+        created_clients = 0
+        linked_clients = 0
         review: list[dict] = []
 
         for idx, pdf in enumerate(pdfs, start=1):
@@ -579,13 +702,41 @@ def main() -> None:
             client = None
             score = 0.0
             detected_nifs = extract_nifs(f"{pdf.stem} {pdf_text[:8000]}")
+            declarante_nif, declarante_nombre = parse_modelo100_declarante(pdf_text)
             for nif in detected_nifs:
                 if nif in clients_by_nif:
                     client = clients_by_nif[nif]
                     score = 1.0
                     break
+            if not client and declarante_nif and declarante_nif in clients_by_nif:
+                client = clients_by_nif[declarante_nif]
+                score = 1.0
             if not client:
                 client, score = best_match(tokens, clients, inv)
+            if (not client or score < float(args.min_score or 0.0)) and args.create_missing_clients and declarante_nif and declarante_nombre:
+                if args.dry_run:
+                    client = Client(
+                        id=f"dry-run-{declarante_nif}",
+                        nombre=declarante_nombre,
+                        nif=declarante_nif,
+                        tokens=frozenset(tokenize_name(declarante_nombre)),
+                    )
+                    score = 1.0
+                else:
+                    client, did_create, did_link = ensure_client_for_renta(
+                        conn,
+                        empresa_id=args.empresa_id,
+                        nif=declarante_nif,
+                        nombre=declarante_nombre,
+                    )
+                    clients.append(client)
+                    inv = build_inverted_index(clients)
+                    clients_by_nif[client.nif] = client
+                    if did_create:
+                        created_clients += 1
+                    if did_link:
+                        linked_clients += 1
+                    score = 1.0
             if (not client) or score < float(args.min_score or 0.0):
                 review.append(
                     {
@@ -594,6 +745,8 @@ def main() -> None:
                         "simplified": stem,
                         "tokens": sorted(tokens),
                         "detected_nifs": detected_nifs,
+                        "declarante_nif": declarante_nif,
+                        "declarante_nombre": declarante_nombre,
                         "best": {"id": client.id, "nombre": client.nombre, "nif": client.nif, "score": score} if client else None,
                     }
                 )
@@ -608,7 +761,9 @@ def main() -> None:
                     "match_nombre": client.nombre,
                     "match_nif": client.nif,
                     "detected_nifs": detected_nifs,
-                    "match_method": "nif" if score >= 1.0 else "nombre",
+                    "declarante_nif": declarante_nif,
+                    "declarante_nombre": declarante_nombre,
+                    "match_method": "nif_or_declarante" if score >= 1.0 else "nombre",
                 },
                 ensure_ascii=False,
             )
@@ -697,6 +852,8 @@ def main() -> None:
                     "already_uploaded_by_hash": already_uploaded,
                     "hash_errors": hash_errors,
                     "excluded_non_modelo100": excluded_non_modelo100,
+                    "created_clients": created_clients,
+                    "linked_clients": linked_clients,
                     **client_duplicates,
                     "review_count": len(review),
                     "review_out": str(out_path),
