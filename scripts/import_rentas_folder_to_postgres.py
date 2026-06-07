@@ -23,6 +23,7 @@ Primero probar:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -54,6 +55,20 @@ STOP_TOKENS = {
 PLACEHOLDER_HEX_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 
 
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def compact_spaces(value: object) -> str:
     return " ".join(str(value or "").strip().split())
 
@@ -77,7 +92,7 @@ def simplify_filename(stem: str) -> str:
     s = re.sub(r"\b\d{8}\b", " ", s)  # 28102025
     s = re.sub(r"\b\d{2}[_/-]?\d{2}[_/-]?\d{4}\b", " ", s)
     # Quita códigos tipo M91XHX, N4AH3B, etc. (mezcla letras+NÚMEROS).
-    s = re.sub(r"\b(?=[A-Z0-9]{5,}\b)(?=.*\d)[A-Z0-9]+\b", " ", s)
+    s = re.sub(r"\b(?=[A-Z0-9]{5,}\b)(?=[A-Z0-9]*\d)[A-Z0-9]+\b", " ", s)
     s = re.sub(
         r"\b(APORTACION|APORTACI[ÓO]N|RECTIFICATIVA|FIRMA|PAGO|PLAZO|SOLICITUD|FRACCIONAMIENTO|BORRADOR)\b",
         " ",
@@ -115,6 +130,14 @@ def build_s3_key(prefix: str, filename: str) -> str:
     rand = os.urandom(4).hex()
     pref = (prefix or "gestoria/rentas").strip().strip("/")
     return f"{pref}/{stamp}_{rand}_{safe_filename(filename)}"
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def pg_connect(dsn: str):
@@ -216,6 +239,77 @@ def fetch_clients(conn, empresa_id: str) -> list[Client]:
     return out
 
 
+def ensure_archivo_hash_column(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE gestoria_docs ADD COLUMN IF NOT EXISTS archivo_hash TEXT")
+
+
+def audit_duplicate_clients(conn, empresa_id: str) -> dict[str, int]:
+    with conn.cursor() as cur:
+        cols = cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='clientes'
+            """
+        ).fetchall()
+        has_apellidos = any(r["column_name"] == "apellidos" for r in cols)
+        name_expr = "COALESCE(c.nombre,'')"
+        if has_apellidos:
+            name_expr = "TRIM(COALESCE(c.nombre,'') || ' ' || COALESCE(c.apellidos,''))"
+        nif_groups = cur.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM (
+              SELECT k
+              FROM (
+                SELECT
+                  c.id,
+                  UPPER(regexp_replace(COALESCE(c.nif,''), '[^0-9A-Za-z]', '', 'g')) AS k
+                FROM clientes c
+                JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                WHERE ce.empresa_id = %s
+              ) base
+              WHERE LENGTH(k) >= 8
+              GROUP BY k
+              HAVING COUNT(DISTINCT id) > 1
+            ) x
+            """,
+            (empresa_id,),
+        ).fetchone()
+        name_groups = cur.execute(
+            f"""
+            SELECT COUNT(*) AS n
+            FROM (
+              SELECT k
+              FROM (
+                SELECT
+                  c.id,
+                  UPPER(regexp_replace(
+                    translate({name_expr},
+                      'áéíóúÁÉÍÓÚäëïöüÄËÏÖÜñÑ',
+                      'aeiouAEIOUaeiouAEIOUnN'
+                    ),
+                    '\\s+', ' ', 'g'
+                  )) AS k
+                FROM clientes c
+                JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                WHERE ce.empresa_id = %s
+                  AND COALESCE(c.nif,'') = ''
+              ) base
+              WHERE k <> ''
+              GROUP BY k
+              HAVING COUNT(DISTINCT id) > 1
+            ) x
+            """,
+            (empresa_id,),
+        ).fetchone()
+    return {
+        "duplicate_nif_groups": int((nif_groups or {}).get("n") or 0),
+        "duplicate_name_without_nif_groups": int((name_groups or {}).get("n") or 0),
+    }
+
+
 def upsert_doc(
     conn,
     *,
@@ -227,13 +321,48 @@ def upsert_doc(
     estado: str,
     notas: str,
     doc_key: str,
+    archivo_hash: str,
     campos_ocr: str,
 ) -> tuple[bool, bool]:
     """Returns (created, updated)."""
     with conn.cursor() as cur:
+        if archivo_hash:
+            existing_by_hash = cur.execute(
+                """
+                SELECT id, doc_key
+                FROM gestoria_docs
+                WHERE empresa_id = %s
+                  AND cliente_id = %s
+                  AND LOWER(COALESCE(referencia_tipo,''))='renta'
+                  AND COALESCE(archivo_hash, '') = %s
+                LIMIT 1
+                """,
+                (empresa_id, cliente_id, archivo_hash),
+            ).fetchone()
+            if existing_by_hash:
+                existing_key = str(existing_by_hash.get("doc_key") or "").strip()
+                needs_key = not existing_key or PLACEHOLDER_HEX_RE.fullmatch(existing_key or "") is not None
+                if needs_key and doc_key:
+                    cur.execute(
+                        """
+                        UPDATE gestoria_docs
+                        SET doc_key = %s,
+                            tipo = %s,
+                            estado = %s,
+                            notas = COALESCE(NULLIF(%s,''), notas),
+                            referencia_id = %s,
+                            campos_ocr = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (doc_key, tipo, estado, notas, referencia_id, campos_ocr, existing_by_hash["id"]),
+                    )
+                    return False, True
+                return False, False
+
         existing = cur.execute(
             """
-            SELECT id, doc_key
+            SELECT id, doc_key, archivo_hash
             FROM gestoria_docs
             WHERE empresa_id = %s
               AND cliente_id = %s
@@ -251,6 +380,7 @@ def upsert_doc(
                     """
                     UPDATE gestoria_docs
                     SET doc_key = %s,
+                        archivo_hash = COALESCE(NULLIF(%s,''), archivo_hash),
                         tipo = %s,
                         estado = %s,
                         notas = COALESCE(NULLIF(%s,''), notas),
@@ -259,7 +389,19 @@ def upsert_doc(
                         updated_at = NOW()
                     WHERE id = %s
                     """,
-                    (doc_key, tipo, estado, notas, referencia_id, campos_ocr, existing["id"]),
+                    (doc_key, archivo_hash, tipo, estado, notas, referencia_id, campos_ocr, existing["id"]),
+                )
+                return False, True
+            if archivo_hash and not str(existing.get("archivo_hash") or "").strip():
+                cur.execute(
+                    """
+                    UPDATE gestoria_docs
+                    SET archivo_hash = %s,
+                        campos_ocr = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (archivo_hash, campos_ocr, existing["id"]),
                 )
                 return False, True
             return False, False
@@ -269,11 +411,11 @@ def upsert_doc(
             INSERT INTO gestoria_docs (
               id, empresa_id, cliente_id, referencia_tipo, referencia_id,
               nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-              calidad_ocr, campos_ocr, created_at, updated_at
+              calidad_ocr, campos_ocr, archivo_hash, created_at, updated_at
             ) VALUES (
               %s, %s, %s, 'renta', %s,
               %s, %s, '', %s, %s, %s, '',
-              0, %s, NOW(), NOW()
+              0, %s, %s, NOW(), NOW()
             )
             """,
             (
@@ -287,6 +429,7 @@ def upsert_doc(
                 notas,
                 doc_key,
                 campos_ocr,
+                archivo_hash,
             ),
         )
         return True, False
@@ -304,7 +447,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="No sube a S3 ni escribe en DB.")
     parser.add_argument("--apply", action="store_true", help="Aplica cambios (si no, actúa como dry-run).")
     parser.add_argument("--out-review", default="reports/rentas_folder_import_review.json", help="JSON con casos no enlazados.")
+    parser.add_argument("--env-file", default=".env", help="Archivo .env local con POSTGRES_URL/DATABASE_URL y S3.")
     args = parser.parse_args()
+
+    load_env_file(Path(args.env_file))
 
     source_dir = Path(args.source_dir).expanduser()
     if not source_dir.exists():
@@ -328,6 +474,8 @@ def main() -> None:
     conn = pg_connect(dsn)
     conn.autocommit = False
     try:
+        ensure_archivo_hash_column(conn)
+        client_duplicates = audit_duplicate_clients(conn, args.empresa_id)
         clients = fetch_clients(conn, args.empresa_id)
         inv = build_inverted_index(clients)
         print(f"[rentas_folder] clientes_indexados={len(clients)}", file=sys.stderr)
@@ -340,6 +488,8 @@ def main() -> None:
         inserted = 0
         updated = 0
         skipped = 0
+        already_uploaded = 0
+        hash_errors = 0
         review: list[dict] = []
 
         for idx, pdf in enumerate(pdfs, start=1):
@@ -368,6 +518,36 @@ def main() -> None:
                 {"match_score": score, "match_nombre": client.nombre, "match_nif": client.nif},
                 ensure_ascii=False,
             )
+            try:
+                archivo_hash = file_sha256(pdf)
+            except Exception as exc:
+                hash_errors += 1
+                review.append(
+                    {
+                        "pdf": str(pdf),
+                        "error": f"hash_failed: {type(exc).__name__}: {exc}",
+                        "client": {"id": client.id, "nombre": client.nombre, "nif": client.nif, "score": score},
+                    }
+                )
+                continue
+
+            with conn.cursor() as cur:
+                existing_hash = cur.execute(
+                    """
+                    SELECT id, nombre, doc_key
+                    FROM gestoria_docs
+                    WHERE empresa_id = %s
+                      AND cliente_id = %s
+                      AND LOWER(COALESCE(referencia_tipo,''))='renta'
+                      AND COALESCE(archivo_hash, '') = %s
+                    LIMIT 1
+                    """,
+                    (args.empresa_id, client.id, archivo_hash),
+                ).fetchone()
+            if existing_hash:
+                already_uploaded += 1
+                skipped += 1
+                continue
 
             if args.dry_run:
                 inserted += 1
@@ -396,6 +576,7 @@ def main() -> None:
                 estado=compact_spaces(args.estado),
                 notas=str(pdf),
                 doc_key=key,
+                archivo_hash=archivo_hash,
                 campos_ocr=campos_ocr,
             )
             if created:
@@ -419,6 +600,9 @@ def main() -> None:
                     "created": inserted,
                     "updated": updated,
                     "skipped": skipped,
+                    "already_uploaded_by_hash": already_uploaded,
+                    "hash_errors": hash_errors,
+                    **client_duplicates,
                     "review_count": len(review),
                     "review_out": str(out_path),
                     "dry_run": bool(args.dry_run),
@@ -439,4 +623,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(130)
-
