@@ -44803,7 +44803,16 @@ const loadClientesList = () => {
     params.set("uploaded_only", "1");
   }
   return api(`/api/clientes_list?${params.toString()}`).then((data) => {
-    const list = data || [];
+    const rawList = Array.isArray(data) ? data : [];
+    const seen = new Set();
+    const list = rawList.filter((cliente) => {
+      const id = String(cliente?.id || "").trim();
+      const fallback = `${normalizeDocumento(cliente?.nif || "")}:${normalizeNombre(cliente?.nombre || "")}`;
+      const key = id || fallback;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     list.sort((a, b) => {
       const nameA = normalizeNombre(formatNombreCliente(a.nombre));
       const nameB = normalizeNombre(formatNombreCliente(b.nombre));
