@@ -27262,11 +27262,15 @@ const renderClienteRentaDashboardPanel = () => {
     summary.className = "cliente-gestoria-summary";
     const latestYear = String(gestoriaSummary.latest_renta_year || "").trim() || "-";
     const alerts = Array.isArray(gestoriaSummary.alerts) ? gestoriaSummary.alerts : [];
+    const checklist = Array.isArray(gestoriaSummary.checklist) ? gestoriaSummary.checklist : [];
+    const nextActions = Array.isArray(gestoriaSummary.next_actions) ? gestoriaSummary.next_actions : [];
+    const timeline = Array.isArray(gestoriaSummary.timeline) ? gestoriaSummary.timeline : [];
+    const statusGlobal = String(gestoriaSummary.status_global || "Sin gestoría").trim();
     summary.innerHTML = `
       <div class="section-head">
         <div>
-          <h4>Situación de gestoría</h4>
-          <p class="muted">Último ejercicio ${escapeHtml(latestYear)} · ${numberFormatter.format(Number(gestoriaSummary.modelo100_docs_total || 0))} Modelo 100 · ${numberFormatter.format(Number(gestoriaSummary.renta_docs_con_pdf || 0))} PDF vinculados</p>
+          <h4>Situación de gestoría <span class="status-pill ${statusGlobal === "Al día" ? "ok" : "warning"}">${escapeHtml(statusGlobal)}</span></h4>
+          <p class="muted">Último ejercicio ${escapeHtml(latestYear)} · ${numberFormatter.format(Number(gestoriaSummary.modelo100_docs_total || 0))} Modelo 100 · ${numberFormatter.format(Number(gestoriaSummary.renta_docs_con_pdf || 0))} PDF vinculados · checklist ${numberFormatter.format(Number(gestoriaSummary.checklist_done || 0))}/${numberFormatter.format(Number(gestoriaSummary.checklist_total || 0))}</p>
         </div>
         <div class="form-actions">
           <button type="button" class="secondary ghost" data-gestoria-summary-action="docs">Documentación</button>
@@ -27286,15 +27290,69 @@ const renderClienteRentaDashboardPanel = () => {
             : '<span class="status-pill ok">Sin alertas operativas</span>'
         }
       </div>
+      <div class="cliente-gestoria-workgrid">
+        <div>
+          <h4>Checklist documental</h4>
+          <div class="cliente-gestoria-checklist">
+            ${
+              checklist.length
+                ? checklist.map((item) => `
+                    <button type="button" class="cliente-checkitem ${item.done ? "done" : "pending"}" data-gestoria-summary-action="docs">
+                      <span>${item.done ? "OK" : "Pendiente"}</span>
+                      <strong>${escapeHtml(item.label || "")}</strong>
+                    </button>
+                  `).join("")
+                : '<p class="muted">Sin checklist disponible.</p>'
+            }
+          </div>
+        </div>
+        <div>
+          <h4>Próximas acciones</h4>
+          <div class="cliente-gestoria-actions">
+            ${
+              nextActions.length
+                ? nextActions.map((item) => `
+                    <button type="button" class="cliente-next-action ${String(item.priority || "") === "alta" ? "urgent" : ""}" data-gestoria-summary-action="${escapeHtml(item.target || "renta")}">
+                      <strong>${escapeHtml(item.label || "")}</strong>
+                      <span>${escapeHtml(item.meta || "")}</span>
+                    </button>
+                  `).join("")
+                : '<p class="muted">Sin acciones recomendadas.</p>'
+            }
+          </div>
+        </div>
+      </div>
+      <div class="cliente-gestoria-timeline">
+        <h4>Últimos hitos</h4>
+        ${
+          timeline.length
+            ? timeline.map((item) => `
+                <div class="cliente-timeline-item">
+                  <span>${escapeHtml(item.date || "-")}</span>
+                  <strong>${escapeHtml(item.title || "")}</strong>
+                  <em>${escapeHtml(item.meta || item.kind || "")}</em>
+                </div>
+              `).join("")
+            : '<p class="muted">Sin hitos registrados.</p>'
+        }
+      </div>
     `;
-    summary.querySelector('[data-gestoria-summary-action="docs"]')?.addEventListener("click", () => {
-      setClienteTab("docs");
-      setClienteDocsTab("gestoria");
-    });
-    summary.querySelector('[data-gestoria-summary-action="renta"]')?.addEventListener("click", () => {
-      setClienteTab("servicios");
-      setClienteOperativaTab("gestoria");
-      setGestoriaClientModuleTab("renta");
+    summary.querySelectorAll("[data-gestoria-summary-action]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const action = String(btn.dataset.gestoriaSummaryAction || "").trim();
+        if (action === "docs") {
+          setClienteTab("docs");
+          setClienteDocsTab("gestoria");
+          return;
+        }
+        setClienteTab("servicios");
+        setClienteOperativaTab("gestoria");
+        if (action === "trabajos" || action === "agenda") {
+          setGestoriaClientModuleTab("admin");
+        } else {
+          setGestoriaClientModuleTab("renta");
+        }
+      });
     });
     root.appendChild(summary);
   }

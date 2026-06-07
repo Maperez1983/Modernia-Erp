@@ -31277,8 +31277,157 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         gestoria_alerts.append({"level": "info", "label": f"{len(gestoria_open_work)} trabajo(s) abiertos"})
     if renta_docs_without_file:
         gestoria_alerts.append({"level": "warning", "label": f"{len(renta_docs_without_file)} documento(s) sin PDF"})
+    cliente_missing_fields = [
+        label
+        for field, label in (
+            ("nif", "NIF"),
+            ("telefono", "teléfono"),
+            ("email", "email"),
+        )
+        if not str(cliente[field] if field in cliente.keys() else "").strip()
+    ]
+    if cliente_missing_fields:
+        gestoria_alerts.append({"level": "warning", "label": f"Falta {', '.join(cliente_missing_fields)}"})
+    if unpaid_rentas:
+        status_global = "Pendiente cobro"
+    elif renta_pending_presentation:
+        status_global = "Pendiente presentación"
+    elif renta_docs_without_file or not modelo100_docs:
+        status_global = "Pendiente documentación"
+    elif gestoria_open_work or gestoria_open_actions:
+        status_global = "En curso"
+    elif profesionales.get("gestoria"):
+        status_global = "Al día"
+    else:
+        status_global = "Sin gestoría"
+
+    def _doc_match(*tokens):
+        normalized_tokens = [normalize_lookup_text(token) for token in tokens if str(token or "").strip()]
+        if not normalized_tokens:
+            return False
+        for row in docs_rows:
+            haystack = normalize_lookup_text(
+                " ".join(str(row.get(key) or "") for key in ("referencia_tipo", "nombre", "tipo", "estado", "notas"))
+            )
+            if all(token in haystack for token in normalized_tokens):
+                return True
+        return False
+
+    checklist = [
+        {
+            "key": "modelo100",
+            "label": "Modelo 100",
+            "done": bool(modelo100_docs),
+            "count": len(modelo100_docs),
+            "action": "Subir o revisar Modelo 100",
+        },
+        {
+            "key": "dni",
+            "label": "DNI/NIE",
+            "done": _doc_match("DNI") or bool(str(cliente["nif"] if "nif" in cliente.keys() else "").strip()),
+            "count": 1 if (_doc_match("DNI") or bool(str(cliente["nif"] if "nif" in cliente.keys() else "").strip())) else 0,
+            "action": "Solicitar DNI/NIE actualizado",
+        },
+        {
+            "key": "datos_fiscales",
+            "label": "Datos fiscales",
+            "done": _doc_match("DATOS FISCALES"),
+            "count": 1 if _doc_match("DATOS FISCALES") else 0,
+            "action": "Solicitar datos fiscales",
+        },
+        {
+            "key": "autorizacion",
+            "label": "Autorización / firma",
+            "done": _doc_match("AUTORIZ") or _doc_match("FIRMA"),
+            "count": 1 if (_doc_match("AUTORIZ") or _doc_match("FIRMA")) else 0,
+            "action": "Solicitar autorización o firma",
+        },
+        {
+            "key": "cobro",
+            "label": "Cobro renta",
+            "done": not unpaid_rentas,
+            "count": len(paid_rentas),
+            "action": "Marcar o reclamar cobro",
+        },
+    ]
+    checklist_done = sum(1 for item in checklist if item.get("done"))
+    next_actions = []
+    if unpaid_rentas:
+        next_actions.append({
+            "priority": "alta",
+            "label": "Reclamar cobro de renta",
+            "meta": f"{len(unpaid_rentas)} pendiente(s) · {sum(parse_money_value(entry.get('precio_servicio')) or 0 for entry in unpaid_rentas):.2f} €",
+            "target": "renta",
+        })
+    if renta_pending_presentation:
+        next_actions.append({
+            "priority": "alta",
+            "label": "Presentar renta pendiente",
+            "meta": f"{len(renta_pending_presentation)} borrador(es)",
+            "target": "renta",
+        })
+    for item in checklist:
+        if not item.get("done"):
+            next_actions.append({
+                "priority": "media",
+                "label": item.get("action") or item.get("label"),
+                "meta": item.get("label"),
+                "target": "docs",
+            })
+    for row in gestoria_open_work[:3]:
+        next_actions.append({
+            "priority": "media",
+            "label": row.get("tipo_trabajo") or "Trabajo abierto",
+            "meta": " · ".join(str(row.get(key) or "").strip() for key in ("estado", "responsable", "fecha_fin") if str(row.get(key) or "").strip()),
+            "target": "trabajos",
+        })
+    for row in gestoria_open_actions[:3]:
+        next_actions.append({
+            "priority": "media",
+            "label": row.get("tipo") or "Acción abierta",
+            "meta": " · ".join(str(row.get(key) or "").strip() for key in ("fecha", "hora", "responsable") if str(row.get(key) or "").strip()),
+            "target": "agenda",
+        })
+
+    timeline = []
+    for row in modelo100_docs[:20]:
+        timeline.append({
+            "date": row.get("fecha") or "",
+            "kind": "documento",
+            "title": row.get("nombre") or "Modelo 100",
+            "meta": row.get("estado") or row.get("tipo") or "",
+        })
+    for entry in renta_entries[:20]:
+        timeline.append({
+            "date": entry.get("presentacion_fecha") or entry.get("fecha_cobro") or "",
+            "kind": "renta",
+            "title": f"Renta {entry.get('ejercicio') or ''}".strip(),
+            "meta": " · ".join(str(value).strip() for value in (entry.get("estado_presentacion") or entry.get("doc_status"), entry.get("responsable")) if str(value or "").strip()),
+        })
+    for row in trabajos[:20]:
+        timeline.append({
+            "date": row.get("fecha_fin") or row.get("fecha_inicio") or "",
+            "kind": "trabajo",
+            "title": row.get("tipo_trabajo") or "Trabajo",
+            "meta": row.get("estado") or "",
+        })
+    for row in acciones[:20]:
+        if normalize_service_key(row.get("servicio")) != "gestoria":
+            continue
+        timeline.append({
+            "date": row.get("fecha") or "",
+            "kind": "accion",
+            "title": row.get("tipo") or "Acción",
+            "meta": " · ".join(str(row.get(key) or "").strip() for key in ("hora", "estado", "responsable") if str(row.get(key) or "").strip()),
+        })
+    timeline = sorted(
+        timeline,
+        key=lambda item: str(item.get("date") or ""),
+        reverse=True,
+    )[:12]
     gestoria_summary = {
         "activo": bool(profesionales.get("gestoria")),
+        "status_global": status_global,
         "mod_renta": int(profesionales.get("gestoria", {}).get("mod_renta") or 0),
         "latest_renta_year": latest_renta_year,
         "rentas_total": len(renta_entries),
@@ -31297,6 +31446,11 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         "trabajos_abiertos": len(gestoria_open_work),
         "acciones_abiertas": len(gestoria_open_actions),
         "alerts": gestoria_alerts[:6],
+        "checklist": checklist,
+        "checklist_done": checklist_done,
+        "checklist_total": len(checklist),
+        "next_actions": next_actions[:8],
+        "timeline": timeline,
     }
     relaciones = fetch_cliente_relaciones(conn, cliente_id)
     asesoramientos_table = conn.execute(

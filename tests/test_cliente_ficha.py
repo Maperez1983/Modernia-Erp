@@ -361,6 +361,11 @@ class ClienteFichaTests(unittest.TestCase):
         self.assertEqual(gestoria["modelo100_docs_total"], 1)
         self.assertEqual(gestoria["rentas_pendientes_cobro"], 1)
         self.assertAlmostEqual(float(gestoria["importe_rentas_pendiente"]), 120.0, places=2)
+        self.assertEqual(gestoria["status_global"], "Pendiente cobro")
+        self.assertGreaterEqual(gestoria["checklist_total"], 1)
+        self.assertTrue(any(item["key"] == "modelo100" and item["done"] for item in gestoria["checklist"]))
+        self.assertTrue(any(item["target"] == "renta" for item in gestoria["next_actions"]))
+        self.assertTrue(any(item["kind"] == "documento" for item in gestoria["timeline"]))
 
 
 if __name__ == "__main__":

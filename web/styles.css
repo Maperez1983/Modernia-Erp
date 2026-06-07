@@ -9809,6 +9809,88 @@ body.crm-context-inmo .crm-resumen-compact-note {
   margin-top: 10px;
 }
 
+.cliente-gestoria-workgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.cliente-gestoria-workgrid h4,
+.cliente-gestoria-timeline h4 {
+  margin: 0 0 8px;
+}
+
+.cliente-gestoria-checklist,
+.cliente-gestoria-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.cliente-checkitem,
+.cliente-next-action {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.cliente-checkitem span {
+  min-width: 76px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cliente-checkitem.done {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+.cliente-checkitem.pending,
+.cliente-next-action.urgent {
+  border-color: color-mix(in srgb, #d97706 45%, var(--border));
+  background: color-mix(in srgb, #f59e0b 8%, var(--surface));
+}
+
+.cliente-next-action {
+  grid-template-columns: 1fr;
+}
+
+.cliente-next-action span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cliente-gestoria-timeline {
+  margin-top: 14px;
+}
+
+.cliente-timeline-item {
+  display: grid;
+  grid-template-columns: 92px 1fr minmax(120px, 220px);
+  gap: 10px;
+  align-items: center;
+  min-height: 34px;
+  border-top: 1px solid var(--border);
+  padding: 7px 0;
+}
+
+.cliente-timeline-item span,
+.cliente-timeline-item em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -9832,6 +9914,13 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border-color: color-mix(in srgb, #16a34a 45%, var(--border));
   background: color-mix(in srgb, #22c55e 10%, var(--surface));
   color: #166534;
+}
+
+@media (max-width: 720px) {
+  .cliente-timeline-item {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
 }
 
 .cliente-mini-chart {
