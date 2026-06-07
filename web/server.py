@@ -77669,6 +77669,10 @@ class Handler(BaseHTTPRequestHandler):
                             "rentas_total_ejercicio": 0,
                             "rentas_realizadas": 0,
                             "rentas_pendientes_presentar": 0,
+                            "rentas_sin_responsable": 0,
+                            "rentas_sin_cobrar": 0,
+                            "rentas_sin_remesar": 0,
+                            "docs_sin_archivo": 0,
                             "sin_vincular_servicio": 0,
                             "acciones_pendientes": 0,
                             "presupuestos_estudio": 0,
@@ -77819,6 +77823,24 @@ class Handler(BaseHTTPRequestHandler):
                 payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
 
             try:
+                docs_sin_archivo = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM gestoria_docs d
+                    WHERE d.empresa_id IN ({placeholders_emp})
+                      AND COALESCE(TRIM(d.doc_key), '') = ''
+                      AND COALESCE(TRIM(d.doc_url), '') = ''
+                    """,
+                    tuple(empresa_ids),
+                ).fetchone()
+                payload["counts"]["docs_sin_archivo"] = int(row_value(docs_sin_archivo, "total", 0) or 0)
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:docs_sin_archivo", exc)
+                except Exception:
+                    pass
+
+            try:
                 modelos_mes = conn.execute(
                     f"""
                     SELECT COUNT(*) AS total
@@ -77901,6 +77923,53 @@ class Handler(BaseHTTPRequestHandler):
                 payload["counts"]["rentas_clientes_con_doc"] = clientes_con_doc
                 payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
                 payload["rentas_pendientes"] = list(renta_summary.get("rows") or [])
+                try:
+                    ejercicio_actual = str(renta_summary.get("ejercicio") or "").strip()
+                    renta_rows = conn.execute(
+                        f"""
+                        SELECT cg.renta_detalles
+                        FROM cliente_gestoria cg
+                        JOIN clientes c ON c.id = cg.cliente_id
+                        LEFT JOIN clientes_empresas ce
+                          ON ce.cliente_id = c.id
+                         AND ce.empresa_id IN ({placeholders_emp})
+                         AND {service_filter}
+                        WHERE COALESCE(cg.mod_renta, 0) = 1
+                          AND (
+                            COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                            OR ce.id IS NOT NULL
+                          )
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchall()
+                    sin_responsable = 0
+                    sin_cobrar = 0
+                    sin_remesar = 0
+                    for renta_row in renta_rows or []:
+                        details = parse_renta_detalles_payload(row_value(renta_row, "renta_detalles", "") or "")
+                        for entry in sanitize_renta_entries(details.get("entries") or []):
+                            ejercicio = str(entry.get("ejercicio") or "").strip()
+                            if ejercicio_actual and ejercicio and ejercicio != ejercicio_actual:
+                                continue
+                            estado_presentacion = normalize_lookup_text(entry.get("estado_presentacion") or entry.get("estado") or "")
+                            presentada = estado_presentacion in {"PRESENTADA", "PRESENTADO", "FINALIZADA", "FINALIZADO"}
+                            cobrada = int(entry.get("cobrada") or 0) == 1
+                            remesada = int(entry.get("remesada") or entry.get("remesa_generada") or 0) == 1
+                            precio = float(coerce_renta_money(entry.get("precio_servicio")) or 0.0)
+                            if not str(entry.get("responsable") or "").strip():
+                                sin_responsable += 1
+                            if presentada and precio > 0 and not cobrada:
+                                sin_cobrar += 1
+                            if presentada and cobrada and not remesada:
+                                sin_remesar += 1
+                    payload["counts"]["rentas_sin_responsable"] = sin_responsable
+                    payload["counts"]["rentas_sin_cobrar"] = sin_cobrar
+                    payload["counts"]["rentas_sin_remesar"] = sin_remesar
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:rentas_operativo", exc)
+                    except Exception:
+                        pass
             except Exception as exc:
                 try:
                     Handler._record_api_error("/api/gestoria_dashboard:rentas_summary", exc)
@@ -77993,387 +78062,386 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+            try:
+                acciones = conn.execute(
+                    f"""
+                    SELECT a.fecha, a.hora,
+                           COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                           a.tipo, a.estado
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.empresa_id IN ({placeholders_emp})
+                      AND LOWER(a.servicio) = 'gestoria'
+                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                      AND a.fecha IS NOT NULL
+                      AND date(a.fecha) BETWEEN date(?) AND date(?)
+                    ORDER BY a.fecha ASC, a.hora ASC
+                    LIMIT 10
+                    """,
+                    tuple([*empresa_ids, today.isoformat(), next_14.isoformat()]),
+                ).fetchall()
+                payload["acciones"] = [dict(r) for r in acciones]
+            except Exception as exc:
                 try:
-                    acciones = conn.execute(
-                        f"""
-                        SELECT a.fecha, a.hora,
-                               COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                               a.tipo, a.estado
-                        FROM acciones a
-                        LEFT JOIN clientes c ON c.id = a.cliente_id
-                        WHERE a.empresa_id IN ({placeholders_emp})
-                          AND LOWER(a.servicio) = 'gestoria'
-                          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                          AND a.fecha IS NOT NULL
-                          AND date(a.fecha) BETWEEN date(?) AND date(?)
-                        ORDER BY a.fecha ASC, a.hora ASC
-                        LIMIT 10
-                        """,
-                        tuple([*empresa_ids, today.isoformat(), next_14.isoformat()]),
-                    ).fetchall()
-                    payload["acciones"] = [dict(r) for r in acciones]
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:acciones", exc)
-                    except Exception:
-                        pass
-
-                try:
-                    acciones_vencidas = conn.execute(
-                        f"""
-                        SELECT a.fecha, a.hora,
-                               COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                               a.tipo, a.estado
-                        FROM acciones a
-                        LEFT JOIN clientes c ON c.id = a.cliente_id
-                        WHERE a.empresa_id IN ({placeholders_emp})
-                          AND LOWER(a.servicio) = 'gestoria'
-                          AND a.fecha IS NOT NULL
-                          AND date(a.fecha) < date(?)
-                          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-                        ORDER BY a.fecha ASC, a.hora ASC
-                        LIMIT 10
-                        """,
-                        tuple([*empresa_ids, today.isoformat()]),
-                    ).fetchall()
-                    payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:acciones_vencidas", exc)
-                    except Exception:
-                        pass
-
-                # --- Dashboard general (admin): economía + históricos + segmentación + productividad.
-                try:
-                    current_year = int(datetime.now().year)
+                    Handler._record_api_error("/api/gestoria_dashboard:acciones", exc)
                 except Exception:
-                    current_year = int(today.strftime("%Y"))
-                years = [current_year - 2, current_year - 1, current_year]
-                month_labels = [f"{m:02d}" for m in range(1, 13)]
+                    pass
+
+            try:
+                acciones_vencidas = conn.execute(
+                    f"""
+                    SELECT a.fecha, a.hora,
+                           COALESCE(c.nombre, a.cliente_nombre) AS cliente,
+                           a.tipo, a.estado
+                    FROM acciones a
+                    LEFT JOIN clientes c ON c.id = a.cliente_id
+                    WHERE a.empresa_id IN ({placeholders_emp})
+                      AND LOWER(a.servicio) = 'gestoria'
+                      AND a.fecha IS NOT NULL
+                      AND date(a.fecha) < date(?)
+                      AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+                    ORDER BY a.fecha ASC, a.hora ASC
+                    LIMIT 10
+                    """,
+                    tuple([*empresa_ids, today.isoformat()]),
+                ).fetchall()
+                payload["acciones_vencidas"] = [dict(r) for r in acciones_vencidas]
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:acciones_vencidas", exc)
+                except Exception:
+                    pass
+
+            # --- Dashboard general (admin): economía + históricos + segmentación + productividad.
+            try:
+                current_year = int(datetime.now().year)
+            except Exception:
+                current_year = int(today.strftime("%Y"))
+            years = [current_year - 2, current_year - 1, current_year]
+            month_labels = [f"{m:02d}" for m in range(1, 13)]
+
+            try:
+                year_placeholders = ",".join(["?"] * len(years))
+                econ_rows = conn.execute(
+                    f"""
+                    SELECT
+                      substr(NULLIF(gc.fecha,''), 1, 7) AS ym,
+                      SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
+                      SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
+                    FROM gestoria_contabilidad gc
+                    WHERE gc.empresa_id IN ({placeholders_emp})
+                      AND gc.fecha IS NOT NULL
+                      AND length(gc.fecha) >= 7
+                      AND substr(gc.fecha, 1, 4) IN ({year_placeholders})
+                    GROUP BY substr(NULLIF(gc.fecha,''), 1, 7)
+                    """,
+                    tuple([*empresa_ids, *[str(y) for y in years]]),
+                ).fetchall()
+                econ_map = {str(row_value(r, "ym", "") or ""): dict(r) for r in (econ_rows or [])}
+
+                econ_series = {}
+                years_str = {str(y) for y in years}
+                renta_by_year_month = {str(y): {m: 0.0 for m in month_labels} for y in years}
+                renta_missing_by_year = {str(y): 0.0 for y in years}
 
                 try:
-                    year_placeholders = ",".join(["?"] * len(years))
-                    econ_rows = conn.execute(
+                    placeholders_emp_renta = ",".join(["?"] * len(empresa_ids))
+                    renta_rows = conn.execute(
                         f"""
-                        SELECT
-                          substr(NULLIF(gc.fecha,''), 1, 7) AS ym,
-                          SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
-                          SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo,''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
-                        FROM gestoria_contabilidad gc
-                        WHERE gc.empresa_id IN ({placeholders_emp})
-                          AND gc.fecha IS NOT NULL
-                          AND length(gc.fecha) >= 7
-                          AND substr(gc.fecha, 1, 4) IN ({year_placeholders})
-                        GROUP BY substr(NULLIF(gc.fecha,''), 1, 7)
+                        SELECT cg.renta_detalles
+                        FROM cliente_gestoria cg
+                        JOIN clientes c ON c.id = cg.cliente_id
+                        LEFT JOIN clientes_empresas ce
+                          ON ce.cliente_id = c.id
+                         AND ce.empresa_id IN ({placeholders_emp_renta})
+                         AND {service_filter_join}
+                        WHERE COALESCE(cg.mod_renta, 0) = 1
+                          AND (
+                            COALESCE(c.empresa_id, '') IN ({placeholders_emp_renta})
+                            OR ce.id IS NOT NULL
+                          )
                         """,
-                        tuple([*empresa_ids, *[str(y) for y in years]]),
+                        tuple([*empresa_ids, *empresa_ids]),
                     ).fetchall()
-                    econ_map = {str(row_value(r, "ym", "") or ""): dict(r) for r in (econ_rows or [])}
-
-                    econ_series = {}
-                    years_str = {str(y) for y in years}
+                    for r in renta_rows or []:
+                        renta_detalles = row_value(r, "renta_detalles", "") if r is not None else ""
+                        payload_r = parse_renta_detalles_payload(renta_detalles)
+                        entries = sanitize_renta_entries(payload_r.get("entries") or [])
+                        for e in entries:
+                            ejercicio = str(e.get("ejercicio") or "").strip()
+                            if ejercicio not in years_str:
+                                continue
+                            if int(e.get("cobrada") or 0) != 1:
+                                continue
+                            amount = float(coerce_renta_money(e.get("precio_servicio")) or 0.0)
+                            if amount <= 0:
+                                continue
+                            date_raw = str(e.get("fecha_cobro") or e.get("presentacion_fecha") or "").strip()
+                            month = date_raw[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", date_raw) else ""
+                            if month in month_labels:
+                                renta_by_year_month[ejercicio][month] += amount
+                            else:
+                                renta_missing_by_year[ejercicio] += amount
+                except Exception:
                     renta_by_year_month = {str(y): {m: 0.0 for m in month_labels} for y in years}
                     renta_missing_by_year = {str(y): 0.0 for y in years}
 
-                    try:
-                        placeholders_emp_renta = ",".join(["?"] * len(empresa_ids))
-                        renta_rows = conn.execute(
-                            f"""
-                            SELECT cg.renta_detalles
-                            FROM cliente_gestoria cg
-                            JOIN clientes c ON c.id = cg.cliente_id
-                            LEFT JOIN clientes_empresas ce
-                              ON ce.cliente_id = c.id
-                             AND ce.empresa_id IN ({placeholders_emp_renta})
-                             AND {service_filter_join}
-                            WHERE COALESCE(cg.mod_renta, 0) = 1
-                              AND (
-                                COALESCE(c.empresa_id, '') IN ({placeholders_emp_renta})
-                                OR ce.id IS NOT NULL
-                              )
-                            """,
-                            tuple([*empresa_ids, *empresa_ids]),
-                        ).fetchall()
-                        for r in renta_rows or []:
-                            renta_detalles = row_value(r, "renta_detalles", "") if r is not None else ""
-                            payload_r = parse_renta_detalles_payload(renta_detalles)
-                            entries = sanitize_renta_entries(payload_r.get("entries") or [])
-                            for e in entries:
-                                ejercicio = str(e.get("ejercicio") or "").strip()
-                                if ejercicio not in years_str:
-                                    continue
-                                if int(e.get("cobrada") or 0) != 1:
-                                    continue
-                                amount = float(coerce_renta_money(e.get("precio_servicio")) or 0.0)
-                                if amount <= 0:
-                                    continue
-                                date_raw = str(e.get("fecha_cobro") or e.get("presentacion_fecha") or "").strip()
-                                month = date_raw[5:7] if re.match(r"^20[0-9]{2}\-[0-9]{2}\-", date_raw) else ""
-                                if month in month_labels:
-                                    renta_by_year_month[ejercicio][month] += amount
-                                else:
-                                    renta_missing_by_year[ejercicio] += amount
-                    except Exception:
-                        renta_by_year_month = {str(y): {m: 0.0 for m in month_labels} for y in years}
-                        renta_missing_by_year = {str(y): 0.0 for y in years}
+                for y in years:
+                    ingresos = []
+                    gastos = []
+                    rentas = []
+                    for m in month_labels:
+                        ym = f"{y}-{m}"
+                        row = econ_map.get(ym) or {}
+                        ingresos.append(float(row_value(row, "ingresos", 0) or 0))
+                        gastos.append(float(row_value(row, "gastos", 0) or 0))
+                        rentas.append(round(float(renta_by_year_month.get(str(y), {}).get(m, 0.0) or 0.0), 2))
+                    econ_series[str(y)] = {
+                        "ingresos": ingresos,
+                        "gastos": gastos,
+                        "rentas_cobradas": rentas,
+                        "neto": [i - g for i, g in zip(ingresos, gastos)],
+                        "total_ingresos": sum(ingresos),
+                        "total_gastos": sum(gastos),
+                        "total_neto": sum(ingresos) - sum(gastos),
+                        "total_rentas_cobradas": sum(rentas),
+                        "total_rentas_sin_fecha": float(renta_missing_by_year.get(str(y), 0.0) or 0.0),
+                    }
+                payload["economics"] = {"years": years, "labels": month_labels, "series": econ_series}
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:economics", exc)
+                except Exception:
+                    pass
 
-                    for y in years:
-                        ingresos = []
-                        gastos = []
-                        rentas = []
-                        for m in month_labels:
-                            ym = f"{y}-{m}"
-                            row = econ_map.get(ym) or {}
-                            ingresos.append(float(row_value(row, "ingresos", 0) or 0))
-                            gastos.append(float(row_value(row, "gastos", 0) or 0))
-                            rentas.append(round(float(renta_by_year_month.get(str(y), {}).get(m, 0.0) or 0.0), 2))
-                        econ_series[str(y)] = {
-                            "ingresos": ingresos,
-                            "gastos": gastos,
-                            "rentas_cobradas": rentas,
-                            "neto": [i - g for i, g in zip(ingresos, gastos)],
-                            "total_ingresos": sum(ingresos),
-                            "total_gastos": sum(gastos),
-                            "total_neto": sum(ingresos) - sum(gastos),
-                            "total_rentas_cobradas": sum(rentas),
-                            "total_rentas_sin_fecha": float(renta_missing_by_year.get(str(y), 0.0) or 0.0),
+            try:
+                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por tipo_cliente.
+                link_rows = conn.execute(
+                    f"""
+                    WITH ce_latest AS (
+                      SELECT
+                        ce.cliente_id,
+                        COALESCE(NULLIF(ce.estado,''), '') AS estado,
+                        COALESCE(NULLIF(ce.fecha_inicio,''), ce.created_at) AS fecha_inicio,
+                        NULLIF(ce.fecha_fin,'') AS fecha_fin,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY ce.cliente_id
+                          ORDER BY datetime(COALESCE(ce.updated_at, ce.created_at)) DESC
+                        ) AS rn
+                      FROM clientes_empresas ce
+                      WHERE ce.empresa_id IN ({placeholders_emp})
+                        AND {service_filter}
+                    )
+                    SELECT
+                      ce_latest.cliente_id,
+                      ce_latest.estado,
+                      ce_latest.fecha_inicio,
+                      ce_latest.fecha_fin,
+                      cg.tipo_cliente AS tipo_cliente
+                    FROM ce_latest
+                    LEFT JOIN cliente_gestoria cg ON cg.cliente_id = ce_latest.cliente_id
+                    WHERE ce_latest.rn = 1
+                    """,
+                    tuple(empresa_ids),
+                ).fetchall()
+                clients = [dict(r) for r in (link_rows or [])]
+
+                def _active_at(row, day):
+                    estado = normalize_lookup_text(row.get("estado") or "")
+                    if estado not in {"ALTA", "ACTIVO", "ACTIVA"}:
+                        return False
+                    start = parse_iso_date(row.get("fecha_inicio"))
+                    end = parse_iso_date(row.get("fecha_fin"))
+                    if start and start > day:
+                        return False
+                    if end and end < day:
+                        return False
+                    return True
+
+                client_years = [current_year - 1, current_year]
+                client_series = {str(y): {"autonomos": [], "empresas": []} for y in client_years}
+                totals = {str(y): {"autonomos": 0, "empresas": 0} for y in client_years}
+                for y in client_years:
+                    for m in range(1, 13):
+                        last_day = calendar.monthrange(int(y), int(m))[1]
+                        day = datetime(int(y), int(m), int(last_day)).date()
+                        a_count = 0
+                        e_count = 0
+                        for row in clients:
+                            if not _active_at(row, day):
+                                continue
+                            tipo = normalize_lookup_text(row.get("tipo_cliente") or "")
+                            if tipo in {"AUTONOMO", "AUTONOMOS"}:
+                                a_count += 1
+                            elif tipo in {"EMPRESA", "EMPRESAS"}:
+                                e_count += 1
+                        client_series[str(y)]["autonomos"].append(a_count)
+                        client_series[str(y)]["empresas"].append(e_count)
+                    totals[str(y)]["autonomos"] = client_series[str(y)]["autonomos"][-1] if client_series[str(y)]["autonomos"] else 0
+                    totals[str(y)]["empresas"] = client_series[str(y)]["empresas"][-1] if client_series[str(y)]["empresas"] else 0
+                payload["clientes_hist"] = {"years": client_years, "labels": month_labels, "series": client_series, "totals": totals}
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:clientes_hist", exc)
+                except Exception:
+                    pass
+
+            try:
+                # Segmentación de trabajos (totales y abiertos).
+                seg = conn.execute(
+                    f"""
+                        SELECT
+                          SUM(
+                            CASE
+                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
+                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
+                              ELSE 0
+                            END
+                          ) AS herencias_total,
+                          SUM(
+                            CASE
+                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
+                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
+                              ) THEN 1
+                              ELSE 0
+                            END
+                          ) AS trafico_total,
+                          SUM(
+                            CASE
+                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
+                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
+                              ) THEN 1
+                              ELSE 0
+                            END
+                          ) AS expedientes_total,
+                          SUM(
+                            CASE
+                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
+                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
+                              ELSE 0
+                            END
+                          ) AS tasaciones_total,
+                          SUM(
+                            CASE
+                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
+                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
+                              ELSE 0
+                            END
+                          ) AS rentas_total,
+                          SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+                    FROM gestoria_trabajos gt
+                    WHERE gt.empresa_id IN ({placeholders_emp})
+                    """,
+                    tuple(empresa_ids),
+                ).fetchone()
+                seg_out = dict(seg) if seg else {}
+                # Rentas no siempre existen como `gestoria_trabajos`; se registran en `cliente_gestoria.renta_detalles`.
+                try:
+                    renta_total = compute_gestoria_renta_campaigns_total(conn, empresa_ids, ejercicio="").get("count", 0)
+                    seg_out["rentas_total"] = int(renta_total or 0)
+                except Exception:
+                    pass
+                payload["segmentacion_trabajos"] = seg_out
+            except Exception as exc:
+                try:
+                    Handler._record_api_error("/api/gestoria_dashboard:segmentacion_trabajos", exc)
+                except Exception:
+                    pass
+
+            try:
+                # Productividad por responsable + usuarios con servicio gestoría.
+                perf_rows = conn.execute(
+                    f"""
+                    SELECT
+                      COALESCE(NULLIF(gt.responsable,''), 'Sin responsable') AS responsable,
+                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 1 ELSE 0 END) AS completados_total,
+                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')
+                                AND date(COALESCE(NULLIF(gt.fecha_fin,''), gt.updated_at, gt.created_at)) >= date('now','-30 day')
+                          THEN 1 ELSE 0 END) AS completados_30d,
+                      SUM(CASE WHEN date(gt.created_at) >= date('now','-30 day') THEN 1 ELSE 0 END) AS creados_30d,
+                      SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 0 ELSE 1 END) AS abiertos
+                    FROM gestoria_trabajos gt
+                    WHERE gt.empresa_id IN ({placeholders_emp})
+                    GROUP BY COALESCE(NULLIF(gt.responsable,''), 'Sin responsable')
+                    ORDER BY abiertos DESC, completados_30d DESC
+                    LIMIT 50
+                    """,
+                    tuple(empresa_ids),
+                ).fetchall()
+                perf = [dict(r) for r in (perf_rows or [])]
+
+                if limited_mode:
+                    users = conn.execute(
+                        """
+                        SELECT id, nombre, apellido, usuario, rol, servicio
+                        FROM usuarios
+                        WHERE COALESCE(activo, 1) = 1
+                          AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+                        ORDER BY LOWER(COALESCE(nombre, '')) ASC
+                        """
+                    ).fetchall()
+                else:
+                    users = conn.execute(
+                        """
+                        SELECT id, nombre, apellido, usuario, email, rol, servicio
+                        FROM usuarios
+                        WHERE COALESCE(activo, 1) = 1
+                          AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+                        ORDER BY LOWER(COALESCE(nombre, '')) ASC
+                        """
+                    ).fetchall()
+                user_rows = [dict(r) for r in (users or [])]
+
+                perf_map = {}
+                for row in perf:
+                    key = normalize_lookup_text(row.get("responsable") or "")
+                    if not key:
+                        continue
+                    perf_map[key] = row
+
+                out = []
+                for u in user_rows:
+                    full = " ".join([str(u.get("nombre") or "").strip(), str(u.get("apellido") or "").strip()]).strip()
+                    keys = [
+                        normalize_lookup_text(u.get("usuario") or ""),
+                        normalize_lookup_text(full or ""),
+                        normalize_lookup_text(u.get("nombre") or ""),
+                    ]
+                    found = None
+                    for k in keys:
+                        if k and k in perf_map:
+                            found = perf_map[k]
+                            break
+                    out.append(
+                        {
+                            "id": u.get("id"),
+                            "usuario": u.get("usuario") or "",
+                            "nombre": full or (u.get("usuario") or ""),
+                            "rol": u.get("rol") or "",
+                            "abiertos": int((found or {}).get("abiertos") or 0),
+                            "creados_30d": int((found or {}).get("creados_30d") or 0),
+                            "completados_30d": int((found or {}).get("completados_30d") or 0),
                         }
-                    payload["economics"] = {"years": years, "labels": month_labels, "series": econ_series}
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:economics", exc)
-                    except Exception:
-                        pass
-
+                    )
+                payload["productividad"] = {"rows": out, "origen_responsables": perf[:20]}
+            except Exception as exc:
                 try:
-                    # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por tipo_cliente.
-                    link_rows = conn.execute(
-                        f"""
-                        WITH ce_latest AS (
-                          SELECT
-                            ce.cliente_id,
-                            COALESCE(NULLIF(ce.estado,''), '') AS estado,
-                            COALESCE(NULLIF(ce.fecha_inicio,''), ce.created_at) AS fecha_inicio,
-                            NULLIF(ce.fecha_fin,'') AS fecha_fin,
-                            ROW_NUMBER() OVER (
-                              PARTITION BY ce.cliente_id
-                              ORDER BY datetime(COALESCE(ce.updated_at, ce.created_at)) DESC
-                            ) AS rn
-                          FROM clientes_empresas ce
-                          WHERE ce.empresa_id IN ({placeholders_emp})
-                            AND {service_filter}
-                        )
-                        SELECT
-                          ce_latest.cliente_id,
-                          ce_latest.estado,
-                          ce_latest.fecha_inicio,
-                          ce_latest.fecha_fin,
-                          cg.tipo_cliente AS tipo_cliente
-                        FROM ce_latest
-                        LEFT JOIN cliente_gestoria cg ON cg.cliente_id = ce_latest.cliente_id
-                        WHERE ce_latest.rn = 1
-                        """,
-                        tuple(empresa_ids),
-                    ).fetchall()
-                    clients = [dict(r) for r in (link_rows or [])]
+                    Handler._record_api_error("/api/gestoria_dashboard:productividad", exc)
+                except Exception:
+                    pass
 
-                    def _active_at(row, day):
-                        estado = normalize_lookup_text(row.get("estado") or "")
-                        if estado not in {"ALTA", "ACTIVO", "ACTIVA"}:
-                            return False
-                        start = parse_iso_date(row.get("fecha_inicio"))
-                        end = parse_iso_date(row.get("fecha_fin"))
-                        if start and start > day:
-                            return False
-                        if end and end < day:
-                            return False
-                        return True
-
-                    client_years = [current_year - 1, current_year]
-                    client_series = {str(y): {"autonomos": [], "empresas": []} for y in client_years}
-                    totals = {str(y): {"autonomos": 0, "empresas": 0} for y in client_years}
-                    for y in client_years:
-                        for m in range(1, 13):
-                            last_day = calendar.monthrange(int(y), int(m))[1]
-                            day = datetime(int(y), int(m), int(last_day)).date()
-                            a_count = 0
-                            e_count = 0
-                            for row in clients:
-                                if not _active_at(row, day):
-                                    continue
-                                tipo = normalize_lookup_text(row.get("tipo_cliente") or "")
-                                if tipo in {"AUTONOMO", "AUTONOMOS"}:
-                                    a_count += 1
-                                elif tipo in {"EMPRESA", "EMPRESAS"}:
-                                    e_count += 1
-                            client_series[str(y)]["autonomos"].append(a_count)
-                            client_series[str(y)]["empresas"].append(e_count)
-                        totals[str(y)]["autonomos"] = client_series[str(y)]["autonomos"][-1] if client_series[str(y)]["autonomos"] else 0
-                        totals[str(y)]["empresas"] = client_series[str(y)]["empresas"][-1] if client_series[str(y)]["empresas"] else 0
-                    payload["clientes_hist"] = {"years": client_years, "labels": month_labels, "series": client_series, "totals": totals}
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:clientes_hist", exc)
-                    except Exception:
-                        pass
-
+            if cache_key:
                 try:
-                    # Segmentación de trabajos (totales y abiertos).
-                    seg = conn.execute(
-                        f"""
-                            SELECT
-                              SUM(
-                                CASE
-                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
-                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
-                                  ELSE 0
-                                END
-                              ) AS herencias_total,
-                              SUM(
-                                CASE
-                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
-                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-                                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
-                                  ) THEN 1
-                                  ELSE 0
-                                END
-                              ) AS trafico_total,
-                              SUM(
-                                CASE
-                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
-                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-                                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
-                                  ) THEN 1
-                                  ELSE 0
-                                END
-                              ) AS expedientes_total,
-                              SUM(
-                                CASE
-                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
-                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
-                                  ELSE 0
-                                END
-                              ) AS tasaciones_total,
-                              SUM(
-                                CASE
-                                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
-                                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
-                                  ELSE 0
-                                END
-                              ) AS rentas_total,
-                              SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
-                        FROM gestoria_trabajos gt
-                        WHERE gt.empresa_id IN ({placeholders_emp})
-                        """,
-                        tuple(empresa_ids),
-                    ).fetchone()
-                    seg_out = dict(seg) if seg else {}
-                    # Rentas no siempre existen como `gestoria_trabajos`; se registran en `cliente_gestoria.renta_detalles`.
-                    try:
-                        renta_total = compute_gestoria_renta_campaigns_total(conn, empresa_ids, ejercicio="").get("count", 0)
-                        seg_out["rentas_total"] = int(renta_total or 0)
-                    except Exception:
-                        pass
-                    payload["segmentacion_trabajos"] = seg_out
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:segmentacion_trabajos", exc)
-                    except Exception:
-                        pass
-
-                try:
-                    # Productividad por responsable + usuarios con servicio gestoría.
-                    perf_rows = conn.execute(
-                        f"""
-                        SELECT
-                          COALESCE(NULLIF(gt.responsable,''), 'Sin responsable') AS responsable,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 1 ELSE 0 END) AS completados_total,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')
-                                    AND date(COALESCE(NULLIF(gt.fecha_fin,''), gt.updated_at, gt.created_at)) >= date('now','-30 day')
-                              THEN 1 ELSE 0 END) AS completados_30d,
-                          SUM(CASE WHEN date(gt.created_at) >= date('now','-30 day') THEN 1 ELSE 0 END) AS creados_30d,
-                          SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 0 ELSE 1 END) AS abiertos
-                        FROM gestoria_trabajos gt
-                        WHERE gt.empresa_id IN ({placeholders_emp})
-                        GROUP BY COALESCE(NULLIF(gt.responsable,''), 'Sin responsable')
-                        ORDER BY abiertos DESC, completados_30d DESC
-                        LIMIT 50
-                        """,
-                        tuple(empresa_ids),
-                    ).fetchall()
-                    perf = [dict(r) for r in (perf_rows or [])]
-
-                    if limited_mode:
-                        users = conn.execute(
-                            """
-                            SELECT id, nombre, apellido, usuario, rol, servicio
-                            FROM usuarios
-                            WHERE COALESCE(activo, 1) = 1
-                              AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
-                            ORDER BY LOWER(COALESCE(nombre, '')) ASC
-                            """
-                        ).fetchall()
-                    else:
-                        users = conn.execute(
-                            """
-                            SELECT id, nombre, apellido, usuario, email, rol, servicio
-                            FROM usuarios
-                            WHERE COALESCE(activo, 1) = 1
-                              AND LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
-                            ORDER BY LOWER(COALESCE(nombre, '')) ASC
-                            """
-                        ).fetchall()
-                    user_rows = [dict(r) for r in (users or [])]
-
-                    perf_map = {}
-                    for row in perf:
-                        key = normalize_lookup_text(row.get("responsable") or "")
-                        if not key:
-                            continue
-                        perf_map[key] = row
-
-                    out = []
-                    for u in user_rows:
-                        full = " ".join([str(u.get("nombre") or "").strip(), str(u.get("apellido") or "").strip()]).strip()
-                        keys = [
-                            normalize_lookup_text(u.get("usuario") or ""),
-                            normalize_lookup_text(full or ""),
-                            normalize_lookup_text(u.get("nombre") or ""),
-                        ]
-                        found = None
-                        for k in keys:
-                            if k and k in perf_map:
-                                found = perf_map[k]
-                                break
-                        out.append(
-                            {
-                                "id": u.get("id"),
-                                "usuario": u.get("usuario") or "",
-                                "nombre": full or (u.get("usuario") or ""),
-                                "rol": u.get("rol") or "",
-                                "abiertos": int((found or {}).get("abiertos") or 0),
-                                "creados_30d": int((found or {}).get("creados_30d") or 0),
-                                "completados_30d": int((found or {}).get("completados_30d") or 0),
-                            }
-                        )
-                    payload["productividad"] = {"rows": out, "origen_responsables": perf[:20]}
-                except Exception as exc:
-                    try:
-                        Handler._record_api_error("/api/gestoria_dashboard:productividad", exc)
-                    except Exception:
-                        pass
-
-                if cache_key:
-                    try:
-                        with Handler._gestoria_dashboard_lock:
-                            Handler._gestoria_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
-                        if len(Handler._gestoria_dashboard_cache) > 200:
-                            for k, (exp, _val) in list(Handler._gestoria_dashboard_cache.items())[:80]:
-                                if exp <= now_ts:
-                                    Handler._gestoria_dashboard_cache.pop(k, None)
-                    except Exception:
-                        pass
-
+                    with Handler._gestoria_dashboard_lock:
+                        Handler._gestoria_dashboard_cache[cache_key] = (now_ts + 6.0, payload)
+                    if len(Handler._gestoria_dashboard_cache) > 200:
+                        for k, (exp, _val) in list(Handler._gestoria_dashboard_cache.items())[:80]:
+                            if exp <= now_ts:
+                                Handler._gestoria_dashboard_cache.pop(k, None)
+                except Exception:
+                    pass
             json_response(self, payload)
             return
 

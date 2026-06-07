@@ -2656,6 +2656,11 @@ const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
+const gestoriaSeniorCockpit = document.getElementById("gestoriaSeniorCockpit");
+const gestoriaSeniorStatusTitle = document.getElementById("gestoriaSeniorStatusTitle");
+const gestoriaSeniorStatusText = document.getElementById("gestoriaSeniorStatusText");
+const gestoriaSeniorKpis = document.getElementById("gestoriaSeniorKpis");
+const gestoriaSeniorActions = document.getElementById("gestoriaSeniorActions");
 const gestoriaDashboardPaneServicios = document.getElementById("gestoriaDashboardPaneServicios");
 const gestoriaDashboardPaneModelos = document.getElementById("gestoriaDashboardPaneModelos");
 const gestoriaDashboardPaneGestiones = document.getElementById("gestoriaDashboardPaneGestiones");
@@ -2699,6 +2704,9 @@ const gestoriaDashDocsOpen = document.getElementById("gestoriaDashDocsOpen");
 const gestoriaDashDocsKpis = document.getElementById("gestoriaDashDocsKpis");
 const gestoriaDashDocsRecent = document.getElementById("gestoriaDashDocsRecent");
 const gestoriaDashDocsInfo = document.getElementById("gestoriaDashDocsInfo");
+const gestoriaKpiRentasSinResponsable = document.getElementById("gestoriaKpiRentasSinResponsable");
+const gestoriaKpiRentasSinCobrar = document.getElementById("gestoriaKpiRentasSinCobrar");
+const gestoriaKpiRentasSinRemesar = document.getElementById("gestoriaKpiRentasSinRemesar");
 const gestoriaDocsSection = document.getElementById("gestoriaDocsSection");
 const gestoriaContaSection = document.getElementById("gestoriaContaSection");
 const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
@@ -58414,6 +58422,92 @@ const renderGestoriaDashGeneralProductividad = (productividad = {}) => {
   gestoriaDashGeneralProdInfo.textContent = `Mostrando ${rows.length} personas.`;
 };
 
+const renderGestoriaSeniorCockpit = (payload = {}, trabajos = []) => {
+  if (!gestoriaSeniorCockpit || !gestoriaSeniorKpis || !gestoriaSeniorActions) return;
+  const counts = payload.counts || {};
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const closedStates = new Set(["completado", "finalizado", "hecho", "cerrado", "presentado", "cancelado"]);
+  const dueDate = (row = {}) => {
+    if (row.fecha_fin) return String(row.fecha_fin).slice(0, 10);
+    if (row.fecha_inicio && row.sla_dias) {
+      const base = new Date(row.fecha_inicio);
+      const days = parseInt(row.sla_dias, 10);
+      if (!Number.isNaN(base.getTime()) && !Number.isNaN(days)) {
+        return new Date(base.getTime() + days * 86400000).toISOString().slice(0, 10);
+      }
+    }
+    return "";
+  };
+  const normalizedTrabajos = Array.isArray(trabajos) ? trabajos : [];
+  const vencidos = normalizedTrabajos.filter((row) => {
+    const estado = String(row.estado || "").trim().toLowerCase();
+    const fin = dueDate(row);
+    return fin && fin < todayStr && !closedStates.has(estado);
+  });
+  const espera = normalizedTrabajos.filter((row) => String(row.estado || "").trim().toLowerCase() === "en espera");
+  const sinResponsable = normalizedTrabajos.filter((row) => {
+    const estado = String(row.estado || "").trim().toLowerCase();
+    return !closedStates.has(estado) && !String(row.responsable || "").trim();
+  });
+  const modelosVencidos = Array.isArray(payload.modelos_vencidos) ? payload.modelos_vencidos.length : 0;
+  const accionesVencidas = Array.isArray(payload.acciones_vencidas) ? payload.acciones_vencidas.length : 0;
+  const rentasPendientes = Number(counts.rentas_pendientes_presentar || 0);
+  const rentasSinCobrar = Number(counts.rentas_sin_cobrar || 0);
+  const docsSinArchivo = Number(counts.docs_sin_archivo || 0);
+  const blockers = vencidos.length + modelosVencidos + accionesVencidas + docsSinArchivo;
+  const warnings = rentasPendientes + espera.length + sinResponsable.length + rentasSinCobrar;
+
+  const status = blockers
+    ? { title: "Atención prioritaria", text: `${numberFormatter.format(blockers)} incidencias bloqueantes requieren revisión hoy.`, tone: "danger" }
+    : warnings
+      ? { title: "Operativa con seguimiento", text: `${numberFormatter.format(warnings)} asuntos necesitan control antes de cerrar el día.`, tone: "warning" }
+      : { title: "Operativa bajo control", text: "No hay bloqueantes ni avisos operativos relevantes en este momento.", tone: "ok" };
+
+  if (gestoriaSeniorStatusTitle) gestoriaSeniorStatusTitle.textContent = status.title;
+  if (gestoriaSeniorStatusText) gestoriaSeniorStatusText.textContent = status.text;
+  gestoriaSeniorCockpit.dataset.tone = status.tone;
+
+  const cards = [
+    { label: "Bloqueantes", value: blockers, note: "vencidos / sin archivo", tone: blockers ? "danger" : "ok" },
+    { label: "Rentas pendientes", value: rentasPendientes, note: "campaña activa", tone: rentasPendientes ? "warning" : "ok" },
+    { label: "En espera", value: espera.length, note: "respuesta cliente/tercero", tone: espera.length ? "warning" : "ok" },
+    { label: "Sin responsable", value: sinResponsable.length, note: "trabajos abiertos", tone: sinResponsable.length ? "warning" : "ok" },
+  ];
+  gestoriaSeniorKpis.innerHTML = cards
+    .map(
+      (card) => `
+        <button type="button" class="gestoria-senior-kpi ${escapeHtml(card.tone)}" data-gestoria-senior-target="${escapeHtml(card.label)}">
+          <span>${escapeHtml(card.label)}</span>
+          <strong>${escapeHtml(numberFormatter.format(Number(card.value || 0)))}</strong>
+          <em>${escapeHtml(card.note)}</em>
+        </button>
+      `
+    )
+    .join("");
+
+  const actions = [
+    { label: "Revisar vencidos", target: "gestiones", active: Boolean(vencidos.length || accionesVencidas || modelosVencidos) },
+    { label: "Campaña renta", target: "rentas", active: Boolean(rentasPendientes || rentasSinCobrar) },
+    { label: "Documentación", target: "documentos", active: Boolean(docsSinArchivo) },
+    { label: "Pipeline", target: "servicios", active: true },
+  ];
+  gestoriaSeniorActions.innerHTML = actions
+    .map(
+      (action) => `
+        <button type="button" class="${action.active ? "secondary" : "secondary ghost"}" data-gestoria-cockpit-action="${escapeHtml(action.target)}">
+          ${escapeHtml(action.label)}
+        </button>
+      `
+    )
+    .join("");
+  gestoriaSeniorActions.querySelectorAll("[data-gestoria-cockpit-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.gestoriaCockpitAction || "general";
+      setGestoriaDashboardView(target);
+    });
+  });
+};
+
 const renderGestoriaDashServicios = (payload = {}, { key = "" } = {}) => {
   if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
   const servicios = payload?.servicios || {};
@@ -60121,6 +60215,9 @@ const loadGestoriaDashboard = () => {
 		      state.gestoriaLastRentasEjercicio = year;
 		    }
 		    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+		    if (gestoriaKpiRentasSinResponsable) gestoriaKpiRentasSinResponsable.textContent = counts.rentas_sin_responsable ?? 0;
+		    if (gestoriaKpiRentasSinCobrar) gestoriaKpiRentasSinCobrar.textContent = counts.rentas_sin_cobrar ?? 0;
+		    if (gestoriaKpiRentasSinRemesar) gestoriaKpiRentasSinRemesar.textContent = counts.rentas_sin_remesar ?? 0;
 	    if (gestoriaKpiSinVincular) gestoriaKpiSinVincular.textContent = counts.sin_vincular_servicio ?? 0;
 	    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
@@ -60252,6 +60349,7 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiGestionesCurso) gestoriaKpiGestionesCurso.textContent = enCurso.length;
     if (gestoriaKpiGestionesEspera) gestoriaKpiGestionesEspera.textContent = enEspera.length;
     if (gestoriaKpiGestionesVencidas) gestoriaKpiGestionesVencidas.textContent = vencidas.length;
+    renderGestoriaSeniorCockpit(data, trabajos);
     renderAlertList(
       gestoriaAlertRentasPendientes,
       data.rentas_pendientes,
