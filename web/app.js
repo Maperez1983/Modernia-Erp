@@ -83841,7 +83841,9 @@ if (gestoriaAltaForm) {
       }
       return;
     }
-    const clienteId = randomId();
+    const nifNorm = String(payload.nif || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    let clienteId = randomId();
+    let existingCliente = null;
     const clientePayload = {
       id: clienteId,
       tipo_persona: payload.tipo_persona || "Física",
@@ -83873,15 +83875,29 @@ if (gestoriaAltaForm) {
       return;
     }
     try {
-      const clienteRes = await fetch("/api/clientes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(clientePayload),
-      });
-      const clienteData = await clienteRes.json();
-      if (clienteData.error) {
-        if (gestoriaAltaStatus) gestoriaAltaStatus.textContent = clienteData.error;
-        return;
+      if (nifNorm) {
+        try {
+          const dupData = await api(
+            `/api/clientes_by_nif?nif=${encodeURIComponent(nifNorm)}&limit=2`
+          );
+          const dupRows = Array.isArray(dupData.rows) ? dupData.rows : [];
+          if (dupRows.length) {
+            existingCliente = dupRows[0];
+            clienteId = existingCliente.id || clienteId;
+          }
+        } catch (e) {}
+      }
+      if (!existingCliente) {
+        const clienteRes = await fetch("/api/clientes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(clientePayload),
+        });
+        const clienteData = await clienteRes.json();
+        if (clienteData.error) {
+          if (gestoriaAltaStatus) gestoriaAltaStatus.textContent = clienteData.error;
+          return;
+        }
       }
       const gestoriaEmpresa = resolveCrmGestoriaEmpresa() || fincas;
       await fetch("/api/clientes_link", {
@@ -83899,23 +83915,61 @@ if (gestoriaAltaForm) {
           fecha_fin: payload.fecha_baja || "",
         }),
       });
-      await fetch("/api/gestoria", {
+      let existingGestoriaRow = {};
+      try {
+        const existingGestoria = await api(`/api/cliente_gestoria?cliente_id=${encodeURIComponent(clienteId)}`);
+        existingGestoriaRow = existingGestoria.row || {};
+      } catch (e) {
+        existingGestoriaRow = {};
+      }
+      const hadGestoriaProfile = Boolean(
+        existingGestoriaRow &&
+          (existingGestoriaRow.tipo_cliente ||
+            Number(existingGestoriaRow.mod_fiscal || 0) ||
+            Number(existingGestoriaRow.mod_laboral || 0) ||
+            Number(existingGestoriaRow.mod_contable || 0) ||
+            Number(existingGestoriaRow.mod_renta || 0) ||
+            Number(existingGestoriaRow.mod_puntuales || 0))
+      );
+      const perfilNorm = normalizeLookupText(payload.perfil || "").toLowerCase();
+      const keepFlag = (key, next) => (Number(existingGestoriaRow?.[key] || 0) ? 1 : next ? 1 : 0);
+      await fetch("/api/cliente_gestoria_update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          empresa_nombre: gestoriaEmpresa?.nombre || resolveCrmGestoriaEmpresaNombre(),
-          cliente: buildDisplayName(clientePayload),
-          fecha: payload.fecha || "",
-          cuota: payload.cuota || "",
-          precio: payload.precio || "",
-          tipo: payload.tipo || "",
-          perfil: payload.perfil || "",
-          estado: payload.estado || "",
-          fecha_baja: payload.fecha_baja || "",
+          cliente_id: clienteId,
+          empresa_id: gestoriaEmpresa?.id || fincas.id,
+          tipo_cliente: existingGestoriaRow.tipo_cliente || payload.perfil || "Gestiones Administrativas",
+          mod_fiscal: keepFlag("mod_fiscal", perfilNorm.includes("autonom") || perfilNorm.includes("empresa")),
+          mod_laboral: keepFlag("mod_laboral", perfilNorm.includes("empresa")),
+          mod_contable: keepFlag("mod_contable", perfilNorm.includes("autonom") || perfilNorm.includes("empresa")),
+          mod_renta: keepFlag("mod_renta", perfilNorm.includes("renta")),
+          mod_registro: keepFlag("mod_registro", false),
+          mod_trafico: keepFlag("mod_trafico", false),
+          mod_puntuales: keepFlag("mod_puntuales", perfilNorm.includes("gestion") || perfilNorm.includes("administr")),
         }),
       });
+      if (!hadGestoriaProfile) {
+        await fetch("/api/gestoria", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            empresa_nombre: gestoriaEmpresa?.nombre || resolveCrmGestoriaEmpresaNombre(),
+            cliente: buildDisplayName(existingCliente || clientePayload),
+            fecha: payload.fecha || "",
+            cuota: payload.cuota || "",
+            precio: payload.precio || "",
+            tipo: payload.tipo || "",
+            perfil: payload.perfil || "",
+            estado: payload.estado || "",
+            fecha_baja: payload.fecha_baja || "",
+          }),
+        });
+      }
       if (gestoriaAltaStatus) {
-        gestoriaAltaStatus.textContent = "Cliente creado y asignado.";
+        gestoriaAltaStatus.textContent = existingCliente
+          ? "Cliente existente localizado y asignado a gestoría."
+          : "Cliente creado y asignado.";
       }
       gestoriaAltaForm.reset();
       updateGestoriaAltaPersona();
