@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -126,6 +127,16 @@ INVALID_VENDOR_TOKENS = {
     "EMITIDA",
     "MES FEBRERO",
 }
+OWN_COMPANY_TOKENS = (
+    "ESTUDIO VELAZQUEZ",
+    "FINCAS VELAZQUEZ",
+    "GAPP",
+)
+OWN_COMPANY_NIFS = {
+    "B93227643",
+    "B72661374",
+}
+AMOUNT_PATTERN = r"-?(?:\d{1,3}(?:[.\s]\d{3})+|\d{1,6})[,.]\d{2}"
 
 
 def norm(value: Any) -> str:
@@ -157,6 +168,62 @@ def parse_decimal(value: Any) -> float:
         return 0.0
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_path_indicates_sale(path: Path) -> bool:
+    return any(norm(part) in {"EMITIDAS", "FACTURAS EMITIDAS"} for part in path.parts)
+
+
+def extract_nif_candidates(text: str) -> list[str]:
+    normalized = norm(text)
+    variants = [
+        normalized,
+        re.sub(r"\b([ABCDEFGHJNPQRSUVW])\s+(\d{7}[0-9A-J])\b", r"\1\2", normalized),
+        re.sub(r"\b(\d{8})\s+([A-Z])\b", r"\1\2", normalized),
+    ]
+    candidates: list[str] = []
+    pattern = r"\b(?:[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]|\d{8}[A-Z])\b"
+    for variant in variants:
+        for item in re.findall(pattern, variant, re.IGNORECASE):
+            value = item.upper()
+            if value not in candidates:
+                candidates.append(value)
+    return candidates
+
+
+def infer_sale_customer(text: str, source_path: Path) -> str:
+    nombre_match = re.search(r"\bNombre\s*:\s*([^\n\r]{3,140})", text, re.IGNORECASE)
+    if nombre_match:
+        return re.sub(r"\s+", " ", nombre_match.group(1)).strip(" .:-")[:120]
+    for line in str(text or "").splitlines()[:12]:
+        clean = re.sub(r"\s+", " ", line).strip(" .:-")
+        upper = norm(clean)
+        if not clean or not any(token in upper for token in OWN_COMPANY_TOKENS):
+            continue
+        parts = [part.strip(" .:-") for part in re.split(r"\s{2,}", line) if part.strip(" .:-")]
+        for part in reversed(parts):
+            part_norm = norm(part)
+            if part_norm and not any(token in part_norm for token in OWN_COMPANY_TOKENS):
+                return re.sub(r"\s+", " ", part).strip(" .:-")[:120]
+    cliente_match = re.search(r"\bcliente\s*[:\-]\s*([^\n\r]{3,140})", text, re.IGNORECASE)
+    if cliente_match:
+        return re.sub(r"\s+", " ", cliente_match.group(1)).strip(" .:-")[:120]
+    return source_path.stem
+
+
+def infer_sale_customer_nif(text: str) -> str:
+    for nif in reversed(extract_nif_candidates(text)):
+        if nif not in OWN_COMPANY_NIFS:
+            return nif
+    return ""
+
+
 def extract_filename_date(path: Path) -> str:
     match = re.search(r"(\d{1,2})[.\-_/](\d{1,2})[.\-_/](\d{2,4})", path.stem)
     if not match:
@@ -184,12 +251,12 @@ def extract_totals_triplet(text: str) -> tuple[float, float, float]:
     best = (0.0, 0.0, 0.0)
     for line in lines:
         upper = norm(line)
-        if "TOTALBI" in upper or "TOTAL IVA" in upper or "DESGLOSE TOTALES" in upper:
+        if "TOTALBI" in upper or "TOTAL IVA" in upper or "TOTAL I V A" in upper or "TOTAL FACTURA" in upper or "DESGLOSE TOTALES" in upper:
             header_seen = True
             continue
         if not header_seen and "IVA 21" not in upper and "TOTAL DOCUMENTO" not in upper:
             continue
-        matches = re.findall(r"(?<![\d.,-])(\d{1,6}[.,]\d{2})(?![\d%]|[.,]\d)", line)
+        matches = re.findall(rf"(?<![\d.,-])({AMOUNT_PATTERN})(?![\d%]|[.,]\d)", line)
         values = [parse_decimal(item) for item in matches if parse_decimal(item) > 0]
         if len(values) >= 3:
             candidates = []
@@ -217,7 +284,7 @@ def extract_totals_triplet(text: str) -> tuple[float, float, float]:
 
 def extract_fallback_total(text: str) -> float:
     values: list[float] = []
-    for match in re.finditer(r"(?<![\d.,-])(-?\d{1,4}[.,]\d{2})(?![\d%]|[.,]\d)", text):
+    for match in re.finditer(rf"(?<![\d.,-])({AMOUNT_PATTERN})(?![\d%]|[.,]\d)", text):
         amount = parse_decimal(match.group(1))
         if amount != 0 and abs(amount) < 100000:
             values.append(amount)
@@ -235,6 +302,12 @@ def extract_fallback_total(text: str) -> float:
 def detect_document_type(path: Path, text: str, parsed: dict[str, Any]) -> str:
     filename = norm(path.name)
     haystack = norm(text)
+    if source_path_indicates_sale(path):
+        return "venta"
+    if any(token in haystack for token in ("ESTUDIO VELAZQUEZ", "FINCAS VELAZQUEZ")) and (
+        "NOMBRE" in haystack or "FACTURA N" in haystack
+    ):
+        return "venta"
     if "FACTURA_GAPP" in filename or "GESTIONES COMERCIALES" in haystack:
         return "venta"
     if any(token in filename for token in ("COMBUSTIBLE", "PARKING", "PEAJE", "REPOSTAJE", "HOTEL", "OPTIMUS", "OBRAMAT", "HTM", "LEROY", "MANDOS", "ARRENDAMIENTO", "ALQUILER", "MATERIAL", "MATERIALES", "LIMPIEZA", "CERRAJER", "ROPA TRABAJO")):
@@ -458,7 +531,7 @@ def score_ocr_text(text: str) -> int:
     ):
         if token in normalized:
             score += weight
-    if re.search(r"(?<![\d.,-])\d{1,4}[.,]\d{2}(?![\d%]|[.,]\d)", text):
+    if re.search(rf"(?<![\d.,-]){AMOUNT_PATTERN}(?![\d%]|[.,]\d)", text):
         score += 25
     if extract_amount_by_labels(text, ("total factura", "total", "total tti", "total tu", "importe total")) > 0:
         score += 30
@@ -471,7 +544,7 @@ def needs_ocr_rescue(text: str) -> bool:
         return True
     if len(normalized) < 120:
         return True
-    if not re.search(r"(?<![\d.,-])\d{1,4}[.,]\d{2}(?![\d%]|[.,]\d)", text):
+    if not re.search(rf"(?<![\d.,-]){AMOUNT_PATTERN}(?![\d%]|[.,]\d)", text):
         return True
     if "FACTURA" not in normalized and "TOTAL" not in normalized:
         return True
@@ -560,13 +633,18 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
     result["tipo"] = detect_document_type(path, text, result)
     if not result.get("fecha"):
         result["fecha"] = extract_filename_date(path)
-    guessed_vendor = infer_vendor(text, path)
+    guessed_vendor = infer_sale_customer(text, path) if result.get("tipo") == "venta" else infer_vendor(text, path)
     if (
         not result.get("tercero")
         or looks_like_own_company(result.get("tercero") or "")
         or looks_like_suspicious_vendor(result.get("tercero") or "")
+        or result.get("tipo") == "venta"
     ):
         result["tercero"] = guessed_vendor
+    if result.get("tipo") == "venta":
+        sale_nif = infer_sale_customer_nif(text)
+        if sale_nif:
+            result["nif"] = sale_nif
     result["tercero"] = canonical_supplier_name(result.get("tercero") or "")
     if not result.get("numero"):
         number = re.search(r"\b([A-Z]{0,4}\d{2,}[A-Z0-9/\-]*)\b", norm(path.stem))
@@ -600,7 +678,15 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
         if total <= 0:
             total = extract_fallback_total(text)
         result["total"] = total
-    if triplet_total > 0 and (float(result.get("total") or 0.0) <= 0 or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))):
+    if triplet_total > 0 and (
+        float(result.get("total") or 0.0) <= 0
+        or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))
+        or (
+            triplet_total > float(result.get("total") or 0.0)
+            and triplet_base > 0
+            and abs(triplet_base - float(result.get("base_imponible") or 0.0)) <= max(1.0, triplet_total * 0.02)
+        )
+    ):
         result["total"] = triplet_total
     if triplet_base > 0 and (float(result.get("base_imponible") or 0.0) <= 0 or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))):
         result["base_imponible"] = triplet_base
@@ -652,6 +738,8 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
 
 
 def classify_record(path: Path, parsed: dict[str, Any]) -> tuple[str, float, str]:
+    if str(parsed.get("tipo") or "").strip().lower() == "venta" and source_path_indicates_sale(path):
+        return "INGRESO", 0.98, "tipo:venta"
     corpus = " ".join(
         [
             path.name,
@@ -673,6 +761,8 @@ def classify_record(path: Path, parsed: dict[str, Any]) -> tuple[str, float, str
         for token in tokens:
             if norm(token) in haystack:
                 return category, 0.92, f"regla:{token}"
+    if str(parsed.get("tipo") or "").strip().lower() == "venta":
+        return "INGRESO", 0.98, "tipo:venta"
     return "SIN_CATEGORIA", 0.0, "sin_regla"
 
 
@@ -796,6 +886,20 @@ def mark_filename_duplicates(records: list[dict[str, Any]]) -> None:
         record.pop("_dup_score", None)
 
 
+def mark_hash_duplicates(records: list[dict[str, Any]]) -> None:
+    seen: dict[str, dict[str, Any]] = {}
+    for record in records:
+        file_hash = str(record.get("archivo_hash") or "").strip()
+        if not file_hash:
+            continue
+        if file_hash in seen:
+            record["estado_revision"] = "DUPLICADO"
+            existing = str(record.get("motivos_revision") or "").strip()
+            record["motivos_revision"] = ",".join(filter(None, [existing, "duplicado_hash"]))
+        else:
+            seen[file_hash] = record
+
+
 def row_map_from_sheet(sheet) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for row_idx in range(1, sheet.max_row + 1):
@@ -840,7 +944,7 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
         canonical_reason_supplier = canonical_supplier_from_reason(reason)
         if canonical_reason_supplier:
             parsed["tercero"] = canonical_reason_supplier
-        if category in EXPENSE_TEMPLATE_CATEGORIES and parsed.get("tipo") == "venta":
+        if category in EXPENSE_TEMPLATE_CATEGORIES and parsed.get("tipo") == "venta" and not source_path_indicates_sale(path):
             parsed["tipo"] = "compra"
         if category == "INGRESO":
             parsed["tipo"] = "venta"
@@ -849,6 +953,7 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
             {
                 "archivo": path.name,
                 "ruta": str(path),
+                "archivo_hash": file_sha256(path),
                 "fecha": parsed.get("fecha") or "",
                 "numero": parsed.get("numero") or "",
                 "tercero": parsed.get("tercero") or "",
@@ -872,6 +977,7 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
         record["estado_revision"] = estado
         record["motivos_revision"] = motivos
     mark_filename_duplicates(records)
+    mark_hash_duplicates(records)
     return records
 
 
@@ -891,6 +997,7 @@ def write_csv(output_path: Path, records: list[dict[str, Any]]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "archivo",
+        "archivo_hash",
         "fecha",
         "numero",
         "tercero",

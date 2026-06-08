@@ -18,6 +18,7 @@ from scripts.build_gapp_facturas_excel import (
     looks_like_own_company,
     looks_like_suspicious_invoice_number,
     mark_filename_duplicates,
+    mark_hash_duplicates,
     preclassify_from_filename,
     review_record,
     write_template_output,
@@ -90,6 +91,53 @@ class GappFacturasExcelTests(unittest.TestCase):
         path = Path("/tmp/Materiales 26.02.2026.jpeg")
         kind = detect_document_type(path, "Cliente GAPP\nimporte 12,49", {"tipo": "venta"})
         self.assertEqual(kind, "compra")
+
+    def test_emitidas_folder_marks_estudio_invoice_as_sale_and_customer(self):
+        path = Path("/tmp/FACTURAS/EMITIDAS/2026/01 MODERNIA mensualidad programas informaticos.pdf")
+        parsed = enrich_parsed(
+            path,
+            """
+                                FACTURA
+            ESTUDIO VELAZQUEZ 2012.SL                     MODERNIA HOME &INVESTMENT S.L.
+               c/ Ildefonso Marzo 18                                B70730742
+                C.I.F. - B 93227643
+            Factura nº 01/2026
+            Fecha: 01/01/2026
+            BASE IVA 71,51 €
+            Total IVA 21% 15,02 €
+            TOTAL 86,53 €
+            """,
+            {"tipo": "compra", "tercero": "ESTUDIO VELAZQUEZ 2012.SL", "nif": "B93227643"},
+        )
+        self.assertEqual(parsed["tipo"], "venta")
+        self.assertEqual(parsed["tercero"], "MODERNIA HOME &INVESTMENT S.L")
+        self.assertEqual(parsed["nif"], "B70730742")
+        category, confidence, reason = classify_record(path, parsed)
+        self.assertEqual(category, "INGRESO")
+        self.assertGreaterEqual(confidence, 0.95)
+        self.assertEqual(reason, "tipo:venta")
+
+    def test_emitted_invoice_with_thousands_reads_footer_total(self):
+        path = Path("/tmp/FACTURAS/EMITIDAS/2026/5 ALEJANDRO MARTIN CHRISTOFOROU.PDF")
+        parsed = enrich_parsed(
+            path,
+            """
+            FINCAS VELAZQUEZ S.L.                              Nombre:        ALEJANDRO MARTIN CHRISTOFOROU
+            B-72661374                                         Nif / Cif :    01880160W
+            Nº FACTURA                                   SERIE                                         FECHA
+                    1                                                                                  15/01/26
+            HONORARIOS INTERMEDIACION COMPRADOR                1,00            14.400,00 €        21,00           17424,00
+            TOTAL BASE IMPONIBLE €      TOTAL NETO                    TOTAL I.V.A. €                     TOTAL FACTURA €
+                        14.400,00 €            14400,00                          3.024,00 €                            17.424,00 €
+            """,
+            {"tipo": "compra", "base_imponible": 14400.0, "cuota_iva": 0.0, "total": 14400.0},
+        )
+        self.assertEqual(parsed["tipo"], "venta")
+        self.assertEqual(parsed["tercero"], "ALEJANDRO MARTIN CHRISTOFOROU")
+        self.assertEqual(parsed["nif"], "01880160W")
+        self.assertAlmostEqual(parsed["base_imponible"], 14400.0)
+        self.assertAlmostEqual(parsed["cuota_iva"], 3024.0)
+        self.assertAlmostEqual(parsed["total"], 17424.0)
 
     def test_prefilter_marks_materiales_as_suministros(self):
         path = Path("/tmp/Materiales 26.02.2026.jpeg")
@@ -365,6 +413,16 @@ class GappFacturasExcelTests(unittest.TestCase):
         mark_filename_duplicates(rows)
         self.assertEqual(rows[0]["estado_revision"], "OK")
         self.assertEqual(rows[1]["estado_revision"], "DUPLICADO")
+
+    def test_mark_hash_duplicates_marks_second_record(self):
+        rows = [
+            {"archivo": "a.pdf", "archivo_hash": "same", "estado_revision": "OK", "motivos_revision": ""},
+            {"archivo": "b.pdf", "archivo_hash": "same", "estado_revision": "OK", "motivos_revision": ""},
+        ]
+        mark_hash_duplicates(rows)
+        self.assertEqual(rows[0]["estado_revision"], "OK")
+        self.assertEqual(rows[1]["estado_revision"], "DUPLICADO")
+        self.assertIn("duplicado_hash", rows[1]["motivos_revision"])
 
     def test_write_template_output_replaces_category_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
