@@ -29891,6 +29891,55 @@ def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, e
     return items
 
 
+def gestoria_renta_doc_sql_condition(alias="d"):
+    prefix = f"{alias}." if alias else ""
+    return f"""
+      (
+        LOWER(COALESCE({prefix}referencia_tipo, '')) IN ('renta', 'gestoria_renta', 'gestoria-renta')
+        OR LOWER(COALESCE({prefix}referencia_id, '')) LIKE 'renta-%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%renta%'
+        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%renta%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
+        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
+      )
+    """
+
+
+def gestoria_renta_doc_year_sql_condition(alias="d"):
+    prefix = f"{alias}." if alias else ""
+    return f"""
+      (
+        LOWER(COALESCE({prefix}referencia_id, '')) LIKE ?
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE ?
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE ?
+        OR LOWER(COALESCE({prefix}notas, '')) LIKE ?
+        OR COALESCE({prefix}fecha, '') LIKE ?
+        OR COALESCE({prefix}created_at, '') LIKE ?
+        OR COALESCE({prefix}updated_at, '') LIKE ?
+      )
+    """
+
+
+def gestoria_renta_doc_year_values(ejercicio_val):
+    year_like = f"%{ejercicio_val}%".lower()
+    ref_like = f"renta-{ejercicio_val}-%".lower()
+    try:
+        campaign_upload_year = str(int(ejercicio_val) + 1)
+    except Exception:
+        campaign_upload_year = ""
+    return [
+        ref_like,
+        year_like,
+        year_like,
+        year_like,
+        f"{ejercicio_val}%",
+        f"{campaign_upload_year}%",
+        f"{campaign_upload_year}%",
+    ]
+
+
 def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
     empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
@@ -30229,32 +30278,30 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     # Documentos de Renta asociados al ejercicio (PDFs subidos). Esto se usa en el
     # dashboard para diferenciar "campañas" (encargos) de "PDFs" (documentación).
     try:
-        year_like = f"%{ejercicio_val}%".lower()
-        ref_like = f"renta-{ejercicio_val}-%".lower()
-        renta_filter = """
-          (
-            LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
-            OR LOWER(COALESCE(d.tipo, '')) = 'renta'
-            OR LOWER(COALESCE(d.tipo, '')) = 'declaracion de renta'
-            OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
-            OR LOWER(COALESCE(d.tipo, '')) LIKE 'modelo 100%'
-          )
-        """
+        renta_filter = gestoria_renta_doc_sql_condition("d")
+        year_filter = gestoria_renta_doc_year_sql_condition("d")
         docs_row = conn.execute(
             f"""
             SELECT
               COUNT(*) AS docs_total,
               COUNT(DISTINCT NULLIF(TRIM(COALESCE(d.cliente_id, '')), '')) AS clientes_con_doc
             FROM gestoria_docs d
-            WHERE d.empresa_id IN ({placeholders_emp})
-              AND {renta_filter}
-              AND (
-                LOWER(COALESCE(d.referencia_id, '')) LIKE ?
-                OR LOWER(COALESCE(d.nombre, '')) LIKE ?
-                OR COALESCE(d.fecha, '') LIKE ?
+            WHERE (
+                d.empresa_id IN ({placeholders_emp})
+                OR EXISTS (
+                  SELECT 1
+                  FROM cliente_gestoria cg
+                  WHERE cg.cliente_id = d.cliente_id
+                    AND (
+                      COALESCE(cg.mod_renta, 0) = 1
+                      OR COALESCE(TRIM(cg.renta_detalles), '') NOT IN ('', '{{}}', '[]')
+                    )
+                )
               )
+              AND {renta_filter}
+              AND {year_filter}
             """,
-            tuple([*empresa_ids, ref_like, year_like, f"{ejercicio_val}%"]),
+            tuple([*empresa_ids, *gestoria_renta_doc_year_values(ejercicio_val)]),
         ).fetchone()
         counts["docs_total"] = int(row_value(docs_row, "docs_total", 0) or 0)
         counts["clientes_con_doc"] = int(row_value(docs_row, "clientes_con_doc", 0) or 0)
@@ -30746,28 +30793,8 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         except Exception:
             ejercicio_val = ""
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
-    year_like = f"%{ejercicio_val}%".lower()
-    ref_like = f"renta-{ejercicio_val}-%".lower()
-    try:
-        campaign_upload_year = str(int(ejercicio_val) + 1)
-    except Exception:
-        campaign_upload_year = ""
-    renta_filter = """
-      (
-        LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
-        OR LOWER(COALESCE(d.tipo, '')) LIKE '%renta%'
-        OR LOWER(COALESCE(d.nombre, '')) LIKE '%renta%'
-      )
-    """
-    year_filter = """
-      (
-        LOWER(COALESCE(d.referencia_id, '')) LIKE ?
-        OR LOWER(COALESCE(d.nombre, '')) LIKE ?
-        OR COALESCE(d.fecha, '') LIKE ?
-        OR COALESCE(d.created_at, '') LIKE ?
-        OR COALESCE(d.updated_at, '') LIKE ?
-      )
-    """
+    renta_filter = gestoria_renta_doc_sql_condition("d")
+    year_filter = gestoria_renta_doc_year_sql_condition("d")
     row = conn.execute(
         f"""
         SELECT
@@ -30798,11 +30825,7 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         """,
         tuple([
             *empresa_ids,
-            ref_like,
-            year_like,
-            f"{ejercicio_val}%",
-            f"{campaign_upload_year}%",
-            f"{campaign_upload_year}%",
+            *gestoria_renta_doc_year_values(ejercicio_val),
         ]),
     ).fetchone()
     return {
@@ -76864,12 +76887,12 @@ class Handler(BaseHTTPRequestHandler):
                 values = [cliente_id]
                 if service:
                     if normalize_lookup_text(service) == "GESTORIA":
-                        gestoria_filter = """
+                        renta_gestoria_filter = gestoria_renta_doc_sql_condition("")
+                        gestoria_filter = f"""
                           (
-                            LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
-                            OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
-                            OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
-                            OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+                            LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría')
+                            OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría')
+                            OR {renta_gestoria_filter}
                           )
                         """
                         # Fallback: incluir documentos de renta referenciados por campañas aunque
@@ -77004,12 +77027,12 @@ class Handler(BaseHTTPRequestHandler):
             service_clause = ""
             service_values = []
             if normalize_lookup_text(service) == "GESTORIA":
-                service_clause = """
+                renta_gestoria_filter = gestoria_renta_doc_sql_condition("d")
+                service_clause = f"""
                   AND (
-                    LOWER(COALESCE(d.referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
-                    OR LOWER(COALESCE(d.tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta', 'declaración de renta', 'modelo 100', 'renta presentada')
-                    OR LOWER(COALESCE(d.tipo, '')) LIKE 'modelo 100%'
-                    OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
+                    LOWER(COALESCE(d.referencia_tipo, '')) IN ('gestoria', 'gestoría')
+                    OR LOWER(COALESCE(d.tipo, '')) IN ('gestoria', 'gestoría')
+                    OR {renta_gestoria_filter}
                   )
                 """
             elif service:

@@ -3,7 +3,12 @@ import sqlite3
 import unittest
 from datetime import datetime, timezone
 
-from web.server import build_cliente_ficha_payload, ensure_seguro_doc_link
+from web.server import (
+    build_cliente_ficha_payload,
+    compute_gestoria_renta_dashboard,
+    compute_gestoria_renta_docs_summary,
+    ensure_seguro_doc_link,
+)
 
 
 class ClienteFichaTests(unittest.TestCase):
@@ -27,6 +32,7 @@ class ClienteFichaTests(unittest.TestCase):
               tipo TEXT,
               perfil TEXT,
               estado TEXT,
+              empresa_id TEXT,
               created_at TEXT,
               updated_at TEXT
             );
@@ -366,6 +372,71 @@ class ClienteFichaTests(unittest.TestCase):
         self.assertTrue(any(item["key"] == "modelo100" and item["done"] for item in gestoria["checklist"]))
         self.assertTrue(any(item["target"] == "renta" for item in gestoria["next_actions"]))
         self.assertTrue(any(item["kind"] == "documento" for item in gestoria["timeline"]))
+
+    def test_renta_dashboard_counts_modelo100_uploaded_during_campaign(self):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute("UPDATE clientes SET empresa_id = 'e1' WHERE id = 'c1'")
+        self.conn.execute(
+            """
+            INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at)
+            VALUES ('ce3', 'c1', 'e1', 'gestoria', 'Activo', ?, ?)
+            """,
+            (now, now),
+        )
+        renta_payload = {
+            "entries": [
+                {
+                    "id": "camp-2025",
+                    "ejercicio": "2025",
+                    "estado_presentacion": "Presentada",
+                    "presentacion_fecha": "2026-05-20",
+                    "precio_servicio": 120,
+                    "cobrada": False,
+                }
+            ]
+        }
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_renta, mod_registro, mod_trafico, mod_puntuales,
+              renta_detalles, created_at, updated_at
+            ) VALUES ('cg-renta-dash', 'c1', 'Particular', 1, 0, 0, 0, ?, ?, ?)
+            """,
+            (json.dumps(renta_payload), now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
+              notas, doc_key, created_at, updated_at
+            ) VALUES (
+              'rd-campaign-upload', 'e1', 'c1', 'gestoria', '',
+              'IRPF presentado.pdf', 'Modelo 100', '', 'Presentada',
+              '', 'gestoria/rentas/modelo100.pdf', '2026-06-01T10:00:00', '2026-06-01T10:00:00'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
+              notas, doc_key, created_at, updated_at
+            ) VALUES (
+              'rd-ref-linked', 'otra-empresa', 'c1', '', 'renta-2025-camp-extra',
+              'Documento fiscal validado.pdf', 'Declaracion presentada', '', 'Presentada',
+              'Modelo 100 verificado', 'gestoria/rentas/modelo100-extra.pdf', '2026-06-02T10:00:00', '2026-06-02T10:00:00'
+            )
+            """
+        )
+        self.conn.commit()
+
+        dashboard = compute_gestoria_renta_dashboard(self.conn, "e1", "2025")
+        summary = compute_gestoria_renta_docs_summary(self.conn, "e1", "2025")
+
+        self.assertEqual(dashboard["counts"]["docs_total"], 2)
+        self.assertEqual(dashboard["counts"]["clientes_con_doc"], 1)
+        self.assertEqual(summary["docs_total"], 2)
+        self.assertEqual(summary["clientes_con_doc"], 1)
 
 
 if __name__ == "__main__":
