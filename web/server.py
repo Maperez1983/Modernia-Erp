@@ -29909,31 +29909,73 @@ def gestoria_renta_doc_sql_condition(alias="d"):
 
 def gestoria_renta_doc_year_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
+    text_exprs = [
+        f"LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({prefix}{col}, ''), '·', ' '), '_', ' '), '-', ' '), '.', ' '))"
+        for col in ("referencia_id", "nombre", "tipo", "notas")
+    ]
+    fiscal_current = " OR ".join(
+        [
+            f"LOWER(COALESCE({prefix}referencia_id, '')) LIKE ?",
+            *[f"{expr} LIKE ?" for expr in text_exprs for _ in range(6)],
+        ]
+    )
+    fiscal_year_block = " OR ".join(
+        [
+            f"LOWER(COALESCE({prefix}referencia_id, '')) LIKE ?",
+            *[f"{expr} LIKE ?" for expr in text_exprs for _ in range(6)],
+        ]
+    )
+    fiscal_any_year = " OR ".join([f"({fiscal_year_block})" for _year in range(2020, 2036)])
     return f"""
       (
-        LOWER(COALESCE({prefix}referencia_id, '')) LIKE ?
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE ?
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE ?
-        OR LOWER(COALESCE({prefix}notas, '')) LIKE ?
-        OR COALESCE({prefix}fecha, '') LIKE ?
-        OR COALESCE({prefix}created_at, '') LIKE ?
-        OR COALESCE({prefix}updated_at, '') LIKE ?
+        ({fiscal_current})
+        OR (
+          NOT ({fiscal_any_year})
+          AND (
+            COALESCE({prefix}fecha, '') LIKE ?
+            OR COALESCE({prefix}created_at, '') LIKE ?
+            OR COALESCE({prefix}updated_at, '') LIKE ?
+          )
+        )
       )
     """
 
 
 def gestoria_renta_doc_year_values(ejercicio_val):
-    year_like = f"%{ejercicio_val}%".lower()
     ref_like = f"renta-{ejercicio_val}-%".lower()
     try:
         campaign_upload_year = str(int(ejercicio_val) + 1)
     except Exception:
         campaign_upload_year = ""
+    fiscal_patterns = [
+        f"%renta {ejercicio_val}%",
+        f"%{ejercicio_val} renta%",
+        f"%modelo 100 {ejercicio_val}%",
+        f"%{ejercicio_val} modelo 100%",
+        f"%irpf {ejercicio_val}%",
+        f"%{ejercicio_val} irpf%",
+    ]
+    current_values = [ref_like]
+    for _col in ("referencia_id", "nombre", "tipo", "notas"):
+        current_values.extend(fiscal_patterns)
+
+    any_year_values = []
+    for year in range(2020, 2036):
+        year_s = str(year)
+        any_year_values.append(f"renta-{year_s}-%")
+        other_patterns = [
+            f"%renta {year_s}%",
+            f"%{year_s} renta%",
+            f"%modelo 100 {year_s}%",
+            f"%{year_s} modelo 100%",
+            f"%irpf {year_s}%",
+            f"%{year_s} irpf%",
+        ]
+        for _col in ("referencia_id", "nombre", "tipo", "notas"):
+            any_year_values.extend(other_patterns)
     return [
-        ref_like,
-        year_like,
-        year_like,
-        year_like,
+        *current_values,
+        *any_year_values,
         f"{ejercicio_val}%",
         f"{campaign_upload_year}%",
         f"{campaign_upload_year}%",

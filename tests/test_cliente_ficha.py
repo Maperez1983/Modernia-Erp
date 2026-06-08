@@ -428,6 +428,18 @@ class ClienteFichaTests(unittest.TestCase):
             )
             """
         )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
+              notas, doc_key, created_at, updated_at
+            ) VALUES (
+              'rd-previous-year-uploaded-in-campaign', 'e1', 'c1', 'renta', 'renta-2024-c1',
+              'Renta 2024 · Cliente.pdf', 'Renta Presentada', '', 'Presentada',
+              '', 'gestoria/rentas/renta-2024.pdf', '2026-06-03T10:00:00', '2026-06-03T10:00:00'
+            )
+            """
+        )
         self.conn.commit()
 
         dashboard = compute_gestoria_renta_dashboard(self.conn, "e1", "2025")
