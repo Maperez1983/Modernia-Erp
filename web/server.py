@@ -78511,8 +78511,10 @@ class Handler(BaseHTTPRequestHandler):
                 modelo100_unicos = int(renta_docs_summary.get("modelo100_unicos") or renta_docs_summary.get("declaraciones_unicas") or 0)
                 modelo100_docs_total = int(renta_docs_summary.get("modelo100_docs_total") or renta_docs_summary.get("declaraciones_docs_total") or 0)
                 payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
-                payload["counts"]["rentas_total_ejercicio"] = max(campañas_total, modelo100_unicos)
-                payload["counts"]["rentas_realizadas"] = max(campañas_presentadas, modelo100_unicos)
+                # Métrica operativa: campañas del ejercicio. Los Modelo 100 vinculados
+                # se exponen aparte como control documental, sin inflar "realizadas".
+                payload["counts"]["rentas_total_ejercicio"] = campañas_total
+                payload["counts"]["rentas_realizadas"] = campañas_presentadas
                 payload["counts"]["rentas_docs_total"] = docs_total
                 payload["counts"]["rentas_clientes_con_doc"] = clientes_con_doc
                 payload["counts"]["rentas_modelo100_unicos"] = modelo100_unicos
