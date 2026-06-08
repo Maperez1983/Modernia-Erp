@@ -21,6 +21,7 @@ from scripts.build_gapp_facturas_excel import (
     mark_hash_duplicates,
     preclassify_from_filename,
     review_record,
+    scan_documents,
     write_template_output,
 )
 from web.server import ensure_tables, open_sqlite_conn
@@ -242,6 +243,28 @@ class GappFacturasExcelTests(unittest.TestCase):
         self.assertEqual(state, "REVISAR")
         self.assertIn("iva_inverosimil", reasons)
 
+    def test_review_record_marks_amount_mismatch(self):
+        state, reasons = review_record(
+            {
+                "categoria_excel": "INGRESO",
+                "importe_agregado": 86.53,
+                "confianza_categoria": 0.98,
+                "ocr_metodo": "pdftotext",
+                "tercero": "MODERNIA HOME &INVESTMENT S.L",
+                "fecha": "2025-07-15",
+                "motivo_categoria": "tipo:venta",
+                "archivo": "40 MODERNIA mensualidad programas informaticos.pdf",
+                "numero": "40/2025",
+                "tipo": "venta",
+                "base_imponible": 71.51,
+                "cuota_iva": 10.41,
+                "total": 86.53,
+            },
+            target_year=2025,
+        )
+        self.assertEqual(state, "REVISAR")
+        self.assertIn("descuadre_importes", reasons)
+
     def test_review_record_marks_expense_detected_as_sale(self):
         state, reasons = review_record(
             {
@@ -423,6 +446,17 @@ class GappFacturasExcelTests(unittest.TestCase):
         self.assertEqual(rows[0]["estado_revision"], "OK")
         self.assertEqual(rows[1]["estado_revision"], "DUPLICADO")
         self.assertIn("duplicado_hash", rows[1]["motivos_revision"])
+
+    def test_scan_documents_recursive_finds_month_subfolders(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            month = root / "01 ENERO"
+            month.mkdir()
+            (month / "01 factura.pdf").write_bytes(b"%PDF-1.4 fake")
+            rows = scan_documents(root, recursive=True, limit=1)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["archivo"], "01 factura.pdf")
+            self.assertEqual(rows[0]["carpeta_relativa"], "01 ENERO")
 
     def test_write_template_output_replaces_category_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:

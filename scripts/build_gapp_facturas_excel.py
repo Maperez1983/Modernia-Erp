@@ -789,7 +789,7 @@ def infer_target_year(records: list[dict[str, Any]]) -> int | None:
 def review_record(record: dict[str, Any], target_year: int | None = None) -> tuple[str, str]:
     flags: list[str] = []
     category = record.get("categoria_excel") or ""
-    if category not in TEMPLATE_CATEGORY_ROWS:
+    if category not in TEMPLATE_CATEGORY_ROWS and category != "INGRESO":
         return "OK", ""
     amount = float(record.get("importe_agregado") or 0.0)
     confidence = float(record.get("confianza_categoria") or 0.0)
@@ -830,6 +830,8 @@ def review_record(record: dict[str, Any], target_year: int | None = None) -> tup
         flags.append("proveedor_dudoso")
     if is_implausible_vat(base, cuota_iva, total):
         flags.append("iva_inverosimil")
+    if base > 0 and total > 0 and abs((base + cuota_iva) - total) > 1.0:
+        flags.append("descuadre_importes")
 
     state = "OK" if not flags else "REVISAR"
     deduped = []
@@ -922,9 +924,10 @@ def write_template_output(template_path: Path, output_path: Path, category_total
     wb.save(output_path)
 
 
-def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[dict[str, Any]]:
+def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0, recursive: bool = False) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    candidates = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in DOC_EXTENSIONS)
+    iterator = input_dir.rglob("*") if recursive else input_dir.iterdir()
+    candidates = sorted(p for p in iterator if p.is_file() and p.suffix.lower() in DOC_EXTENSIONS)
     if limit > 0:
         candidates = candidates[:limit]
     for path in candidates:
@@ -952,6 +955,7 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
         records.append(
             {
                 "archivo": path.name,
+                "carpeta_relativa": str(path.parent.relative_to(input_dir)) if path.parent != input_dir else "",
                 "ruta": str(path),
                 "archivo_hash": file_sha256(path),
                 "fecha": parsed.get("fecha") or "",
@@ -997,6 +1001,7 @@ def write_csv(output_path: Path, records: list[dict[str, Any]]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "archivo",
+        "carpeta_relativa",
         "archivo_hash",
         "fecha",
         "numero",
@@ -1136,6 +1141,7 @@ def main() -> None:
     parser.add_argument("--output-json", help="JSON detalle de revisión")
     parser.add_argument("--pdf-pages", type=int, default=2, help="Páginas máximas a leer con pdftotext")
     parser.add_argument("--limit", type=int, default=0, help="Limita el número de documentos procesados")
+    parser.add_argument("--recursive", action="store_true", help="Busca documentos tambien dentro de subcarpetas")
     parser.add_argument("--include-needs-review", action="store_true", help="Incluye documentos marcados para revisión en los totales del Excel")
     parser.add_argument("--db-path", help=f"Base SQLite local para importar el lote (por defecto {DB_DEFAULT})")
     parser.add_argument("--empresa-ref", help="ID o nombre de la empresa destino en la base local")
@@ -1158,7 +1164,7 @@ def main() -> None:
     if not template_path.exists():
         raise SystemExit(f"Plantilla no encontrada: {template_path}")
 
-    records = scan_documents(input_dir, pdf_pages=max(args.pdf_pages, 1), limit=max(args.limit, 0))
+    records = scan_documents(input_dir, pdf_pages=max(args.pdf_pages, 1), limit=max(args.limit, 0), recursive=bool(args.recursive))
     category_totals = build_category_totals(records, include_needs_review=args.include_needs_review)
     write_template_output(template_path, output_excel, category_totals)
 
