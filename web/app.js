@@ -59312,13 +59312,15 @@ const renderGestoriaRentaDashboard = (payload) => {
   const ticketMedio = conPrecio > 0 ? facturacionTotal / conPrecio : 0;
   const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
   const docsTotal = Number(counts.docs_total || 0);
+  const declaracionesUnicas = Number(counts.declaraciones_unicas || counts.clientes_con_doc || 0);
+  const pendientesAsignarDocs = Number(counts.docs_pendiente_asignar || 0);
   const sinPrecio = Number(counts.sin_precio || 0);
   const cobradasConPrecio = Number(counts.cobradas_con_precio || 0);
   const sinCobrarConPrecio = Number(counts.sin_cobrar_con_precio || 0);
   addKpi({
     title: "Campañas renta",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
-    note: `Ejercicio ${ejercicio || ""} · PDFs: ${numberFormatter.format(docsTotal)}`.trim(),
+    note: `Ejercicio ${ejercicio || ""} · Declaraciones: ${numberFormatter.format(declaracionesUnicas)} · Docs: ${numberFormatter.format(docsTotal)}${pendientesAsignarDocs ? ` · Pend. asignar: ${numberFormatter.format(pendientesAsignarDocs)}` : ""}`.trim(),
     onClick: () => setView("all"),
   });
   addKpi({

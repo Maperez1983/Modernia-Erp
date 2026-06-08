@@ -96,6 +96,7 @@ class ClienteFichaTests(unittest.TestCase):
               notas TEXT,
               doc_key TEXT,
               doc_url TEXT,
+              archivo_hash TEXT,
               calidad_ocr TEXT,
               campos_ocr TEXT,
               created_at TEXT,
@@ -447,8 +448,12 @@ class ClienteFichaTests(unittest.TestCase):
 
         self.assertEqual(dashboard["counts"]["docs_total"], 2)
         self.assertEqual(dashboard["counts"]["clientes_con_doc"], 1)
+        self.assertEqual(dashboard["counts"]["declaraciones_docs_total"], 2)
+        self.assertEqual(dashboard["counts"]["declaraciones_unicas"], 1)
         self.assertEqual(summary["docs_total"], 2)
         self.assertEqual(summary["clientes_con_doc"], 1)
+        self.assertEqual(summary["declaraciones_docs_total"], 2)
+        self.assertEqual(summary["declaraciones_unicas"], 1)
 
 
 if __name__ == "__main__":
