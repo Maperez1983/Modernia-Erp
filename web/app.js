@@ -2816,7 +2816,11 @@ const gestoriaContaInnerTabs = document.getElementById("gestoriaContaInnerTabs")
 const gestoriaImportRefreshBtn = document.getElementById("gestoriaImportRefreshBtn");
 const gestoriaImportQueueBtn = document.getElementById("gestoriaImportQueueBtn");
 const gestoriaImportApplyBtn = document.getElementById("gestoriaImportApplyBtn");
+const gestoriaImportExcelBtn = document.getElementById("gestoriaImportExcelBtn");
 const gestoriaImportEstadoFilter = document.getElementById("gestoriaImportEstadoFilter");
+const gestoriaImportUploadForm = document.getElementById("gestoriaImportUploadForm");
+const gestoriaImportUploadFiles = document.getElementById("gestoriaImportUploadFiles");
+const gestoriaImportUploadStatus = document.getElementById("gestoriaImportUploadStatus");
 const gestoriaImportSelectedLoteMeta = document.getElementById("gestoriaImportSelectedLoteMeta");
 const gestoriaImportLotesTable = document.getElementById("gestoriaImportLotesTable");
 const gestoriaImportLotesInfo = document.getElementById("gestoriaImportLotesInfo");
@@ -66976,7 +66980,7 @@ const loadGestoriaClienteImportador = (clienteId) => {
     renderGestoriaImportDocsTable([]);
     return;
   }
-  api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresaId)}`)
+  return api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresaId)}`)
     .then((data) => {
       renderGestoriaImportLotesTable(clienteId, data.rows || []);
     })
@@ -82650,6 +82654,58 @@ if (gestoriaImportQueueBtn) {
   });
 }
 
+if (gestoriaImportUploadForm) {
+  gestoriaImportUploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresa = resolveCrmGestoriaEmpresa();
+    const empresaId = resolveLegacyEmpresaId(empresa);
+    const clienteId = String(state.currentClienteId || "").trim();
+    const files = Array.from(gestoriaImportUploadFiles?.files || []);
+    if (!empresaId || !clienteId) {
+      if (gestoriaImportUploadStatus) {
+        gestoriaImportUploadStatus.textContent = "Selecciona cliente y empresa antes de importar.";
+      }
+      return;
+    }
+    if (!files.length) {
+      if (gestoriaImportUploadStatus) gestoriaImportUploadStatus.textContent = "Selecciona un ZIP o PDFs.";
+      return;
+    }
+    const formData = new FormData(gestoriaImportUploadForm);
+    formData.set("empresa_id", empresaId);
+    formData.set("empresa_nombre", empresa?.nombre || "");
+    formData.set("cliente_id", clienteId);
+    if (gestoriaImportUploadStatus) {
+      gestoriaImportUploadStatus.textContent = `Procesando ${files.length} archivo${files.length === 1 ? "" : "s"}...`;
+    }
+    try {
+      const resp = await fetch("/api/gestoria_import_upload", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || "No se pudo procesar el lote.");
+      }
+      state.gestoriaImportSelectedLoteId = data.lote_id || "";
+      if (gestoriaImportUploadStatus) {
+        const skipped = Array.isArray(data.skipped) && data.skipped.length ? ` · omitidos ${data.skipped.length}` : "";
+        gestoriaImportUploadStatus.textContent = `Lote creado: ${data.inserted || 0} documentos · Excel filas ${data.excel_rows ?? "-"}${skipped}.`;
+      }
+      gestoriaImportUploadForm.reset();
+      await loadGestoriaClienteImportador(clienteId);
+      if (data.lote_id) {
+        await loadGestoriaImportLoteDocuments(data.lote_id);
+      }
+    } catch (error) {
+      if (gestoriaImportUploadStatus) {
+        gestoriaImportUploadStatus.textContent = error?.message || "Error al procesar el lote.";
+      }
+    }
+  });
+}
+
 if (gestoriaImportRefreshBtn) {
   gestoriaImportRefreshBtn.addEventListener("click", () => {
     if (state.currentClienteId) {
@@ -82693,6 +82749,42 @@ if (gestoriaImportApplyBtn) {
       }
     } catch (_) {
       if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Error al aplicar el lote.";
+    }
+  });
+}
+
+if (gestoriaImportExcelBtn) {
+  gestoriaImportExcelBtn.addEventListener("click", async () => {
+    const loteId = String(state.gestoriaImportSelectedLoteId || "").trim();
+    if (!loteId) {
+      if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Selecciona un lote.";
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/gestoria_import_excel?lote_id=${encodeURIComponent(loteId)}`, {
+        credentials: "same-origin",
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "No se pudo generar el Excel.");
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get("Content-Disposition") || "";
+      const match = cd.match(/filename=\"?([^\";]+)\"?/i);
+      const filename = (match && match[1]) || `miconversor_lote_${loteId.slice(0, 8)}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Excel generado.";
+    } catch (error) {
+      if (gestoriaImportDocsInfo) {
+        gestoriaImportDocsInfo.textContent = error?.message || "Error al generar el Excel.";
+      }
     }
   });
 }

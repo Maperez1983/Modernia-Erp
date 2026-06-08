@@ -9841,6 +9841,31 @@
                   </div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
+                  <h3>Nuevo lote de facturas</h3>
+                  <p class="muted">Sube un ZIP con carpetas mensuales o varios PDFs/imagenes. El lote queda en revisión antes de aplicarse a contabilidad.</p>
+                  <form id="gestoriaImportUploadForm" class="form-grid">
+                    <label>
+                      Periodo
+                      <input name="periodo" type="text" placeholder="2025, 2026-01..." />
+                    </label>
+                    <label>
+                      Tipo de lote
+                      <select name="tipo_lote">
+                        <option value="emitidas">Emitidas / ventas</option>
+                        <option value="recibidas">Recibidas / compras</option>
+                      </select>
+                    </label>
+                    <label class="span-2">
+                      Archivos
+                      <input id="gestoriaImportUploadFiles" name="files" type="file" accept=".zip,.pdf,.png,.jpg,.jpeg" multiple />
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Procesar lote</button>
+                      <span id="gestoriaImportUploadStatus" class="muted"></span>
+                    </div>
+                  </form>
+                </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="importador">
                   <div class="section-head">
                     <div>
                       <h3>Bandeja de lotes</h3>
@@ -9872,6 +9897,7 @@
                           <option value="ERROR">Error</option>
                         </select>
                       </label>
+                      <button type="button" class="ghost" id="gestoriaImportExcelBtn">Descargar Excel</button>
                       <button type="button" id="gestoriaImportApplyBtn">Aplicar lote</button>
                     </div>
                   </div>

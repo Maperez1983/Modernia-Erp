@@ -14,6 +14,7 @@ import base64
 import hmac
 import re
 import subprocess
+import sys
 import tempfile
 import shutil
 import urllib.request
@@ -8331,6 +8332,104 @@ def _iivtnu_parse_uploaded_pdf(body, content_type=""):
     if not file_bytes:
         raise ValueError("No se encontró el campo file")
     return _iivtnu_extract_from_pdf(file_bytes, filename=filename)
+
+
+def parse_multipart_form_data(body, content_type=""):
+    ctype = str(content_type or "").strip()
+    if "multipart/form-data" not in ctype.lower():
+        raise ValueError("Content-Type debe ser multipart/form-data")
+    import email.policy
+
+    envelope = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8", "ignore") + (body or b"")
+    msg = email.message_from_bytes(envelope, policy=email.policy.default)
+    fields = {}
+    files = []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        cd = str(part.get("Content-Disposition") or "")
+        if "form-data" not in cd.lower():
+            continue
+        name = str(part.get_param("name", header="Content-Disposition") or "").strip()
+        filename = str(part.get_filename() or "").strip()
+        payload = part.get_payload(decode=True) or b""
+        if filename:
+            files.append(
+                {
+                    "field": name,
+                    "filename": filename,
+                    "content_type": str(part.get_content_type() or ""),
+                    "bytes": payload,
+                }
+            )
+        elif name:
+            fields[name] = payload.decode("utf-8", "ignore").strip()
+    return fields, files
+
+
+def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str]]:
+    import zipfile
+
+    allowed = {".pdf", ".png", ".jpg", ".jpeg"}
+    target_dir.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    skipped = []
+
+    def safe_name(value):
+        raw = str(value or "documento").replace("\\", "/").split("/")[-1].strip()
+        raw = re.sub(r"[^A-Za-z0-9._() áéíóúÁÉÍÓÚñÑ-]+", "_", raw)
+        return raw[:180] or "documento"
+
+    def unique_path(base_dir: Path, filename: str) -> Path:
+        name = safe_name(filename)
+        candidate = base_dir / name
+        if not candidate.exists():
+            return candidate
+        stem = candidate.stem
+        suffix = candidate.suffix
+        for idx in range(2, 10000):
+            candidate = base_dir / f"{stem} ({idx}){suffix}"
+            if not candidate.exists():
+                return candidate
+        return base_dir / f"{stem}-{os.urandom(4).hex()}{suffix}"
+
+    for item in files or []:
+        filename = str(item.get("filename") or "").strip()
+        payload = item.get("bytes") or b""
+        suffix = Path(filename).suffix.lower()
+        if not payload:
+            continue
+        if suffix == ".zip":
+            try:
+                with zipfile.ZipFile(BytesIO(payload)) as zf:
+                    for member in zf.infolist():
+                        if member.is_dir():
+                            continue
+                        member_name = str(member.filename or "").replace("\\", "/")
+                        parts = [part for part in member_name.split("/") if part not in {"", ".", ".."}]
+                        if not parts or Path(parts[-1]).suffix.lower() not in allowed:
+                            skipped.append(member_name)
+                            continue
+                        relative_parent = Path(*parts[:-1]) if len(parts) > 1 else Path()
+                        dest_parent = (target_dir / relative_parent).resolve()
+                        if target_dir.resolve() not in dest_parent.parents and dest_parent != target_dir.resolve():
+                            skipped.append(member_name)
+                            continue
+                        dest_parent.mkdir(parents=True, exist_ok=True)
+                        dest = unique_path(dest_parent, parts[-1])
+                        with zf.open(member) as src, dest.open("wb") as out:
+                            shutil.copyfileobj(src, out)
+                        saved += 1
+            except Exception as exc:
+                skipped.append(f"{filename}: {type(exc).__name__}")
+            continue
+        if suffix not in allowed:
+            skipped.append(filename)
+            continue
+        dest = unique_path(target_dir, filename)
+        dest.write_bytes(payload)
+        saved += 1
+    return saved, skipped
 
 
 def _iivtnu_detect_doc_type(text_upper: str) -> str:
@@ -49790,6 +49889,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/gestoria_import_lotes",
+            "/api/gestoria_import_upload",
             "/api/gestoria_import_documentos_bulk",
             "/api/gestoria_import_documento_resolver",
             "/api/gestoria_import_aplicar",
@@ -50032,6 +50132,175 @@ class Handler(BaseHTTPRequestHandler):
                     status=400,
                 )
             return
+        if parsed.path == "/api/gestoria_import_upload":
+            if not self._require_api_auth():
+                return
+            try:
+                self._ensure_db_ready()
+            except DbUnavailableError as exc:
+                try:
+                    Handler._trigger_db_bootstrap_async(self.db_path)
+                except Exception:
+                    pass
+                json_response(
+                    self,
+                    {"error": "DB no disponible", "detail": str(exc)},
+                    status=503,
+                    extra_headers=[("Retry-After", "2")],
+                )
+                return
+            try:
+                fields, files = parse_multipart_form_data(body, content_type=self.headers.get("Content-Type", ""))
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo leer la subida", "detail": Handler._safe_exc_detail(exc)}, status=400)
+                return
+            if not files:
+                json_response(self, {"error": "Selecciona al menos un PDF o ZIP"}, status=400)
+                return
+            payload_fields = dict(fields)
+            payload_fields["servicio"] = "gestoria"
+            conn = None
+            try:
+                conn = get_db(self.db_path)
+                self._track_conn(conn)
+                ensure_tables(self.db_path)
+                ensure_gestoria_import_schema(conn)
+                empresa_id = str(payload_fields.get("empresa_id") or "").strip()
+                if not empresa_id:
+                    empresa_id = infer_empresa_id_for_payload(conn, payload_fields) or ""
+                if not empresa_id:
+                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                    return
+                session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                if session_tmp and not workspace_actor_is_privileged(conn, session_tmp):
+                    ok, err = enforce_empresa_membership(conn, session_tmp, empresa_id, write=True)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
+                empresa_row = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                if not empresa_row:
+                    json_response(self, {"error": "empresa no encontrada"}, status=404)
+                    return
+                cliente_id = str(payload_fields.get("cliente_id") or "").strip() or None
+                if cliente_id:
+                    client_row = conn.execute("SELECT id FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+                    if not client_row:
+                        json_response(self, {"error": "cliente no encontrado"}, status=404)
+                        return
+                periodo = str(payload_fields.get("periodo") or "").strip() or None
+                tipo_lote = normalize_lookup_text(payload_fields.get("tipo_lote") or payload_fields.get("tipo") or "emitidas")
+                folder_name = "EMITIDAS" if "emit" in tipo_lote or "venta" in tipo_lote else "RECIBIDAS"
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_root = Path(tmpdir)
+                    input_dir = tmp_root / folder_name
+                    saved, skipped = safe_extract_invoice_uploads(files, input_dir)
+                    if saved <= 0:
+                        json_response(self, {"error": "No se encontraron PDFs o imágenes procesables", "skipped": skipped[:20]}, status=400)
+                        return
+                    out_excel = tmp_root / "miconversor.xlsx"
+                    out_csv = tmp_root / "review.csv"
+                    out_json = tmp_root / "review.json"
+                    script_path = ROOT.parent / "scripts" / "build_gapp_facturas_excel.py"
+                    template_path = ROOT.parent / "templates" / "Plantilla conversor asientos facturas.xlsx"
+                    cmd = [
+                        sys.executable or "python3",
+                        str(script_path),
+                        "--input-dir",
+                        str(input_dir),
+                        "--recursive",
+                        "--template",
+                        str(template_path),
+                        "--output-excel",
+                        str(out_excel),
+                        "--output-csv",
+                        str(out_csv),
+                        "--output-json",
+                        str(out_json),
+                    ]
+                    run = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=240,
+                        cwd=str(ROOT.parent),
+                    )
+                    if run.returncode != 0:
+                        json_response(
+                            self,
+                            {"error": "El importador falló", "detail": (run.stderr or run.stdout or "").strip()[:2000]},
+                            status=500,
+                        )
+                        return
+                    if not out_json.exists():
+                        json_response(self, {"error": "El importador no generó revisión"}, status=500)
+                        return
+                    parsed_import = json.loads(out_json.read_text(encoding="utf-8"))
+                    records = parsed_import.get("records") or []
+                    lote_id = os.urandom(16).hex()
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_import_lotes (
+                          id, empresa_id, cliente_id, origen, estado, periodo, carpeta_origen,
+                          template_path, notas, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            lote_id,
+                            empresa_id,
+                            cliente_id,
+                            "web_upload",
+                            "nuevo",
+                            periodo,
+                            f"web:{folder_name}",
+                            str(template_path),
+                            f"Subida web · archivos procesables: {saved}",
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                    inserted = 0
+                    for record in records:
+                        if isinstance(record, dict):
+                            upsert_gestoria_import_document(conn, lote_id, empresa_id, cliente_id, record, now_iso)
+                            inserted += 1
+                    lote_row = refresh_gestoria_import_lote_totals(conn, lote_id, now_iso)
+                    log_gestoria_import_event(
+                        conn,
+                        lote_id,
+                        "documentos_cargados",
+                        now_iso,
+                        detalle=f"Subida web procesada: {inserted} documentos",
+                        payload={"saved": saved, "skipped": skipped[:50], "stdout": (run.stdout or "").strip()[-1000:]},
+                    )
+                    conn.commit()
+                    json_response(
+                        self,
+                        {
+                            "ok": True,
+                            "lote_id": lote_id,
+                            "inserted": inserted,
+                            "saved": saved,
+                            "skipped": skipped[:50],
+                            "lote": lote_row,
+                            "excel_rows": parsed_import.get("output_excel_rows"),
+                        },
+                    )
+                    return
+            except subprocess.TimeoutExpired:
+                json_response(self, {"error": "El importador tardó demasiado"}, status=504)
+                return
+            except Exception as exc:
+                try:
+                    if conn:
+                        conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo procesar el lote", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
@@ -77028,6 +77297,120 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+            return
+
+        if path == "/api/gestoria_import_excel":
+            lote_id = params.get("lote_id", [""])[0]
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            if not OPENPYXL_AVAILABLE:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            lote = conn.execute(
+                """
+                SELECT l.*, COALESCE(c.nombre, '') AS cliente
+                FROM gestoria_import_lotes l
+                LEFT JOIN clientes c ON c.id = l.cliente_id
+                WHERE l.id = ?
+                LIMIT 1
+                """,
+                (lote_id,),
+            ).fetchone()
+            if not lote:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            try:
+                session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                if session_tmp and not workspace_actor_is_privileged(conn, session_tmp):
+                    ok, err = enforce_empresa_membership(conn, session_tmp, str(lote["empresa_id"] or ""), write=False)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
+            except Exception:
+                pass
+            docs = conn.execute(
+                """
+                SELECT *
+                FROM gestoria_import_documentos
+                WHERE lote_id = ? AND estado_revision = 'OK'
+                ORDER BY fecha_detectada ASC, created_at ASC
+                """,
+                (lote_id,),
+            ).fetchall()
+            wb = load_workbook(GESTORIA_EXCEL_TEMPLATE) if GESTORIA_EXCEL_TEMPLATE.exists() else Workbook()
+            ws = wb["Hoja1"] if "Hoja1" in wb.sheetnames else wb.active
+            ws.title = "Hoja1"
+            if ws.max_row < 1:
+                headers = [
+                    "FECHA ASIENTO",
+                    "FECHA FACTURA",
+                    "Nº FACTURA",
+                    "CONCEPTO",
+                    "SUBCUENTA",
+                    "NIF",
+                    "NOMBRE",
+                    "DOMICILIO",
+                    "LOCALIDAD",
+                    "PROVINCIA",
+                    "CODIGO POSTAL",
+                    "BASE IMPONIBLE",
+                    "% IVA",
+                    "IMPORTE IVA",
+                    "SUBCUENTA GASTOS/INGRESOS",
+                    "IMPORTE (TOTAL)",
+                ]
+                ws.append(headers)
+                ws.append([None] * 16)
+            style_row_idx = 2
+            style_cells = [ws.cell(style_row_idx, col) for col in range(1, 17)]
+            for row_idx in range(2, max(ws.max_row, style_row_idx) + 1):
+                for col in range(1, 17):
+                    ws.cell(row_idx, col).value = None
+            for offset, doc in enumerate(docs, start=0):
+                row_idx = 2 + offset
+                for col in range(1, 17):
+                    target = ws.cell(row_idx, col)
+                    source = style_cells[col - 1]
+                    target._style = shallow_copy(source._style)
+                    target.number_format = source.number_format
+                    target.protection = shallow_copy(source.protection)
+                    target.alignment = shallow_copy(source.alignment)
+                    target.font = shallow_copy(source.font)
+                    target.fill = shallow_copy(source.fill)
+                    target.border = shallow_copy(source.border)
+                tipo = normalize_service_key(doc["tipo_detectado"] or "")
+                base = round(parse_money_value(doc["base_detectada"]), 2)
+                iva = round(parse_money_value(doc["cuota_iva_detectada"]), 2)
+                total = round(parse_money_value(doc["total_detectado"]), 2)
+                iva_pct = round((iva / base) * 100.0, 2) if base and iva else ""
+                subcuenta_tercero = "430000000" if tipo == "venta" else "400000000"
+                subcuenta_gi = "700000000" if tipo == "venta" else str(doc["cuenta_sugerida"] or "629000000")
+                ws.cell(row_idx, 1).value = doc["fecha_detectada"] or ""
+                ws.cell(row_idx, 2).value = doc["fecha_detectada"] or ""
+                ws.cell(row_idx, 3).value = doc["numero_detectado"] or ""
+                ws.cell(row_idx, 4).value = f'=CONCATENATE(C{row_idx}," ",G{row_idx})'
+                ws.cell(row_idx, 5).value = subcuenta_tercero
+                ws.cell(row_idx, 6).value = doc["nif_detectado"] or ""
+                ws.cell(row_idx, 7).value = doc["tercero_detectado"] or ""
+                ws.cell(row_idx, 12).value = base if base else ""
+                ws.cell(row_idx, 13).value = iva_pct
+                ws.cell(row_idx, 14).value = iva if iva else ""
+                ws.cell(row_idx, 15).value = subcuenta_gi
+                ws.cell(row_idx, 16).value = total if total else ""
+            bio = BytesIO()
+            wb.save(bio)
+            payload = bio.getvalue()
+            cliente_slug = re.sub(r"[^A-Za-z0-9]+", "_", str(lote["cliente"] or "cliente")).strip("_") or "cliente"
+            periodo_slug = re.sub(r"[^A-Za-z0-9]+", "_", str(lote["periodo"] or "lote")).strip("_") or "lote"
+            filename = f"miconversor_{cliente_slug}_{periodo_slug}.xlsx"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload)
             return
 
         if path == "/api/gestoria_asientos":

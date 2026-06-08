@@ -1,10 +1,16 @@
 import sqlite3
+import tempfile
 import unittest
+import zipfile
+from io import BytesIO
+from pathlib import Path
 
 from web.server import (
     apply_gestoria_import_lote,
     ensure_gestoria_import_schema,
+    parse_multipart_form_data,
     refresh_gestoria_import_lote_totals,
+    safe_extract_invoice_uploads,
     upsert_gestoria_import_document,
 )
 
@@ -296,6 +302,29 @@ class GestoriaImportBackendTests(unittest.TestCase):
             "SELECT COUNT(*) AS n FROM gestoria_facturas"
         ).fetchone()["n"]
         self.assertEqual(factura_count, 0)
+
+    def test_multipart_parser_and_zip_extraction_for_invoice_upload(self):
+        boundary = "----crmtest"
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("01 ENERO/factura.pdf", b"%PDF-1.4 fake")
+            zf.writestr("01 ENERO/origen.xlsx", b"xlsx")
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="periodo"\r\n\r\n'
+            "2025\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="files"; filename="emitidas.zip"\r\n'
+            "Content-Type: application/zip\r\n\r\n"
+        ).encode("utf-8") + zip_buffer.getvalue() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        fields, files = parse_multipart_form_data(body, f"multipart/form-data; boundary={boundary}")
+        self.assertEqual(fields["periodo"], "2025")
+        self.assertEqual(len(files), 1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            saved, skipped = safe_extract_invoice_uploads(files, Path(tmpdir))
+            self.assertEqual(saved, 1)
+            self.assertTrue((Path(tmpdir) / "01 ENERO" / "factura.pdf").exists())
+            self.assertTrue(any("origen.xlsx" in item for item in skipped))
 
 
 if __name__ == "__main__":
