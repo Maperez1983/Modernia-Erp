@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+from copy import copy as shallow_copy
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -924,6 +925,90 @@ def write_template_output(template_path: Path, output_path: Path, category_total
     wb.save(output_path)
 
 
+def infer_invoice_excel_accounts(record: dict[str, Any]) -> tuple[str, str]:
+    tipo = str(record.get("tipo") or "").strip().lower()
+    category = str(record.get("categoria_excel") or "").strip().upper()
+    if tipo == "venta" or category == "INGRESO":
+        return "430000000", "700000000"
+    if category == "ALQUILER LOCAL":
+        return "410000000", "621000000"
+    if category == "SUMINISTROS":
+        return "400000000", "628000000"
+    return "400000000", "629000000"
+
+
+def invoice_row_from_record(record: dict[str, Any]) -> list[object]:
+    fecha = str(record.get("fecha") or "").strip()
+    numero = str(record.get("numero") or "").strip()
+    tercero = str(record.get("tercero") or "").strip()
+    nif = str(record.get("nif") or "").strip()
+    base = round(float(record.get("base_imponible") or 0.0), 2)
+    iva = round(float(record.get("cuota_iva") or 0.0), 2)
+    total = round(float(record.get("total") or record.get("importe_agregado") or 0.0), 2)
+    iva_pct = round((iva / base) * 100.0, 2) if base and iva else ""
+    subcuenta_tercero, subcuenta_gi = infer_invoice_excel_accounts(record)
+    return [
+        fecha,
+        fecha,
+        numero,
+        "",
+        subcuenta_tercero,
+        nif,
+        tercero,
+        "",
+        "",
+        "",
+        "",
+        base if base else "",
+        iva_pct,
+        iva if iva else "",
+        subcuenta_gi,
+        total if total else "",
+    ]
+
+
+def write_invoice_rows_output(
+    template_path: Path,
+    output_path: Path,
+    records: list[dict[str, Any]],
+    include_needs_review: bool = False,
+) -> int:
+    wb = load_workbook(template_path)
+    sheet = wb[TEMPLATE_SHEET] if TEMPLATE_SHEET in wb.sheetnames else wb.active
+    style_row_idx = 2
+    max_existing = max(sheet.max_row, style_row_idx)
+    style_cells = [sheet.cell(style_row_idx, col) for col in range(1, 17)]
+    for row_idx in range(2, max_existing + 1):
+        for col in range(1, 17):
+            sheet.cell(row_idx, col).value = None
+
+    rows = [
+        invoice_row_from_record(record)
+        for record in records
+        if record.get("estado_revision") == "OK"
+        or (include_needs_review and record.get("estado_revision") == "REVISAR")
+    ]
+    for offset, row in enumerate(rows, start=0):
+        row_idx = 2 + offset
+        for col in range(1, 17):
+            target = sheet.cell(row_idx, col)
+            source = style_cells[col - 1]
+            target._style = shallow_copy(source._style)
+            target.number_format = source.number_format
+            target.protection = shallow_copy(source.protection)
+            target.alignment = shallow_copy(source.alignment)
+            target.font = shallow_copy(source.font)
+            target.fill = shallow_copy(source.fill)
+            target.border = shallow_copy(source.border)
+        for col, value in enumerate(row, start=1):
+            sheet.cell(row_idx, col).value = value
+        sheet.cell(row_idx, 4).value = f'=CONCATENATE(C{row_idx}," ",G{row_idx})'
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_path)
+    return len(rows)
+
+
 def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0, recursive: bool = False) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     iterator = input_dir.rglob("*") if recursive else input_dir.iterdir()
@@ -1166,7 +1251,12 @@ def main() -> None:
 
     records = scan_documents(input_dir, pdf_pages=max(args.pdf_pages, 1), limit=max(args.limit, 0), recursive=bool(args.recursive))
     category_totals = build_category_totals(records, include_needs_review=args.include_needs_review)
-    write_template_output(template_path, output_excel, category_totals)
+    excel_rows = write_invoice_rows_output(
+        template_path,
+        output_excel,
+        records,
+        include_needs_review=bool(args.include_needs_review),
+    )
 
     if output_csv:
         write_csv(output_csv, records)
@@ -1175,6 +1265,7 @@ def main() -> None:
             "input_dir": str(input_dir),
             "template": str(template_path),
             "output_excel": str(output_excel),
+            "output_excel_rows": excel_rows,
             "category_totals": category_totals,
             "records": records,
         }
@@ -1210,6 +1301,7 @@ def main() -> None:
     duplicate_count = sum(1 for row in records if row.get("estado_revision") == "DUPLICADO")
     print(f"REVISAR: {review_count}")
     print(f"DUPLICADO: {duplicate_count}")
+    print(f"EXCEL_FILAS: {excel_rows}")
     for category in TEMPLATE_CATEGORY_ROWS:
         print(f"{category}: {category_totals.get(category, 0.0):.2f}")
     if db_result:

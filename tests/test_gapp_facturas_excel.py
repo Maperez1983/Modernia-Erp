@@ -22,6 +22,7 @@ from scripts.build_gapp_facturas_excel import (
     preclassify_from_filename,
     review_record,
     scan_documents,
+    write_invoice_rows_output,
     write_template_output,
 )
 from web.server import ensure_tables, open_sqlite_conn
@@ -478,6 +479,80 @@ class GappFacturasExcelTests(unittest.TestCase):
             sheet = result["Hoja1"]
             self.assertAlmostEqual(sheet["B2"].value, 120.5)
             self.assertAlmostEqual(sheet["B3"].value, 300.0)
+
+    def test_write_invoice_rows_output_fills_miconversor_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            template = Path(tmpdir) / "template.xlsx"
+            output = Path(tmpdir) / "output.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Hoja1"
+            ws.append(
+                [
+                    "FECHA ASIENTO",
+                    "FECHA FACTURA",
+                    "Nº FACTURA",
+                    "CONCEPTO",
+                    "SUBCUENTA",
+                    "NIF",
+                    "NOMBRE",
+                    "DOMICILIO",
+                    "LOCALIDAD",
+                    "PROVINCIA",
+                    "CODIGO POSTAL",
+                    "BASE IMPONIBLE",
+                    "% IVA",
+                    "IMPORTE IVA",
+                    "SUBCUENTA GASTOS/INGRESOS",
+                    "IMPORTE (TOTAL)",
+                ]
+            )
+            ws.append([None, None, None, '=CONCATENATE(C2," ",G2)', None, None, None, None, None, None, None, None, None, None, None, None])
+            wb.save(template)
+
+            count = write_invoice_rows_output(
+                template,
+                output,
+                [
+                    {
+                        "fecha": "2025-01-01",
+                        "numero": "01/2025",
+                        "tercero": "Cliente Uno",
+                        "nif": "B12345678",
+                        "tipo": "venta",
+                        "base_imponible": 100.0,
+                        "cuota_iva": 21.0,
+                        "total": 121.0,
+                        "categoria_excel": "INGRESO",
+                        "estado_revision": "OK",
+                    },
+                    {
+                        "fecha": "2025-01-02",
+                        "numero": "02/2025",
+                        "tercero": "Cliente Dos",
+                        "tipo": "venta",
+                        "base_imponible": 71.51,
+                        "cuota_iva": 10.41,
+                        "total": 86.53,
+                        "categoria_excel": "INGRESO",
+                        "estado_revision": "REVISAR",
+                    },
+                ],
+            )
+            self.assertEqual(count, 1)
+            result = load_workbook(output, data_only=False)
+            sheet = result["Hoja1"]
+            self.assertEqual(sheet.cell(2, 1).value, "2025-01-01")
+            self.assertEqual(sheet.cell(2, 3).value, "01/2025")
+            self.assertEqual(sheet.cell(2, 5).value, "430000000")
+            self.assertEqual(sheet.cell(2, 6).value, "B12345678")
+            self.assertEqual(sheet.cell(2, 7).value, "Cliente Uno")
+            self.assertAlmostEqual(float(sheet.cell(2, 12).value), 100.0)
+            self.assertAlmostEqual(float(sheet.cell(2, 13).value), 21.0)
+            self.assertAlmostEqual(float(sheet.cell(2, 14).value), 21.0)
+            self.assertEqual(sheet.cell(2, 15).value, "700000000")
+            self.assertAlmostEqual(float(sheet.cell(2, 16).value), 121.0)
+            self.assertIsNone(sheet.cell(3, 3).value)
 
     def test_build_category_totals_ignores_non_template_categories(self):
         totals = build_category_totals(
