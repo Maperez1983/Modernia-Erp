@@ -59312,7 +59312,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   const ticketMedio = conPrecio > 0 ? facturacionTotal / conPrecio : 0;
   const tasaCobro = facturacionTotal > 0 ? (cobradoTotal / facturacionTotal) * 100 : 0;
   const docsTotal = Number(counts.docs_total || 0);
-  const declaracionesUnicas = Number(counts.declaraciones_unicas || counts.clientes_con_doc || 0);
+  const modelo100Unicos = Number(counts.modelo100_unicos || counts.declaraciones_unicas || 0);
   const pendientesAsignarDocs = Number(counts.docs_pendiente_asignar || 0);
   const sinPrecio = Number(counts.sin_precio || 0);
   const cobradasConPrecio = Number(counts.cobradas_con_precio || 0);
@@ -59320,7 +59320,7 @@ const renderGestoriaRentaDashboard = (payload) => {
   addKpi({
     title: "Campañas renta",
     value: numberFormatter.format(Number(counts.campanas_ejercicio || 0)),
-    note: `Ejercicio ${ejercicio || ""} · Declaraciones: ${numberFormatter.format(declaracionesUnicas)} · Docs: ${numberFormatter.format(docsTotal)}${pendientesAsignarDocs ? ` · Pend. asignar: ${numberFormatter.format(pendientesAsignarDocs)}` : ""}`.trim(),
+    note: `Ejercicio ${ejercicio || ""} · Modelo 100: ${numberFormatter.format(modelo100Unicos)} · Docs: ${numberFormatter.format(docsTotal)}${pendientesAsignarDocs ? ` · Pend. asignar: ${numberFormatter.format(pendientesAsignarDocs)}` : ""}`.trim(),
     onClick: () => setView("all"),
   });
   addKpi({

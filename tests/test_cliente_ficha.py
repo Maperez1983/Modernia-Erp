@@ -423,6 +423,18 @@ class ClienteFichaTests(unittest.TestCase):
               id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
               notas, doc_key, created_at, updated_at
             ) VALUES (
+              'rd-aux-dni', 'e1', 'c1', 'renta', 'renta-2025-aux',
+              'Renta 2025 · DNI Cliente.pdf', 'DNI', '', 'Recibido',
+              '', 'gestoria/rentas/dni.pdf', '2026-06-02T11:00:00', '2026-06-02T11:00:00'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
+              notas, doc_key, created_at, updated_at
+            ) VALUES (
               'rd-ref-linked', 'otra-empresa', 'c1', '', 'renta-2025-camp-extra',
               'Documento fiscal validado.pdf', 'Declaracion presentada', '', 'Presentada',
               'Modelo 100 verificado', 'gestoria/rentas/modelo100-extra.pdf', '2026-06-02T10:00:00', '2026-06-02T10:00:00'
@@ -446,12 +458,16 @@ class ClienteFichaTests(unittest.TestCase):
         dashboard = compute_gestoria_renta_dashboard(self.conn, "e1", "2025")
         summary = compute_gestoria_renta_docs_summary(self.conn, "e1", "2025")
 
-        self.assertEqual(dashboard["counts"]["docs_total"], 2)
+        self.assertEqual(dashboard["counts"]["docs_total"], 3)
         self.assertEqual(dashboard["counts"]["clientes_con_doc"], 1)
+        self.assertEqual(dashboard["counts"]["modelo100_docs_total"], 2)
+        self.assertEqual(dashboard["counts"]["modelo100_unicos"], 1)
         self.assertEqual(dashboard["counts"]["declaraciones_docs_total"], 2)
         self.assertEqual(dashboard["counts"]["declaraciones_unicas"], 1)
-        self.assertEqual(summary["docs_total"], 2)
+        self.assertEqual(summary["docs_total"], 3)
         self.assertEqual(summary["clientes_con_doc"], 1)
+        self.assertEqual(summary["modelo100_docs_total"], 2)
+        self.assertEqual(summary["modelo100_unicos"], 1)
         self.assertEqual(summary["declaraciones_docs_total"], 2)
         self.assertEqual(summary["declaraciones_unicas"], 1)
 

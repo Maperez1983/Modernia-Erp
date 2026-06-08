@@ -29921,6 +29921,38 @@ def gestoria_renta_doc_pending_assign_sql_condition(alias="d", client_alias="c")
     """
 
 
+def gestoria_modelo100_doc_sql_condition(alias="d"):
+    prefix = f"{alias}." if alias else ""
+    positive = f"""
+      (
+        LOWER(COALESCE({prefix}tipo, '')) IN ('modelo 100', 'renta', 'renta presentada', 'declaracion presentada', 'declaración presentada')
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
+        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%irpf%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%irpf%'
+        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%irpf%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta presentad%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE 'renta %'
+      )
+    """
+    auxiliary = f"""
+      (
+        LOWER(COALESCE({prefix}tipo, '')) LIKE '%dni%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%dni%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%firma%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%firma%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%autoriz%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%autoriz%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%certificado%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%certificado%'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%justificante%'
+        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%justificante%'
+      )
+    """
+    return f"(({positive}) AND NOT ({auxiliary}))"
+
+
 def gestoria_renta_doc_year_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
     text_exprs = [
@@ -30336,6 +30368,7 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
     # documentos brutos. No usamos documentos brutos como proxy de Modelos 100.
     try:
         renta_filter = gestoria_renta_doc_sql_condition("d")
+        modelo100_filter = gestoria_modelo100_doc_sql_condition("d")
         year_filter = gestoria_renta_doc_year_sql_condition("d")
         pending_filter = gestoria_renta_doc_pending_assign_sql_condition("d", "c")
         docs_row = conn.execute(
@@ -30345,7 +30378,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
                 d.id,
                 COALESCE(d.cliente_id, '') AS cliente_id,
                 COALESCE(d.archivo_hash, '') AS archivo_hash,
-                CASE WHEN {pending_filter} THEN 1 ELSE 0 END AS pendiente_asignar
+                CASE WHEN {pending_filter} THEN 1 ELSE 0 END AS pendiente_asignar,
+                CASE WHEN {modelo100_filter} THEN 1 ELSE 0 END AS es_modelo100
               FROM gestoria_docs d
               LEFT JOIN clientes c ON c.id = d.cliente_id
               WHERE (
@@ -30374,8 +30408,8 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
               COUNT(*) AS docs_total,
               COUNT(DISTINCT NULLIF(TRIM(cliente_id), '')) AS clientes_con_doc,
               SUM(CASE WHEN pendiente_asignar = 1 THEN 1 ELSE 0 END) AS docs_pendiente_asignar,
-              SUM(CASE WHEN pendiente_asignar = 0 THEN 1 ELSE 0 END) AS declaraciones_docs_total,
-              COUNT(DISTINCT CASE WHEN pendiente_asignar = 0 THEN NULLIF(TRIM(cliente_id), '') ELSE NULL END) AS declaraciones_unicas,
+              SUM(CASE WHEN pendiente_asignar = 0 AND es_modelo100 = 1 THEN 1 ELSE 0 END) AS modelo100_docs_total,
+              COUNT(DISTINCT CASE WHEN pendiente_asignar = 0 AND es_modelo100 = 1 THEN NULLIF(TRIM(cliente_id), '') ELSE NULL END) AS modelo100_unicos,
               (SELECT COUNT(*) FROM shared_hashes) AS hash_compartido_grupos
             FROM renta_docs
             """,
@@ -30383,13 +30417,17 @@ def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
         ).fetchone()
         counts["docs_total"] = int(row_value(docs_row, "docs_total", 0) or 0)
         counts["clientes_con_doc"] = int(row_value(docs_row, "clientes_con_doc", 0) or 0)
-        counts["declaraciones_docs_total"] = int(row_value(docs_row, "declaraciones_docs_total", 0) or 0)
-        counts["declaraciones_unicas"] = int(row_value(docs_row, "declaraciones_unicas", 0) or 0)
+        counts["modelo100_docs_total"] = int(row_value(docs_row, "modelo100_docs_total", 0) or 0)
+        counts["modelo100_unicos"] = int(row_value(docs_row, "modelo100_unicos", 0) or 0)
+        counts["declaraciones_docs_total"] = counts["modelo100_docs_total"]
+        counts["declaraciones_unicas"] = counts["modelo100_unicos"]
         counts["docs_pendiente_asignar"] = int(row_value(docs_row, "docs_pendiente_asignar", 0) or 0)
         counts["hash_compartido_grupos"] = int(row_value(docs_row, "hash_compartido_grupos", 0) or 0)
     except Exception:
         counts["docs_total"] = 0
         counts["clientes_con_doc"] = 0
+        counts["modelo100_docs_total"] = 0
+        counts["modelo100_unicos"] = 0
         counts["declaraciones_docs_total"] = 0
         counts["declaraciones_unicas"] = 0
         counts["docs_pendiente_asignar"] = 0
@@ -30875,6 +30913,8 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
             "docs_total": 0,
             "clientes_con_doc": 0,
             "docs_presentados": 0,
+            "modelo100_docs_total": 0,
+            "modelo100_unicos": 0,
             "declaraciones_docs_total": 0,
             "declaraciones_unicas": 0,
             "docs_pendiente_asignar": 0,
@@ -30889,6 +30929,7 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
             ejercicio_val = ""
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
     renta_filter = gestoria_renta_doc_sql_condition("d")
+    modelo100_filter = gestoria_modelo100_doc_sql_condition("d")
     year_filter = gestoria_renta_doc_year_sql_condition("d")
     pending_filter = gestoria_renta_doc_pending_assign_sql_condition("d", "c")
     row = conn.execute(
@@ -30900,7 +30941,8 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
             COALESCE(d.archivo_hash, '') AS archivo_hash,
             COALESCE(d.estado, '') AS estado,
             COALESCE(d.tipo, '') AS tipo,
-            CASE WHEN {pending_filter} THEN 1 ELSE 0 END AS pendiente_asignar
+            CASE WHEN {pending_filter} THEN 1 ELSE 0 END AS pendiente_asignar,
+            CASE WHEN {modelo100_filter} THEN 1 ELSE 0 END AS es_modelo100
           FROM gestoria_docs d
           LEFT JOIN clientes c ON c.id = d.cliente_id
           WHERE (
@@ -30936,8 +30978,8 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
             END
           ) AS docs_presentados,
           SUM(CASE WHEN pendiente_asignar = 1 THEN 1 ELSE 0 END) AS docs_pendiente_asignar,
-          SUM(CASE WHEN pendiente_asignar = 0 THEN 1 ELSE 0 END) AS declaraciones_docs_total,
-          COUNT(DISTINCT CASE WHEN pendiente_asignar = 0 THEN NULLIF(TRIM(cliente_id), '') ELSE NULL END) AS declaraciones_unicas,
+          SUM(CASE WHEN pendiente_asignar = 0 AND es_modelo100 = 1 THEN 1 ELSE 0 END) AS modelo100_docs_total,
+          COUNT(DISTINCT CASE WHEN pendiente_asignar = 0 AND es_modelo100 = 1 THEN NULLIF(TRIM(cliente_id), '') ELSE NULL END) AS modelo100_unicos,
           (SELECT COUNT(*) FROM shared_hashes) AS hash_compartido_grupos
         FROM renta_docs
         """,
@@ -30951,8 +30993,10 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         "docs_total": int(row_value(row, "docs_total", 0) or 0),
         "clientes_con_doc": int(row_value(row, "clientes_con_doc", 0) or 0),
         "docs_presentados": int(row_value(row, "docs_presentados", 0) or 0),
-        "declaraciones_docs_total": int(row_value(row, "declaraciones_docs_total", 0) or 0),
-        "declaraciones_unicas": int(row_value(row, "declaraciones_unicas", 0) or 0),
+        "modelo100_docs_total": int(row_value(row, "modelo100_docs_total", 0) or 0),
+        "modelo100_unicos": int(row_value(row, "modelo100_unicos", 0) or 0),
+        "declaraciones_docs_total": int(row_value(row, "modelo100_docs_total", 0) or 0),
+        "declaraciones_unicas": int(row_value(row, "modelo100_unicos", 0) or 0),
         "docs_pendiente_asignar": int(row_value(row, "docs_pendiente_asignar", 0) or 0),
         "hash_compartido_grupos": int(row_value(row, "hash_compartido_grupos", 0) or 0),
     }
@@ -78464,15 +78508,17 @@ class Handler(BaseHTTPRequestHandler):
                 campañas_presentadas = int(renta_summary.get("presentadas") or 0)
                 docs_total = int(renta_docs_summary.get("docs_total") or 0)
                 clientes_con_doc = int(renta_docs_summary.get("clientes_con_doc") or 0)
-                declaraciones_unicas = int(renta_docs_summary.get("declaraciones_unicas") or 0)
-                declaraciones_docs_total = int(renta_docs_summary.get("declaraciones_docs_total") or 0)
+                modelo100_unicos = int(renta_docs_summary.get("modelo100_unicos") or renta_docs_summary.get("declaraciones_unicas") or 0)
+                modelo100_docs_total = int(renta_docs_summary.get("modelo100_docs_total") or renta_docs_summary.get("declaraciones_docs_total") or 0)
                 payload["counts"]["rentas_pendientes_presentar"] = int(renta_summary.get("count") or 0)
-                payload["counts"]["rentas_total_ejercicio"] = max(campañas_total, declaraciones_unicas)
-                payload["counts"]["rentas_realizadas"] = max(campañas_presentadas, declaraciones_unicas)
+                payload["counts"]["rentas_total_ejercicio"] = max(campañas_total, modelo100_unicos)
+                payload["counts"]["rentas_realizadas"] = max(campañas_presentadas, modelo100_unicos)
                 payload["counts"]["rentas_docs_total"] = docs_total
                 payload["counts"]["rentas_clientes_con_doc"] = clientes_con_doc
-                payload["counts"]["rentas_declaraciones_unicas"] = declaraciones_unicas
-                payload["counts"]["rentas_declaraciones_docs_total"] = declaraciones_docs_total
+                payload["counts"]["rentas_modelo100_unicos"] = modelo100_unicos
+                payload["counts"]["rentas_modelo100_docs_total"] = modelo100_docs_total
+                payload["counts"]["rentas_declaraciones_unicas"] = modelo100_unicos
+                payload["counts"]["rentas_declaraciones_docs_total"] = modelo100_docs_total
                 payload["counts"]["rentas_docs_pendiente_asignar"] = int(renta_docs_summary.get("docs_pendiente_asignar") or 0)
                 payload["counts"]["rentas_hash_compartido_grupos"] = int(renta_docs_summary.get("hash_compartido_grupos") or 0)
                 payload["counts"]["rentas_ejercicio"] = str(renta_summary.get("ejercicio") or "").strip()
