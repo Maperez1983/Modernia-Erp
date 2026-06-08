@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from web.server import (
     build_cliente_ficha_payload,
+    classify_gestoria_renta_document,
     compute_gestoria_renta_dashboard,
     compute_gestoria_renta_docs_summary,
     ensure_seguro_doc_link,
@@ -97,6 +98,10 @@ class ClienteFichaTests(unittest.TestCase):
               doc_key TEXT,
               doc_url TEXT,
               archivo_hash TEXT,
+              ejercicio_fiscal TEXT,
+              tipo_documento TEXT,
+              estado_revision TEXT,
+              duplicate_of TEXT,
               calidad_ocr TEXT,
               campos_ocr TEXT,
               created_at TEXT,
@@ -470,6 +475,33 @@ class ClienteFichaTests(unittest.TestCase):
         self.assertEqual(summary["modelo100_unicos"], 1)
         self.assertEqual(summary["declaraciones_docs_total"], 2)
         self.assertEqual(summary["declaraciones_unicas"], 1)
+
+    def test_renta_document_classifier_separates_modelo100_from_auxiliary(self):
+        modelo = classify_gestoria_renta_document(
+            self.conn,
+            cliente_id="c1",
+            ejercicio="2025",
+            nombre="Renta 2025 · Presentada.pdf",
+            tipo="Modelo 100",
+            referencia_id="renta-2025-c1",
+            estado="Presentada",
+        )
+        dni = classify_gestoria_renta_document(
+            self.conn,
+            cliente_id="c1",
+            ejercicio="2025",
+            nombre="Renta 2025 · DNI Cliente.pdf",
+            tipo="DNI",
+            referencia_id="renta-2025-aux",
+            estado="Recibido",
+        )
+
+        self.assertEqual(modelo["ejercicio_fiscal"], "2025")
+        self.assertEqual(modelo["tipo_documento"], "modelo_100")
+        self.assertEqual(modelo["estado_revision"], "ok")
+        self.assertEqual(dni["ejercicio_fiscal"], "2025")
+        self.assertEqual(dni["tipo_documento"], "dni")
+        self.assertEqual(dni["estado_revision"], "ok")
 
 
 if __name__ == "__main__":

@@ -29895,7 +29895,8 @@ def gestoria_renta_doc_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
     return f"""
       (
-        LOWER(COALESCE({prefix}referencia_tipo, '')) IN ('renta', 'gestoria_renta', 'gestoria-renta')
+        LOWER(COALESCE({prefix}tipo_documento, '')) IN ('modelo_100', 'renta', 'renta_auxiliar', 'datos_fiscales', 'borrador_renta')
+        OR LOWER(COALESCE({prefix}referencia_tipo, '')) IN ('renta', 'gestoria_renta', 'gestoria-renta')
         OR LOWER(COALESCE({prefix}referencia_id, '')) LIKE 'renta-%'
         OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta%'
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%renta%'
@@ -29912,7 +29913,9 @@ def gestoria_renta_doc_pending_assign_sql_condition(alias="d", client_alias="c")
     client_prefix = f"{client_alias}." if client_alias else ""
     return f"""
       (
-        LOWER(COALESCE({prefix}tipo, '')) LIKE '%pendiente asignar%'
+        LOWER(COALESCE({prefix}estado_revision, '')) IN ('pendiente_asignar', 'conflicto_cliente')
+        OR LOWER(COALESCE({prefix}tipo_documento, '')) = 'pendiente_asignar'
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%pendiente asignar%'
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%pendiente asignar%'
         OR LOWER(COALESCE({prefix}estado, '')) LIKE '%pendiente asignar%'
         OR LOWER(COALESCE({client_prefix}nombre, '')) IN ('rentas clientes', 'pendiente asignar gestoria')
@@ -29925,7 +29928,8 @@ def gestoria_modelo100_doc_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
     positive = f"""
       (
-        LOWER(COALESCE({prefix}tipo, '')) IN ('modelo 100', 'renta', 'renta presentada', 'declaracion presentada', 'declaración presentada')
+        LOWER(COALESCE({prefix}tipo_documento, '')) = 'modelo_100'
+        OR LOWER(COALESCE({prefix}tipo, '')) IN ('modelo 100', 'renta', 'renta presentada', 'declaracion presentada', 'declaración presentada')
         OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
         OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
@@ -29938,7 +29942,8 @@ def gestoria_modelo100_doc_sql_condition(alias="d"):
     """
     auxiliary = f"""
       (
-        LOWER(COALESCE({prefix}tipo, '')) LIKE '%dni%'
+        LOWER(COALESCE({prefix}tipo_documento, '')) IN ('dni', 'firma', 'autorizacion', 'certificado', 'justificante', 'datos_fiscales', 'borrador_renta', 'renta_auxiliar')
+        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%dni%'
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%dni%'
         OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%firma%'
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%firma%'
@@ -29950,7 +29955,7 @@ def gestoria_modelo100_doc_sql_condition(alias="d"):
         OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%justificante%'
       )
     """
-    return f"(({positive}) AND NOT ({auxiliary}))"
+    return f"(({positive}) AND NOT ({auxiliary}) AND LOWER(COALESCE({prefix}estado_revision, '')) NOT IN ('duplicado', 'conflicto_cliente', 'pendiente_asignar'))"
 
 
 def gestoria_renta_doc_year_sql_condition(alias="d"):
@@ -29974,6 +29979,8 @@ def gestoria_renta_doc_year_sql_condition(alias="d"):
     fiscal_any_year = " OR ".join([f"({fiscal_year_block})" for _year in range(2020, 2036)])
     return f"""
       (
+        COALESCE(TRIM(COALESCE({prefix}ejercicio_fiscal, '')), '') = ?
+        OR
         ({fiscal_current})
         OR (
           NOT ({fiscal_any_year})
@@ -30020,12 +30027,132 @@ def gestoria_renta_doc_year_values(ejercicio_val):
         for _col in ("referencia_id", "nombre", "tipo", "notas"):
             any_year_values.extend(other_patterns)
     return [
+        str(ejercicio_val or "").strip(),
         *current_values,
         *any_year_values,
         f"{ejercicio_val}%",
         f"{campaign_upload_year}%",
         f"{campaign_upload_year}%",
     ]
+
+
+def classify_gestoria_renta_document(
+    conn,
+    *,
+    cliente_id="",
+    ejercicio="",
+    nombre="",
+    tipo="",
+    notas="",
+    referencia_id="",
+    estado="",
+    archivo_hash="",
+    doc_key="",
+    exclude_doc_id="",
+):
+    text = normalize_lookup_text(" ".join(str(v or "") for v in (nombre, tipo, notas, referencia_id, estado)))
+    ejercicio_val = str(ejercicio or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio_val or ""):
+        year_values = re.findall(r"20[0-9]{2}", " ".join(str(v or "") for v in (referencia_id, nombre, tipo, notas)))
+        ejercicio_val = year_values[0] if year_values else ""
+    aux_patterns = (
+        " DNI",
+        "FIRMA",
+        "AUTORIZ",
+        "CERTIFICADO",
+        "JUSTIFICANTE",
+        "DATOS FISCALES",
+        "BORRADOR",
+        "CONTRATO",
+        "POLIZA",
+        "PÓLIZA",
+        "FACTURA",
+        "IBI",
+        "MODELO 650",
+        "MODELO 660",
+        "MODELO 390",
+    )
+    is_pending = (
+        "PENDIENTE ASIGNAR" in text
+        or normalize_lookup_text(nombre) in {"RENTAS CLIENTES", "PENDIENTE ASIGNAR GESTORIA"}
+        or not str(cliente_id or "").strip()
+    )
+    is_aux = any(p in f" {text} " for p in aux_patterns)
+    is_modelo100 = (
+        not is_aux
+        and (
+            "MODELO 100" in text
+            or "IRPF" in text
+            or "RENTA PRESENTAD" in text
+            or normalize_lookup_text(tipo) in {"MODELO 100", "RENTA", "RENTA PRESENTADA", "DECLARACION PRESENTADA", "DECLARACIÓN PRESENTADA"}
+        )
+    )
+    if is_pending:
+        tipo_documento = "pendiente_asignar"
+        estado_revision = "pendiente_asignar"
+    elif is_modelo100:
+        tipo_documento = "modelo_100"
+        estado_revision = "ok"
+    elif is_aux:
+        if "DNI" in text:
+            tipo_documento = "dni"
+        elif "FIRMA" in text:
+            tipo_documento = "firma"
+        elif "AUTORIZ" in text:
+            tipo_documento = "autorizacion"
+        elif "DATOS FISCALES" in text:
+            tipo_documento = "datos_fiscales"
+        elif "BORRADOR" in text:
+            tipo_documento = "borrador_renta"
+        elif "JUSTIFICANTE" in text:
+            tipo_documento = "justificante"
+        else:
+            tipo_documento = "renta_auxiliar"
+        estado_revision = "ok"
+    else:
+        tipo_documento = "renta_auxiliar" if "RENTA" in text else ""
+        estado_revision = "revisar" if tipo_documento else ""
+
+    duplicate_of = ""
+    hash_value = str(archivo_hash or "").strip()
+    key_value = str(doc_key or "").strip()
+    cid = str(cliente_id or "").strip()
+    if hash_value or key_value:
+        where = []
+        args = []
+        if hash_value:
+            where.append("COALESCE(archivo_hash, '') = ?")
+            args.append(hash_value)
+        if key_value:
+            where.append("COALESCE(doc_key, '') = ?")
+            args.append(key_value)
+        if where:
+            sql = f"""
+                SELECT id, COALESCE(cliente_id, '') AS cliente_id
+                FROM gestoria_docs
+                WHERE ({' OR '.join(where)})
+                  AND COALESCE(id, '') <> ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """
+            try:
+                row = conn.execute(sql, tuple([*args, str(exclude_doc_id or "").strip()])).fetchone()
+            except Exception:
+                row = None
+            if row:
+                duplicate_of = str(row_value(row, "id", "") or "").strip()
+                other_cid = str(row_value(row, "cliente_id", "") or "").strip()
+                if duplicate_of:
+                    if cid and other_cid and cid != other_cid:
+                        estado_revision = "conflicto_cliente"
+                    else:
+                        estado_revision = "duplicado"
+    return {
+        "ejercicio_fiscal": ejercicio_val,
+        "tipo_documento": tipo_documento,
+        "estado_revision": estado_revision,
+        "duplicate_of": duplicate_of,
+    }
 
 
 def compute_gestoria_renta_dashboard(conn, empresa_id, ejercicio=""):
@@ -33702,6 +33829,10 @@ def ensure_tables(db_path):
         ensure_column(conn, "gestoria_docs", "calidad_ocr", "calidad_ocr TEXT")
         ensure_column(conn, "gestoria_docs", "campos_ocr", "campos_ocr TEXT")
         ensure_column(conn, "gestoria_docs", "archivo_hash", "archivo_hash TEXT")
+        ensure_column(conn, "gestoria_docs", "ejercicio_fiscal", "ejercicio_fiscal TEXT")
+        ensure_column(conn, "gestoria_docs", "tipo_documento", "tipo_documento TEXT")
+        ensure_column(conn, "gestoria_docs", "estado_revision", "estado_revision TEXT")
+        ensure_column(conn, "gestoria_docs", "duplicate_of", "duplicate_of TEXT")
     except Exception:
         pass
     conn.execute(
@@ -69780,6 +69911,7 @@ class Handler(BaseHTTPRequestHandler):
             doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
             doc_key = str(payload.get("doc_key") or "").strip()
             doc_url = str(payload.get("doc_url") or "").strip()
+            archivo_hash = str(payload.get("archivo_hash") or payload.get("file_hash") or "").strip()
             forma_cobro = str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip()
             remesada_raw = payload.get("remesada", current_entry.get("remesada"))
             remesada_val = 1 if str(remesada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
@@ -69788,12 +69920,28 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_key and not doc_url:
                 json_response(self, {"error": "Debes subir un archivo antes de guardar el documento"}, status=400)
                 return
+            doc_meta = classify_gestoria_renta_document(
+                conn,
+                cliente_id=cliente_id,
+                ejercicio=ejercicio,
+                nombre=doc_nombre,
+                tipo=doc_tipo,
+                notas=doc_notas,
+                referencia_id=f"renta-{ejercicio}-{entry_id}",
+                estado=estado_presentacion,
+                archivo_hash=archivo_hash,
+                doc_key=doc_key,
+                exclude_doc_id=doc_id,
+            )
             if doc_id:
                 cur = conn.execute(
                     """
                     UPDATE gestoria_docs
                     SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
-                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?,
+                        archivo_hash = COALESCE(NULLIF(?, ''), archivo_hash),
+                        ejercicio_fiscal = ?, tipo_documento = ?, estado_revision = ?, duplicate_of = ?,
+                        updated_at = datetime(?)
                     WHERE id = ?
                     """,
                     (
@@ -69807,6 +69955,11 @@ class Handler(BaseHTTPRequestHandler):
                         doc_notas,
                         doc_key or None,
                         doc_url or None,
+                        archivo_hash,
+                        doc_meta["ejercicio_fiscal"],
+                        doc_meta["tipo_documento"],
+                        doc_meta["estado_revision"],
+                        doc_meta["duplicate_of"],
                         now,
                         doc_id,
                     ),
@@ -69818,9 +69971,10 @@ class Handler(BaseHTTPRequestHandler):
                         INSERT INTO gestoria_docs (
                           id, empresa_id, cliente_id, referencia_tipo, referencia_id,
                           nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
                           created_at, updated_at
                         ) VALUES (
-                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                         )
                         """,
                         (
@@ -69835,6 +69989,11 @@ class Handler(BaseHTTPRequestHandler):
                             doc_notas,
                             doc_key or None,
                             doc_url or None,
+                            archivo_hash or None,
+                            doc_meta["ejercicio_fiscal"],
+                            doc_meta["tipo_documento"],
+                            doc_meta["estado_revision"],
+                            doc_meta["duplicate_of"],
                             now,
                             now,
                         ),
@@ -69846,9 +70005,10 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO gestoria_docs (
                       id, empresa_id, cliente_id, referencia_tipo, referencia_id,
                       nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                         (
@@ -69863,6 +70023,11 @@ class Handler(BaseHTTPRequestHandler):
                         doc_notas,
                         doc_key or None,
                         doc_url or None,
+                        archivo_hash or None,
+                        doc_meta["ejercicio_fiscal"],
+                        doc_meta["tipo_documento"],
+                        doc_meta["estado_revision"],
+                        doc_meta["duplicate_of"],
                         now,
                         now,
                     ),
@@ -69973,6 +70138,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/renta_quick_ocr":
             doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
             doc_url = str(payload.get("doc_url") or "").strip()
+            archivo_hash = str(payload.get("archivo_hash") or payload.get("file_hash") or "").strip()
             filename = str(payload.get("filename") or "renta.pdf").strip()
             ejercicio = str(payload.get("ejercicio") or "").strip()
             estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
@@ -69999,6 +70165,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(blob) > 30 * 1024 * 1024:
                     json_response(self, {"error": "Archivo demasiado grande (máx 30MB)"}, status=413)
                     return
+                archivo_hash = hashlib.sha256(blob).hexdigest()
                 client = s3_client()
                 if not client:
                     bucket, region = s3_config()
@@ -70035,15 +70202,28 @@ class Handler(BaseHTTPRequestHandler):
             )
             doc_tipo = str(payload.get("tipo") or "").strip() or "Modelo 100"
             doc_estado = "Pendiente"
+            doc_meta = classify_gestoria_renta_document(
+                conn,
+                cliente_id="",
+                ejercicio=ejercicio,
+                nombre=doc_nombre,
+                tipo=doc_tipo,
+                notas="",
+                referencia_id=f"renta-pendiente-{doc_id}",
+                estado=doc_estado,
+                archivo_hash=archivo_hash,
+                doc_key=doc_key,
+            )
             try:
                 conn.execute(
                     """
                     INSERT INTO gestoria_docs (
                       id, empresa_id, cliente_id, referencia_tipo, referencia_id,
                       nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, NULL, 'renta', ?, ?, ?, '', ?, '', ?, ?, datetime(?), datetime(?)
+                      ?, ?, NULL, 'renta', ?, ?, ?, '', ?, '', ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -70055,6 +70235,11 @@ class Handler(BaseHTTPRequestHandler):
                         doc_estado,
                         doc_key or None,
                         doc_url or None,
+                        archivo_hash or None,
+                        doc_meta["ejercicio_fiscal"],
+                        doc_meta["tipo_documento"],
+                        doc_meta["estado_revision"],
+                        doc_meta["duplicate_of"],
                         now,
                         now,
                     ),
@@ -70154,6 +70339,7 @@ class Handler(BaseHTTPRequestHandler):
             estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
             doc_key = str(payload.get("doc_key") or "").strip()
             doc_url = str(payload.get("doc_url") or "").strip()
+            archivo_hash = str(payload.get("archivo_hash") or payload.get("file_hash") or "").strip()
             if not cliente_id or not ejercicio:
                 json_response(self, {"error": "cliente_id y ejercicio requeridos"}, status=400)
                 return
@@ -70237,6 +70423,19 @@ class Handler(BaseHTTPRequestHandler):
             doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
             doc_tipo = str(payload.get("tipo") or "Modelo 100").strip()
             doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
+            doc_meta = classify_gestoria_renta_document(
+                conn,
+                cliente_id=cliente_id,
+                ejercicio=ejercicio,
+                nombre=doc_nombre,
+                tipo=doc_tipo,
+                notas=doc_notas,
+                referencia_id=f"renta-{ejercicio}-{entry_id}",
+                estado=estado_presentacion,
+                archivo_hash=archivo_hash,
+                doc_key=doc_key,
+                exclude_doc_id=doc_id,
+            )
             forma_cobro = str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip()
             remesada_raw = payload.get("remesada", current_entry.get("remesada"))
             remesada_val = 1 if str(remesada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
@@ -70247,7 +70446,10 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     UPDATE gestoria_docs
                     SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
-                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?,
+                        archivo_hash = COALESCE(NULLIF(?, ''), archivo_hash),
+                        ejercicio_fiscal = ?, tipo_documento = ?, estado_revision = ?, duplicate_of = ?,
+                        updated_at = datetime(?)
                     WHERE id = ?
                     """,
                     (
@@ -70261,6 +70463,11 @@ class Handler(BaseHTTPRequestHandler):
                         doc_notas,
                         doc_key or None,
                         doc_url or None,
+                        archivo_hash,
+                        doc_meta["ejercicio_fiscal"],
+                        doc_meta["tipo_documento"],
+                        doc_meta["estado_revision"],
+                        doc_meta["duplicate_of"],
                         now,
                         doc_id,
                     ),
@@ -70274,9 +70481,10 @@ class Handler(BaseHTTPRequestHandler):
                         INSERT INTO gestoria_docs (
                           id, empresa_id, cliente_id, referencia_tipo, referencia_id,
                           nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
                           created_at, updated_at
                         ) VALUES (
-                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                          ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                         )
                         """,
                         (
@@ -70291,6 +70499,11 @@ class Handler(BaseHTTPRequestHandler):
                             doc_notas,
                             doc_key or None,
                             doc_url or None,
+                            archivo_hash or None,
+                            doc_meta["ejercicio_fiscal"],
+                            doc_meta["tipo_documento"],
+                            doc_meta["estado_revision"],
+                            doc_meta["duplicate_of"],
                             now,
                             now,
                         ),
@@ -70302,9 +70515,10 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO gestoria_docs (
                       id, empresa_id, cliente_id, referencia_tipo, referencia_id,
                       nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -70319,6 +70533,11 @@ class Handler(BaseHTTPRequestHandler):
                         doc_notas,
                         doc_key or None,
                         doc_url or None,
+                        archivo_hash or None,
+                        doc_meta["ejercicio_fiscal"],
+                        doc_meta["tipo_documento"],
+                        doc_meta["estado_revision"],
+                        doc_meta["duplicate_of"],
                         now,
                         now,
                     ),
