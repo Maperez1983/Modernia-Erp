@@ -29895,15 +29895,26 @@ def gestoria_renta_doc_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
     return f"""
       (
-        LOWER(COALESCE({prefix}tipo_documento, '')) IN ('modelo_100', 'renta', 'renta_auxiliar', 'datos_fiscales', 'borrador_renta')
-        OR LOWER(COALESCE({prefix}referencia_tipo, '')) IN ('renta', 'gestoria_renta', 'gestoria-renta')
-        OR LOWER(COALESCE({prefix}referencia_id, '')) LIKE 'renta-%'
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta%'
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%renta%'
-        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%renta%'
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
-        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
+        (
+          COALESCE(TRIM(COALESCE({prefix}tipo_documento, '')), '') <> ''
+          AND LOWER(COALESCE({prefix}tipo_documento, '')) IN (
+            'modelo_100', 'renta', 'renta_auxiliar', 'datos_fiscales', 'borrador_renta',
+            'dni', 'firma', 'autorizacion', 'certificado', 'justificante', 'pendiente_asignar'
+          )
+        )
+        OR (
+          COALESCE(TRIM(COALESCE({prefix}tipo_documento, '')), '') = ''
+          AND (
+            LOWER(COALESCE({prefix}referencia_tipo, '')) IN ('renta', 'gestoria_renta', 'gestoria-renta')
+            OR LOWER(COALESCE({prefix}referencia_id, '')) LIKE 'renta-%'
+            OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta%'
+            OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%renta%'
+            OR LOWER(COALESCE({prefix}notas, '')) LIKE '%renta%'
+            OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
+            OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
+            OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
+          )
+        )
       )
     """
 
@@ -29928,16 +29939,24 @@ def gestoria_modelo100_doc_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
     positive = f"""
       (
-        LOWER(COALESCE({prefix}tipo_documento, '')) = 'modelo_100'
-        OR LOWER(COALESCE({prefix}tipo, '')) IN ('modelo 100', 'renta', 'renta presentada', 'declaracion presentada', 'declaración presentada')
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
-        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%irpf%'
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%irpf%'
-        OR LOWER(COALESCE({prefix}notas, '')) LIKE '%irpf%'
-        OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta presentad%'
-        OR LOWER(COALESCE({prefix}nombre, '')) LIKE 'renta %'
+        (
+          COALESCE(TRIM(COALESCE({prefix}tipo_documento, '')), '') <> ''
+          AND LOWER(COALESCE({prefix}tipo_documento, '')) = 'modelo_100'
+        )
+        OR (
+          COALESCE(TRIM(COALESCE({prefix}tipo_documento, '')), '') = ''
+          AND (
+            LOWER(COALESCE({prefix}tipo, '')) IN ('modelo 100', 'renta', 'renta presentada', 'declaracion presentada', 'declaración presentada')
+            OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%modelo 100%'
+            OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%modelo 100%'
+            OR LOWER(COALESCE({prefix}notas, '')) LIKE '%modelo 100%'
+            OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%irpf%'
+            OR LOWER(COALESCE({prefix}nombre, '')) LIKE '%irpf%'
+            OR LOWER(COALESCE({prefix}notas, '')) LIKE '%irpf%'
+            OR LOWER(COALESCE({prefix}tipo, '')) LIKE '%renta presentad%'
+            OR LOWER(COALESCE({prefix}nombre, '')) LIKE 'renta %'
+          )
+        )
       )
     """
     auxiliary = f"""
@@ -29980,14 +29999,18 @@ def gestoria_renta_doc_year_sql_condition(alias="d"):
     return f"""
       (
         COALESCE(TRIM(COALESCE({prefix}ejercicio_fiscal, '')), '') = ?
-        OR
-        ({fiscal_current})
         OR (
-          NOT ({fiscal_any_year})
+          COALESCE(TRIM(COALESCE({prefix}ejercicio_fiscal, '')), '') = ''
           AND (
-            COALESCE({prefix}fecha, '') LIKE ?
-            OR COALESCE({prefix}created_at, '') LIKE ?
-            OR COALESCE({prefix}updated_at, '') LIKE ?
+            ({fiscal_current})
+            OR (
+              NOT ({fiscal_any_year})
+              AND (
+                COALESCE({prefix}fecha, '') LIKE ?
+                OR COALESCE({prefix}created_at, '') LIKE ?
+                OR COALESCE({prefix}updated_at, '') LIKE ?
+              )
+            )
           )
         )
       )

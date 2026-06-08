@@ -476,6 +476,51 @@ class ClienteFichaTests(unittest.TestCase):
         self.assertEqual(summary["declaraciones_docs_total"], 2)
         self.assertEqual(summary["declaraciones_unicas"], 1)
 
+    def test_renta_dashboard_respects_normalized_auxiliary_type(self):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute("UPDATE clientes SET empresa_id = 'e1' WHERE id = 'c1'")
+        self.conn.execute(
+            """
+            INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at)
+            VALUES ('ce-normalized-renta', 'c1', 'e1', 'gestoria', 'Activo', ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_renta, mod_registro, mod_trafico, mod_puntuales,
+              renta_detalles, created_at, updated_at
+            ) VALUES ('cg-normalized-renta', 'c1', 'Particular', 1, 0, 0, 0, ?, ?, ?)
+            """,
+            (json.dumps({"entries": [{"id": "camp-2024", "ejercicio": "2024", "estado_presentacion": "Presentada"}]}), now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado,
+              notas, doc_key, ejercicio_fiscal, tipo_documento, estado_revision, created_at, updated_at
+            ) VALUES (
+              'rd-normalized-aux', 'e1', 'c1', 'renta', 'renta-2024-aux',
+              'Modelo 100 datos fiscales.pdf', 'Modelo 100', '', 'Presentada',
+              'Modelo 100 importado como auxiliar', 'gestoria/rentas/datos-fiscales.pdf',
+              '2024', 'datos_fiscales', 'ok', ?, ?
+            )
+            """,
+            (now, now),
+        )
+        self.conn.commit()
+
+        dashboard = compute_gestoria_renta_dashboard(self.conn, "e1", "2024")
+        summary = compute_gestoria_renta_docs_summary(self.conn, "e1", "2024")
+
+        self.assertEqual(dashboard["counts"]["docs_total"], 1)
+        self.assertEqual(dashboard["counts"]["modelo100_docs_total"], 0)
+        self.assertEqual(dashboard["counts"]["declaraciones_docs_total"], 0)
+        self.assertEqual(summary["docs_total"], 1)
+        self.assertEqual(summary["modelo100_docs_total"], 0)
+        self.assertEqual(summary["declaraciones_docs_total"], 0)
+
     def test_renta_document_classifier_separates_modelo100_from_auxiliary(self):
         modelo = classify_gestoria_renta_document(
             self.conn,
