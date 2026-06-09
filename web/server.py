@@ -75177,9 +75177,15 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
-            if workspace_company_id and workspace_id and not empresa_id:
-                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
-            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if workspace_id:
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            elif empresa_id:
+                empresa_ids = [empresa_id]
+            elif workspace_company_id:
+                resolved_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+                empresa_ids = [resolved_empresa_id] if resolved_empresa_id else []
+            else:
+                empresa_ids = []
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
@@ -77228,8 +77234,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_trabajo_tipos":
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
+            if not empresa_id and workspace_id:
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                empresa_id = str(empresa_ids[0] if empresa_ids else "").strip()
             if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
@@ -77673,24 +77683,27 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_import_lotes":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
-                """
+                f"""
                 SELECT l.id, l.empresa_id, l.cliente_id, l.origen, l.estado, l.periodo,
                        l.carpeta_origen, l.template_path, l.total_documentos, l.total_ok,
                        l.total_revisar, l.total_duplicado, l.total_error, l.notas,
                        l.created_at, l.updated_at, COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_import_lotes l
                 LEFT JOIN clientes c ON c.id = l.cliente_id
-                WHERE l.empresa_id = ?
+                WHERE l.empresa_id IN ({placeholders})
                   AND (? = '' OR COALESCE(l.cliente_id, '') = ?)
                 ORDER BY l.created_at DESC
                 LIMIT 200
                 """,
-                (empresa_id, cliente_id, cliente_id),
+                tuple([*empresa_ids, cliente_id, cliente_id]),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -78189,10 +78202,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_conta_tasks":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             estado = params.get("estado", [""])[0]
             periodo = params.get("periodo", [""])[0]
-            if not cliente_id and not empresa_id:
-                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+            empresa_ids = []
+            if workspace_id:
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+            elif str(empresa_id or "").strip():
+                empresa_ids = [str(empresa_id or "").strip()]
+            if not cliente_id and not empresa_ids:
+                json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
             where = []
             values = []
@@ -78205,9 +78224,13 @@ class Handler(BaseHTTPRequestHandler):
             if estado:
                 where.append("LOWER(t.estado) = ?")
                 values.append(estado.lower())
-            if empresa_id:
-                where.append("c.empresa_id = ?")
-                values.append(empresa_id)
+            if empresa_ids:
+                if len(empresa_ids) == 1:
+                    where.append("c.empresa_id = ?")
+                    values.append(empresa_ids[0])
+                else:
+                    where.append(f"c.empresa_id IN ({','.join(['?'] * len(empresa_ids))})")
+                    values.extend(empresa_ids)
             where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
@@ -78241,18 +78264,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/auditoria":
             empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             entidad = (params.get("entidad", [""])[0] if params else "").strip()
             entidad_id = (params.get("entidad_id", [""])[0] if params else "").strip()
             usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit = params.get("limit", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            empresa_ids = []
+            if workspace_id:
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+            elif str(empresa_id or "").strip():
+                empresa_ids = [str(empresa_id or "").strip()]
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             limit_clause = "LIMIT 50"
             if limit.isdigit():
                 limit_clause = f"LIMIT {int(limit)}"
-            where = ["a.empresa_id = ?"]
-            values = [empresa_id]
+            if len(empresa_ids) == 1:
+                where = ["a.empresa_id = ?"]
+                values = [empresa_ids[0]]
+            else:
+                where = [f"a.empresa_id IN ({','.join(['?'] * len(empresa_ids))})"]
+                values = list(empresa_ids)
             if entidad:
                 where.append("a.entidad = ?")
                 values.append(entidad)

@@ -26461,13 +26461,6 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
       (state.currentWorkspaceDetail?.companies_v2 || state.currentWorkspaceDetail?.companies) || [];
     if (Array.isArray(companies) && companies.length) {
       state.empresas = companies;
-      if (empresaSelect) {
-        empresaSelect.innerHTML = "";
-        empresaSelect.appendChild(createOption("", "Todas las empresas"));
-        companies.forEach((item) => {
-          empresaSelect.appendChild(createOption(item.id, item.nombre));
-        });
-      }
     }
   }
   const empresa = resolveCrmGestoriaEmpresa();
@@ -26486,18 +26479,17 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
           openGestoriaServiceTab(targetTab, { retryEmpresas: false });
         })
         .catch(() => {
-          alert("No se pudo abrir Gestoría: no hay empresa disponible o falló la carga de empresas.");
+          alert("No se pudo abrir Gestoría: no hay workspace disponible o falló la carga.");
         });
       return;
     }
-    alert("No se pudo abrir Gestoría: no hay empresa seleccionada/disponible.");
+    alert("No se pudo abrir Gestoría: no hay workspace seleccionado/disponible.");
     return;
   }
   if (!isTenantWorkspaceMode()) {
     openCompany(empresa.nombre, { allowRestricted: true });
     const legacyId = resolveLegacyEmpresaId(empresa);
     state.crmGestoriaEmpresaId = legacyId;
-    setStoredServiceCompanyId("gestoria", legacyId);
   } else {
     // Tenant: abrir Gestoría sin depender de empresa.
     try {
@@ -26506,9 +26498,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
       setModule("empresas");
       setPage("empresa");
     } catch (e) {}
-    const legacyId = resolveLegacyEmpresaId(empresa);
-    state.crmGestoriaEmpresaId = legacyId;
-    setStoredServiceCompanyId("gestoria", legacyId);
+    state.crmGestoriaEmpresaId = "";
   }
   setTab(tab);
   try {
@@ -26564,7 +26554,7 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash", opts = {}) => {
     return;
   }
   if (targetTab === "gestoria-agenda") {
-    loadAcciones("gestoria", empresa?.id || "", gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     return;
   }
   if (targetTab === "gestoria-fact") {
@@ -31912,15 +31902,16 @@ const loadGestoriaTrabajoTipos = async ({ force = false } = {}) => {
   if (
     !force
     && state.gestoriaTrabajoTiposCache
-    && String(state.gestoriaTrabajoTiposCache.empresaId || "") === String(empresaId || "")
+    && String(state.gestoriaTrabajoTiposCache.scopeKey || "") === String(getGestoriaWorkspaceScopeKey() || empresaId || "")
     && cacheAge >= 0
     && cacheAge < 60000
   ) {
     return state.gestoriaTrabajoTiposCache.rows || [];
   }
-  const data = await api(`/api/gestoria_trabajo_tipos?empresa_id=${encodeURIComponent(empresaId)}`).catch(() => ({ rows: [] }));
+  const params = buildGestoriaWorkspaceParams();
+  const data = await api(`/api/gestoria_trabajo_tipos?${params.toString()}`).catch(() => ({ rows: [] }));
   const rows = Array.isArray(data?.rows) ? data.rows : [];
-  state.gestoriaTrabajoTiposCache = { empresaId, rows, ts: Date.now() };
+  state.gestoriaTrabajoTiposCache = { scopeKey: getGestoriaWorkspaceScopeKey() || empresaId, rows, ts: Date.now() };
   return rows;
 };
 
@@ -31984,7 +31975,7 @@ const bindGestoriaTipoDefaults = (selectEl, handler) => {
 const persistGestoriaTrabajoTipo = async (payload = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) throw new Error("Sin empresa.");
+  if (!empresaId) throw new Error("Sin workspace.");
   const usuario = getCurrentUser();
   const res = await fetch("/api/gestoria_trabajo_tipos_update", {
     method: "POST",
@@ -31999,7 +31990,7 @@ const persistGestoriaTrabajoTipo = async (payload = {}) => {
 const deleteGestoriaTrabajoTipo = async (id) => {
   const empresa = resolveCrmGestoriaEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) throw new Error("Sin empresa.");
+  if (!empresaId) throw new Error("Sin workspace.");
   const usuario = getCurrentUser();
   const res = await fetch("/api/gestoria_trabajo_tipos_delete", {
     method: "POST",
@@ -36206,13 +36197,12 @@ const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
 
 const loadGestoriaContabilidad = () => {
   if (!gestoriaContabilidadTable || !gestoriaContabilidadInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams();
+  if (!params.toString()) {
+    gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`).then(async (data) => {
+  api(`/api/gestoria_contabilidad?${params.toString()}`).then(async (data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin anotaciones contables.</p>";
@@ -36746,12 +36736,11 @@ const createGestoriaContaChecklist = () => {
 
 const loadGestoriaContaQueue = () => {
   if (!gestoriaContaQueueTable || !gestoriaContaQueueInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams();
+  if (!params.toString()) {
+    gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa) });
   if (gestoriaContaQueueFilter && gestoriaContaQueueFilter.value) {
     params.set("estado", gestoriaContaQueueFilter.value);
   }
@@ -36795,11 +36784,11 @@ const loadGestoriaContaQueue = () => {
 };
 
 // Dashboard Gestoría (no admin): evitar avalanchas de peticiones concurrentes a /api/gestoria_trabajos
-// (pueden saturar el pool de Postgres en Render). Cachea la respuesta por empresa unos segundos y
+// (pueden saturar el pool de Postgres en Render). Cachea la respuesta por workspace unos segundos y
 // reutiliza la misma Promise mientras está en vuelo.
 const _gestoriaTrabajosDashCache = new Map();
-const fetchGestoriaTrabajosForDashboard = (empresaId) => {
-  const key = String(empresaId || "").trim();
+const fetchGestoriaTrabajosForDashboard = () => {
+  const key = getGestoriaWorkspaceScopeKey();
   if (!key) return Promise.resolve({ rows: [] });
   const now = Date.now();
   const cached = _gestoriaTrabajosDashCache.get(key);
@@ -36811,7 +36800,8 @@ const fetchGestoriaTrabajosForDashboard = (empresaId) => {
       return cached.promise;
     }
   }
-  const promise = api(`/api/gestoria_trabajos?empresa_id=${encodeURIComponent(key)}&limit=600`)
+  const params = buildGestoriaWorkspaceParams({ limit: "600" });
+  const promise = api(`/api/gestoria_trabajos?${params.toString()}`)
     .then((data) => {
       const payload = data && typeof data === "object" ? data : { rows: [] };
       _gestoriaTrabajosDashCache.set(key, { ts: Date.now(), data: payload, promise: null });
@@ -36827,9 +36817,8 @@ const fetchGestoriaTrabajosForDashboard = (empresaId) => {
 
 const loadGestoriaTrabajosOverview = () => {
   if (!gestoriaTrabajosTable || !gestoriaTrabajosInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  if (!getGestoriaWorkspaceScopeKey()) {
+    gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
   ensureGestoriaTrabajoCategorySelects();
@@ -36853,7 +36842,7 @@ const loadGestoriaTrabajosOverview = () => {
       });
     })
     .catch(() => {});
-  fetchGestoriaTrabajosForDashboard(resolveLegacyEmpresaId(empresa)).then((data) => {
+  fetchGestoriaTrabajosForDashboard().then((data) => {
     let rows = data.rows || [];
     const tipoFilterRaw = gestoriaTrabajosTipoFilter ? gestoriaTrabajosTipoFilter.value.trim() : "";
     const tipoFilter = normalizeGestoriaTrabajoCategory(tipoFilterRaw);
@@ -36917,12 +36906,11 @@ const loadGestoriaTrabajosOverview = () => {
 
 const loadGestoriaModelosOverview = () => {
   if (!gestoriaModelosOverviewTable || !gestoriaModelosOverviewInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams({ scope: "proximos" });
+  if (!params.toString()) {
+    gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa), scope: "proximos" });
   api(`/api/gestoria_modelos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
@@ -36968,13 +36956,12 @@ const loadGestoriaModelosOverview = () => {
 
 const loadGestoriaPipeline = () => {
   if (!gestoriaPipeline) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaPipeline.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  if (!getGestoriaWorkspaceScopeKey()) {
+    gestoriaPipeline.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
   ensureGestoriaTrabajoCategorySelects();
-  fetchGestoriaTrabajosForDashboard(resolveLegacyEmpresaId(empresa)).then((data) => {
+  fetchGestoriaTrabajosForDashboard().then((data) => {
     const rows = data.rows || [];
     const servicioRaw = gestoriaPipelineServicio ? gestoriaPipelineServicio.value.trim() : "";
     const servicio = normalizeGestoriaTrabajoCategory(servicioRaw);
@@ -37066,13 +37053,12 @@ const loadGestoriaPipeline = () => {
 
 const loadGestoriaDocsRecent = () => {
   if (!gestoriaDocsRecent || !gestoriaDocsRecentInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams({ service: "gestoria", limit: "30" });
+  if (!params.toString()) {
+    gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  api(`/api/gestoria_docs?empresa_id=${encodeURIComponent(empresaId)}&service=gestoria&limit=30`).then((data) => {
+  api(`/api/gestoria_docs?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin documentos recientes.</p>";
@@ -37136,13 +37122,12 @@ const loadGestoriaDocsRecent = () => {
 
 const loadGestoriaAuditoria = () => {
   if (!gestoriaAuditTable || !gestoriaAuditInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaAuditTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams({ limit: "50" });
+  if (!params.toString()) {
+    gestoriaAuditTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  api(`/api/auditoria?empresa_id=${encodeURIComponent(empresaId)}&limit=50`)
+  api(`/api/auditoria?${params.toString()}`)
     .then((data) => {
       const rows = data.rows || [];
       if (!rows.length) {
@@ -57746,7 +57731,7 @@ const loadGestoriaCrm = async () => {
   }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
-    gestoriaCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaCrmTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
   if (!isRentaTab && isSearching) {
@@ -57856,22 +57841,12 @@ const loadGestoriaCrm = async () => {
   const limit = gestoriaCrmLimit ? gestoriaCrmLimit.value : "50";
   const noFilters = !rawQuery && !estado && !tipo && !subtipo;
   const isFullWithoutFilters = noFilters && state.gestoriaCrmFull;
-  const empresaLegacyId = resolveLegacyEmpresaId(empresa);
-  const params = new URLSearchParams({
+  const gestoriaScopeKey = getGestoriaWorkspaceScopeKey();
+  const params = buildGestoriaWorkspaceParams({
     tabla: "gestoria",
-    empresa_id: empresaLegacyId,
     q,
     include_id: "1",
   });
-  // En modo tenant/workspace, acotamos por workspace para evitar fugas y para incluir
-  // todas las empresas del workspace (no solo la seleccionada).
-  try {
-    if (isTenantWorkspaceMode() && state.currentWorkspaceId) {
-      params.set("workspace_id", String(state.currentWorkspaceId || "").trim());
-      // Mantiene `empresa_id` (legacy) como compat para migración: si falta vínculo en `workspace_companies`,
-      // el backend puede usar este id para no dejar el CRM vacío.
-    }
-  } catch (e) {}
   if (tipo) {
     params.set("tipo", tipo);
   }
@@ -57900,7 +57875,7 @@ const loadGestoriaCrm = async () => {
     const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
     if (
       state.gestoriaRentaCardsCache &&
-      state.gestoriaRentaCardsCache.empresaId === empresaLegacyId &&
+      state.gestoriaRentaCardsCache.scopeKey === gestoriaScopeKey &&
       String(state.gestoriaRentaCardsCache.estado || "") === String(estado || "") &&
       String(state.gestoriaRentaCardsCache.ejercicio || "") === String(ejercicio || "") &&
       isFreshCache &&
@@ -57919,11 +57894,10 @@ const loadGestoriaCrm = async () => {
       if (gestoriaCrmToggleView) {
         gestoriaCrmToggleView.classList.add("hidden");
       }
-      loadAcciones("gestoria", empresaLegacyId, gestoriaAgendaTable, gestoriaAgendaInfo);
+      loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
       return;
     }
-    const rentaParams = new URLSearchParams({
-      empresa_id: empresaLegacyId,
+    const rentaParams = buildGestoriaWorkspaceParams({
       q: hasSearch ? String(effectiveQuery || "").trim() : "",
       estado,
       // Rendimiento: sin búsqueda cargamos dataset moderado; con búsqueda pedimos resultados filtrados.
@@ -57969,7 +57943,7 @@ const loadGestoriaCrm = async () => {
     const totalHint = Array.isArray(rentaData.rows) ? rentaData.rows.length : 0;
     if (hasSearch) {
       state.gestoriaRentaCardsSearchCache = {
-        empresaId: empresaLegacyId,
+        scopeKey: gestoriaScopeKey,
         estado: String(estado || ""),
         ejercicio: String(ejercicio || ""),
         q: String(searchKey || ""),
@@ -57979,7 +57953,7 @@ const loadGestoriaCrm = async () => {
       };
     } else {
       state.gestoriaRentaCardsCache = {
-        empresaId: empresaLegacyId,
+        scopeKey: gestoriaScopeKey,
         estado: String(estado || ""),
         ejercicio: String(ejercicio || ""),
         rows: rentaRows,
@@ -58003,7 +57977,7 @@ const loadGestoriaCrm = async () => {
     if (gestoriaCrmToggleView) {
       gestoriaCrmToggleView.classList.add("hidden");
     }
-    loadAcciones("gestoria", empresaLegacyId, gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     return;
   }
   let data = await api(`/api/tabla?${params.toString()}`);
@@ -58012,7 +57986,7 @@ const loadGestoriaCrm = async () => {
   // - el usuario está buscando (q), o
   // - está en vista "tabla completa" (gestoriaCrmFull).
   const shouldFallbackGlobal = Boolean(rawQuery) || state.gestoriaCrmFull;
-  if (data && (!data.rows || data.rows.length === 0) && empresa?.id && shouldFallbackGlobal) {
+  if (data && (!data.rows || data.rows.length === 0) && !isTenantWorkspaceMode() && empresa?.id && shouldFallbackGlobal) {
     const fallbackParams = new URLSearchParams(params);
     fallbackParams.delete("empresa_id");
     data = await api(`/api/tabla?${fallbackParams.toString()}`);
@@ -58211,7 +58185,7 @@ const loadGestoriaCrm = async () => {
     if (!gestoriaCrmInfo.textContent) {
       gestoriaCrmInfo.textContent = `Mostrando ${rows.length} clientes de gestoría.`;
     }
-    loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
+    loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     const showFull = state.gestoriaCrmFull === true;
     if (gestoriaCrmTable) gestoriaCrmTable.classList.toggle("hidden", !showFull);
     if (gestoriaCrmSummary) gestoriaCrmSummary.classList.toggle("hidden", showFull);
@@ -58660,6 +58634,26 @@ const resolveGestoriaDashboardEmpresaId = () => {
   return resolveLegacyEmpresaId(empresa);
 };
 
+const getGestoriaWorkspaceScopeKey = () => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (workspaceId) return `workspace:${workspaceId}`;
+  const fallbackEmpresaId = resolveGestoriaDashboardEmpresaId();
+  return fallbackEmpresaId ? `legacy:${fallbackEmpresaId}` : "";
+};
+
+const buildGestoriaWorkspaceParams = (initial = {}) => {
+  const params = new URLSearchParams(initial);
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (workspaceId) {
+    params.set("workspace_id", workspaceId);
+    params.delete("empresa_id");
+    return params;
+  }
+  const fallbackEmpresaId = resolveGestoriaDashboardEmpresaId();
+  if (fallbackEmpresaId) params.set("empresa_id", fallbackEmpresaId);
+  return params;
+};
+
 const setGestoriaDashboardView = (viewKey = "general") => {
   const key = normalizeGestoriaDashboardView(viewKey);
   state.gestoriaDashboardView = key;
@@ -58863,18 +58857,14 @@ const renderGestoriaDashboardModelos = (rows = []) => {
 
 const loadGestoriaDashboardGestiones = async ({ force = false } = {}) => {
   if (!gestoriaDashTrabajosTable || !gestoriaDashTrabajosInfo || !gestoriaDashTrabajosReload) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) {
-    gestoriaDashTrabajosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  if (!getGestoriaWorkspaceScopeKey()) {
+    gestoriaDashTrabajosTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     gestoriaDashTrabajosInfo.textContent = "";
     if (gestoriaDashTrabajosKpis) gestoriaDashTrabajosKpis.innerHTML = "";
     return;
   }
-  const workspaceId = String(state.currentWorkspaceId || "").trim();
   const estadoFiltro = String(gestoriaDashTrabajosEstado?.value || "").trim().toLowerCase();
-  const qs = new URLSearchParams();
-  if (workspaceId) qs.set("workspace_id", workspaceId);
-  else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
+  const qs = buildGestoriaWorkspaceParams();
 
   if (gestoriaDashTrabajosEstado && gestoriaDashTrabajosEstado.dataset.bound !== "1") {
     gestoriaDashTrabajosEstado.dataset.bound = "1";
@@ -60066,7 +60056,7 @@ const renderGestoriaRentaDashboard = (payload) => {
 const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa || !gestoriaDashRentaEjercicio || !gestoriaDashRentaReload) return;
-  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeKey = getGestoriaWorkspaceScopeKey();
   ensureGestoriaDashRentaEjercicioOptions();
   if (gestoriaDashRentaEjercicio.dataset.bound !== "1") {
     gestoriaDashRentaEjercicio.dataset.bound = "1";
@@ -60082,7 +60072,7 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   if (
     !force &&
     state.gestoriaRentaDashCache &&
-    String(state.gestoriaRentaDashCache.scopeKey || "") === String(workspaceId || resolveLegacyEmpresaId(empresa) || "") &&
+    String(state.gestoriaRentaDashCache.scopeKey || "") === String(scopeKey || "") &&
     String(state.gestoriaRentaDashCache.ejercicio || "") === String(ejercicio || "") &&
     isFreshCache
   ) {
@@ -60092,12 +60082,10 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   gestoriaDashRentaReload.disabled = true;
   gestoriaDashRentaReload.textContent = "Cargando...";
   try {
-    const qs = new URLSearchParams({ ejercicio: String(ejercicio || "") });
-    if (workspaceId) qs.set("workspace_id", workspaceId);
-    else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
+    const qs = buildGestoriaWorkspaceParams({ ejercicio: String(ejercicio || "") });
     const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
-    state.gestoriaRentaDashCache = { scopeKey: workspaceId || resolveLegacyEmpresaId(empresa) || "", ejercicio, payload: data, ts: Date.now() };
+    state.gestoriaRentaDashCache = { scopeKey, ejercicio, payload: data, ts: Date.now() };
     if (!state.gestoriaRentaDashView) state.gestoriaRentaDashView = "overview";
     renderGestoriaRentaDashboard(data);
   } catch (err) {
@@ -60134,7 +60122,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   if (!gestoriaDashServiciosKpis || !gestoriaDashServiciosChart || !gestoriaDashServiciosCards) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeKey = getGestoriaWorkspaceScopeKey();
 
   if (gestoriaDashServiciosReload.dataset.bound !== "1") {
     gestoriaDashServiciosReload.dataset.bound = "1";
@@ -60148,8 +60136,8 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
-  const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
-  const expectedKey = workspaceId || resolveLegacyEmpresaId(empresa);
+  const cacheKey = String(state.gestoriaDashAdminCache?.scopeKey || "");
+  const expectedKey = scopeKey;
   if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
     renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: renderKey });
     return;
@@ -60158,12 +60146,10 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   gestoriaDashServiciosReload.disabled = true;
   gestoriaDashServiciosReload.textContent = "Cargando...";
   try {
-    const qs = new URLSearchParams();
-    if (workspaceId) qs.set("workspace_id", workspaceId);
-    else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
+    const qs = buildGestoriaWorkspaceParams();
     const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
-    state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
+    state.gestoriaDashAdminCache = { scopeKey: expectedKey, payload: data, ts: Date.now() };
     renderGestoriaDashServicios(data, { key: renderKey });
   } catch (err) {
     gestoriaDashServiciosKpis.innerHTML = `<p class="muted">No se pudo cargar Servicios: ${escapeHtml(String(err?.message || err || "").trim())}</p>`;
@@ -60177,7 +60163,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
 const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
-  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const scopeKey = getGestoriaWorkspaceScopeKey();
   state.gestoriaScopeEmpresaId = "";
   if (gestoriaDashboardEmpresaScope) {
     gestoriaDashboardEmpresaScope.classList.add("hidden");
@@ -60189,9 +60175,7 @@ const loadGestoriaDashboard = () => {
   setGestoriaDashboardView(desiredView);
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
-  const qsBase = new URLSearchParams();
-  if (workspaceId) qsBase.set("workspace_id", workspaceId);
-  else qsBase.set("empresa_id", resolveLegacyEmpresaId(empresa));
+  const qsBase = buildGestoriaWorkspaceParams();
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
     api(`/api/gestoria_trabajos?${qsBase.toString()}`),
@@ -60227,8 +60211,7 @@ const loadGestoriaDashboard = () => {
     renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
     renderGestoriaDashGeneralProductividad(data.productividad || {});
     try {
-      const expectedKey = workspaceId || resolveLegacyEmpresaId(empresa);
-      state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
+      state.gestoriaDashAdminCache = { scopeKey, payload: data, ts: Date.now() };
     } catch {}
     if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {
       gestoriaDashGeneralProdReload.dataset.bound = "1";
@@ -60533,9 +60516,7 @@ const openGestoriaCrmWithFilters = ({
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  const legacyId = resolveLegacyEmpresaId(empresa);
-  state.crmGestoriaEmpresaId = legacyId;
-  setStoredServiceCompanyId("gestoria", legacyId);
+  state.crmGestoriaEmpresaId = isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -60584,9 +60565,7 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  const legacyId = resolveLegacyEmpresaId(empresa);
-  state.crmGestoriaEmpresaId = legacyId;
-  setStoredServiceCompanyId("gestoria", legacyId);
+  state.crmGestoriaEmpresaId = isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -60607,9 +60586,7 @@ const openGestoriaRentaCampaign = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (!isTenantWorkspaceMode()) openCompany(empresa.nombre, { allowRestricted: true });
-  const legacyId = resolveLegacyEmpresaId(empresa);
-  state.crmGestoriaEmpresaId = legacyId;
-  setStoredServiceCompanyId("gestoria", legacyId);
+  state.crmGestoriaEmpresaId = isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -64481,15 +64458,14 @@ const loadGestoriaBdt = async () => {
     gestoriaBdtInfo.textContent = "";
     return;
   }
-  const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
-  if (!empresa) {
-    gestoriaBdtTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildGestoriaWorkspaceParams({ tabla: "gestoria" });
+  if (!params.toString()) {
+    gestoriaBdtTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     gestoriaBdtInfo.textContent = "";
     return;
   }
   gestoriaBdtInfo.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ tabla: "gestoria", empresa_id: resolveLegacyEmpresaId(empresa) });
     const data = await api(`/api/tabla?${params}`);
     if (data?.error) {
       gestoriaBdtTable.innerHTML = `<p class='muted'>${data.error}</p>`;
@@ -66060,6 +66036,7 @@ const resolveAgendaEmpresaIdForService = (servicio = "") => {
 };
 
 const buildAgendaActionParams = (servicio, extra = {}) => {
+  const serviceKey = normalizeSimple(servicio || "");
   const params = new URLSearchParams({ servicio: String(servicio || "").trim() });
   Object.entries(extra || {}).forEach(([key, value]) => {
     const raw = String(value ?? "").trim();
@@ -66072,8 +66049,9 @@ const buildAgendaActionParams = (servicio, extra = {}) => {
       || String(state.homeTimeStatus?.workspace_id || "").trim()
       || (() => {
         try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
-      })();
+    })();
     if (ws && !params.get("workspace_id")) params.set("workspace_id", ws);
+    if (serviceKey === "gestoria") params.delete("empresa_id");
     const wcId = String(state.currentWorkspaceCompanyWsId || "").trim();
     if (wcId && !params.get("workspace_company_id")) params.set("workspace_company_id", wcId);
   } else if (!params.get("empresa_id")) {
@@ -66359,7 +66337,7 @@ const submitGestoriaTrabajoForm = async (form, statusEl, afterSubmit) => {
   }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
-    if (statusEl) statusEl.textContent = "Sin empresa.";
+    if (statusEl) statusEl.textContent = "Sin workspace.";
     return;
   }
   if (statusEl) statusEl.textContent = "Guardando...";
@@ -66512,18 +66490,12 @@ const loadGestoriaDocs = (clienteId) => {
 
 const loadGestoriaClienteAgenda = (clienteId) => {
   if (!gestoriaClienteAgendaTable || !gestoriaClienteAgendaInfo) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) {
-    gestoriaClienteAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const params = buildAgendaActionParams("gestoria", { cliente_id: clienteId });
+  if (!params.get("workspace_id") && !params.get("empresa_id")) {
+    gestoriaClienteAgendaTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     return;
   }
   gestoriaClienteAgendaTable.dataset.service = "gestoria";
-  const params = new URLSearchParams({
-    servicio: "gestoria",
-    empresa_id: empresaId,
-    cliente_id: clienteId,
-  });
   api(`/api/acciones?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (state.currentPage === "cliente") {
@@ -66569,9 +66541,8 @@ const loadGestoriaClienteDashboard = (clienteId) => {
   const modelosReq = api(`/api/gestoria_modelos?cliente_id=${clienteId}`);
   const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${clienteId}`);
   const docsReq = api(`/api/gestoria_docs?cliente_id=${clienteId}`);
-  const empresaId = resolveLegacyEmpresaId(empresa);
   const accionesReq = api(
-    `/api/acciones?servicio=gestoria&empresa_id=${encodeURIComponent(empresaId)}&cliente_id=${clienteId}`
+    `/api/acciones?${buildAgendaActionParams("gestoria", { cliente_id: clienteId }).toString()}`
   );
   Promise.all([modelosReq, trabajosReq, docsReq, accionesReq]).then(
     ([modelosData, trabajosData, docsData, accionesData]) => {
@@ -66950,23 +66921,23 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
   gestoriaImportLotesTable.appendChild(table);
   fillGestoriaImportSelectedLoteMeta(visibleRows.find((row) => row.id === selectedId) || null);
   if (gestoriaImportLotesInfo) {
-    gestoriaImportLotesInfo.textContent = `Mostrando ${visibleRows.length} lotes${exactRows.length ? " del cliente" : " recientes de la empresa"}${unassignedRows.length ? " · incluye lotes sin cliente asignado" : ""}.`;
+    gestoriaImportLotesInfo.textContent = `Mostrando ${visibleRows.length} lotes${exactRows.length ? " del cliente" : " recientes del workspace"}${unassignedRows.length ? " · incluye lotes sin cliente asignado" : ""}.`;
   }
   loadGestoriaImportLoteDocuments(selectedId);
 };
 
 const loadGestoriaClienteImportador = (clienteId) => {
   if (!gestoriaImportLotesTable) return;
-  const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!clienteId || !empresaId) {
-    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+  const params = buildGestoriaWorkspaceParams();
+  if (clienteId) params.set("cliente_id", clienteId);
+  if (!clienteId || !params.toString()) {
+    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o workspace seleccionado.</p>";
     if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
     fillGestoriaImportSelectedLoteMeta(null);
     renderGestoriaImportDocsTable([]);
     return;
   }
-  return api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresaId)}`)
+  return api(`/api/gestoria_import_lotes?${params.toString()}`)
     .then((data) => {
       renderGestoriaImportLotesTable(clienteId, data.rows || []);
     })
@@ -67731,7 +67702,7 @@ const createGestoriaRentaCampaign = async () => {
   try {
     const empresa = resolveCrmGestoriaEmpresa();
     const empresaId = resolveLegacyEmpresaId(empresa);
-    if (!empresaId) throw new Error("Selecciona empresa de Gestoría.");
+    if (!empresaId) throw new Error("Workspace de Gestoría no disponible.");
     const { entryId, renta_detalles } = buildRentaDetallesPayloadWithNewEntry(row, ejercicio);
     const res = await fetch("/api/cliente_gestoria_update", {
       method: "POST",
@@ -67895,7 +67866,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
     createBtn.addEventListener("click", async () => {
       const empresa = resolveCrmGestoriaEmpresa();
       if (!empresa) {
-        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa de Gestoría.";
+        if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin workspace de Gestoría.";
         return;
       }
       const nif = String(ctx.nif || "").trim().toUpperCase();
@@ -68019,7 +67990,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
 const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
-    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa.";
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin workspace.";
     return;
   }
   const ejercicio = String(ctx.ejercicio || "").trim();
@@ -68100,7 +68071,7 @@ const submitGestoriaRentaQuick = async () => {
   if (!gestoriaRentaQuickForm) return;
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
-    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin empresa.";
+    if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin workspace.";
     return;
   }
   // Nota: en algunos navegadores/flows (p.ej. PWA/Windows) el input puede re-montarse y
@@ -68383,7 +68354,7 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
   }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
-    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Sin empresa.";
+    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Sin workspace.";
     return;
   }
   const row = state.currentClienteGestoriaData || {};
@@ -70166,15 +70137,18 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     .filter((row) => normalizeSimple(row.servicio || "") === "inmobiliaria")
     .map((row) => empresaByName.get(row.empresa))
     .filter(Boolean);
-  const contaIds = gestoriaEmpresaIds.length
-    ? gestoriaEmpresaIds
-    : ((state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY)?.id
-      ? [(state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY).id]
-      : []);
-  const contaReqs = contaIds.map((empresaId) =>
-    api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`)
-      .catch(() => ({ rows: [] }))
-  );
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const contaReqs = workspaceId
+    ? [api(`/api/gestoria_contabilidad?workspace_id=${encodeURIComponent(workspaceId)}`).catch(() => ({ rows: [] }))]
+    : (gestoriaEmpresaIds.length
+        ? gestoriaEmpresaIds
+        : ((state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY)?.id
+          ? [(state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY).id]
+          : [])
+      ).map((empresaId) =>
+        api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`)
+          .catch(() => ({ rows: [] }))
+      );
   const finReqs = finEmpresaIds.map((empresaId) =>
     getTableRowsByEmpresa("hipotecas", empresaId, clienteNombre).catch(() => ({ columns: [], rows: [] }))
   );
@@ -70381,19 +70355,24 @@ const loadClienteFacturasServicios = async (clienteId, empresas = [], prefetched
     clienteFacturas.appendChild(table);
     return;
   }
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
   const empresaByName = new Map((state.empresas || []).map((item) => [item.nombre, item.id]));
-  const gestoriaEmpresaIds = (empresas || [])
-    .filter((row) => normalizeSimple(row.servicio || "") === "gestoria")
-    .map((row) => empresaByName.get(row.empresa))
-    .filter(Boolean);
-  if (!gestoriaEmpresaIds.length) {
+  const gestoriaEmpresaIds = workspaceId
+    ? []
+    : (empresas || [])
+        .filter((row) => normalizeSimple(row.servicio || "") === "gestoria")
+        .map((row) => empresaByName.get(row.empresa))
+        .filter(Boolean);
+  if (!workspaceId && !gestoriaEmpresaIds.length) {
     clienteFacturas.innerHTML = "<p class='muted'>Sin facturación registrada para servicios adscritos.</p>";
     return;
   }
   const payloads = await Promise.all(
-    gestoriaEmpresaIds.map((id) =>
-      api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(id)}`).catch(() => ({ rows: [] }))
-    )
+    workspaceId
+      ? [api(`/api/gestoria_contabilidad?workspace_id=${encodeURIComponent(workspaceId)}`).catch(() => ({ rows: [] }))]
+      : gestoriaEmpresaIds.map((id) =>
+          api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(id)}`).catch(() => ({ rows: [] }))
+        )
   );
   const rows = payloads
     .flatMap((item) => item.rows || [])
@@ -72301,7 +72280,7 @@ const closeClienteDetail = () => {
         loadGestoriaContaQueue();
       } else if (returnTab === "gestoria-agenda") {
         const empresa = resolveCrmGestoriaEmpresa();
-        if (empresa) loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
+        if (empresa) loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
       } else if (returnTab === "gestoria-fact") {
         loadGestoriaFact();
       }
@@ -72975,7 +72954,7 @@ viewTabs.addEventListener("click", (event) => {
   if (currentTab === "gestoria-agenda") {
     const empresa = resolveCrmGestoriaEmpresa();
     if (empresa) {
-      loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
+      loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
     }
     updateTableVisibility();
     return;
@@ -81590,7 +81569,7 @@ if (gestoriaDocsForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaDocsStatus) gestoriaDocsStatus.textContent = "Sin empresa.";
+      if (gestoriaDocsStatus) gestoriaDocsStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaDocsForm);
@@ -81659,7 +81638,7 @@ if (gestoriaClienteDocsForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaClienteDocsStatus) gestoriaClienteDocsStatus.textContent = "Sin empresa.";
+      if (gestoriaClienteDocsStatus) gestoriaClienteDocsStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaClienteDocsForm);
@@ -81948,7 +81927,7 @@ if (gestoriaDocForm) {
     payload.cliente_id = state.currentClienteId;
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaDocStatus) gestoriaDocStatus.textContent = "Sin empresa.";
+      if (gestoriaDocStatus) gestoriaDocStatus.textContent = "Sin workspace.";
       return;
     }
     payload.empresa_nombre = empresa.nombre;
@@ -81989,7 +81968,7 @@ if (gestoriaClienteAgendaForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaClienteAgendaStatus) gestoriaClienteAgendaStatus.textContent = "Sin empresa.";
+      if (gestoriaClienteAgendaStatus) gestoriaClienteAgendaStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaClienteAgendaForm);
@@ -82356,7 +82335,7 @@ if (gestoriaCrmForm) {
     const payload = Object.fromEntries(formData.entries());
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaCrmStatus) gestoriaCrmStatus.textContent = "Sin empresa.";
+      if (gestoriaCrmStatus) gestoriaCrmStatus.textContent = "Sin workspace.";
       return;
     }
     payload.empresa_nombre = empresa.nombre;
@@ -82402,7 +82381,7 @@ if (gestoriaTrabajoForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaTrabajoStatus) gestoriaTrabajoStatus.textContent = "Sin empresa.";
+      if (gestoriaTrabajoStatus) gestoriaTrabajoStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaTrabajoForm);
@@ -82471,7 +82450,7 @@ if (gestoriaAgendaForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaAgendaStatus) gestoriaAgendaStatus.textContent = "Sin empresa.";
+      if (gestoriaAgendaStatus) gestoriaAgendaStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaAgendaForm);
@@ -82494,7 +82473,7 @@ if (gestoriaAgendaForm) {
           gestoriaAgendaStatus.textContent = "Guardado.";
         }
         gestoriaAgendaForm.reset();
-        loadAcciones("gestoria", resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
+        loadAcciones("gestoria", isTenantWorkspaceMode() ? "" : resolveLegacyEmpresaId(empresa), gestoriaAgendaTable, gestoriaAgendaInfo);
       })
       .catch(() => {
         if (gestoriaAgendaStatus) {
@@ -82521,7 +82500,7 @@ if (gestoriaContabilidadForm) {
     }
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Sin empresa.";
+      if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaContabilidadForm);
@@ -82623,7 +82602,7 @@ if (gestoriaContaTasksBtn) {
 if (gestoriaContaQueueBtn) {
   gestoriaContaQueueBtn.addEventListener("click", () => {
     const empresa = resolveCrmGestoriaEmpresa();
-    if (empresa?.nombre) openCompany(empresa.nombre);
+    if (!isTenantWorkspaceMode() && empresa?.nombre) openCompany(empresa.nombre);
     setTab("gestoria-conta");
     loadGestoriaContabilidad();
     loadGestoriaContaQueue();
@@ -82633,7 +82612,7 @@ if (gestoriaContaQueueBtn) {
 if (gestoriaImportQueueBtn) {
   gestoriaImportQueueBtn.addEventListener("click", () => {
     const empresa = resolveCrmGestoriaEmpresa();
-    if (empresa?.nombre) openCompany(empresa.nombre);
+    if (!isTenantWorkspaceMode() && empresa?.nombre) openCompany(empresa.nombre);
     setTab("gestoria-conta");
     loadGestoriaContabilidad();
     loadGestoriaContaQueue();
@@ -82649,7 +82628,7 @@ if (gestoriaImportUploadForm) {
     const files = Array.from(gestoriaImportUploadFiles?.files || []);
     if (!empresaId || !clienteId) {
       if (gestoriaImportUploadStatus) {
-        gestoriaImportUploadStatus.textContent = "Selecciona cliente y empresa antes de importar.";
+        gestoriaImportUploadStatus.textContent = "Selecciona cliente y workspace antes de importar.";
       }
       return;
     }
@@ -82786,7 +82765,7 @@ if (gestoriaImportReviewForm) {
     if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Guardando revisión...";
     const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) {
-      if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Sin empresa.";
+      if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Sin workspace.";
       return;
     }
     const formData = new FormData(gestoriaImportReviewForm);
@@ -82835,7 +82814,7 @@ if (gestoriaClienteLibroExcelBtn) {
     const empresaId = resolveLegacyEmpresaId(empresa);
     if (!clienteId || !empresaId) {
       if (gestoriaClienteLibroExcelStatus) {
-        gestoriaClienteLibroExcelStatus.textContent = "Cliente o empresa no disponible.";
+        gestoriaClienteLibroExcelStatus.textContent = "Cliente o workspace no disponible.";
       }
       return;
     }
@@ -83381,8 +83360,7 @@ if (empresaSelect) {
       return;
     }
     if (String(currentTab || "").startsWith("gestoria-")) {
-      state.crmGestoriaEmpresaId = empresaSelect.value;
-      setStoredServiceCompanyId("gestoria", empresaSelect.value);
+      state.crmGestoriaEmpresaId = "";
       openGestoriaServiceTab(currentTab);
       return;
     }
@@ -83924,7 +83902,7 @@ if (gestoriaAltaForm) {
     const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
     if (!fincas) {
       if (gestoriaAltaStatus) {
-        gestoriaAltaStatus.textContent = "Empresa gestoría no encontrada.";
+        gestoriaAltaStatus.textContent = "Workspace de Gestoría no disponible.";
       }
       return;
     }
