@@ -58874,7 +58874,7 @@ const loadGestoriaDashboardGestiones = async ({ force = false } = {}) => {
   const qs = new URLSearchParams();
   if (workspaceId) qs.set("workspace_id", workspaceId);
   else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-  if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+  if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
 
   if (gestoriaDashTrabajosEstado && gestoriaDashTrabajosEstado.dataset.bound !== "1") {
     gestoriaDashTrabajosEstado.dataset.bound = "1";
@@ -60090,7 +60090,7 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
     const qs = new URLSearchParams({ ejercicio: String(ejercicio || "") });
     if (workspaceId) qs.set("workspace_id", workspaceId);
     else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-    if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+    if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     state.gestoriaRentaDashCache = { empresaId: scopeEmpresaId, ejercicio, payload: data, ts: Date.now() };
@@ -60146,7 +60146,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
   const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
-  const expectedKey = scopeEmpresaId || resolveLegacyEmpresaId(empresa);
+  const expectedKey = scopeEmpresaId || workspaceId || resolveLegacyEmpresaId(empresa);
   if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
     renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: renderKey });
     return;
@@ -60158,7 +60158,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
     const qs = new URLSearchParams();
     if (workspaceId) qs.set("workspace_id", workspaceId);
     else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-    if (scopeEmpresaId) qs.set("empresa_id", scopeEmpresaId);
+    if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
@@ -60207,7 +60207,7 @@ const loadGestoriaDashboard = () => {
   const qsBase = new URLSearchParams();
   if (workspaceId) qsBase.set("workspace_id", workspaceId);
   else qsBase.set("empresa_id", resolveLegacyEmpresaId(empresa));
-  if (scopeEmpresaId) qsBase.set("empresa_id", scopeEmpresaId);
+  if (scopeEmpresaId) qsBase.set("scope_empresa_id", scopeEmpresaId);
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
     api(`/api/gestoria_trabajos?${qsBase.toString()}`),
@@ -60243,7 +60243,7 @@ const loadGestoriaDashboard = () => {
     renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
     renderGestoriaDashGeneralProductividad(data.productividad || {});
     try {
-      const expectedKey = scopeEmpresaId || resolveLegacyEmpresaId(empresa);
+      const expectedKey = scopeEmpresaId || workspaceId || resolveLegacyEmpresaId(empresa);
       state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
     } catch {}
     if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {

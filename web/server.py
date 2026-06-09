@@ -75211,11 +75211,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_renta_dashboard":
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            scope_empresa_id = str(params.get("scope_empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
-            if workspace_company_id and workspace_id and not empresa_id:
-                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
-            empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+            if workspace_company_id and workspace_id and not scope_empresa_id:
+                scope_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+            if scope_empresa_id:
+                empresa_ids = [scope_empresa_id]
+            elif workspace_id:
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            elif empresa_id:
+                empresa_ids = [empresa_id]
+            else:
+                empresa_ids = []
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
@@ -77154,16 +77162,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_trabajos":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            scope_empresa_id = str(params.get("scope_empresa_id", [""])[0] or "").strip()
             limit_raw = (params.get("limit", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             empresa_ids = []
-            if str(empresa_id or "").strip():
-                empresa_ids = [str(empresa_id or "").strip()]
+            if scope_empresa_id:
+                empresa_ids = [scope_empresa_id]
             elif workspace_id:
                 try:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                 except Exception:
                     empresa_ids = []
+            elif str(empresa_id or "").strip():
+                empresa_ids = [str(empresa_id or "").strip()]
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
@@ -78457,8 +78468,16 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/gestoria_dashboard":
                 empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+                scope_empresa_id = str(params.get("scope_empresa_id", [""])[0] or "").strip()
                 workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
-                empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
+                if scope_empresa_id:
+                    empresa_ids = [scope_empresa_id]
+                elif workspace_id:
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+                elif empresa_id:
+                    empresa_ids = [empresa_id]
+                else:
+                    empresa_ids = []
                 if not empresa_ids:
                     json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                     return
