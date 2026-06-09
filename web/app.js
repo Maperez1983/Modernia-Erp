@@ -58656,8 +58656,6 @@ const normalizeGestoriaDashboardView = (viewKey = "") => {
 };
 
 const resolveGestoriaDashboardEmpresaId = () => {
-  const scoped = String(state.gestoriaScopeEmpresaId || "").trim();
-  if (scoped) return scoped;
   const empresa = resolveCrmGestoriaEmpresa();
   return resolveLegacyEmpresaId(empresa);
 };
@@ -58762,9 +58760,11 @@ const renderGestoriaDashKpis = (target, items = []) => {
 
 const loadGestoriaDashboardModelos = async ({ force = false } = {}) => {
   if (!gestoriaDashModelosTable || !gestoriaDashModelosInfo || !gestoriaDashModelosReload) return;
-  const empresaId = resolveGestoriaDashboardEmpresaId();
-  if (!empresaId) {
-    gestoriaDashModelosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const fallbackEmpresaId = resolveGestoriaDashboardEmpresaId();
+  const scopeKey = workspaceId || fallbackEmpresaId;
+  if (!scopeKey) {
+    gestoriaDashModelosTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     gestoriaDashModelosInfo.textContent = "";
     return;
   }
@@ -58791,7 +58791,7 @@ const loadGestoriaDashboardModelos = async ({ force = false } = {}) => {
   if (
     !force &&
     state.gestoriaDashModelosCache &&
-    String(state.gestoriaDashModelosCache.empresaId || "") === String(empresaId || "") &&
+    String(state.gestoriaDashModelosCache.scopeKey || "") === String(scopeKey || "") &&
     String(state.gestoriaDashModelosCache.scope || "") === String(scope || "") &&
     isFreshCache
   ) {
@@ -58803,10 +58803,12 @@ const loadGestoriaDashboardModelos = async ({ force = false } = {}) => {
   gestoriaDashModelosReload.disabled = true;
   gestoriaDashModelosReload.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ empresa_id: empresaId, scope });
+    const params = new URLSearchParams({ scope });
+    if (workspaceId) params.set("workspace_id", workspaceId);
+    else params.set("empresa_id", fallbackEmpresaId);
     const data = await api(`/api/gestoria_modelos?${params.toString()}`);
     if (data?.error) throw new Error(String(data.error));
-    state.gestoriaDashModelosCache = { empresaId, scope, payload: data, ts: Date.now() };
+    state.gestoriaDashModelosCache = { scopeKey, scope, payload: data, ts: Date.now() };
     renderGestoriaDashboardModelos(data.rows || []);
   } catch (err) {
     gestoriaDashModelosTable.innerHTML = `<p class="muted">No se pudieron cargar los modelos: ${escapeHtml(String(err?.message || err || ""))}</p>`;
@@ -58869,12 +58871,10 @@ const loadGestoriaDashboardGestiones = async ({ force = false } = {}) => {
     return;
   }
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
   const estadoFiltro = String(gestoriaDashTrabajosEstado?.value || "").trim().toLowerCase();
   const qs = new URLSearchParams();
   if (workspaceId) qs.set("workspace_id", workspaceId);
   else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-  if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
 
   if (gestoriaDashTrabajosEstado && gestoriaDashTrabajosEstado.dataset.bound !== "1") {
     gestoriaDashTrabajosEstado.dataset.bound = "1";
@@ -59002,9 +59002,11 @@ const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {})
 
 const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
   if (!gestoriaDashContaTable || !gestoriaDashContaInfo || !gestoriaDashContaReload) return;
-  const empresaId = resolveGestoriaDashboardEmpresaId();
-  if (!empresaId) {
-    gestoriaDashContaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const fallbackEmpresaId = resolveGestoriaDashboardEmpresaId();
+  const scopeKey = workspaceId || fallbackEmpresaId;
+  if (!scopeKey) {
+    gestoriaDashContaTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
     gestoriaDashContaInfo.textContent = "";
     if (gestoriaDashContaKpis) gestoriaDashContaKpis.innerHTML = "";
     return;
@@ -59021,7 +59023,7 @@ const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashContaCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
-  if (!force && state.gestoriaDashContaCache && String(state.gestoriaDashContaCache.empresaId || "") === String(empresaId || "") && isFreshCache) {
+  if (!force && state.gestoriaDashContaCache && String(state.gestoriaDashContaCache.scopeKey || "") === String(scopeKey || "") && isFreshCache) {
     renderGestoriaDashboardContabilidad(state.gestoriaDashContaCache.rows || [], state.gestoriaDashContaCache.summary || {});
     return;
   }
@@ -59029,12 +59031,14 @@ const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
   gestoriaDashContaReload.disabled = true;
   gestoriaDashContaReload.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ empresa_id: empresaId, limit: "60" });
+    const params = new URLSearchParams({ limit: "60" });
+    if (workspaceId) params.set("workspace_id", workspaceId);
+    else params.set("empresa_id", fallbackEmpresaId);
     const data = await api(`/api/gestoria_contabilidad?${params.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     const rows = Array.isArray(data.rows) ? data.rows : [];
     const summary = data.summary || {};
-    state.gestoriaDashContaCache = { empresaId, rows, summary, ts: Date.now() };
+    state.gestoriaDashContaCache = { scopeKey, rows, summary, ts: Date.now() };
     renderGestoriaDashboardContabilidad(rows, summary);
   } catch (err) {
     gestoriaDashContaTable.innerHTML = `<p class="muted">No se pudo cargar contabilidad: ${escapeHtml(String(err?.message || err || ""))}</p>`;
@@ -59095,9 +59099,11 @@ const renderGestoriaDashboardContabilidad = (rows = [], summary = {}) => {
 
 const loadGestoriaDashboardDocumentos = async ({ force = false } = {}) => {
   if (!gestoriaDashDocsRecent || !gestoriaDashDocsInfo || !gestoriaDashDocsReload) return;
-  const empresaId = resolveGestoriaDashboardEmpresaId();
-  if (!empresaId) {
-    gestoriaDashDocsRecent.innerHTML = "<p class='muted'>Sin empresa.</p>";
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const fallbackEmpresaId = resolveGestoriaDashboardEmpresaId();
+  const scopeKey = workspaceId || fallbackEmpresaId;
+  if (!scopeKey) {
+    gestoriaDashDocsRecent.innerHTML = "<p class='muted'>Sin workspace.</p>";
     gestoriaDashDocsInfo.textContent = "";
     if (gestoriaDashDocsKpis) gestoriaDashDocsKpis.innerHTML = "";
     return;
@@ -59114,7 +59120,7 @@ const loadGestoriaDashboardDocumentos = async ({ force = false } = {}) => {
 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashDocsCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
-  if (!force && state.gestoriaDashDocsCache && String(state.gestoriaDashDocsCache.empresaId || "") === String(empresaId || "") && isFreshCache) {
+  if (!force && state.gestoriaDashDocsCache && String(state.gestoriaDashDocsCache.scopeKey || "") === String(scopeKey || "") && isFreshCache) {
     renderGestoriaDashboardDocumentos(state.gestoriaDashDocsCache.rows || []);
     return;
   }
@@ -59122,11 +59128,13 @@ const loadGestoriaDashboardDocumentos = async ({ force = false } = {}) => {
   gestoriaDashDocsReload.disabled = true;
   gestoriaDashDocsReload.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ empresa_id: empresaId, limit: "50" });
+    const params = new URLSearchParams({ limit: "50" });
+    if (workspaceId) params.set("workspace_id", workspaceId);
+    else params.set("empresa_id", fallbackEmpresaId);
     const data = await api(`/api/gestoria_docs?${params.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     const rows = Array.isArray(data.rows) ? data.rows : [];
-    state.gestoriaDashDocsCache = { empresaId, rows, ts: Date.now() };
+    state.gestoriaDashDocsCache = { scopeKey, rows, ts: Date.now() };
     renderGestoriaDashboardDocumentos(rows);
   } catch (err) {
     gestoriaDashDocsRecent.innerHTML = `<p class="muted">No se pudieron cargar documentos: ${escapeHtml(String(err?.message || err || ""))}</p>`;
@@ -59222,11 +59230,9 @@ const renderGestoriaRentaDashboard = (payload) => {
 
   const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
     const workspaceId = String(state.currentWorkspaceId || "").trim();
-    const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
     if (!workspaceId) return;
     const params = new URLSearchParams();
     params.set("workspace_id", workspaceId);
-    if (scopeEmpresaId) params.set("empresa_id", scopeEmpresaId);
     if (ejercicio) params.set("ejercicio", ejercicio);
     if (kind) params.set("kind", kind);
     if (fields) params.set("fields", fields);
@@ -60061,7 +60067,6 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa || !gestoriaDashRentaEjercicio || !gestoriaDashRentaReload) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
   ensureGestoriaDashRentaEjercicioOptions();
   if (gestoriaDashRentaEjercicio.dataset.bound !== "1") {
     gestoriaDashRentaEjercicio.dataset.bound = "1";
@@ -60077,7 +60082,7 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
   if (
     !force &&
     state.gestoriaRentaDashCache &&
-    String(state.gestoriaRentaDashCache.empresaId || "") === String(scopeEmpresaId || "") &&
+    String(state.gestoriaRentaDashCache.scopeKey || "") === String(workspaceId || resolveLegacyEmpresaId(empresa) || "") &&
     String(state.gestoriaRentaDashCache.ejercicio || "") === String(ejercicio || "") &&
     isFreshCache
   ) {
@@ -60090,10 +60095,9 @@ const loadGestoriaRentaDashboard = async ({ force = false } = {}) => {
     const qs = new URLSearchParams({ ejercicio: String(ejercicio || "") });
     if (workspaceId) qs.set("workspace_id", workspaceId);
     else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-    if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_renta_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
-    state.gestoriaRentaDashCache = { empresaId: scopeEmpresaId, ejercicio, payload: data, ts: Date.now() };
+    state.gestoriaRentaDashCache = { scopeKey: workspaceId || resolveLegacyEmpresaId(empresa) || "", ejercicio, payload: data, ts: Date.now() };
     if (!state.gestoriaRentaDashView) state.gestoriaRentaDashView = "overview";
     renderGestoriaRentaDashboard(data);
   } catch (err) {
@@ -60131,7 +60135,6 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
 
   if (gestoriaDashServiciosReload.dataset.bound !== "1") {
     gestoriaDashServiciosReload.dataset.bound = "1";
@@ -60146,7 +60149,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
   const cacheAgeMs = Date.now() - Number(state.gestoriaDashAdminCache?.ts || 0);
   const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 45000;
   const cacheKey = String(state.gestoriaDashAdminCache?.empresaId || "");
-  const expectedKey = scopeEmpresaId || workspaceId || resolveLegacyEmpresaId(empresa);
+  const expectedKey = workspaceId || resolveLegacyEmpresaId(empresa);
   if (!force && isFreshCache && cacheKey === expectedKey && state.gestoriaDashAdminCache?.payload) {
     renderGestoriaDashServicios(state.gestoriaDashAdminCache.payload, { key: renderKey });
     return;
@@ -60158,7 +60161,6 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
     const qs = new URLSearchParams();
     if (workspaceId) qs.set("workspace_id", workspaceId);
     else qs.set("empresa_id", resolveLegacyEmpresaId(empresa));
-    if (scopeEmpresaId) qs.set("scope_empresa_id", scopeEmpresaId);
     const data = await api(`/api/gestoria_dashboard?${qs.toString()}`);
     if (data?.error) throw new Error(String(data.error));
     state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
@@ -60176,38 +60178,20 @@ const loadGestoriaDashboard = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const workspaceId = String(state.currentWorkspaceId || "").trim();
-
-  if (gestoriaDashboardEmpresaScope && gestoriaDashboardEmpresaScope.dataset.bound !== "1") {
-    gestoriaDashboardEmpresaScope.dataset.bound = "1";
-    gestoriaDashboardEmpresaScope.addEventListener("change", () => {
-      state.gestoriaScopeEmpresaId = String(gestoriaDashboardEmpresaScope.value || "").trim();
-      try {
-        if (state.gestoriaRentaDashCache) state.gestoriaRentaDashCache.ts = 0;
-      } catch {}
-      loadGestoriaDashboard();
-      loadGestoriaRentaDashboard({ force: true }).catch(() => {});
-    });
-  }
+  state.gestoriaScopeEmpresaId = "";
   if (gestoriaDashboardEmpresaScope) {
-    const current = String(state.gestoriaScopeEmpresaId || "").trim();
-    gestoriaDashboardEmpresaScope.innerHTML = "";
-    gestoriaDashboardEmpresaScope.appendChild(createOption("", "Todas las empresas"));
-    (state.empresas || []).forEach((row) => {
-      if (!row?.id) return;
-      gestoriaDashboardEmpresaScope.appendChild(createOption(row.id, row.nombre || row.id));
-    });
-    gestoriaDashboardEmpresaScope.value = current;
+    gestoriaDashboardEmpresaScope.classList.add("hidden");
+    gestoriaDashboardEmpresaScope.setAttribute("aria-hidden", "true");
+    gestoriaDashboardEmpresaScope.value = "";
   }
   initGestoriaDashboardTabs();
   const desiredView = normalizeGestoriaDashboardView(state.gestoriaDashboardView || state.gestoriaDashboardPane || "general");
   setGestoriaDashboardView(desiredView);
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
-  const scopeEmpresaId = String(state.gestoriaScopeEmpresaId || "").trim();
   const qsBase = new URLSearchParams();
   if (workspaceId) qsBase.set("workspace_id", workspaceId);
   else qsBase.set("empresa_id", resolveLegacyEmpresaId(empresa));
-  if (scopeEmpresaId) qsBase.set("scope_empresa_id", scopeEmpresaId);
   Promise.all([
     api(`/api/gestoria_dashboard?${qsBase.toString()}`),
     api(`/api/gestoria_trabajos?${qsBase.toString()}`),
@@ -60243,7 +60227,7 @@ const loadGestoriaDashboard = () => {
     renderGestoriaDashGeneralTrabajos(data.segmentacion_trabajos || {});
     renderGestoriaDashGeneralProductividad(data.productividad || {});
     try {
-      const expectedKey = scopeEmpresaId || workspaceId || resolveLegacyEmpresaId(empresa);
+      const expectedKey = workspaceId || resolveLegacyEmpresaId(empresa);
       state.gestoriaDashAdminCache = { empresaId: expectedKey, payload: data, ts: Date.now() };
     } catch {}
     if (gestoriaDashGeneralProdReload && gestoriaDashGeneralProdReload.dataset.bound !== "1") {
