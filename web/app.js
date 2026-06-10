@@ -44835,6 +44835,37 @@ const buildClienteSearchHaystack = (cliente = {}) => {
   return normalizeLookupText(parts.filter(Boolean).join(" "));
 };
 
+const scoreClienteSearchMatch = (cliente = {}, queryNorm = "", docNorm = "") => {
+  const nombreNorm = normalizeLookupText(cliente.nombre || "");
+  const nombreDisplayNorm = normalizeLookupText(formatNombreCliente(cliente.nombre || ""));
+  const nifNorm = normalizeDocumento(cliente.nif || cliente.dni || cliente.cif || "");
+  const contactNorm = normalizeLookupText([
+    cliente.telefono,
+    cliente.movil,
+    cliente.otro_telefono,
+    cliente.email,
+  ].filter(Boolean).join(" "));
+  const linkedNorm = normalizeLookupText([
+    cliente.empresas,
+    cliente.servicios,
+    cliente.direccion,
+    cliente.poblacion,
+    cliente.localidad,
+    cliente.provincia,
+  ].filter(Boolean).join(" "));
+  if (docNorm && nifNorm === docNorm) return 1000;
+  if (queryNorm && nombreNorm === queryNorm) return 900;
+  if (queryNorm && nombreDisplayNorm === queryNorm) return 890;
+  if (docNorm && nifNorm.includes(docNorm)) return 820;
+  if (queryNorm && nombreNorm.startsWith(queryNorm)) return 760;
+  if (queryNorm && nombreDisplayNorm.startsWith(queryNorm)) return 750;
+  if (queryNorm && nombreNorm.includes(queryNorm)) return 700;
+  if (queryNorm && nombreDisplayNorm.includes(queryNorm)) return 690;
+  if (queryNorm && contactNorm.includes(queryNorm)) return 520;
+  if (queryNorm && linkedNorm.includes(queryNorm)) return 250;
+  return 0;
+};
+
 // Lista completa de clientes (sin filtrar por servicio) para selectores globales (p. ej. "Cliente relacionado").
 const loadClientesAllList = () => {
   // Seguridad multi-servicio: no cargamos "todos los clientes" sin filtro de servicio.
@@ -57767,14 +57798,23 @@ const loadGestoriaCrm = async () => {
       const queryNorm = normalizeLookupText(rawQuery);
       const docNorm = normalizeDocumento(rawQuery);
       const matches = (Array.isArray(clientes) ? clientes : [])
-        .filter((cliente) => {
+        .map((cliente) => {
           const haystack = buildClienteSearchHaystack(cliente || {});
-          const nif = normalizeDocumento(cliente?.nif || cliente?.dni || cliente?.cif || "");
-          return (
+          const score = scoreClienteSearchMatch(cliente || {}, queryNorm, docNorm);
+          const matched =
             (queryNorm && haystack.includes(queryNorm)) ||
-            (docNorm && nif.includes(docNorm))
-          );
+            Boolean(score);
+          return { cliente, score, matched };
         })
+        .filter((item) => item.matched)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return String(a.cliente?.nombre || "").localeCompare(String(b.cliente?.nombre || ""), "es", {
+            numeric: true,
+            sensitivity: "base",
+          });
+        })
+        .map((item) => item.cliente)
         .slice(0, 10);
       if (matches.length && gestoriaCrmSummary) {
         const list = document.createElement("div");
