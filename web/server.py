@@ -74819,6 +74819,19 @@ class Handler(BaseHTTPRequestHandler):
             if allowed and normalized_services:
                 normalized_services = [s for s in normalized_services if s in allowed]
             is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            cliente_list_cols = """
+                    c.id,
+                    c.nombre,
+                    c.tipo_persona,
+                    c.nif,
+                    c.telefono,
+                    c.movil,
+                    c.otro_telefono,
+                    c.email,
+                    c.direccion,
+                    c.poblacion,
+                    c.provincia
+            """
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
