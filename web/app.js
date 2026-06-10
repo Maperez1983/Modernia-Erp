@@ -44813,6 +44813,28 @@ const loadClientesList = () => {
   });
 };
 
+const buildClienteSearchHaystack = (cliente = {}) => {
+  const parts = [
+    cliente.nombre,
+    formatNombreCliente(cliente.nombre || ""),
+    cliente.nif,
+    cliente.dni,
+    cliente.cif,
+    cliente.telefono,
+    cliente.movil,
+    cliente.otro_telefono,
+    cliente.email,
+    cliente.tipo_persona,
+    cliente.empresas,
+    cliente.servicios,
+    cliente.direccion,
+    cliente.poblacion,
+    cliente.localidad,
+    cliente.provincia,
+  ];
+  return normalizeLookupText(parts.filter(Boolean).join(" "));
+};
+
 // Lista completa de clientes (sin filtrar por servicio) para selectores globales (p. ej. "Cliente relacionado").
 const loadClientesAllList = () => {
   // Seguridad multi-servicio: no cargamos "todos los clientes" sin filtro de servicio.
@@ -57746,14 +57768,10 @@ const loadGestoriaCrm = async () => {
       const docNorm = normalizeDocumento(rawQuery);
       const matches = (Array.isArray(clientes) ? clientes : [])
         .filter((cliente) => {
-          const nombre = formatNombreCliente(cliente?.nombre || "");
-          const nombreRaw = String(cliente?.nombre || "");
-          const nif = normalizeDocumento(cliente?.nif || "");
+          const haystack = buildClienteSearchHaystack(cliente || {});
+          const nif = normalizeDocumento(cliente?.nif || cliente?.dni || cliente?.cif || "");
           return (
-            (queryNorm && (
-              normalizeLookupText(nombre).includes(queryNorm) ||
-              normalizeLookupText(nombreRaw).includes(queryNorm)
-            )) ||
+            (queryNorm && haystack.includes(queryNorm)) ||
             (docNorm && nif.includes(docNorm))
           );
         })

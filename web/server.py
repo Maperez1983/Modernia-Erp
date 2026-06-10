@@ -74496,6 +74496,19 @@ class Handler(BaseHTTPRequestHandler):
             # Cuando el filtro es "seguros", los clientes visibles deben venir del CRM Seguros (tabla `seguros`),
             # no sólo de relaciones `clientes_empresas` (pueden existir vínculos sin póliza asociada).
             is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            cliente_list_cols = """
+                    c.id,
+                    c.nombre,
+                    c.tipo_persona,
+                    c.nif,
+                    c.telefono,
+                    c.movil,
+                    c.otro_telefono,
+                    c.email,
+                    c.direccion,
+                    c.poblacion,
+                    c.provincia
+            """
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
@@ -74833,10 +74846,59 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 rows = conn.execute(
                     f"""
-                    SELECT DISTINCT c.id, c.nombre, c.nif
+                    SELECT DISTINCT {cliente_list_cols}
                     FROM clientes c
                     JOIN seguros s ON s.cliente_id = c.id
                     WHERE {' AND '.join(where)}
+                    ORDER BY c.nombre
+                    """,
+                    values,
+                ).fetchall()
+                json_response(self, [dict(r) for r in rows])
+                return
+            if workspace_id and "gestoria" in normalized_services:
+                ce_cols = table_columns(conn, "clientes_empresas") or set()
+                c_cols = table_columns(conn, "clientes") or set()
+                service_clause, service_values = service_sql_match_clause("ce", ["gestoria", "fincas"])
+                where_parts = []
+                values = []
+                scope_parts = []
+                if "workspace_id" in ce_cols:
+                    scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                if "workspace_id" in c_cols:
+                    scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                    values.append(workspace_id)
+                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                if empresa_ids:
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                    values.extend(empresa_ids)
+                    if "empresa_id" in c_cols:
+                        scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
+                        values.extend(empresa_ids)
+                if scope_parts:
+                    where_parts.append(f"({' OR '.join(scope_parts)})")
+                else:
+                    json_response(self, [])
+                    return
+                if service_clause:
+                    where_parts.append(f"(({service_clause}) OR cg.cliente_id IS NOT NULL)")
+                    values.extend(service_values)
+                else:
+                    where_parts.append("cg.cliente_id IS NOT NULL")
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT
+                      {cliente_list_cols},
+                      {empresas_agg} AS empresas,
+                      {servicios_agg} AS servicios
+                    FROM clientes c
+                    LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    LEFT JOIN cliente_gestoria cg ON cg.cliente_id = c.id
+                    LEFT JOIN empresas e ON e.id = ce.empresa_id
+                    WHERE {' AND '.join(where_parts)}
+                    GROUP BY c.id
                     ORDER BY c.nombre
                     """,
                     values,
@@ -74859,7 +74921,7 @@ class Handler(BaseHTTPRequestHandler):
                         values.extend(empresa_ids)
                 rows = conn.execute(
                     f"""
-                    SELECT DISTINCT c.id, c.nombre, c.nif
+                    SELECT DISTINCT {cliente_list_cols}
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
                     WHERE {' AND '.join(where_parts)}
@@ -74871,11 +74933,11 @@ class Handler(BaseHTTPRequestHandler):
                 c_cols = table_columns(conn, "clientes") or set()
                 if workspace_id and "workspace_id" in c_cols:
                     rows = conn.execute(
-                        "SELECT id, nombre, nif FROM clientes WHERE COALESCE(workspace_id, '') = ? ORDER BY nombre",
+                        f"SELECT {cliente_list_cols} FROM clientes c WHERE COALESCE(c.workspace_id, '') = ? ORDER BY c.nombre",
                         (workspace_id,),
                     ).fetchall()
                 else:
-                    rows = conn.execute("SELECT id, nombre, nif FROM clientes ORDER BY nombre").fetchall()
+                    rows = conn.execute(f"SELECT {cliente_list_cols} FROM clientes c ORDER BY c.nombre").fetchall()
             json_response(self, [dict(r) for r in rows])
             return
 
