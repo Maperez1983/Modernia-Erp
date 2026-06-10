@@ -74509,6 +74509,8 @@ class Handler(BaseHTTPRequestHandler):
                     c.poblacion,
                     c.provincia
             """
+            empresas_agg = sql_group_concat("e.nombre", " | ")
+            servicios_agg = sql_group_concat("ce.servicio", " | ")
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
