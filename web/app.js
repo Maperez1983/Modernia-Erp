@@ -5182,6 +5182,77 @@ const syncActionModalClienteButtons = () => {
   }
 };
 
+const setSelectValueWithoutCarry = (select, rawValue, fallbackValue = "") => {
+  if (!select) return "";
+  const desired = String(rawValue ?? "").trim();
+  const fallback = String(fallbackValue ?? "").trim();
+  try {
+    select.selectedIndex = -1;
+  } catch (e) {}
+  const hasBlank = Array.from(select.options || []).some((opt) => opt.value === "");
+  if (!hasBlank) {
+    try {
+      select.insertBefore(createOption("", ""), select.firstChild);
+    } catch (e) {}
+  }
+  const options = Array.from(select.options || []);
+  const desiredOption = desired ? options.find((opt) => opt.value === desired) : null;
+  if (desiredOption) {
+    select.value = desired;
+    return select.value;
+  }
+  if (desired) {
+    try {
+      select.appendChild(createOption(desired, desired));
+      select.value = desired;
+      return select.value;
+    } catch (e) {}
+  }
+  const fallbackOption = fallback ? options.find((opt) => opt.value === fallback) : null;
+  if (fallbackOption) {
+    select.value = fallback;
+    return select.value;
+  }
+  select.value = "";
+  if (String(select.value || "").trim()) {
+    try {
+      select.selectedIndex = -1;
+    } catch (e) {}
+  }
+  return select.value || "";
+};
+
+const getCrmAgendaStorageScope = () => {
+  const user = normalizeSimple(getCurrentUser?.() || "usuario") || "usuario";
+  let workspace = "";
+  try {
+    workspace =
+      (typeof resolveActiveTenantWorkspaceId === "function" ? String(resolveActiveTenantWorkspaceId() || "").trim() : "")
+      || (typeof getTenantWorkspaceIdFromUrl === "function" ? String(getTenantWorkspaceIdFromUrl() || "").trim() : "");
+  } catch (e) {
+    workspace = "";
+  }
+  return `${user}:${workspace || "global"}`;
+};
+
+const getCrmAgendaStorageKey = (name) => `crm.agenda.${name}.${getCrmAgendaStorageScope()}`;
+
+const readCrmAgendaStorage = (name, legacyKey = "") => {
+  try {
+    const scoped = localStorage.getItem(getCrmAgendaStorageKey(name));
+    if (scoped !== null && scoped !== undefined) return scoped;
+    return legacyKey ? localStorage.getItem(legacyKey) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeCrmAgendaStorage = (name, value) => {
+  try {
+    localStorage.setItem(getCrmAgendaStorageKey(name), String(value ?? ""));
+  } catch (e) {}
+};
+
 const openActionEditor = (ev, context = null) => {
   if (!actionModal) return;
   void ensureModalDataLoaded();
@@ -5211,17 +5282,7 @@ const openActionEditor = (ev, context = null) => {
   if (actionModalHora) actionModalHora.value = ev.time || "";
   if (actionModalHoraFin) actionModalHoraFin.value = ev.timeEnd || "";
   if (actionModalTipo) {
-    actionModalTipo.value = ev.tipo || "";
-    // Si el valor no existe en el <select>, el navegador puede conservar el anterior.
-    // Forzamos reset cuando no hay tipo.
-    if (!String(ev.tipo || "").trim()) {
-      try {
-        actionModalTipo.value = "";
-      } catch (e) {}
-      if (String(actionModalTipo.value || "").trim() && actionModalTipo.options && actionModalTipo.options.length) {
-        actionModalTipo.selectedIndex = 0;
-      }
-    }
+    setSelectValueWithoutCarry(actionModalTipo, ev.tipo || "");
   }
   if (actionModalNotas) actionModalNotas.value = ev.notas || "";
   if (actionModalRecordatorio) {
@@ -5230,12 +5291,14 @@ const openActionEditor = (ev, context = null) => {
         ? String(ev.recordatorio_min)
         : "";
   }
-  if (actionModalEstado) actionModalEstado.value = ev.estado || "Pendiente";
+  if (actionModalEstado) {
+    setSelectValueWithoutCarry(actionModalEstado, ev.estado || "Pendiente", "Pendiente");
+  }
   if (actionModalResponsable) {
     populateActionModalResponsables(ev.serviceId || ev.service || "");
     // IMPORTANTE: si la acción no tiene responsable, no arrastres el valor anterior del <select>.
     // (Bug: al editar una cita "sin responsable" se quedaba el responsable de la cita anterior).
-    actionModalResponsable.value = ev.responsable || "";
+    setSelectValueWithoutCarry(actionModalResponsable, ev.responsable || "");
   }
   if (state.actionModalContext) {
     const ctx = state.actionModalContext;
@@ -52831,34 +52894,23 @@ const openCrmAgendaEditModal = (row) => {
     form.querySelector('[name="asunto"]').value = rowSnapshot.asunto || "";
     // Si el value no existe entre las opciones, fuerza a limpiar para no heredar el anterior.
     if (tipoSelect) {
-      const nextTipo = rowSnapshot.tipo || "";
-      tipoSelect.value = nextTipo;
-      if (nextTipo && tipoSelect.value !== nextTipo) tipoSelect.value = "";
-      if (!tipoSelect.value) tipoSelect.value = tipoSelect.options[0]?.value || "";
+      setSelectValueWithoutCarry(tipoSelect, rowSnapshot.tipo || "");
     }
     if (responsableSelect) {
-      const nextResp = rowSnapshot.responsable || "";
-      responsableSelect.value = nextResp;
-      if (nextResp && responsableSelect.value !== nextResp) responsableSelect.value = "";
+      setSelectValueWithoutCarry(responsableSelect, rowSnapshot.responsable || "");
     }
     if (estadoSelect) {
-      const nextEstado = rowSnapshot.estado || "Pendiente";
-      estadoSelect.value = nextEstado;
-      if (nextEstado && estadoSelect.value !== nextEstado) estadoSelect.value = "Pendiente";
+      setSelectValueWithoutCarry(estadoSelect, rowSnapshot.estado || "Pendiente", "Pendiente");
     }
     if (form.querySelector('[name="notas"]')) form.querySelector('[name="notas"]').value = rowSnapshot.notas || "";
   }
 
   syncResultOptions();
   if (resultadoSelect) {
-    const nextRes = rowSnapshot.resultado_cierre || "";
-    resultadoSelect.value = nextRes;
-    if (nextRes && resultadoSelect.value !== nextRes) resultadoSelect.value = "";
+    setSelectValueWithoutCarry(resultadoSelect, rowSnapshot.resultado_cierre || "");
   }
   if (nextSelect) {
-    const nextSt = rowSnapshot.estado_siguiente || "";
-    nextSelect.value = nextSt;
-    if (nextSt && nextSelect.value !== nextSt) nextSelect.value = "";
+    setSelectValueWithoutCarry(nextSelect, rowSnapshot.estado_siguiente || "");
   }
 
   const cleanup = () => {
@@ -52994,23 +53046,24 @@ const initCrmAgendaPrefsIfNeeded = () => {
   // Importante: por UX, la agenda no debe “vaciarse” al pasar de semana.
   // Usamos un preset más amplio por defecto.
   const DEFAULT_PRESET = "citas_equipo";
-  if (!state.crmAgendaView) {
+  const storageScope = getCrmAgendaStorageScope();
+  if (!state.crmAgendaView || state.crmAgendaPrefsScope !== storageScope) {
     let view = "list";
     let day = formatAgendaDate(new Date());
     let ambito = "";
     let preset = DEFAULT_PRESET;
     try {
-      view = normalizeCrmAgendaView(localStorage.getItem("crm.agenda.view") || view);
+      view = normalizeCrmAgendaView(readCrmAgendaStorage("view", "crm.agenda.view") || view);
     } catch (e) {}
     try {
-      const storedDay = String(localStorage.getItem("crm.agenda.day") || "").trim();
+      const storedDay = String(readCrmAgendaStorage("day", "crm.agenda.day") || "").trim();
       if (storedDay) day = storedDay;
     } catch (e) {}
     try {
-      ambito = String(localStorage.getItem("crm.agenda.ambito") || "").trim();
+      ambito = String(readCrmAgendaStorage("ambito", "crm.agenda.ambito") || "").trim();
     } catch (e) {}
     try {
-      const storedPreset = String(localStorage.getItem("crm.agenda.preset") || "").trim();
+      const storedPreset = String(readCrmAgendaStorage("preset", "crm.agenda.preset") || "").trim();
       // Migración suave: si existía el preset antiguo, pásalo a equipo.
       if (storedPreset) preset = storedPreset === "citas_7dias" ? "citas_7dias_equipo" : storedPreset;
     } catch (e) {}
@@ -53018,6 +53071,7 @@ const initCrmAgendaPrefsIfNeeded = () => {
     state.crmAgendaAnchorDay = day;
     state.crmAgendaAmbito = ambito;
     state.crmAgendaPreset = preset;
+    state.crmAgendaPrefsScope = storageScope;
   }
   if (!state.crmAgendaAnchorDay) {
     state.crmAgendaAnchorDay = formatAgendaDate(new Date());
@@ -53050,11 +53104,11 @@ const initCrmAgendaPrefsIfNeeded = () => {
 
 const persistCrmAgendaPrefs = () => {
   try {
-    localStorage.setItem("crm.agenda.view", String(state.crmAgendaView || "week"));
-    localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
-    localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
+    writeCrmAgendaStorage("view", String(state.crmAgendaView || "week"));
+    writeCrmAgendaStorage("day", String(state.crmAgendaAnchorDay || ""));
+    writeCrmAgendaStorage("ambito", String(state.crmAgendaAmbito || ""));
     if (crmAgendaPreset) {
-      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_equipo"));
+      writeCrmAgendaStorage("preset", String(crmAgendaPreset.value || "citas_equipo"));
     }
   } catch (e) {}
 };
@@ -53227,11 +53281,27 @@ const renderCrmAgendaCalendar = (rows = []) => {
   const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
   const anchor = parseAgendaDate(state.crmAgendaAnchorDay) || new Date();
   const items = Array.isArray(rows) ? rows : [];
+  try {
+    const scope = getCrmAgendaStorageScope();
+    if (state.crmAgendaUiPrefsScope !== scope) {
+      const rawPeople = readCrmAgendaStorage("people", "crm.agenda.people") || "[]";
+      const parsedPeople = JSON.parse(rawPeople);
+      state.crmAgendaPeople = Array.isArray(parsedPeople)
+        ? parsedPeople.map((v) => String(v || "").trim()).filter(Boolean)
+        : [];
+      state.crmAgendaShowCancelled = (readCrmAgendaStorage("showCancelled", "crm.agenda.showCancelled") || "0") === "1";
+      state.crmAgendaUiPrefsScope = scope;
+    }
+  } catch (e) {
+    state.crmAgendaPeople = [];
+    state.crmAgendaShowCancelled = false;
+    state.crmAgendaUiPrefsScope = getCrmAgendaStorageScope();
+  }
 
   const persistAgendaUiPrefs = () => {
     try {
-      localStorage.setItem("crm.agenda.people", JSON.stringify(Array.isArray(state.crmAgendaPeople) ? state.crmAgendaPeople : []));
-      localStorage.setItem("crm.agenda.showCancelled", state.crmAgendaShowCancelled ? "1" : "0");
+      writeCrmAgendaStorage("people", JSON.stringify(Array.isArray(state.crmAgendaPeople) ? state.crmAgendaPeople : []));
+      writeCrmAgendaStorage("showCancelled", state.crmAgendaShowCancelled ? "1" : "0");
     } catch (e) {}
   };
 
@@ -53946,8 +54016,8 @@ const applyCrmAgendaFilters = (rows = []) => {
   const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
   // IMPORTANTE: no normalizar el preset aquí: los valores usan sufijo `_equipo` y underscores.
   // Si lo normalizamos, se pierde el sufijo y la agenda filtra solo por usuario (parece que “desaparecen” citas del equipo).
-  // Defaults: en caso de duda, mostrar agenda de equipo 7 días (equilibrado) para evitar parecer vacía.
-  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo").trim() || "citas_7dias_equipo";
+  // Defaults: en caso de duda, mostrar todas las citas de equipo para evitar parecer vacía.
+  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo").trim() || "citas_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
   state.crmAgendaPreset = presetRaw;
@@ -53958,19 +54028,31 @@ const applyCrmAgendaFilters = (rows = []) => {
   const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
   const buildCurrentUserKeys = () => {
     const keys = new Set();
+    const authUser = typeof getAuthScopeUser === "function" ? getAuthScopeUser() : null;
+    const addKey = (value) => {
+      const key = normalizePersonKey(value || "");
+      if (key) keys.add(key);
+    };
     const meRaw = getCurrentUser();
     const meKey = normalizePersonKey(meRaw);
-    if (meKey) keys.add(meKey);
+    addKey(meRaw);
+    if (authUser) {
+      addKey(authUser.usuario);
+      addKey(authUser.email);
+      addKey(authUser.nombre);
+      addKey(authUser.apellido);
+      addKey(authUser.nombre_completo);
+      addKey(`${authUser.nombre || ""} ${authUser.apellido || ""}`.trim());
+    }
     const users = Array.isArray(state.usersList) ? state.usersList : [];
     const match = users.find((u) => normalizePersonKey(u?.usuario || "") === meKey) || null;
     if (match) {
       const full = `${match.nombre || ""} ${match.apellido || ""}`.trim();
-      const fullKey = normalizePersonKey(full);
-      if (fullKey) keys.add(fullKey);
-      const emailKey = normalizePersonKey(match.email || "");
-      if (emailKey) keys.add(emailKey);
-      const nombreKey = normalizePersonKey(match.nombre || "");
-      if (nombreKey) keys.add(nombreKey);
+      addKey(full);
+      addKey(match.email);
+      addKey(match.nombre);
+      addKey(match.apellido);
+      addKey(match.nombre_completo);
     }
     return keys;
   };
@@ -54198,9 +54280,12 @@ const loadCrmAgenda = () => {
   }
   if (rangeStart) params.set("start", fmt(rangeStart));
   if (rangeEnd) params.set("end", fmt(rangeEnd));
-  // En vista lista, si el usuario está en "todas las citas", pedimos histórico completo.
-  // Esto evita el recorte por defecto del backend (pensado para evitar timeouts).
-  if (view === "list" && (preset === "citas" || preset === "actividades_caducadas" || preset === "citas_caducadas")) {
+  // En vista lista, las vistas "todas" deben incluir histórico completo para admin y no admin.
+  // El sufijo `_equipo` ya está normalizado en `preset`, así que cubre personales y equipo.
+  if (
+    view === "list" &&
+    (preset === "citas" || preset === "citas_caducadas" || preset === "actividades_caducadas")
+  ) {
     params.set("range", "all");
   }
   api(`/api/acciones?${params.toString()}`).then((data) => {
