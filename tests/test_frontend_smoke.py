@@ -40,6 +40,29 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertLess(route_pos, init_pos)
         self.assertIn('localStorage.getItem("crm.currentWorkspaceId")', auth_js)
 
+    def test_visible_service_cards_keep_click_and_href_invariants(self):
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('coreCards.addEventListener("click", (event) => {', app_js)
+        self.assertIn("const fallbackNavigate = () => {", app_js)
+        self.assertIn('card.dataset.action = "crm-inmo";', app_js)
+        self.assertIn('card.dataset.action = "crm-gestoria";', app_js)
+        self.assertIn('card.dataset.action = "crm-seguros";', app_js)
+        self.assertIn('card.dataset.action = "crm-fin";', app_js)
+        self.assertIn('data-action="crm-inmo"', app_js)
+        self.assertIn('data-action="crm-gestoria"', app_js)
+        self.assertIn('data-action="crm-seguros"', app_js)
+        self.assertIn('data-action="crm-fin"', app_js)
+
+    def test_visible_home_cards_match_permission_guards(self):
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("const hasAdminWideAccess = (user) => {", app_js)
+        self.assertIn("const canAccessSharedHomeModules = (user) => hasAdminWideAccess(user);", app_js)
+        self.assertIn("if (hasAdminWideAccess(user)) return true;", app_js)
+        self.assertIn('if (!userCanAccessService("inmobiliaria")) return;', app_js)
+        self.assertIn('if (!userCanAccessService("gestoria")) return;', app_js)
+        self.assertIn('if (!userCanAccessService("seguros")) return;', app_js)
+        self.assertIn('if (!userCanAccessService("financiaciones")) return;', app_js)
+
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/*.bak_*", gitignore)

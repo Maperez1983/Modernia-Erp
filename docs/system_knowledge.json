@@ -1,18 +1,18 @@
 {
   "kind": "modernia_system_knowledge",
-  "generated_at": "2026-06-16T12:39:40+00:00",
+  "generated_at": "2026-06-16T15:18:57+00:00",
   "git": {
     "branch": "main",
-    "commit": "cc0041524667d4eb5d212d6dfff96a1db9bfc1aa",
+    "commit": "4226b4a71f8a2a71c1ec5931cc9e47bf13c60da2",
     "recent_commits": [
-      "cc00415 Add Ollama diff review workflow",
-      "b3dc35b Refine production matrix company checks",
-      "da44385 Add safe CRM autofix planning agent",
-      "e832764 Add stable CRM system knowledge base",
-      "30dc0b5 Expand production system audit matrix",
-      "d77f46d Add production API audit monitor",
-      "fe518f6 Allow remote Ollama audit summaries",
-      "164c67a Use Ollama API for audit summaries"
+      "4226b4a Fix CRM card access for admin home users",
+      "31cda4a Recover legacy agenda actions in tenant audit",
+      "a83b2df Allow token access to system audit summary",
+      "47a8d7f Allow system audit ingest route",
+      "2d9ceda Publish system audit summaries into CRM",
+      "dadd14f Improve autofix branch and regression workflow",
+      "82103d0 Add audit trend tracking and CI guardrails",
+      "fd29b75 Expand Ollama audit and autofix operations"
     ]
   },
   "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
@@ -36,70 +36,70 @@
   },
   "frontend_api_map": {
     "/api/acciones": [
-      "line:62936",
-      "line:66367",
-      "line:74802",
-      "line:75328",
-      "line:82329",
-      "line:82520",
-      "line:82782",
-      "line:82814",
-      "line:83465",
-      "line:83549",
-      "line:83575"
+      "line:62991",
+      "line:66422",
+      "line:74857",
+      "line:75383",
+      "line:82384",
+      "line:82575",
+      "line:82837",
+      "line:82869",
+      "line:83520",
+      "line:83604",
+      "line:83630"
     ],
     "/api/acciones_delete": [
-      "line:57378"
+      "line:57433"
     ],
     "/api/acciones_update": [
-      "line:5763",
-      "line:53094",
+      "line:5771",
+      "line:53149",
       "submitClosePayload",
-      "line:66254",
-      "line:75328"
+      "line:66309",
+      "line:75383"
     ],
     "/api/ai_fin_copilot": [
-      "line:81494"
+      "line:81549"
     ],
     "/api/ai_inmo_encargo_copilot": [
-      "line:33548",
-      "line:33573"
+      "line:33603",
+      "line:33628"
     ],
     "/api/ai_seguros_copilot": [
-      "line:75850"
+      "line:75905"
     ],
     "/api/captacion_convert": [
-      "line:46930",
-      "line:47011"
+      "line:46985",
+      "line:47066"
     ],
     "/api/captacion_update": [
-      "line:33887",
-      "line:33921",
-      "line:56043"
+      "line:33942",
+      "line:33976",
+      "line:56098"
     ],
     "/api/captaciones": [
-      "line:25536",
-      "line:83937"
+      "line:25591",
+      "line:83992"
     ],
     "/api/captaciones_update": [
-      "line:49905"
+      "line:49960"
     ],
     "/api/catalogo_poblaciones?limit=50000": [
-      "line:85264"
+      "line:85319"
     ],
     "/api/cliente_empresa_update": [
-      "line:34095"
+      "line:34150"
     ],
     "/api/cliente_gestoria_update": [
       "line:255",
-      "line:68049",
-      "line:68274",
-      "line:81604",
-      "line:81755",
+      "line:68104",
+      "line:68329",
+      "line:81659",
+      "line:81810",
       "keepFlag"
     ],
     "/api/cliente_profesional": [
-      "line:81537"
+      "line:81592"
     ],
     "/api/cliente_profesional_delete": [
       "deleteClienteProfesional"
@@ -108,35 +108,35 @@
       "saveClienteProfesionalField"
     ],
     "/api/cliente_relaciones": [
-      "line:81098"
+      "line:81153"
     ],
     "/api/cliente_relaciones_delete": [
-      "line:45418"
+      "line:45473"
     ],
     "/api/cliente_update": [
-      "line:33979",
-      "line:34063"
+      "line:34034",
+      "line:34118"
     ],
     "/api/clientes": [
-      "line:25451",
-      "line:42745",
-      "line:64554",
-      "line:68245",
-      "line:84306",
-      "line:84514",
-      "line:84981"
+      "line:25506",
+      "line:42800",
+      "line:64609",
+      "line:68300",
+      "line:84361",
+      "line:84569",
+      "line:85036"
     ],
     "/api/clientes_link": [
-      "line:25480",
-      "line:42716",
-      "line:45607",
-      "line:64474",
-      "line:65080",
-      "line:68262",
-      "line:81040",
-      "line:84318",
-      "line:84612",
-      "line:84998"
+      "line:25535",
+      "line:42771",
+      "line:45662",
+      "line:64529",
+      "line:65135",
+      "line:68317",
+      "line:81095",
+      "line:84373",
+      "line:84667",
+      "line:85053"
     ],
     "/api/clientes_link_delete": [
       "deleteClienteEmpresaLink"
@@ -145,75 +145,75 @@
       "loadClientesCardStats"
     ],
     "/api/compraventas": [
-      "line:84021"
+      "line:84076"
     ],
     "/api/compraventas_close": [
-      "line:84060"
+      "line:84115"
     ],
     "/api/copilot_web_ask": [
-      "line:74143"
+      "line:74198"
     ],
     "/api/copilot_web_fetch": [
-      "line:74143",
-      "line:74156"
+      "line:74198",
+      "line:74211"
     ],
     "/api/crm_": [
       "line:267"
     ],
     "/api/demandas": [
-      "line:82372",
-      "line:84087"
+      "line:82427",
+      "line:84142"
     ],
     "/api/demandas_update": [
-      "line:52324"
+      "line:52379"
     ],
     "/api/empresa_delete": [
-      "line:11089"
+      "line:11135"
     ],
     "/api/empresa_update": [
-      "line:78118"
+      "line:78173"
     ],
     "/api/empresas": [
-      "line:10563",
-      "line:10859",
-      "line:24343",
-      "line:25008",
-      "line:26533",
+      "line:10609",
+      "line:10905",
+      "line:24398",
+      "line:25063",
+      "line:26588",
       "refreshClientesAltaSelects",
       "linkClienteSegurosService",
-      "line:72926",
-      "line:78202"
+      "line:72981",
+      "line:78257"
     ],
     "/api/fin_": [
       "line:263"
     ],
     "/api/fin_asesoramiento_ocr": [
-      "line:81173"
+      "line:81228"
     ],
     "/api/fin_asesoramiento_ocr_auto": [
-      "line:81237"
+      "line:81292"
     ],
     "/api/fin_asesoramiento_ocr_guided": [
-      "line:81310"
+      "line:81365"
     ],
     "/api/fin_asesoramientos": [
-      "line:70175",
-      "line:81368"
-    ],
-    "/api/fin_asesoramientos_convert": [
-      "line:65573",
+      "line:70230",
       "line:81423"
     ],
+    "/api/fin_asesoramientos_convert": [
+      "line:65628",
+      "line:81478"
+    ],
     "/api/fin_asesoramientos_update": [
-      "line:30121",
-      "line:70175",
-      "line:81368"
+      "line:30176",
+      "line:70230",
+      "line:81423"
     ],
     "/api/fin_checklist_generate": [
-      "line:81457"
+      "line:81512"
     ],
     "/api/fin_checklist_update": [
-      "line:65418"
+      "line:65473"
     ],
     "/api/fin_inmobiliarias": [
       "loadFinInmobiliarias"
@@ -222,34 +222,34 @@
       "line:263"
     ],
     "/api/fiscal_scenario_upsert": [
-      "line:77697"
+      "line:77752"
     ],
     "/api/fiscal_scenarios_list": [
       "loadSlotFromDb"
     ],
     "/api/fiscal_venta_pdf": [
-      "line:77197"
+      "line:77252"
     ],
     "/api/gestoria": [
-      "line:82693",
-      "line:84368"
+      "line:82748",
+      "line:84423"
     ],
     "/api/gestoria_": [
       "line:255"
     ],
     "/api/gestoria_conta_config": [
-      "line:82916"
+      "line:82971"
     ],
     "/api/gestoria_conta_task_update": [
       "updateGestoriaContaTask"
     ],
     "/api/gestoria_conta_tasks_bulk": [
-      "line:36779"
+      "line:36834"
     ],
     "/api/gestoria_contabilidad": [
-      "line:76298",
-      "line:82859",
-      "line:84902"
+      "line:76353",
+      "line:82914",
+      "line:84957"
     ],
     "/api/gestoria_contabilidad_delete": [
       "deleteGestoriaContabilidad"
@@ -258,13 +258,13 @@
       "saveGestoriaContabilidadField"
     ],
     "/api/gestoria_docs": [
-      "line:81950",
-      "line:82022",
-      "line:82104",
-      "line:82284"
+      "line:82005",
+      "line:82077",
+      "line:82159",
+      "line:82339"
     ],
     "/api/gestoria_docs_delete": [
-      "line:27794",
+      "line:27849",
       "deleteGestoriaDoc"
     ],
     "/api/gestoria_docs_update": [
@@ -272,19 +272,19 @@
       "saveGestoriaDocField"
     ],
     "/api/gestoria_factura_ocr": [
-      "line:69611"
+      "line:69666"
     ],
     "/api/gestoria_import_aplicar": [
-      "line:83051"
+      "line:83106"
     ],
     "/api/gestoria_import_documento_resolver": [
-      "line:83129"
+      "line:83184"
     ],
     "/api/gestoria_import_upload": [
-      "line:82997"
+      "line:83052"
     ],
     "/api/gestoria_modelos": [
-      "line:81650"
+      "line:81705"
     ],
     "/api/gestoria_modelos_delete": [
       "deleteGestoriaModelo"
@@ -299,8 +299,8 @@
       "persistGestoriaTrabajoTipo"
     ],
     "/api/gestoria_trabajos": [
-      "line:66695",
-      "line:82747"
+      "line:66750",
+      "line:82802"
     ],
     "/api/gestoria_trabajos_delete": [
       "deleteGestoriaTrabajo"
@@ -310,10 +310,10 @@
     ],
     "/api/gestoria_update": [
       "line:255",
-      "line:45926",
-      "line:45929",
-      "line:58459",
-      "line:58477"
+      "line:45981",
+      "line:45984",
+      "line:58514",
+      "line:58532"
     ],
     "/api/health": [
       "probeDbHealth",
@@ -321,61 +321,61 @@
     ],
     "/api/hipotecas": [
       "line:263",
-      "line:42318",
-      "line:85135"
+      "line:42373",
+      "line:85190"
     ],
     "/api/hipotecas/firmar": [
-      "line:46095"
+      "line:46150"
     ],
     "/api/hipotecas_delete": [
       "deleteHipoteca"
     ],
     "/api/hipotecas_update": [
-      "line:42336",
-      "line:42797",
-      "line:45927",
-      "line:65661"
+      "line:42391",
+      "line:42852",
+      "line:45982",
+      "line:65716"
     ],
     "/api/home_time_status": [
-      "line:19810",
+      "line:19856",
       "openHomeTimePunchModal",
       "refresh",
-      "line:72929"
+      "line:72984"
     ],
     "/api/iivtnu_cp_lookup": [
-      "line:7592"
+      "line:7600"
     ],
     "/api/iivtnu_municipios": [
       "ensureIivtnuMunicipios"
     ],
     "/api/iivtnu_param_upsert": [
-      "line:7670"
+      "line:7678"
     ],
     "/api/iivtnu_pdf_parse": [
-      "line:77264"
+      "line:77319"
     ],
     "/api/iivtnu_simulate": [
-      "line:77044",
-      "line:77173"
+      "line:77099",
+      "line:77228"
     ],
     "/api/inmo_": [
       "line:267"
     ],
     "/api/inmueble_anuncio_generate": [
-      "line:33817"
+      "line:33872"
     ],
     "/api/inmueble_archive_pending_actions": [
-      "line:56081"
+      "line:56136"
     ],
     "/api/inmueble_catastro_lookup": [
-      "line:35600",
-      "line:35663"
+      "line:35655",
+      "line:35718"
     ],
     "/api/inmueble_catastro_sync": [
-      "line:35737"
+      "line:35792"
     ],
     "/api/inmueble_checklist_generate": [
-      "line:57037"
+      "line:57092"
     ],
     "/api/inmueble_checklist_update": [
       "updateInmuebleChecklist"
@@ -384,35 +384,35 @@
       "upsertInmuebleComprador"
     ],
     "/api/inmueble_delete": [
-      "line:80116"
+      "line:80171"
     ],
     "/api/inmueble_docs": [
-      "line:82591"
+      "line:82646"
     ],
     "/api/inmueble_encargo_close": [
-      "line:56202"
+      "line:56257"
     ],
     "/api/inmueble_guided_prepare": [
-      "line:80539"
+      "line:80594"
     ],
     "/api/inmueble_propietario_create": [
-      "line:38346"
+      "line:38401"
     ],
     "/api/inmueble_propietarios_update": [
-      "line:38291",
-      "line:55685"
+      "line:38346",
+      "line:55740"
     ],
     "/api/inmueble_renovar": [
-      "line:83387"
+      "line:83442"
     ],
     "/api/inmueble_servicios_update": [
-      "line:55538"
+      "line:55593"
     ],
     "/api/inmueble_signature_request": [
-      "line:56754"
+      "line:56809"
     ],
     "/api/inmueble_signature_sign": [
-      "line:28818"
+      "line:28873"
     ],
     "/api/inmueble_update": [
       "saveInmuebleFields"
@@ -421,85 +421,85 @@
       "line:267"
     ],
     "/api/irpf_alquiler_simulate": [
-      "line:77993"
+      "line:78048"
     ],
     "/api/irpf_ganancia_compare_pdf": [
-      "line:77744"
+      "line:77799"
     ],
     "/api/irpf_ganancia_pdf": [
-      "line:8900",
-      "line:77960"
+      "line:8908",
+      "line:78015"
     ],
     "/api/irpf_ganancia_simulate": [
-      "line:8885",
-      "line:8907",
-      "line:77172",
-      "line:77559",
-      "line:77974"
+      "line:8893",
+      "line:8915",
+      "line:77227",
+      "line:77614",
+      "line:78029"
     ],
     "/api/legal_copilot": [
-      "line:74102"
+      "line:74157"
     ],
     "/api/legal_copilot_catalog": [
       "loadLegalCatalog"
     ],
     "/api/legal_dgt_lookup": [
-      "line:74339",
-      "line:77135"
+      "line:74394",
+      "line:77190"
     ],
     "/api/legal_library_import": [
       "area"
     ],
     "/api/legal_radar_digest": [
-      "line:74300"
+      "line:74355"
     ],
     "/api/legal_radar_items": [
-      "line:74227"
+      "line:74282"
     ],
     "/api/legal_radar_items_update": [
-      "line:74377"
+      "line:74432"
     ],
     "/api/legal_radar_scan": [
-      "line:74266"
+      "line:74321"
     ],
     "/api/me": [
       "api"
     ],
     "/api/movimientos": [
-      "line:83841",
-      "line:84185",
-      "line:84691"
+      "line:83896",
+      "line:84240",
+      "line:84746"
     ],
     "/api/portal_inmuebles?limit=120": [
-      "line:28646"
+      "line:28701"
     ],
     "/api/portal_lead": [
-      "line:28627"
+      "line:28682"
     ],
     "/api/portal_owner_access_create": [
-      "line:50861"
+      "line:50916"
     ],
     "/api/portal_publish_update": [
-      "line:50825"
+      "line:50880"
     ],
     "/api/renta_campaign_document": [
-      "line:68741"
+      "line:68796"
     ],
     "/api/renta_entry_ocr_reprocess": [
-      "line:68892"
+      "line:68947"
     ],
     "/api/renta_quick_attach": [
-      "line:68366"
+      "line:68421"
     ],
     "/api/renta_quick_note": [
-      "line:68525"
+      "line:68580"
     ],
     "/api/renta_quick_ocr": [
-      "line:68469",
-      "line:68483"
+      "line:68524",
+      "line:68538"
     ],
     "/api/resumen": [
-      "line:72928"
+      "line:72983"
     ],
     "/api/s3_multipart_abort": [
       "line:609"
@@ -517,7 +517,7 @@
     ],
     "/api/s3_presign": [
       "line:646",
-      "line:68449"
+      "line:68504"
     ],
     "/api/s3_redirect?key=": [
       "line:919"
@@ -528,35 +528,35 @@
     "/api/seguros": [
       "line:259",
       "line:1625",
-      "line:65063",
-      "line:84415"
+      "line:65118",
+      "line:84470"
     ],
     "/api/seguros_": [
       "line:259"
     ],
     "/api/seguros_cambio_compania": [
-      "line:71503"
+      "line:71558"
     ],
     "/api/seguros_campanas": [
       "loadSegurosCampanas",
-      "line:76016"
+      "line:76071"
     ],
     "/api/seguros_campanas_import_email": [
-      "line:76050"
+      "line:76105"
     ],
     "/api/seguros_checklist_generate": [
-      "line:75663"
+      "line:75718"
     ],
     "/api/seguros_checklist_update": [
-      "line:63215"
+      "line:63270"
     ],
     "/api/seguros_comisiones": [
       "refreshSegurosOcrComisionSuggestion",
       "loadSegurosComisiones",
-      "line:76098"
+      "line:76153"
     ],
     "/api/seguros_consentimientos_update": [
-      "line:62079"
+      "line:62134"
     ],
     "/api/seguros_delete": [
       "deleteSeguro"
@@ -564,18 +564,18 @@
     "/api/seguros_enrich": [
       "line:1358",
       "line:1595",
-      "line:76671",
-      "line:76764",
-      "line:77007"
+      "line:76726",
+      "line:76819",
+      "line:77062"
     ],
     "/api/seguros_idd_update": [
-      "line:62075"
+      "line:62130"
     ],
     "/api/seguros_ipid_register": [
-      "line:75787"
+      "line:75842"
     ],
     "/api/seguros_movimientos": [
-      "line:76195"
+      "line:76250"
     ],
     "/api/seguros_ocr": [
       "runSegurosOcrDirectPayload"
@@ -584,171 +584,174 @@
       "startSegurosOcrJob"
     ],
     "/api/seguros_ofertas": [
-      "line:75943"
+      "line:75998"
     ],
     "/api/seguros_poliza_accion": [
-      "line:62912",
-      "line:63125",
-      "line:63798",
-      "line:71485",
-      "line:71489",
-      "line:71493",
-      "line:75748"
+      "line:62967",
+      "line:63180",
+      "line:63853",
+      "line:71540",
+      "line:71544",
+      "line:71548",
+      "line:75803"
     ],
     "/api/seguros_preferencias": [
-      "line:75905"
+      "line:75960"
     ],
     "/api/seguros_recibos": [
-      "line:76141"
+      "line:76196"
     ],
     "/api/seguros_recibos_delete": [
-      "line:62728"
+      "line:62783"
     ],
     "/api/seguros_recibos_update": [
-      "line:62503",
-      "line:62527",
-      "line:62539",
-      "line:62568",
-      "line:62589",
-      "line:62678",
-      "line:62694",
-      "line:62712"
+      "line:62558",
+      "line:62582",
+      "line:62594",
+      "line:62623",
+      "line:62644",
+      "line:62733",
+      "line:62749",
+      "line:62767"
     ],
     "/api/seguros_reclamacion": [
-      "line:75821"
+      "line:75876"
     ],
     "/api/seguros_reclamacion_update": [
-      "line:62318"
+      "line:62373"
     ],
     "/api/seguros_referidos": [
       "loadSegurosReferidos",
-      "line:75985"
+      "line:76040"
     ],
     "/api/seguros_renovaciones_update": [
       "updateSegurosRenovacion"
     ],
     "/api/seguros_siniestros": [
-      "line:76228"
+      "line:76283"
     ],
     "/api/seguros_siniestros_delete": [
-      "line:62849"
+      "line:62904"
     ],
     "/api/seguros_siniestros_update": [
-      "line:62820",
-      "line:62832"
+      "line:62875",
+      "line:62887"
     ],
     "/api/seguros_update": [
       "line:259",
       "line:1364",
       "line:1611",
       "sendTableUpdate",
-      "line:63817",
-      "line:71483",
-      "line:71791",
-      "line:76640",
-      "line:76749",
-      "line:76774",
-      "line:76950"
+      "line:63872",
+      "line:71538",
+      "line:71846",
+      "line:76695",
+      "line:76804",
+      "line:76829",
+      "line:77005"
     ],
     "/api/seguros_version_snapshot": [
-      "line:76171"
+      "line:76226"
+    ],
+    "/api/system_audit_latest": [
+      "line:23918"
     ],
     "/api/tablas": [
-      "line:72927"
+      "line:72982"
     ],
     "/api/usuarios": [
-      "line:16333",
-      "line:17146",
+      "line:16379",
+      "line:17192",
       "loadUsuarios",
-      "line:82159"
+      "line:82214"
     ],
     "/api/usuarios_delete": [
-      "line:15354",
-      "line:17225",
-      "line:37717"
+      "line:15400",
+      "line:17271",
+      "line:37772"
     ],
     "/api/usuarios_invitar": [
-      "line:16390",
-      "line:17193",
-      "line:37692"
+      "line:16436",
+      "line:17239",
+      "line:37747"
     ],
     "/api/usuarios_update": [
-      "line:16269",
-      "line:16416",
-      "line:16457",
-      "line:17146",
-      "line:37670"
+      "line:16315",
+      "line:16462",
+      "line:16503",
+      "line:17192",
+      "line:37725"
     ],
     "/api/visitas": [
-      "line:82411",
-      "line:84149"
+      "line:82466",
+      "line:84204"
     ],
     "/api/workspace_automatizaciones": [
-      "line:79853"
+      "line:79908"
     ],
     "/api/workspace_cobros": [
-      "line:79738"
+      "line:79793"
     ],
     "/api/workspace_company_create": [
-      "line:10623",
-      "line:10921"
+      "line:10669",
+      "line:10967"
     ],
     "/api/workspace_company_logo_upload": [
-      "line:78186"
+      "line:78241"
     ],
     "/api/workspace_company_update": [
-      "line:11081"
+      "line:11127"
     ],
     "/api/workspace_contrato_catalog": [
       "loadContractTemplates"
     ],
     "/api/workspace_contrato_copilot": [
-      "line:12365"
+      "line:12411"
     ],
     "/api/workspace_contratos": [
-      "line:12265",
-      "line:12304",
-      "line:18522",
-      "line:23066"
+      "line:12311",
+      "line:12350",
+      "line:18568",
+      "line:23112"
     ],
     "/api/workspace_customer_create": [
-      "line:78520"
+      "line:78575"
     ],
     "/api/workspace_delete": [
-      "line:78309",
-      "line:78318"
+      "line:78364",
+      "line:78373"
     ],
     "/api/workspace_document_assign": [
-      "line:23488"
+      "line:23534"
     ],
     "/api/workspace_empresa_link": [
-      "line:10595",
-      "line:10892"
+      "line:10641",
+      "line:10938"
     ],
     "/api/workspace_empresa_unlink": [
-      "line:11062"
+      "line:11108"
     ],
     "/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18079"
+      "line:18125"
     ],
     "/api/workspace_factura_pdf_public?token=${encodeURIComponent(token)}&id=${encodeURIComponent(row.id || ": [
-      "line:28381"
+      "line:28436"
     ],
     "/api/workspace_facturacion": [
-      "line:78634"
+      "line:78689"
     ],
     "/api/workspace_fincas_comunidad_delete": [
-      "line:21956"
+      "line:22002"
     ],
     "/api/workspace_fincas_comunidades": [
-      "line:20299",
-      "line:21086",
-      "line:79975"
+      "line:20345",
+      "line:21132",
+      "line:80030"
     ],
     "/api/workspace_fincas_contabilidad": [
-      "line:20782",
-      "line:21507",
-      "line:79183"
+      "line:20828",
+      "line:21553",
+      "line:79238"
     ],
     "/api/workspace_fincas_contabilidad_import": [
       "line:826"
@@ -757,200 +760,200 @@
       "line:800"
     ],
     "/api/workspace_fincas_convert_presupuesto": [
-      "line:23039"
+      "line:23085"
     ],
     "/api/workspace_fincas_documentos": [
-      "line:20934",
-      "line:21803"
+      "line:20980",
+      "line:21849"
     ],
     "/api/workspace_fincas_incidencias": [
-      "line:20601",
-      "line:21323",
-      "line:80008"
+      "line:20647",
+      "line:21369",
+      "line:80063"
     ],
     "/api/workspace_fincas_juntas": [
-      "line:80052"
+      "line:80107"
     ],
     "/api/workspace_fincas_proveedores": [
-      "line:20498",
-      "line:21201",
-      "line:80030"
+      "line:20544",
+      "line:21247",
+      "line:80085"
     ],
     "/api/workspace_fincas_vecinos": [
-      "line:20407",
-      "line:21676"
+      "line:20453",
+      "line:21722"
     ],
     "/api/workspace_inbox": [
-      "line:79652",
-      "line:79706"
+      "line:79707",
+      "line:79761"
     ],
     "/api/workspace_inbox_review": [
       "runInboxAction"
     ],
     "/api/workspace_kiosk_qr?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(String(employee?.id || ": [
-      "line:14101"
+      "line:14147"
     ],
     "/api/workspace_kiosk_token": [
-      "line:16495"
+      "line:16541"
     ],
     "/api/workspace_link_delete": [
-      "line:11575"
+      "line:11621"
     ],
     "/api/workspace_link_upsert": [
-      "line:11551"
+      "line:11597"
     ],
     "/api/workspace_member_delete": [
-      "line:11452",
-      "line:37866"
+      "line:11498",
+      "line:37921"
     ],
     "/api/workspace_member_set": [
-      "line:37890"
+      "line:37945"
     ],
     "/api/workspace_member_upsert": [
-      "line:11404",
-      "line:16348"
+      "line:11450",
+      "line:16394"
     ],
     "/api/workspace_members_reset": [
-      "line:11433"
+      "line:11479"
     ],
     "/api/workspace_module_update": [
-      "line:17700"
+      "line:17746"
     ],
     "/api/workspace_portal": [
-      "line:79808"
+      "line:79863"
     ],
     "/api/workspace_portal_facturas_excel?token=${encodeURIComponent(token)}": [
-      "line:28051"
+      "line:28106"
     ],
     "/api/workspace_portal_presign": [
       "line:854"
     ],
     "/api/workspace_portal_public_request": [
-      "line:28536"
+      "line:28591"
     ],
     "/api/workspace_portal_requerimientos": [
-      "line:79830"
+      "line:79885"
     ],
     "/api/workspace_portal_upload": [
-      "line:28413",
-      "line:28457"
+      "line:28468",
+      "line:28512"
     ],
     "/api/workspace_presupuesto_delete": [
-      "line:23293",
-      "line:23402"
+      "line:23339",
+      "line:23448"
     ],
     "/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18431"
+      "line:18477"
     ],
     "/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18430"
+      "line:18476"
     ],
     "/api/workspace_presupuestos": [
-      "line:18476",
+      "line:18522",
       "updateWorkspacePresupuestoFromRow",
-      "line:78724",
-      "line:79393",
-      "line:79615"
+      "line:78779",
+      "line:79448",
+      "line:79670"
     ],
     "/api/workspace_registro_alerts": [
-      "line:78815"
+      "line:78870"
     ],
     "/api/workspace_registro_horario": [
-      "line:19999",
-      "line:79875"
+      "line:20045",
+      "line:79930"
     ],
     "/api/workspace_registro_horario_toggle": [
-      "line:17260",
-      "line:19665",
+      "line:17306",
+      "line:19711",
       "runToggle"
     ],
     "/api/workspace_registro_periodo_lock": [
-      "line:78917"
+      "line:78972"
     ],
     "/api/workspace_registro_personal": [
-      "line:15251",
-      "line:16203",
-      "line:16355",
-      "line:16577",
-      "line:16614",
-      "line:16713",
-      "line:79900"
+      "line:15297",
+      "line:16249",
+      "line:16401",
+      "line:16623",
+      "line:16660",
+      "line:16759",
+      "line:79955"
     ],
     "/api/workspace_registro_personal_delete": [
-      "line:15293",
-      "line:15340"
+      "line:15339",
+      "line:15386"
     ],
     "/api/workspace_registro_personal_self_photo": [
-      "line:15152"
+      "line:15198"
     ],
     "/api/workspace_registro_usuario_toggle": [
-      "line:16541",
-      "line:17056",
-      "line:17168",
-      "line:19389"
+      "line:16587",
+      "line:17102",
+      "line:17214",
+      "line:19435"
     ],
     "/api/workspace_remesas": [
-      "line:79762"
+      "line:79817"
     ],
     "/api/workspace_rrhh_ausencia": [
-      "line:17321"
+      "line:17367"
     ],
     "/api/workspace_rrhh_ausencia_estado": [
-      "line:17363"
+      "line:17409"
     ],
     "/api/workspace_rrhh_cleanup": [
-      "line:16978"
+      "line:17024"
     ],
     "/api/workspace_rrhh_documento": [
-      "line:17575"
+      "line:17621"
     ],
     "/api/workspace_rrhh_gasto": [
-      "line:17422"
+      "line:17468"
     ],
     "/api/workspace_rrhh_gasto_estado": [
-      "line:17463"
+      "line:17509"
     ],
     "/api/workspace_rrhh_nomina_ocr": [
-      "line:15430"
+      "line:15476"
     ],
     "/api/workspace_rrhh_nominas_import": [
-      "line:17505"
+      "line:17551"
     ],
     "/api/workspace_rrhh_productividad_manual_bulk_update": [
-      "line:15864"
+      "line:15910"
     ],
     "/api/workspace_rrhh_productividad_manual_delete": [
-      "line:15729"
+      "line:15775"
     ],
     "/api/workspace_rrhh_productividad_manual_upsert": [
-      "line:15930"
+      "line:15976"
     ],
     "/api/workspace_rrhh_profile": [
-      "line:17285"
+      "line:17331"
     ],
     "/api/workspace_rrhh_reset": [
-      "line:16843"
+      "line:16889"
     ],
     "/api/workspace_rrhh_turnos": [
-      "line:15116"
+      "line:15162"
     ],
     "/api/workspace_series": [
-      "line:79785"
+      "line:79840"
     ],
     "/api/workspace_service_matrix_delete": [
-      "line:11276"
+      "line:11322"
     ],
     "/api/workspace_service_matrix_upsert": [
-      "line:11265"
+      "line:11311"
     ],
     "/api/workspace_update": [
-      "line:78273"
+      "line:78328"
     ],
     "/api/workspaces": [
-      "line:6392",
-      "line:23963",
+      "line:6400",
+      "line:24018",
       "isStale",
-      "line:69738"
+      "line:69793"
     ],
     "/api/years": [
       "ensureYearOptions"
@@ -968,11 +971,12 @@
       "endpoints_sample": [
         {
           "path": "/api/acciones",
-          "line": 75464,
+          "line": 75665,
           "module": "agenda"
         }
       ],
       "tests": [
+        "tests/test_acciones_service_scope.py",
         "tests/test_agenda_frontend_regressions.py"
       ],
       "frontend_functions_sample": [
@@ -1041,17 +1045,17 @@
         {
           "path": "/api/acciones",
           "frontend_functions": [
-            "line:62936",
-            "line:66367",
-            "line:74802",
-            "line:75328",
-            "line:82329",
-            "line:82520",
-            "line:82782",
-            "line:82814",
-            "line:83465",
-            "line:83549",
-            "line:83575"
+            "line:62991",
+            "line:66422",
+            "line:74857",
+            "line:75383",
+            "line:82384",
+            "line:82575",
+            "line:82837",
+            "line:82869",
+            "line:83520",
+            "line:83604",
+            "line:83630"
           ]
         }
       ]
@@ -1066,12 +1070,12 @@
       "endpoints_sample": [
         {
           "path": "/api/usuarios",
-          "line": 78329,
+          "line": 78531,
           "module": "usuarios_permisos"
         },
         {
           "path": "/api/workspace_registro_usuarios",
-          "line": 73186,
+          "line": 73387,
           "module": "usuarios_permisos"
         }
       ],
@@ -1094,10 +1098,10 @@
         {
           "path": "/api/usuarios",
           "frontend_functions": [
-            "line:16333",
-            "line:17146",
+            "line:16379",
+            "line:17192",
             "loadUsuarios",
-            "line:82159"
+            "line:82214"
           ]
         }
       ]
@@ -1111,202 +1115,202 @@
       "endpoints_sample": [
         {
           "path": "/api/workspace_automatizacion_logs",
-          "line": 73967,
+          "line": 74168,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_automatizaciones",
-          "line": 72817,
+          "line": 73018,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_billing_summary",
-          "line": 72659,
+          "line": 72852,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_boot",
-          "line": 72508,
+          "line": 72701,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_cliente_360",
-          "line": 72713,
+          "line": 72906,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_clientes",
-          "line": 72703,
+          "line": 72896,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_cobros",
-          "line": 72685,
+          "line": 72878,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_contrato_catalog",
-          "line": 73754,
+          "line": 73955,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_contrato_pdf",
-          "line": 73790,
+          "line": 73991,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_contratos",
-          "line": 73772,
+          "line": 73973,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_detail",
-          "line": 71934,
+          "line": 72127,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_document_hub",
-          "line": 72667,
+          "line": 72860,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_factura_pdf",
-          "line": 74204,
+          "line": 74405,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_factura_pdf_public",
-          "line": 74217,
+          "line": 74418,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_facturacion",
-          "line": 72676,
+          "line": 72869,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fin_overview",
-          "line": 72756,
+          "line": 72957,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_comunidades",
-          "line": 73851,
+          "line": 74052,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_contabilidad",
-          "line": 73913,
+          "line": 74114,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_documentos",
-          "line": 73949,
+          "line": 74150,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_incidencias",
-          "line": 73868,
+          "line": 74069,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_juntas",
-          "line": 73904,
+          "line": 74105,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_proveedores",
-          "line": 73886,
+          "line": 74087,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_fincas_vecinos",
-          "line": 73931,
+          "line": 74132,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_gestoria_overview",
-          "line": 72738,
+          "line": 72939,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_health",
-          "line": 72726,
+          "line": 72919,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_inbox",
-          "line": 72791,
+          "line": 72992,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_inmo_overview",
-          "line": 72765,
+          "line": 72966,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_kiosk_qr",
-          "line": 73350,
+          "line": 73551,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_kiosk_status",
-          "line": 73295,
+          "line": 73496,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_links",
-          "line": 72457,
+          "line": 72650,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_members",
-          "line": 72630,
+          "line": 72823,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_portal",
-          "line": 72800,
+          "line": 73001,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_portal_facturas_excel",
-          "line": 74062,
+          "line": 74263,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_portal_public",
-          "line": 73986,
+          "line": 74187,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_portal_requerimientos",
-          "line": 72808,
+          "line": 73009,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_portal_s3_url",
-          "line": 74162,
+          "line": 74363,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_presupuesto_encargo_pdf",
-          "line": 73833,
+          "line": 74034,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_presupuesto_pdf",
-          "line": 73821,
+          "line": 74022,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_presupuesto_templates",
-          "line": 73715,
+          "line": 73916,
           "module": "workspaces"
         },
         {
           "path": "/api/workspace_presupuestos",
-          "line": 49332,
+          "line": 49506,
           "module": "workspaces"
         }
       ],
@@ -1380,13 +1384,13 @@
         {
           "path": "/api/workspace_automatizaciones",
           "frontend_functions": [
-            "line:79853"
+            "line:79908"
           ]
         },
         {
           "path": "/api/workspace_cobros",
           "frontend_functions": [
-            "line:79738"
+            "line:79793"
           ]
         },
         {
@@ -1398,118 +1402,512 @@
         {
           "path": "/api/workspace_contratos",
           "frontend_functions": [
-            "line:12265",
-            "line:12304",
-            "line:18522",
-            "line:23066"
+            "line:12311",
+            "line:12350",
+            "line:18568",
+            "line:23112"
           ]
         },
         {
           "path": "/api/workspace_facturacion",
           "frontend_functions": [
-            "line:78634"
+            "line:78689"
           ]
         },
         {
           "path": "/api/workspace_fincas_comunidades",
           "frontend_functions": [
-            "line:20299",
-            "line:21086",
-            "line:79975"
+            "line:20345",
+            "line:21132",
+            "line:80030"
           ]
         },
         {
           "path": "/api/workspace_fincas_contabilidad",
           "frontend_functions": [
-            "line:20782",
-            "line:21507",
-            "line:79183"
+            "line:20828",
+            "line:21553",
+            "line:79238"
           ]
         },
         {
           "path": "/api/workspace_fincas_documentos",
           "frontend_functions": [
-            "line:20934",
-            "line:21803"
+            "line:20980",
+            "line:21849"
           ]
         },
         {
           "path": "/api/workspace_fincas_incidencias",
           "frontend_functions": [
-            "line:20601",
-            "line:21323",
-            "line:80008"
+            "line:20647",
+            "line:21369",
+            "line:80063"
           ]
         },
         {
           "path": "/api/workspace_fincas_juntas",
           "frontend_functions": [
-            "line:80052"
+            "line:80107"
           ]
         },
         {
           "path": "/api/workspace_fincas_proveedores",
           "frontend_functions": [
-            "line:20498",
-            "line:21201",
-            "line:80030"
+            "line:20544",
+            "line:21247",
+            "line:80085"
           ]
         },
         {
           "path": "/api/workspace_fincas_vecinos",
           "frontend_functions": [
-            "line:20407",
-            "line:21676"
+            "line:20453",
+            "line:21722"
           ]
         },
         {
           "path": "/api/workspace_inbox",
           "frontend_functions": [
-            "line:79652",
-            "line:79706"
+            "line:79707",
+            "line:79761"
           ]
         },
         {
           "path": "/api/workspace_portal",
           "frontend_functions": [
-            "line:79808"
+            "line:79863"
           ]
         },
         {
           "path": "/api/workspace_portal_requerimientos",
           "frontend_functions": [
-            "line:79830"
+            "line:79885"
           ]
         },
         {
           "path": "/api/workspace_presupuestos",
           "frontend_functions": [
-            "line:18476",
+            "line:18522",
             "updateWorkspacePresupuestoFromRow",
-            "line:78724",
-            "line:79393",
-            "line:79615"
+            "line:78779",
+            "line:79448",
+            "line:79670"
           ]
         },
         {
           "path": "/api/workspace_remesas",
           "frontend_functions": [
-            "line:79762"
+            "line:79817"
           ]
         },
         {
           "path": "/api/workspace_series",
           "frontend_functions": [
-            "line:79785"
+            "line:79840"
           ]
         },
         {
           "path": "/api/workspaces",
           "frontend_functions": [
-            "line:6392",
-            "line:23963",
+            "line:6400",
+            "line:24018",
             "isStale",
-            "line:69738"
+            "line:69793"
+          ]
+        }
+      ]
+    },
+    "core": {
+      "expectations": [
+        "Si una card del home es visible para el usuario, debe abrir una vista real o tener href funcional.",
+        "No puede existir una card CRM visible pero inerte por guards frontend inconsistentes con el render."
+      ],
+      "endpoint_count": 46,
+      "endpoints_sample": [
+        {
+          "path": "/api/admin_user_lookup",
+          "line": 72252,
+          "module": "core"
+        },
+        {
+          "path": "/api/auditoria",
+          "line": 78546,
+          "module": "core"
+        },
+        {
+          "path": "/api/auth_invite_status",
+          "line": 72273,
+          "module": "core"
+        },
+        {
+          "path": "/api/catalogo",
+          "line": 78732,
+          "module": "core"
+        },
+        {
+          "path": "/api/catalogo_match",
+          "line": 78763,
+          "module": "core"
+        },
+        {
+          "path": "/api/catalogo_poblaciones",
+          "line": 74837,
+          "module": "core"
+        },
+        {
+          "path": "/api/cliente",
+          "line": 75214,
+          "module": "core"
+        },
+        {
+          "path": "/api/cliente_ficha",
+          "line": 75197,
+          "module": "core"
+        },
+        {
+          "path": "/api/cliente_lookup",
+          "line": 75239,
+          "module": "core"
+        },
+        {
+          "path": "/api/cliente_profesional",
+          "line": 77382,
+          "module": "core"
+        },
+        {
+          "path": "/api/cliente_relaciones",
+          "line": 75378,
+          "module": "core"
+        },
+        {
+          "path": "/api/clientes",
+          "line": 79632,
+          "module": "core"
+        },
+        {
+          "path": "/api/clientes_by_nif",
+          "line": 75386,
+          "module": "core"
+        },
+        {
+          "path": "/api/clientes_list",
+          "line": 75009,
+          "module": "core"
+        },
+        {
+          "path": "/api/clientes_stats",
+          "line": 74690,
+          "module": "core"
+        },
+        {
+          "path": "/api/convenios_catalog",
+          "line": 72406,
+          "module": "core"
+        },
+        {
+          "path": "/api/copilot_web_domains",
+          "line": 72410,
+          "module": "core"
+        },
+        {
+          "path": "/api/crm_resumen_ytd",
+          "line": 85568,
+          "module": "core"
+        },
+        {
+          "path": "/api/dashboard",
+          "line": 84577,
+          "module": "core"
+        },
+        {
+          "path": "/api/debug_auth",
+          "line": 72215,
+          "module": "core"
+        },
+        {
+          "path": "/api/debug_db_path",
+          "line": 75174,
+          "module": "core"
+        },
+        {
+          "path": "/api/empresa_presupuestos",
+          "line": 49503,
+          "module": "core"
+        },
+        {
+          "path": "/api/empresas",
+          "line": 72372,
+          "module": "core"
+        },
+        {
+          "path": "/api/geocode_lookup",
+          "line": 74881,
+          "module": "core"
+        },
+        {
+          "path": "/api/home_time_status",
+          "line": 72450,
+          "module": "core"
+        },
+        {
+          "path": "/api/inmo_inicio_dashboard",
+          "line": 85121,
+          "module": "core"
+        },
+        {
+          "path": "/api/legal_copilot_catalog",
+          "line": 74183,
+          "module": "core"
+        },
+        {
+          "path": "/api/legal_library_documents",
+          "line": 72424,
+          "module": "core"
+        },
+        {
+          "path": "/api/legal_radar_auto_status",
+          "line": 72414,
+          "module": "core"
+        },
+        {
+          "path": "/api/legal_radar_counts",
+          "line": 72419,
+          "module": "core"
+        },
+        {
+          "path": "/api/legal_radar_items",
+          "line": 74177,
+          "module": "core"
+        },
+        {
+          "path": "/api/me",
+          "line": 72175,
+          "module": "core"
+        },
+        {
+          "path": "/api/notarias",
+          "line": 82793,
+          "module": "core"
+        },
+        {
+          "path": "/api/ocr_job",
+          "line": 75293,
+          "module": "core"
+        },
+        {
+          "path": "/api/portal_empresa_logo",
+          "line": 79860,
+          "module": "core"
+        },
+        {
+          "path": "/api/portal_publish_preview",
+          "line": 79993,
+          "module": "core"
+        },
+        {
+          "path": "/api/postal_codes",
+          "line": 74793,
+          "module": "core"
+        },
+        {
+          "path": "/api/postal_lookup",
+          "line": 74757,
+          "module": "core"
+        },
+        {
+          "path": "/api/resumen",
+          "line": 74671,
+          "module": "core"
+        },
+        {
+          "path": "/api/s3_local_put",
+          "line": 50347,
+          "module": "core"
+        }
+      ],
+      "tests": [
+        "tests/test_admin_force_reset_password_invite.py",
+        "tests/test_aon_diario_to_miconversor.py",
+        "tests/test_auth_invites_table_does_not_close_conn.py",
+        "tests/test_auth_security.py",
+        "tests/test_cliente_ficha.py",
+        "tests/test_fiscal_venta_pdf.py",
+        "tests/test_fiscal_venta_presets.py",
+        "tests/test_frontend_smoke.py",
+        "tests/test_iivtnu_hacienda_excel2022_catalog.py",
+        "tests/test_iivtnu_malaga_proxies.py",
+        "tests/test_iivtnu_max_coefs.py",
+        "tests/test_iivtnu_param_upsert.py",
+        "tests/test_iivtnu_pdf_extract.py",
+        "tests/test_import_historico_price.py",
+        "tests/test_irpf_abatimiento.py",
+        "tests/test_irpf_ganancia_pdf.py",
+        "tests/test_irpf_ganancia_simulate.py",
+        "tests/test_irpf_simulators.py",
+        "tests/test_normalize_service_key.py",
+        "tests/test_ollama_automation_tools.py",
+        "tests/test_parse_iso_dt_utc.py",
+        "tests/test_prod_api_monitor.py",
+        "tests/test_service_parsing.py",
+        "tests/test_summarize_audit_with_ollama.py"
+      ],
+      "frontend_functions_sample": [
+        "_startOfMonth",
+        "_startOfYear",
+        "_toDateInput",
+        "aLast",
+        "aName",
+        "action",
+        "active",
+        "add",
+        "addAlert",
+        "addCnaeToInput",
+        "addDays",
+        "addDaysIso",
+        "addDocLink",
+        "addKey",
+        "addKpi",
+        "addMember",
+        "addMonths",
+        "addOneYear",
+        "addOptionUnique",
+        "addOwnerRow",
+        "addrPostal",
+        "adqTotal",
+        "ageDays",
+        "alignMonthlySeries",
+        "alignSeries",
+        "allDisplayableColumns",
+        "allow",
+        "allowService",
+        "allowed",
+        "allowedByContext",
+        "api",
+        "apiPost",
+        "appendOptions",
+        "appendServiceCard",
+        "appendSimuladoresCard",
+        "apply",
+        "applyCaptacionOwnerMatch",
+        "applyColumnFilters",
+        "applyCompanyCell",
+        "applyCompanyFilters",
+        "applyCrmGlobalSearchToCurrentView",
+        "applyCrmTecnocloudQuickSearch",
+        "applyDensityMode",
+        "applyDraftToForm",
+        "applyFilter",
+        "applyFiscalWizardPrefill",
+        "applyFiscalWizardPreset",
+        "applyParty",
+        "applyPasswordVisibility",
+        "applyPostal",
+        "applyPresetFilter",
+        "applyPrestamoFromOcr",
+        "applyRamoCell",
+        "applySuggestedValues",
+        "applyToRoot",
+        "applyVisible",
+        "applyWidth",
+        "area",
+        "attachChartTooltip",
+        "attachEmpresaIdForServiceRequest"
+      ],
+      "frontend_endpoint_links": [
+        {
+          "path": "/api/cliente_profesional",
+          "frontend_functions": [
+            "line:81592"
+          ]
+        },
+        {
+          "path": "/api/cliente_relaciones",
+          "frontend_functions": [
+            "line:81153"
+          ]
+        },
+        {
+          "path": "/api/clientes",
+          "frontend_functions": [
+            "line:25506",
+            "line:42800",
+            "line:64609",
+            "line:68300",
+            "line:84361",
+            "line:84569",
+            "line:85036"
+          ]
+        },
+        {
+          "path": "/api/clientes_stats",
+          "frontend_functions": [
+            "loadClientesCardStats"
+          ]
+        },
+        {
+          "path": "/api/empresas",
+          "frontend_functions": [
+            "line:10609",
+            "line:10905",
+            "line:24398",
+            "line:25063",
+            "line:26588",
+            "refreshClientesAltaSelects",
+            "linkClienteSegurosService",
+            "line:72981",
+            "line:78257"
+          ]
+        },
+        {
+          "path": "/api/home_time_status",
+          "frontend_functions": [
+            "line:19856",
+            "openHomeTimePunchModal",
+            "refresh",
+            "line:72984"
+          ]
+        },
+        {
+          "path": "/api/legal_copilot_catalog",
+          "frontend_functions": [
+            "loadLegalCatalog"
+          ]
+        },
+        {
+          "path": "/api/legal_radar_items",
+          "frontend_functions": [
+            "line:74282"
+          ]
+        },
+        {
+          "path": "/api/me",
+          "frontend_functions": [
+            "api"
+          ]
+        },
+        {
+          "path": "/api/resumen",
+          "frontend_functions": [
+            "line:72983"
+          ]
+        },
+        {
+          "path": "/api/system_audit_latest",
+          "frontend_functions": [
+            "line:23918"
+          ]
+        },
+        {
+          "path": "/api/tablas",
+          "frontend_functions": [
+            "line:72982"
+          ]
+        },
+        {
+          "path": "/api/years",
+          "frontend_functions": [
+            "ensureYearOptions"
           ]
         }
       ]
@@ -1523,137 +1921,137 @@
       "endpoints_sample": [
         {
           "path": "/api/audit_inmobiliaria",
-          "line": 79904,
+          "line": 80106,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/compraventas",
-          "line": 79938,
+          "line": 80140,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/demandas",
-          "line": 81383,
+          "line": 81585,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/fin_inmobiliarias",
-          "line": 74961,
+          "line": 75162,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble",
-          "line": 80114,
+          "line": 80316,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_checklist",
-          "line": 81606,
+          "line": 81808,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_compradores",
-          "line": 81564,
+          "line": 81766,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_consumo_pdf",
-          "line": 81041,
+          "line": 81243,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_docs",
-          "line": 81130,
+          "line": 81332,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_encargo_pdf",
-          "line": 80319,
+          "line": 80521,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_ensure",
-          "line": 80231,
+          "line": 80433,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_expediente_docs",
-          "line": 80763,
+          "line": 80965,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_honorarios_pdf",
-          "line": 80963,
+          "line": 81165,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_matching",
-          "line": 81552,
+          "line": 81754,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_negociacion_pdf",
-          "line": 80905,
+          "line": 81107,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_portal_feed",
-          "line": 79711,
+          "line": 79913,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_signature_config",
-          "line": 79754,
+          "line": 79956,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_signature_document",
-          "line": 74035,
+          "line": 74236,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_signature_public",
-          "line": 73998,
+          "line": 74199,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_timeline",
-          "line": 81160,
+          "line": 81362,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_visita_docs",
-          "line": 80590,
+          "line": 80792,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmueble_visita_pdf",
-          "line": 80507,
+          "line": 80709,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/inmuebles",
-          "line": 79814,
+          "line": 80016,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/matching",
-          "line": 81539,
+          "line": 81741,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/portal_inmueble",
-          "line": 79779,
+          "line": 79981,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/portal_inmuebles",
-          "line": 79648,
+          "line": 79850,
           "module": "inmobiliaria"
         },
         {
           "path": "/api/visitas",
-          "line": 81473,
+          "line": 81675,
           "module": "inmobiliaria"
         }
       ],
@@ -1730,14 +2128,14 @@
         {
           "path": "/api/compraventas",
           "frontend_functions": [
-            "line:84021"
+            "line:84076"
           ]
         },
         {
           "path": "/api/demandas",
           "frontend_functions": [
-            "line:82372",
-            "line:84087"
+            "line:82427",
+            "line:84142"
           ]
         },
         {
@@ -1755,7 +2153,7 @@
         {
           "path": "/api/inmueble_docs",
           "frontend_functions": [
-            "line:82591"
+            "line:82646"
           ]
         },
         {
@@ -1767,8 +2165,8 @@
         {
           "path": "/api/visitas",
           "frontend_functions": [
-            "line:82411",
-            "line:84149"
+            "line:82466",
+            "line:84204"
           ]
         }
       ]
@@ -1782,132 +2180,132 @@
       "endpoints_sample": [
         {
           "path": "/api/fincas_seguros_dashboard",
-          "line": 82690,
+          "line": 82892,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_alertas",
-          "line": 83650,
+          "line": 83852,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_campanas",
-          "line": 75877,
+          "line": 76079,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_checklist",
-          "line": 84252,
+          "line": 84454,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_cliente",
-          "line": 76150,
+          "line": 76352,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_comisiones",
-          "line": 76072,
+          "line": 76274,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_compliance_kpis",
-          "line": 77102,
+          "line": 77304,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_consentimientos",
-          "line": 75829,
+          "line": 76031,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_data_quality",
-          "line": 76314,
+          "line": 76516,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_eventos",
-          "line": 76439,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_idd",
-          "line": 75788,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_insights",
-          "line": 76342,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_kpis",
-          "line": 83926,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_movimientos",
-          "line": 76083,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_ofertas",
-          "line": 75749,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_preferencias",
-          "line": 75772,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_recibos",
-          "line": 76466,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_recibos_export",
-          "line": 76900,
-          "module": "seguros"
-        },
-        {
-          "path": "/api/seguros_recibos_summary",
           "line": 76641,
           "module": "seguros"
         },
         {
+          "path": "/api/seguros_idd",
+          "line": 75990,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_insights",
+          "line": 76544,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_kpis",
+          "line": 84128,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_movimientos",
+          "line": 76285,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_ofertas",
+          "line": 75951,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_preferencias",
+          "line": 75974,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos",
+          "line": 76668,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos_export",
+          "line": 77102,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos_summary",
+          "line": 76843,
+          "module": "seguros"
+        },
+        {
           "path": "/api/seguros_reclamaciones",
-          "line": 77070,
+          "line": 77272,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_recomendacion",
-          "line": 75889,
+          "line": 76091,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_referidos",
-          "line": 75864,
+          "line": 76066,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_renovaciones_queue",
-          "line": 83723,
+          "line": 83925,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_siniestros",
-          "line": 76583,
+          "line": 76785,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_version",
-          "line": 76124,
+          "line": 76326,
           "module": "seguros"
         },
         {
           "path": "/api/seguros_versiones",
-          "line": 76106,
+          "line": 76308,
           "module": "seguros"
         }
       ],
@@ -1988,7 +2386,7 @@
           "path": "/api/seguros_campanas",
           "frontend_functions": [
             "loadSegurosCampanas",
-            "line:76016"
+            "line:76071"
           ]
         },
         {
@@ -1996,44 +2394,44 @@
           "frontend_functions": [
             "refreshSegurosOcrComisionSuggestion",
             "loadSegurosComisiones",
-            "line:76098"
+            "line:76153"
           ]
         },
         {
           "path": "/api/seguros_movimientos",
           "frontend_functions": [
-            "line:76195"
+            "line:76250"
           ]
         },
         {
           "path": "/api/seguros_ofertas",
           "frontend_functions": [
-            "line:75943"
+            "line:75998"
           ]
         },
         {
           "path": "/api/seguros_preferencias",
           "frontend_functions": [
-            "line:75905"
+            "line:75960"
           ]
         },
         {
           "path": "/api/seguros_recibos",
           "frontend_functions": [
-            "line:76141"
+            "line:76196"
           ]
         },
         {
           "path": "/api/seguros_referidos",
           "frontend_functions": [
             "loadSegurosReferidos",
-            "line:75985"
+            "line:76040"
           ]
         },
         {
           "path": "/api/seguros_siniestros",
           "frontend_functions": [
-            "line:76228"
+            "line:76283"
           ]
         }
       ]
@@ -2047,107 +2445,107 @@
       "endpoints_sample": [
         {
           "path": "/api/cliente_gestoria",
-          "line": 75150,
+          "line": 75351,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_asientos",
-          "line": 77960,
+          "line": 78162,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_conta_config",
-          "line": 78265,
+          "line": 78467,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_conta_tasks",
-          "line": 78281,
+          "line": 78483,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_contabilidad",
-          "line": 77591,
+          "line": 77793,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_dashboard",
-          "line": 78591,
+          "line": 78793,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_docs",
-          "line": 77339,
+          "line": 77541,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_excel_plantilla",
-          "line": 78091,
+          "line": 78293,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_facturas",
-          "line": 77733,
+          "line": 77935,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_import_documentos",
-          "line": 77790,
+          "line": 77992,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_import_excel",
-          "line": 77846,
+          "line": 78048,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_import_lotes",
-          "line": 77763,
+          "line": 77965,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_libros",
-          "line": 77990,
+          "line": 78192,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_modelos",
-          "line": 77197,
+          "line": 77399,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_renta_cards",
-          "line": 75255,
+          "line": 75456,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_renta_dashboard",
-          "line": 75297,
+          "line": 75498,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_renta_debug",
-          "line": 78449,
+          "line": 78651,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_renta_export",
-          "line": 75346,
+          "line": 75547,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_trabajo_tipos",
-          "line": 77314,
+          "line": 77516,
           "module": "gestoria"
         },
         {
           "path": "/api/gestoria_trabajos",
-          "line": 77260,
+          "line": 77462,
           "module": "gestoria"
         },
         {
           "path": "/api/renta_quick_pending",
-          "line": 78394,
+          "line": 78596,
           "module": "gestoria"
         }
       ],
@@ -2229,37 +2627,37 @@
         {
           "path": "/api/gestoria_conta_config",
           "frontend_functions": [
-            "line:82916"
+            "line:82971"
           ]
         },
         {
           "path": "/api/gestoria_contabilidad",
           "frontend_functions": [
-            "line:76298",
-            "line:82859",
-            "line:84902"
+            "line:76353",
+            "line:82914",
+            "line:84957"
           ]
         },
         {
           "path": "/api/gestoria_docs",
           "frontend_functions": [
-            "line:81950",
-            "line:82022",
-            "line:82104",
-            "line:82284"
+            "line:82005",
+            "line:82077",
+            "line:82159",
+            "line:82339"
           ]
         },
         {
           "path": "/api/gestoria_modelos",
           "frontend_functions": [
-            "line:81650"
+            "line:81705"
           ]
         },
         {
           "path": "/api/gestoria_trabajos",
           "frontend_functions": [
-            "line:66695",
-            "line:82747"
+            "line:66750",
+            "line:82802"
           ]
         }
       ]
@@ -2272,62 +2670,62 @@
       "endpoints_sample": [
         {
           "path": "/api/fin_alertas",
-          "line": 84286,
+          "line": 84488,
           "module": "financiacion"
         },
         {
           "path": "/api/fin_asesoramientos",
-          "line": 75667,
+          "line": 75869,
           "module": "financiacion"
         },
         {
           "path": "/api/fin_checklist",
-          "line": 84269,
+          "line": 84471,
           "module": "financiacion"
         },
         {
           "path": "/api/fin_hipotecas_estudio",
-          "line": 75711,
+          "line": 75913,
           "module": "financiacion"
         },
         {
           "path": "/api/fin_kpis",
-          "line": 84332,
+          "line": 84534,
           "module": "financiacion"
         },
         {
           "path": "/api/hipoteca_bdt",
-          "line": 82332,
+          "line": 82534,
           "module": "financiacion"
         },
         {
           "path": "/api/hipoteca_dashboard",
-          "line": 81708,
+          "line": 81910,
           "module": "financiacion"
         },
         {
           "path": "/api/hipoteca_ficha_print",
-          "line": 82501,
+          "line": 82703,
           "module": "financiacion"
         },
         {
           "path": "/api/hipoteca_registros",
-          "line": 82540,
+          "line": 82742,
           "module": "financiacion"
         },
         {
           "path": "/api/hipoteca_stats",
-          "line": 81629,
+          "line": 81831,
           "module": "financiacion"
         },
         {
           "path": "/api/hipotecas_audit_descuadres",
-          "line": 82389,
+          "line": 82591,
           "module": "financiacion"
         },
         {
           "path": "/api/hipotecas_firmadas_excel",
-          "line": 82663,
+          "line": 82865,
           "module": "financiacion"
         }
       ],
@@ -2403,8 +2801,8 @@
         {
           "path": "/api/fin_asesoramientos",
           "frontend_functions": [
-            "line:70175",
-            "line:81368"
+            "line:70230",
+            "line:81423"
           ]
         }
       ]
@@ -2417,12 +2815,12 @@
       "endpoints_sample": [
         {
           "path": "/api/fincas_alerts",
-          "line": 83619,
+          "line": 83821,
           "module": "fincas"
         },
         {
           "path": "/api/fincas_stats",
-          "line": 82744,
+          "line": 82946,
           "module": "fincas"
         }
       ],
@@ -2465,127 +2863,127 @@
       "endpoints_sample": [
         {
           "path": "/api/workspace_registro_alerts",
-          "line": 73260,
+          "line": 73461,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_audit",
-          "line": 73395,
+          "line": 73596,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario",
-          "line": 73209,
+          "line": 73410,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_alerts_run",
-          "line": 73413,
+          "line": 73614,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_export",
-          "line": 73650,
+          "line": 73851,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_pdf",
-          "line": 73578,
+          "line": 73779,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_resumen",
-          "line": 73240,
+          "line": 73441,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_xlsx",
-          "line": 73604,
+          "line": 73805,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_horario_xml",
-          "line": 73556,
+          "line": 73757,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_notifications",
-          "line": 73277,
+          "line": 73478,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_periodos",
-          "line": 73173,
+          "line": 73374,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_personal",
-          "line": 72825,
+          "line": 73026,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_registro_sweep_status",
-          "line": 73427,
+          "line": 73628,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_ausencias",
-          "line": 73485,
+          "line": 73686,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_documentos",
-          "line": 73538,
+          "line": 73739,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_economicos_dashboard",
-          "line": 72997,
+          "line": 73198,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_gastos",
-          "line": 73518,
+          "line": 73719,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_memoria_economica",
-          "line": 73037,
+          "line": 73238,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_payroll_export",
-          "line": 73673,
+          "line": 73874,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_productividad",
-          "line": 72913,
+          "line": 73114,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_productividad_manual",
-          "line": 72968,
+          "line": 73169,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_productividad_renta",
-          "line": 72862,
+          "line": 73063,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_profile",
-          "line": 73446,
+          "line": 73647,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_turnos",
-          "line": 73468,
+          "line": 73669,
           "module": "rrhh"
         },
         {
           "path": "/api/workspace_rrhh_vacaciones_summary",
-          "line": 73505,
+          "line": 73706,
           "module": "rrhh"
         }
       ],
@@ -2618,45 +3016,57 @@
         {
           "path": "/api/workspace_registro_alerts",
           "frontend_functions": [
-            "line:78815"
+            "line:78870"
           ]
         },
         {
           "path": "/api/workspace_registro_horario",
           "frontend_functions": [
-            "line:19999",
-            "line:79875"
+            "line:20045",
+            "line:79930"
           ]
         },
         {
           "path": "/api/workspace_registro_personal",
           "frontend_functions": [
-            "line:15251",
-            "line:16203",
-            "line:16355",
-            "line:16577",
-            "line:16614",
-            "line:16713",
-            "line:79900"
+            "line:15297",
+            "line:16249",
+            "line:16401",
+            "line:16623",
+            "line:16660",
+            "line:16759",
+            "line:79955"
           ]
         },
         {
           "path": "/api/workspace_rrhh_profile",
           "frontend_functions": [
-            "line:17285"
+            "line:17331"
           ]
         },
         {
           "path": "/api/workspace_rrhh_turnos",
           "frontend_functions": [
-            "line:15116"
+            "line:15162"
           ]
         }
       ]
     }
   },
-  "all_api_endpoints_total": 207,
+  "all_api_endpoints_total": 208,
   "diagnostic_rules": [
+    {
+      "symptom": "Una card del home se muestra pero al pulsarla no navega a ningun CRM.",
+      "module": "core",
+      "look_at": [
+        "web/app.js renderCompanyCards y appendServiceCard",
+        "web/app.js coreCards.addEventListener(click)",
+        "web/app.js userCanAccessService / hasAdminWideAccess",
+        "scripts/frontend_home_access_audit.py",
+        "tests/test_frontend_smoke.py",
+        "tests/test_agenda_frontend_regressions.py"
+      ]
+    },
     {
       "symptom": "Un usuario no admin no ve citas o ve menos que admin en el mismo workspace.",
       "module": "agenda",

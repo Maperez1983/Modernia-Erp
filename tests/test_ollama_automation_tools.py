@@ -10,6 +10,7 @@ from scripts import ollama_json
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import system_autofix_agent
+from scripts import frontend_home_access_audit
 if "PIL" not in sys.modules:
     pil_stub = types.ModuleType("PIL")
     pil_stub.Image = object()
@@ -84,6 +85,11 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertEqual(result["class"], "server_error")
         self.assertTrue(result["action_required"])
+
+    def test_frontend_home_access_audit_passes_with_current_invariants(self):
+        report = frontend_home_access_audit.run()
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["summary"]["actionable_warnings"], 0)
 
     def test_diff_text_uses_git_rev_range(self):
         with TemporaryDirectory() as tmp:

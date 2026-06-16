@@ -45,6 +45,10 @@ MODULE_EXPECTATIONS = {
         "Toda consulta operativa debe resolver workspace_id de forma explicita o desde la sesion.",
         "Los endpoints compartidos deben mantener aislamiento entre workspaces.",
     ],
+    "core": [
+        "Si una card del home es visible para el usuario, debe abrir una vista real o tener href funcional.",
+        "No puede existir una card CRM visible pero inerte por guards frontend inconsistentes con el render.",
+    ],
     "inmobiliaria": [
         "La informacion de inmuebles, demandas, visitas, compraventas y matching debe estar filtrada por workspace.",
         "Las vistas de no admin deben devolver datos permitidos, no listas vacias por error de scoping.",
@@ -199,6 +203,18 @@ def build_knowledge() -> dict:
         },
         "all_api_endpoints_total": len(endpoints),
         "diagnostic_rules": [
+            {
+                "symptom": "Una card del home se muestra pero al pulsarla no navega a ningun CRM.",
+                "module": "core",
+                "look_at": [
+                    "web/app.js renderCompanyCards y appendServiceCard",
+                    "web/app.js coreCards.addEventListener(click)",
+                    "web/app.js userCanAccessService / hasAdminWideAccess",
+                    "scripts/frontend_home_access_audit.py",
+                    "tests/test_frontend_smoke.py",
+                    "tests/test_agenda_frontend_regressions.py",
+                ],
+            },
             {
                 "symptom": "Un usuario no admin no ve citas o ve menos que admin en el mismo workspace.",
                 "module": "agenda",

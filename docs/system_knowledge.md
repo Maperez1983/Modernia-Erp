@@ -1,7 +1,7 @@
 # Modernia CRM System Knowledge
 
-Generated: 2026-06-16T12:39:40+00:00
-Commit: cc0041524667d4eb5d212d6dfff96a1db9bfc1aa
+Generated: 2026-06-16T15:18:57+00:00
+Commit: 4226b4a71f8a2a71c1ec5931cc9e47bf13c60da2
 
 Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.
 
@@ -10,7 +10,7 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
 ### agenda
 
 - API endpoints: 1
-- Tests: tests/test_agenda_frontend_regressions.py
+- Tests: tests/test_acciones_service_scope.py, tests/test_agenda_frontend_regressions.py
 - Expectations:
   - Los usuarios de un workspace deben ver sus citas nuevas y antiguas si pertenecen al workspace.
   - El comportamiento de lectura de agenda debe ser equivalente entre admin y no admin dentro del mismo workspace permitido.
@@ -33,6 +33,14 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
 - Expectations:
   - Toda consulta operativa debe resolver workspace_id de forma explicita o desde la sesion.
   - Los endpoints compartidos deben mantener aislamiento entre workspaces.
+
+### core
+
+- API endpoints: 46
+- Tests: tests/test_admin_force_reset_password_invite.py, tests/test_aon_diario_to_miconversor.py, tests/test_auth_invites_table_does_not_close_conn.py, tests/test_auth_security.py, tests/test_cliente_ficha.py, tests/test_fiscal_venta_pdf.py, tests/test_fiscal_venta_presets.py, tests/test_frontend_smoke.py, tests/test_iivtnu_hacienda_excel2022_catalog.py, tests/test_iivtnu_malaga_proxies.py, tests/test_iivtnu_max_coefs.py, tests/test_iivtnu_param_upsert.py
+- Expectations:
+  - Si una card del home es visible para el usuario, debe abrir una vista real o tener href funcional.
+  - No puede existir una card CRM visible pero inerte por guards frontend inconsistentes con el render.
 
 ### inmobiliaria
 
@@ -80,6 +88,16 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
   - El registro horario y personal deben estar acotados por usuario/workspace.
 
 ## Diagnostic Rules
+
+### Una card del home se muestra pero al pulsarla no navega a ningun CRM.
+- Module: core
+- Look at:
+  - web/app.js renderCompanyCards y appendServiceCard
+  - web/app.js coreCards.addEventListener(click)
+  - web/app.js userCanAccessService / hasAdminWideAccess
+  - scripts/frontend_home_access_audit.py
+  - tests/test_frontend_smoke.py
+  - tests/test_agenda_frontend_regressions.py
 
 ### Un usuario no admin no ve citas o ve menos que admin en el mismo workspace.
 - Module: agenda

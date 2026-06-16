@@ -633,6 +633,7 @@ def main() -> int:
             [
                 ("python_syntax_web_server", [sys.executable, "-m", "py_compile", "web/server.py"], None, 120),
                 ("javascript_syntax_app", ["node", "--check", "web/app.js"], None, 120),
+                ("frontend_home_access_audit", [sys.executable, "scripts/frontend_home_access_audit.py", "--json"], None, 120),
                 ("pytest_fast_core", [sys.executable, "-m", "pytest", "-q", *_existing(FAST_PYTESTS)], None, 1200),
             ]
         )
