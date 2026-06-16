@@ -1,0 +1,378 @@
+#!/usr/bin/env python3
+"""Prepara diagnosticos y planes de reparacion a partir de auditorias fallidas.
+
+Este agente no despliega ni modifica produccion. Su primera responsabilidad es
+convertir un fallo en una ruta de reparacion concreta: modulo, ficheros, tests y
+riesgo. Puede ejecutar tests locales relacionados si se solicita.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_REPORT_DIR = ROOT / "reports" / "system_audit"
+DEFAULT_KNOWLEDGE_PATH = ROOT / "docs" / "system_knowledge.json"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _run(cmd: list[str], timeout: int = 900) -> dict:
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+        )
+        return {
+            "command": cmd,
+            "status": "passed" if proc.returncode == 0 else "failed",
+            "returncode": proc.returncode,
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "output_tail": (proc.stdout or "")[-12000:],
+        }
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout if isinstance(exc.stdout, str) else ""
+        return {
+            "command": cmd,
+            "status": "timeout",
+            "returncode": None,
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "output_tail": (output or "")[-12000:],
+        }
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _latest_report(report_dir: Path) -> Path:
+    candidates = sorted(report_dir.glob("system-audit-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise FileNotFoundError(f"No hay reportes en {report_dir}")
+    return candidates[0]
+
+
+def _compact_report(report: dict) -> dict:
+    steps = []
+    for step in report.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        steps.append(
+            {
+                "name": step.get("name"),
+                "status": step.get("status"),
+                "returncode": step.get("returncode"),
+                "duration_seconds": step.get("duration_seconds"),
+                "json_summary": step.get("json_summary"),
+                "output_tail": (step.get("output_tail") or "")[-3000:],
+            }
+        )
+    return {
+        "run_id": report.get("run_id"),
+        "status": report.get("status"),
+        "failed_steps": report.get("failed_steps"),
+        "steps": steps,
+    }
+
+
+def _compact_knowledge(knowledge: dict) -> dict:
+    modules = {}
+    for name, data in (knowledge.get("modules") or {}).items():
+        if not isinstance(data, dict):
+            continue
+        modules[name] = {
+            "expectations": data.get("expectations"),
+            "tests": data.get("tests"),
+            "endpoints_sample": data.get("endpoints_sample"),
+            "frontend_functions_sample": data.get("frontend_functions_sample"),
+        }
+    return {
+        "generated_at": knowledge.get("generated_at"),
+        "git": knowledge.get("git"),
+        "entrypoints": knowledge.get("entrypoints"),
+        "modules": modules,
+        "diagnostic_rules": knowledge.get("diagnostic_rules"),
+    }
+
+
+def _json_from_text(text: str) -> dict:
+    text = (text or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _heuristic_plan(report: dict, knowledge: dict) -> dict:
+    failed_steps = report.get("failed_steps") or []
+    text = json.dumps(report, ensure_ascii=False).lower()
+    modules = knowledge.get("modules") or {}
+    selected = []
+    for name in modules:
+        if name.lower() in text:
+            selected.append(name)
+    if "agenda" in text or "acciones" in text or "cita" in text:
+        selected.insert(0, "agenda")
+    if "403" in text or "permiso" in text or "usuario" in text:
+        selected.append("usuarios_permisos")
+    if not selected:
+        selected = ["core"]
+    ordered = []
+    for item in selected:
+        if item not in ordered:
+            ordered.append(item)
+    tests = []
+    files = []
+    for module in ordered:
+        data = modules.get(module) or {}
+        tests.extend(data.get("tests") or [])
+        for endpoint in data.get("endpoints_sample") or []:
+            if isinstance(endpoint, dict) and endpoint.get("path"):
+                files.append(f"web/server.py:{endpoint.get('line')}")
+    entrypoints = knowledge.get("entrypoints") or {}
+    for group in ("backend", "frontend", "auditoria"):
+        files.extend(entrypoints.get(group) or [])
+    dedup_tests = []
+    for test in tests:
+        if test not in dedup_tests:
+            dedup_tests.append(test)
+    dedup_files = []
+    for file in files:
+        if file not in dedup_files:
+            dedup_files.append(file)
+    return {
+        "source": "heuristic",
+        "status": "needs_human_or_llm_patch",
+        "risk_level": "medium",
+        "probable_modules": ordered[:4],
+        "probable_files": dedup_files[:20],
+        "probable_tests": dedup_tests[:20],
+        "failed_steps": failed_steps,
+        "diagnosis": "Plan heuristico generado desde el reporte y la base de conocimiento.",
+        "repair_strategy": [
+            "Reproducir el fallo con los tests relacionados o crear una regresion minima.",
+            "Inspeccionar el endpoint/funcion indicado por el modulo afectado.",
+            "Aplicar cambio pequeno y verificar con tests + auditoria de produccion no destructiva.",
+        ],
+        "autofix_allowed": False,
+    }
+
+
+def _ollama_plan(report: dict, knowledge: dict) -> dict:
+    base_url = (os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
+    model = os.environ.get("OLLAMA_AUTOFIX_MODEL") or os.environ.get("OLLAMA_AUDIT_MODEL") or "qwen2.5-coder:7b"
+    prompt = (
+        "Responde solo JSON valido, sin markdown. Eres un agente senior de reparacion del CRM Modernia. "
+        "No inventes ficheros. No propongas tocar produccion directamente. "
+        "A partir del reporte fallido y la base de conocimiento, devuelve este esquema exacto: "
+        "{"
+        "\"source\":\"ollama\","
+        "\"status\":\"needs_patch|needs_more_data|no_action\","
+        "\"risk_level\":\"low|medium|high\","
+        "\"probable_modules\":[\"...\"],"
+        "\"probable_files\":[\"...\"],"
+        "\"probable_tests\":[\"...\"],"
+        "\"diagnosis\":\"...\","
+        "\"repair_strategy\":[\"...\"],"
+        "\"patch_outline\":[\"...\"],"
+        "\"verification_commands\":[[\"python3\",\"-m\",\"pytest\",\"-q\",\"tests/test_x.py\"]],"
+        "\"autofix_allowed\":false"
+        "}. "
+        "El campo autofix_allowed solo puede ser true si el cambio es trivial, de bajo riesgo y hay test directo; por defecto false.\n\n"
+        + json.dumps({"report": _compact_report(report), "knowledge": _compact_knowledge(knowledge)}, ensure_ascii=False, indent=2)
+    )
+    if model.lower().startswith("qwen3:"):
+        prompt = "/no_think\n" + prompt
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
+    request = Request(
+        f"{base_url}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=240) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except URLError as exc:
+        raise RuntimeError(f"No se puede conectar con Ollama: {exc}") from exc
+    response = str(data.get("response") or "").strip()
+    parsed = _json_from_text(response)
+    if not parsed:
+        raise RuntimeError(f"Ollama no devolvio JSON util: {response[:500]}")
+    valid_statuses = {"needs_patch", "needs_more_data", "no_action"}
+    required = {"status", "risk_level", "probable_modules", "probable_files", "probable_tests", "diagnosis", "repair_strategy"}
+    if parsed.get("status") not in valid_statuses or not required.issubset(parsed.keys()):
+        raise RuntimeError(f"Ollama devolvio JSON fuera de esquema: {response[-1000:]}")
+    parsed.setdefault("source", "ollama")
+    parsed["raw_response_tail"] = response[-2000:]
+    return parsed
+
+
+def _safe_test_paths(paths: list[str]) -> list[str]:
+    safe = []
+    allow_e2e = (os.environ.get("RUN_AUTOFIX_E2E") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+    for item in paths:
+        value = str(item or "").strip()
+        if not value or not value.startswith("tests/") or ".." in value:
+            continue
+        if "e2e" in value.lower() and not allow_e2e:
+            continue
+        if (ROOT / value).exists() and value not in safe:
+            safe.append(value)
+    return safe
+
+
+def _git_dirty() -> list[str]:
+    result = _run(["git", "status", "--short"], timeout=30)
+    return [line for line in (result.get("output_tail") or "").splitlines() if line.strip()]
+
+
+def _write_prompt_artifact(plan: dict, report_path: Path, output_dir: Path) -> Path:
+    prompt_path = output_dir / "codex_repair_prompt.md"
+    lines = [
+        "# CRM Repair Prompt",
+        "",
+        f"Report: {report_path}",
+        f"Generated: {_utc_now()}",
+        "",
+        "## Diagnosis",
+        "",
+        str(plan.get("diagnosis") or ""),
+        "",
+        "## Probable Modules",
+        "",
+        "\n".join(f"- {item}" for item in plan.get("probable_modules") or []),
+        "",
+        "## Probable Files",
+        "",
+        "\n".join(f"- {item}" for item in plan.get("probable_files") or []),
+        "",
+        "## Probable Tests",
+        "",
+        "\n".join(f"- {item}" for item in plan.get("probable_tests") or []),
+        "",
+        "## Repair Strategy",
+        "",
+        "\n".join(f"- {item}" for item in plan.get("repair_strategy") or []),
+        "",
+        "## Patch Outline",
+        "",
+        "\n".join(f"- {item}" for item in plan.get("patch_outline") or []),
+    ]
+    prompt_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    return prompt_path
+
+
+def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_tests: bool, use_ollama: bool) -> dict:
+    report = _load_json(report_path)
+    knowledge = _load_json(knowledge_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if report.get("status") != "failed":
+        plan = {
+            "source": "system_autofix_agent",
+            "status": "no_action",
+            "risk_level": "low",
+            "diagnosis": "La auditoria no esta fallando; no se prepara reparacion.",
+            "autofix_allowed": False,
+        }
+    else:
+        plan = _heuristic_plan(report, knowledge)
+        if use_ollama:
+            try:
+                ollama_plan = _ollama_plan(report, knowledge)
+                if ollama_plan:
+                    plan.update({k: v for k, v in ollama_plan.items() if v not in (None, "", [])})
+            except Exception as exc:
+                plan["ollama_error"] = str(exc)
+
+    tests_run = []
+    if run_tests and plan.get("status") != "no_action":
+        test_paths = _safe_test_paths(plan.get("probable_tests") or [])
+        if test_paths:
+            tests_run.append(_run([sys.executable, "-m", "pytest", "-q", *test_paths], timeout=1200))
+        else:
+            tests_run.append({"status": "skipped", "detail": "No hay tests seguros detectados"})
+
+    prompt_path = _write_prompt_artifact(plan, report_path, output_dir)
+    result = {
+        "kind": "system_autofix_agent",
+        "generated_at": _utc_now(),
+        "report_path": str(report_path),
+        "knowledge_path": str(knowledge_path),
+        "git_dirty": _git_dirty(),
+        "plan": plan,
+        "tests_run": tests_run,
+        "artifacts": {
+            "repair_prompt": str(prompt_path),
+        },
+        "safety": {
+            "edits_applied": False,
+            "production_touched": False,
+            "reason": "Modo preparacion: diagnostica y prepara plan; no modifica codigo ni despliega.",
+        },
+    }
+    output_path = output_dir / "autofix_plan.json"
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    result["artifacts"]["plan_json"] = str(output_path)
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Agente seguro de preparacion de reparaciones del CRM.")
+    parser.add_argument("report", nargs="?", help="Ruta a system-audit-*.json. Si se omite, usa el ultimo reporte.")
+    parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), help="Directorio de reportes si no se pasa report.")
+    parser.add_argument("--knowledge", default=str(DEFAULT_KNOWLEDGE_PATH), help="Base de conocimiento JSON.")
+    parser.add_argument("--output-dir", default="", help="Directorio donde guardar el plan.")
+    parser.add_argument("--run-tests", action="store_true", help="Ejecuta tests seguros relacionados con el diagnostico.")
+    parser.add_argument("--no-ollama", action="store_true", help="Usa solo heuristica local, sin consultar Ollama.")
+    parser.add_argument("--json", action="store_true", help="Imprime JSON completo.")
+    args = parser.parse_args()
+
+    report_path = Path(args.report).resolve() if args.report else _latest_report(Path(args.report_dir).resolve())
+    knowledge_path = Path(args.knowledge).resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else report_path.with_suffix("").parent / f"{report_path.stem}-autofix"
+
+    if not args.no_ollama and not shutil.which("ollama") and not os.environ.get("OLLAMA_BASE_URL"):
+        use_ollama = False
+    else:
+        use_ollama = not args.no_ollama
+
+    result = run_agent(report_path, knowledge_path, output_dir, run_tests=args.run_tests, use_ollama=use_ollama)
+    print(json.dumps(result, ensure_ascii=False, indent=2 if args.json else None))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

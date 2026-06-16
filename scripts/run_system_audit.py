@@ -275,6 +275,15 @@ def main() -> int:
         report["ollama_summary_status"] = summary["status"]
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    if failed and _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX"):
+        autofix_cmd = [sys.executable, "scripts/system_autofix_agent.py", str(report_path), "--json"]
+        if _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX_TESTS"):
+            autofix_cmd.append("--run-tests")
+        autofix = _run_step("autofix_plan", autofix_cmd, timeout=900)
+        report["steps"].append(autofix)
+        report["autofix_plan_status"] = autofix["status"]
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     return 1 if failed else 0
 
 
