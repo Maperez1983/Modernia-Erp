@@ -185,7 +185,41 @@ def _heuristic_plan(report: dict, knowledge: dict) -> dict:
             "Inspeccionar el endpoint/funcion indicado por el modulo afectado.",
             "Aplicar cambio pequeno y verificar con tests + auditoria de produccion no destructiva.",
         ],
+        "regression_test_outline": _regression_outline(ordered, text),
         "autofix_allowed": False,
+    }
+
+
+def _regression_outline(modules: list[str], report_text: str) -> dict:
+    primary = modules[0] if modules else "core"
+    if primary == "agenda" or "acciones" in report_text or "cita" in report_text:
+        return {
+            "target_file": "tests/test_agenda_frontend_regressions.py",
+            "goal": "Cubrir que admin y no admin ven agenda del mismo workspace y que el modal de cita no hereda campos residuales.",
+            "cases": [
+                "Simular apertura de nueva cita tras editar otra y comprobar cliente/tipo/responsable vacios o valores por defecto.",
+                "Validar que /api/acciones con workspace_id y range=all devuelve filas para usuario miembro no admin.",
+            ],
+            "commands": [["python3", "-m", "pytest", "-q", "tests/test_agenda_frontend_regressions.py", "tests/test_api_usuarios_scoping.py"]],
+        }
+    if primary == "usuarios_permisos" or "403" in report_text:
+        return {
+            "target_file": "tests/test_api_usuarios_scoping.py",
+            "goal": "Cubrir diferencias esperadas entre permisos correctos y perdida accidental de datos por scoping.",
+            "cases": [
+                "Usuario no privilegiado solo ve usuarios/workspaces donde es miembro.",
+                "403 de modulo sin servicio se mantiene controlado y no se convierte en 5xx.",
+            ],
+            "commands": [["python3", "-m", "pytest", "-q", "tests/test_api_usuarios_scoping.py", "tests/test_workspace_membership_autojoin.py"]],
+        }
+    return {
+        "target_file": "tests/test_frontend_smoke.py",
+        "goal": "Crear una regresion minima alrededor del endpoint o flujo que aparece en failed_steps/output_tail.",
+        "cases": [
+            "Reproducir el endpoint fallido con parametros minimos.",
+            "Verificar que responde 2xx o error 4xx controlado, nunca 5xx.",
+        ],
+        "commands": [["python3", "-m", "pytest", "-q", "tests/test_frontend_smoke.py"]],
     }
 
 
@@ -205,6 +239,7 @@ def _ollama_plan(report: dict, knowledge: dict) -> dict:
         "\"probable_tests\":[\"...\"],"
         "\"diagnosis\":\"...\","
         "\"repair_strategy\":[\"...\"],"
+        "\"regression_test_outline\":{\"target_file\":\"tests/test_x.py\",\"goal\":\"...\",\"cases\":[\"...\"],\"commands\":[[\"python3\",\"-m\",\"pytest\",\"-q\",\"tests/test_x.py\"]]},"
         "\"patch_outline\":[\"...\"],"
         "\"verification_commands\":[[\"python3\",\"-m\",\"pytest\",\"-q\",\"tests/test_x.py\"]],"
         "\"autofix_allowed\":false"
@@ -285,6 +320,10 @@ def _write_prompt_artifact(plan: dict, report_path: Path, output_dir: Path) -> P
         "## Repair Strategy",
         "",
         "\n".join(f"- {item}" for item in plan.get("repair_strategy") or []),
+        "",
+        "## Regression Test Outline",
+        "",
+        json.dumps(plan.get("regression_test_outline") or {}, ensure_ascii=False, indent=2),
         "",
         "## Patch Outline",
         "",
