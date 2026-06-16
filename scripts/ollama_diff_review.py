@@ -15,8 +15,11 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.ollama_json import generate_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,23 +42,6 @@ def _run(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
 def _load_json(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _json_from_text(text: str) -> dict:
-    text = (text or "").strip()
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {}
-    try:
-        data = json.loads(match.group(0))
-        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -190,17 +176,15 @@ def _ollama_review(diff: str, heuristic: dict, knowledge: dict) -> dict:
         "No inventes ficheros. Si el diff es insuficiente, usa findings de severidad medium.\n\n"
         + json.dumps({"heuristic": heuristic, "knowledge": compact_knowledge, "diff": diff}, ensure_ascii=False)
     )
-    if model.lower().startswith("qwen3:"):
-        prompt = "/no_think\n" + prompt
-    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
-    request = Request(f"{base_url}/api/generate", data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urlopen(request, timeout=240) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except URLError as exc:
-        raise RuntimeError(f"No se puede conectar con Ollama: {exc}") from exc
-    parsed = _json_from_text(str(data.get("response") or ""))
-    if parsed.get("status") not in {"passed", "review_required", "blocked"} or not isinstance(parsed.get("findings"), list):
+    parsed = generate_json(
+        base_url=base_url,
+        model=model,
+        prompt=prompt,
+        required_keys={"status", "findings", "recommended_tests", "risk_summary"},
+        valid_statuses={"passed", "review_required", "blocked"},
+        retries=1,
+    )
+    if not isinstance(parsed.get("findings"), list):
         raise RuntimeError("Ollama no devolvio un JSON de revision valido")
     parsed["source"] = "ollama"
     return parsed

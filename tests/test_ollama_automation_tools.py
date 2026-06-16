@@ -1,6 +1,8 @@
 import unittest
 
 from scripts import ollama_diff_review
+from scripts import ollama_json
+from scripts import prod_system_matrix_audit
 from scripts import system_autofix_agent
 
 
@@ -39,6 +41,32 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertIn("Cambio sin tests modificados", titles)
         self.assertIn("Zona sensible modificada", titles)
         self.assertIn("tests/test_frontend_smoke.py", review["recommended_tests"])
+
+    def test_ollama_json_extracts_embedded_object(self):
+        parsed = ollama_json.json_from_text("texto previo {\"status\":\"passed\",\"findings\":[]} texto final")
+        self.assertEqual(parsed["status"], "passed")
+
+    def test_matrix_classification_marks_expected_permission_as_non_actionable(self):
+        result = prod_system_matrix_audit._classify_endpoint_result(
+            {
+                "status": "warning",
+                "http_status": 403,
+                "detail": "{'error': 'Sin permisos para este servicio'}",
+            }
+        )
+        self.assertEqual(result["class"], "expected_permission_denied")
+        self.assertFalse(result["action_required"])
+
+    def test_matrix_classification_marks_server_error_as_actionable(self):
+        result = prod_system_matrix_audit._classify_endpoint_result(
+            {
+                "status": "failed",
+                "http_status": 500,
+                "detail": "Traceback...",
+            }
+        )
+        self.assertEqual(result["class"], "server_error")
+        self.assertTrue(result["action_required"])
 
 
 if __name__ == "__main__":

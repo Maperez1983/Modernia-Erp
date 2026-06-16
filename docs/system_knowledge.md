@@ -1,7 +1,7 @@
 # Modernia CRM System Knowledge
 
-Generated: 2026-06-16T10:20:44+00:00
-Commit: 30dc0b522a37844feb0e0e9353b26af8d2cabcea
+Generated: 2026-06-16T12:39:40+00:00
+Commit: cc0041524667d4eb5d212d6dfff96a1db9bfc1aa
 
 Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.
 

@@ -18,8 +18,11 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.ollama_json import generate_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,25 +116,6 @@ def _compact_knowledge(knowledge: dict) -> dict:
         "modules": modules,
         "diagnostic_rules": knowledge.get("diagnostic_rules"),
     }
-
-
-def _json_from_text(text: str) -> dict:
-    text = (text or "").strip()
-    if not text:
-        return {}
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {}
-    try:
-        data = json.loads(match.group(0))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 def _heuristic_plan(report: dict, knowledge: dict) -> dict:
@@ -247,30 +231,17 @@ def _ollama_plan(report: dict, knowledge: dict) -> dict:
         "El campo autofix_allowed solo puede ser true si el cambio es trivial, de bajo riesgo y hay test directo; por defecto false.\n\n"
         + json.dumps({"report": _compact_report(report), "knowledge": _compact_knowledge(knowledge)}, ensure_ascii=False, indent=2)
     )
-    if model.lower().startswith("qwen3:"):
-        prompt = "/no_think\n" + prompt
-    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
-    request = Request(
-        f"{base_url}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=240) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except URLError as exc:
-        raise RuntimeError(f"No se puede conectar con Ollama: {exc}") from exc
-    response = str(data.get("response") or "").strip()
-    parsed = _json_from_text(response)
-    if not parsed:
-        raise RuntimeError(f"Ollama no devolvio JSON util: {response[:500]}")
     valid_statuses = {"needs_patch", "needs_more_data", "no_action"}
     required = {"status", "risk_level", "probable_modules", "probable_files", "probable_tests", "diagnosis", "repair_strategy"}
-    if parsed.get("status") not in valid_statuses or not required.issubset(parsed.keys()):
-        raise RuntimeError(f"Ollama devolvio JSON fuera de esquema: {response[-1000:]}")
+    parsed = generate_json(
+        base_url=base_url,
+        model=model,
+        prompt=prompt,
+        required_keys=required,
+        valid_statuses=valid_statuses,
+        retries=1,
+    )
     parsed.setdefault("source", "ollama")
-    parsed["raw_response_tail"] = response[-2000:]
     return parsed
 
 
@@ -291,6 +262,11 @@ def _safe_test_paths(paths: list[str]) -> list[str]:
 def _git_dirty() -> list[str]:
     result = _run(["git", "status", "--short"], timeout=30)
     return [line for line in (result.get("output_tail") or "").splitlines() if line.strip()]
+
+
+def _current_branch() -> str:
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=30)
+    return (result.get("output_tail") or "").strip()
 
 
 def _write_prompt_artifact(plan: dict, report_path: Path, output_dir: Path) -> Path:
@@ -333,7 +309,70 @@ def _write_prompt_artifact(plan: dict, report_path: Path, output_dir: Path) -> P
     return prompt_path
 
 
-def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_tests: bool, use_ollama: bool) -> dict:
+def _write_regression_artifact(plan: dict, output_dir: Path) -> Path:
+    outline = plan.get("regression_test_outline") or {}
+    target = str(outline.get("target_file") or "tests/test_regression_from_audit.py")
+    artifact_path = output_dir / "proposed_regression_test.py"
+    cases = outline.get("cases") or []
+    content = [
+        '"""Regresion propuesta por system_autofix_agent.',
+        "",
+        f"Destino sugerido: {target}",
+        f"Objetivo: {outline.get('goal') or ''}",
+        '"""',
+        "",
+        "import unittest",
+        "",
+        "",
+        "class ProposedAuditRegression(unittest.TestCase):",
+    ]
+    if cases:
+        for idx, case in enumerate(cases, start=1):
+            content.extend(
+                [
+                    f"    def test_case_{idx}(self):",
+                    f"        # TODO: {case}",
+                    "        self.skipTest('Regresion propuesta; implementar con fixtures del modulo afectado')",
+                    "",
+                ]
+            )
+    else:
+        content.extend(
+            [
+                "    def test_regression_placeholder(self):",
+                "        self.skipTest('Regresion propuesta; completar con el fallo reproducible')",
+                "",
+            ]
+        )
+    content.extend(["", "if __name__ == '__main__':", "    unittest.main()", ""])
+    artifact_path.write_text("\n".join(content), encoding="utf-8")
+    return artifact_path
+
+
+def _prepare_branch_artifact(plan: dict, report: dict, output_dir: Path, *, create_branch: bool) -> dict:
+    run_id = str(report.get("run_id") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    branch = "autofix/" + re.sub(r"[^A-Za-z0-9_.-]+", "-", run_id).strip("-")
+    info = {
+        "branch": branch,
+        "current_branch": _current_branch(),
+        "created": False,
+        "command": ["git", "switch", "-c", branch],
+        "reason": "Modo preparacion: no se crea rama salvo --prepare-branch.",
+    }
+    dirty = _git_dirty()
+    if create_branch:
+        if dirty:
+            info["reason"] = "No se crea rama porque hay cambios locales pendientes."
+        else:
+            result = _run(["git", "switch", "-c", branch], timeout=60)
+            info["created"] = result.get("status") == "passed"
+            info["result"] = result
+            info["reason"] = "Rama creada para preparar parche." if info["created"] else "No se pudo crear la rama."
+    (output_dir / "branch_plan.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return info
+
+
+def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_tests: bool, use_ollama: bool, prepare_branch: bool = False) -> dict:
     report = _load_json(report_path)
     knowledge = _load_json(knowledge_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -365,6 +404,8 @@ def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_
             tests_run.append({"status": "skipped", "detail": "No hay tests seguros detectados"})
 
     prompt_path = _write_prompt_artifact(plan, report_path, output_dir)
+    regression_path = _write_regression_artifact(plan, output_dir)
+    branch_plan = _prepare_branch_artifact(plan, report, output_dir, create_branch=prepare_branch)
     result = {
         "kind": "system_autofix_agent",
         "generated_at": _utc_now(),
@@ -375,7 +416,10 @@ def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_
         "tests_run": tests_run,
         "artifacts": {
             "repair_prompt": str(prompt_path),
+            "proposed_regression_test": str(regression_path),
+            "branch_plan": str(output_dir / "branch_plan.json"),
         },
+        "branch_plan": branch_plan,
         "safety": {
             "edits_applied": False,
             "production_touched": False,
@@ -395,6 +439,7 @@ def main() -> int:
     parser.add_argument("--knowledge", default=str(DEFAULT_KNOWLEDGE_PATH), help="Base de conocimiento JSON.")
     parser.add_argument("--output-dir", default="", help="Directorio donde guardar el plan.")
     parser.add_argument("--run-tests", action="store_true", help="Ejecuta tests seguros relacionados con el diagnostico.")
+    parser.add_argument("--prepare-branch", action="store_true", help="Crea rama autofix/<run_id> solo si el arbol git esta limpio.")
     parser.add_argument("--no-ollama", action="store_true", help="Usa solo heuristica local, sin consultar Ollama.")
     parser.add_argument("--json", action="store_true", help="Imprime JSON completo.")
     args = parser.parse_args()
@@ -408,7 +453,7 @@ def main() -> int:
     else:
         use_ollama = not args.no_ollama
 
-    result = run_agent(report_path, knowledge_path, output_dir, run_tests=args.run_tests, use_ollama=use_ollama)
+    result = run_agent(report_path, knowledge_path, output_dir, run_tests=args.run_tests, use_ollama=use_ollama, prepare_branch=args.prepare_branch)
     print(json.dumps(result, ensure_ascii=False, indent=2 if args.json else None))
     return 0
 

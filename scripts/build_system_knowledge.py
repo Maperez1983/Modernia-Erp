@@ -111,6 +111,29 @@ def _extract_endpoints(server_text: str) -> list[dict]:
     return sorted(unique.values(), key=lambda item: item["path"])
 
 
+def _extract_frontend_api_map(app_text: str) -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = defaultdict(list)
+    lines = app_text.splitlines()
+    for idx, line in enumerate(lines, start=1):
+        for match in re.finditer(r'["\'](/api/[^"\']+)["\']', line):
+            endpoint = match.group(1)
+            start = max(0, idx - 6)
+            context = "\n".join(lines[start:idx])
+            fn_match = re.findall(r"\b(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(|\bconst\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(", context)
+            names = []
+            for a, b in fn_match:
+                if a:
+                    names.append(a)
+                if b:
+                    names.append(b)
+            if not names:
+                names = [f"line:{idx}"]
+            for name in names[-3:]:
+                if name not in mapping[endpoint]:
+                    mapping[endpoint].append(name)
+    return dict(sorted(mapping.items()))
+
+
 def _classify(text: str) -> str:
     lower = text.lower()
     for module, needles in MODULE_RULES:
@@ -141,6 +164,7 @@ def build_knowledge() -> dict:
     for match in re.finditer(r"\bconst\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(", app_text):
         name = match.group(1)
         frontend_functions[_classify(name)].append(name)
+    frontend_api_map = _extract_frontend_api_map(app_text)
     return {
         "kind": "modernia_system_knowledge",
         "generated_at": _utc_now(),
@@ -154,6 +178,7 @@ def build_knowledge() -> dict:
             "endpoint, frontend, test y expectativa funcional correspondiente."
         ),
         "entrypoints": MODULE_ENTRYPOINTS,
+        "frontend_api_map": frontend_api_map,
         "modules": {
             module: {
                 "expectations": expectations,
@@ -161,6 +186,14 @@ def build_knowledge() -> dict:
                 "endpoints_sample": [item for item in endpoints if item["module"] == module][:40],
                 "tests": _tests_by_module().get(module, []),
                 "frontend_functions_sample": sorted(set(frontend_functions.get(module, [])))[:60],
+                "frontend_endpoint_links": [
+                    {
+                        "path": item["path"],
+                        "frontend_functions": frontend_api_map.get(item["path"], []),
+                    }
+                    for item in endpoints
+                    if item["module"] == module and frontend_api_map.get(item["path"])
+                ][:40],
             }
             for module, expectations in MODULE_EXPECTATIONS.items()
         },

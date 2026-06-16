@@ -180,6 +180,27 @@ def _status_for_http(status_code: int, rows: int | None = None) -> str:
     return "failed"
 
 
+def _classify_endpoint_result(item: dict) -> dict:
+    status = item.get("status")
+    http_status = item.get("http_status")
+    detail = str(item.get("detail") or "")
+    if status == "passed":
+        return {"class": "ok", "severity": "none", "action_required": False}
+    if status == "skipped":
+        return {"class": "not_applicable", "severity": "low", "action_required": False}
+    if http_status == 403 and "Sin permisos para este servicio" in detail:
+        return {"class": "expected_permission_denied", "severity": "low", "action_required": False}
+    if http_status in {401, 403}:
+        return {"class": "permission_review", "severity": "medium", "action_required": True}
+    if http_status == 400 and "empresa_id requerido" in detail:
+        return {"class": "missing_empresa_id", "severity": "medium", "action_required": True}
+    if http_status and int(http_status) >= 500:
+        return {"class": "server_error", "severity": "high", "action_required": True}
+    if status == "failed":
+        return {"class": "failed_check", "severity": "high", "action_required": True}
+    return {"class": "review", "severity": "medium", "action_required": status == "warning"}
+
+
 def _health(base_url: str, timeout: int) -> dict:
     started = time.monotonic()
     try:
@@ -337,13 +358,18 @@ def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, sp
             "empresa_id": "",
             "duration_seconds": round(time.monotonic() - started, 2),
             "detail": "Sin empresa vinculada en workspace para endpoint que requiere empresa_id",
+            "classification": {
+                "class": "not_applicable",
+                "severity": "low",
+                "action_required": False,
+            },
         }
     url = _request_url(base_url, spec, ws_id, empresa_id=empresa_id)
     try:
         resp, data = _get_json(session, url, timeout)
         rows = _extract_rows(data)
         status = _status_for_http(resp.status_code, len(rows))
-        return {
+        result = {
             "user_label": user_label,
             "workspace_id": ws_id,
             "workspace_nombre": workspace.get("nombre"),
@@ -357,8 +383,10 @@ def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, sp
             "duration_seconds": round(time.monotonic() - started, 2),
             "detail": "" if status == "passed" else str(data)[:500],
         }
+        result["classification"] = _classify_endpoint_result(result)
+        return result
     except Exception as exc:
-        return {
+        result = {
             "user_label": user_label,
             "workspace_id": ws_id,
             "workspace_nombre": workspace.get("nombre"),
@@ -370,6 +398,8 @@ def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, sp
             "detail": f"{type(exc).__name__}: {exc}",
             "duration_seconds": round(time.monotonic() - started, 2),
         }
+        result["classification"] = _classify_endpoint_result(result)
+        return result
 
 
 def run() -> dict:
@@ -418,11 +448,28 @@ def run() -> dict:
     failed_checks = [item.get("name") or item.get("endpoint") for item in checks + endpoint_matrix + workspace_user_inventory if item.get("status") in failed_statuses]
     warning_checks = [item.get("name") or item.get("endpoint") for item in checks + endpoint_matrix + workspace_user_inventory if item.get("status") == "warning"]
     by_module: dict[str, dict[str, int]] = {}
+    warning_classes: dict[str, int] = {}
+    actionable_warnings = []
     for item in endpoint_matrix:
         module = str(item.get("module") or "unknown")
         status = str(item.get("status") or "unknown")
         by_module.setdefault(module, {})
         by_module[module][status] = by_module[module].get(status, 0) + 1
+        classification = item.get("classification") or _classify_endpoint_result(item)
+        class_name = str(classification.get("class") or "unknown")
+        warning_classes[class_name] = warning_classes.get(class_name, 0) + 1
+        if classification.get("action_required"):
+            actionable_warnings.append(
+                {
+                    "user_label": item.get("user_label"),
+                    "workspace_nombre": item.get("workspace_nombre"),
+                    "module": item.get("module"),
+                    "endpoint": item.get("endpoint"),
+                    "http_status": item.get("http_status"),
+                    "detail": item.get("detail"),
+                    "classification": classification,
+                }
+            )
 
     return {
         "kind": "prod_system_matrix_audit",
@@ -439,7 +486,10 @@ def run() -> dict:
             "workspace_user_inventories": len(workspace_user_inventory),
             "endpoint_checks": len(endpoint_matrix),
             "endpoint_status_by_module": by_module,
+            "endpoint_classification_counts": warning_classes,
+            "actionable_warnings": len(actionable_warnings),
         },
+        "actionable_warnings": actionable_warnings,
         "checks": checks,
         "users": users,
         "workspaces_by_user": workspaces_by_user,

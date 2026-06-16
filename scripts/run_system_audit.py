@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import shlex
@@ -78,6 +79,7 @@ def _summarize_json_output(output: str) -> dict | None:
             "failed_checks": data.get("failed_checks"),
             "warning_checks": (data.get("warning_checks") or [])[:80],
             "summary": data.get("summary"),
+            "actionable_warnings": data.get("actionable_warnings"),
             "users": data.get("users"),
             "workspaces_by_user": data.get("workspaces_by_user"),
             "workspace_user_inventory": [
@@ -113,6 +115,108 @@ def _summarize_json_output(output: str) -> dict | None:
         "failed_checks": data.get("failed_checks"),
         "summary": data.get("summary"),
     }
+
+
+def _build_alerts(report: dict) -> list[dict]:
+    alerts = []
+    for step in report.get("steps", []):
+        name = step.get("name")
+        status = step.get("status")
+        if status not in {"passed", "skipped"}:
+            alerts.append(
+                {
+                    "severity": "high",
+                    "type": "step_failed",
+                    "title": f"Fallo en {name}",
+                    "detail": (step.get("output_tail") or "")[-1000:],
+                }
+            )
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "prod_system_matrix_audit":
+            for item in js.get("actionable_warnings") or []:
+                classification = item.get("classification") or {}
+                alerts.append(
+                    {
+                        "severity": classification.get("severity") or "medium",
+                        "type": classification.get("class") or "matrix_warning",
+                        "title": f"{item.get('module')}/{item.get('endpoint')} requiere revision",
+                        "detail": item.get("detail") or "",
+                        "workspace": item.get("workspace_nombre"),
+                        "user_label": item.get("user_label"),
+                    }
+                )
+    return alerts
+
+
+def _append_history(report_dir: Path, report: dict) -> None:
+    history_path = report_dir / "system-audit-history.jsonl"
+    summary = {
+        "run_id": report.get("run_id"),
+        "started_at": report.get("started_at"),
+        "finished_at": report.get("finished_at"),
+        "status": report.get("status"),
+        "failed_steps": report.get("failed_steps"),
+        "alerts_total": len(report.get("alerts") or []),
+        "steps": [
+            {
+                "name": step.get("name"),
+                "status": step.get("status"),
+                "duration_seconds": step.get("duration_seconds"),
+                "json_summary": {
+                    "kind": (step.get("json_summary") or {}).get("kind"),
+                    "summary": (step.get("json_summary") or {}).get("summary"),
+                    "failed_checks": (step.get("json_summary") or {}).get("failed_checks"),
+                }
+                if step.get("json_summary")
+                else None,
+            }
+            for step in report.get("steps", [])
+        ],
+    }
+    with history_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(summary, ensure_ascii=False) + "\n")
+
+
+def _write_dashboard(report_dir: Path, report: dict) -> None:
+    latest_json = report_dir / "latest-system-audit.json"
+    latest_html = report_dir / "latest-system-audit.html"
+    latest_json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    alerts = report.get("alerts") or []
+    step_rows = []
+    for step in report.get("steps", []):
+        step_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(step.get('name') or ''))}</td>"
+            f"<td>{html.escape(str(step.get('status') or ''))}</td>"
+            f"<td>{html.escape(str(step.get('duration_seconds') or ''))}</td>"
+            "</tr>"
+        )
+    alert_items = "\n".join(
+        f"<li><strong>{html.escape(str(item.get('severity') or ''))}</strong> "
+        f"{html.escape(str(item.get('title') or ''))} "
+        f"<span>{html.escape(str(item.get('detail') or ''))[:300]}</span></li>"
+        for item in alerts
+    )
+    latest_html.write_text(
+        """<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<title>Modernia CRM System Health</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:32px;line-height:1.35;color:#1f2933}
+table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid #d9e2ec;padding:8px;text-align:left}
+.status{font-size:22px;font-weight:700}.passed{color:#0f7b4f}.failed{color:#b42318}.alerts li{margin:8px 0}
+</style>
+<h1>Modernia CRM System Health</h1>
+"""
+        + f"<p class=\"status {html.escape(str(report.get('status') or ''))}\">Estado: {html.escape(str(report.get('status') or ''))}</p>"
+        + f"<p>Run ID: {html.escape(str(report.get('run_id') or ''))}<br>Inicio: {html.escape(str(report.get('started_at') or ''))}<br>Fin: {html.escape(str(report.get('finished_at') or ''))}</p>"
+        + f"<h2>Alertas ({len(alerts)})</h2><ul class=\"alerts\">{alert_items or '<li>Sin alertas accionables</li>'}</ul>"
+        + "<h2>Pasos</h2><table><thead><tr><th>Paso</th><th>Estado</th><th>Segundos</th></tr></thead><tbody>"
+        + "\n".join(step_rows)
+        + "</tbody></table></html>\n",
+        encoding="utf-8",
+    )
 
 
 def _run_step(name: str, cmd: list[str], *, env: dict[str, str] | None = None, timeout: int = 900) -> dict:
@@ -262,7 +366,10 @@ def main() -> int:
     report["finished_at"] = _utc_now()
     report["status"] = "failed" if failed else "passed"
     report["failed_steps"] = [step.get("name") for step in failed]
+    report["alerts"] = _build_alerts(report)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _append_history(report_dir, report)
+    _write_dashboard(report_dir, report)
     print(f"[audit] reporte: {report_path}")
 
     if args.ollama:
@@ -273,7 +380,9 @@ def main() -> int:
         )
         report["steps"].append(summary)
         report["ollama_summary_status"] = summary["status"]
+        report["alerts"] = _build_alerts(report)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
 
     if failed and _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX"):
         autofix_cmd = [sys.executable, "scripts/system_autofix_agent.py", str(report_path), "--json"]
@@ -282,7 +391,9 @@ def main() -> int:
         autofix = _run_step("autofix_plan", autofix_cmd, timeout=900)
         report["steps"].append(autofix)
         report["autofix_plan_status"] = autofix["status"]
+        report["alerts"] = _build_alerts(report)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
 
     return 1 if failed else 0
 
