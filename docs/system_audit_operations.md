@@ -37,7 +37,18 @@ El HTML `latest-system-audit.html` resume:
 - estado global,
 - run ID,
 - alertas accionables,
+- tendencia respecto a la ejecucion anterior,
+- historial reciente,
 - pasos y duracion.
+
+La tendencia incluye:
+
+- fallos repetidos,
+- fallos nuevos,
+- fallos recuperados,
+- racha de ejecuciones fallidas,
+- cambios en la clasificacion de endpoints,
+- variacion de avisos accionables.
 
 ## Hook local
 
@@ -66,3 +77,14 @@ Recomendacion:
 - auditoria: modelo pequeno/rapido,
 - autofix: modelo coder,
 - review de diff: modelo coder o reasoning corto.
+
+## CI de guardarrailes
+
+Se ha anadido `.github/workflows/system-guardrails.yml` para que en cada `push` y `pull_request` se ejecute:
+
+- regeneracion de `docs/system_knowledge.json`,
+- tests de automatizacion Ollama,
+- revision heuristica del diff (`ollama_diff_review.py --no-ollama`),
+- render local del dashboard de auditoria.
+
+En CI no se depende de Ollama; la revision usa solo heuristicas y memoria del sistema.

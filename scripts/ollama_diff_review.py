@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -62,10 +61,18 @@ def _changed_files(staged: bool) -> list[str]:
     return files
 
 
-def _diff_text(staged: bool, max_chars: int) -> str:
-    cmd = ["git", "diff", "--cached", "--"] if staged else ["git", "diff", "--"]
+def _changed_files_for_rev_range(rev_range: str) -> list[str]:
+    _, out = _run(["git", "diff", "--name-only", rev_range, "--"], timeout=120)
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def _diff_text(staged: bool, max_chars: int, rev_range: str = "") -> str:
+    if rev_range:
+        cmd = ["git", "diff", rev_range, "--"]
+    else:
+        cmd = ["git", "diff", "--cached", "--"] if staged else ["git", "diff", "--"]
     _, out = _run(cmd, timeout=120)
-    if not staged:
+    if not staged and not rev_range:
         _, untracked = _run(["git", "ls-files", "--others", "--exclude-standard"])
         extras = []
         for file in [x.strip() for x in untracked.splitlines() if x.strip()]:
@@ -190,15 +197,16 @@ def _ollama_review(diff: str, heuristic: dict, knowledge: dict) -> dict:
     return parsed
 
 
-def run_review(*, staged: bool, no_ollama: bool, max_diff_chars: int, output: Path | None) -> dict:
+def run_review(*, staged: bool, no_ollama: bool, max_diff_chars: int, output: Path | None, rev_range: str = "") -> dict:
     knowledge = _load_json(DEFAULT_KNOWLEDGE_PATH)
-    files = _changed_files(staged)
-    diff = _diff_text(staged, max_diff_chars)
+    files = _changed_files_for_rev_range(rev_range) if rev_range else _changed_files(staged)
+    diff = _diff_text(staged, max_diff_chars, rev_range=rev_range)
     heuristic = _heuristic_review(files, knowledge)
     result = {
         "kind": "ollama_diff_review",
         "generated_at": _utc_now(),
         "staged": staged,
+        "rev_range": rev_range or None,
         "heuristic": heuristic,
         "ollama": None,
         "status": heuristic["status"],
@@ -228,11 +236,18 @@ def main() -> int:
     parser.add_argument("--no-ollama", action="store_true", help="Usa solo heuristica local.")
     parser.add_argument("--max-diff-chars", type=int, default=50000, help="Maximo de caracteres de diff para Ollama.")
     parser.add_argument("--output", default="", help="Ruta donde guardar JSON de revision.")
+    parser.add_argument("--rev-range", default="", help="Rango git para revisar, por ejemplo origin/main...HEAD.")
     parser.add_argument("--json", action="store_true", help="Imprime JSON completo.")
     parser.add_argument("--fail-on-review", action="store_true", help="Devuelve codigo 1 si hay review_required/blocked.")
     args = parser.parse_args()
     output = Path(args.output).resolve() if args.output else None
-    result = run_review(staged=args.staged, no_ollama=args.no_ollama, max_diff_chars=args.max_diff_chars, output=output)
+    result = run_review(
+        staged=args.staged,
+        no_ollama=args.no_ollama,
+        max_diff_chars=args.max_diff_chars,
+        output=output,
+        rev_range=args.rev_range.strip(),
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2 if args.json else None))
     if args.fail_on_review and result.get("status") in {"review_required", "blocked"}:
         return 1

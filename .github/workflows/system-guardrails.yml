@@ -1,0 +1,38 @@
+name: System Guardrails
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  review-and-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build system knowledge
+        run: python3 scripts/build_system_knowledge.py
+
+      - name: Run automation unit tests
+        run: python3 -m unittest tests.test_ollama_automation_tools
+
+      - name: Review diff with heuristics
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python3 scripts/ollama_diff_review.py --rev-range "origin/${{ github.base_ref }}...HEAD" --no-ollama --fail-on-review --json
+          else
+            python3 scripts/ollama_diff_review.py --rev-range "HEAD~1...HEAD" --no-ollama --fail-on-review --json
+          fi
+
+      - name: Render latest dashboard locally
+        run: python3 scripts/run_system_audit.py --skip-local --report-dir /tmp/system_audit_ci

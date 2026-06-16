@@ -1,8 +1,11 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from scripts import ollama_diff_review
 from scripts import ollama_json
 from scripts import prod_system_matrix_audit
+from scripts import run_system_audit
 from scripts import system_autofix_agent
 
 
@@ -67,6 +70,52 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertEqual(result["class"], "server_error")
         self.assertTrue(result["action_required"])
+
+    def test_diff_text_uses_git_rev_range(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tracked.txt").write_text("base\n", encoding="utf-8")
+            old_root = ollama_diff_review.ROOT
+            try:
+                ollama_diff_review.ROOT = root
+                code, _ = ollama_diff_review._run(["git", "init"], timeout=30)
+                self.assertEqual(code, 0)
+                ollama_diff_review._run(["git", "config", "user.email", "test@example.com"], timeout=30)
+                ollama_diff_review._run(["git", "config", "user.name", "Test User"], timeout=30)
+                ollama_diff_review._run(["git", "add", "tracked.txt"], timeout=30)
+                ollama_diff_review._run(["git", "commit", "-m", "base"], timeout=30)
+                (root / "tracked.txt").write_text("base\nchange\n", encoding="utf-8")
+                files = ollama_diff_review._changed_files_for_rev_range("HEAD")
+                diff = ollama_diff_review._diff_text(False, 5000, rev_range="HEAD")
+                self.assertIn("tracked.txt", files)
+                self.assertIn("+change", diff)
+            finally:
+                ollama_diff_review.ROOT = old_root
+
+    def test_build_trend_alerts_detects_actionable_increase(self):
+        trend = {
+            "repeated_failures": [],
+            "new_failures": [],
+            "recovered_failures": [],
+            "consecutive_failed_runs": 0,
+            "matrix": {
+                "current": {"actionable_warnings_total": 2},
+                "previous": {"actionable_warnings_total": 0},
+            },
+        }
+        alerts = run_system_audit._build_trend_alerts({"status": "failed"}, trend)
+        self.assertEqual(alerts[0]["type"], "actionable_warning_increase")
+
+    def test_load_history_reads_recent_entries(self):
+        with TemporaryDirectory() as tmp:
+            history_path = Path(tmp) / "system-audit-history.jsonl"
+            history_path.write_text(
+                '{"run_id":"a","status":"passed"}\n{"run_id":"b","status":"failed"}\n',
+                encoding="utf-8",
+            )
+            entries = run_system_audit._load_history(Path(tmp), limit=1)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["run_id"], "b")
 
 
 if __name__ == "__main__":

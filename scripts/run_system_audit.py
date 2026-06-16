@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -148,8 +149,141 @@ def _build_alerts(report: dict) -> list[dict]:
     return alerts
 
 
+def _load_history(report_dir: Path, limit: int = 20) -> list[dict]:
+    history_path = report_dir / "system-audit-history.jsonl"
+    if not history_path.exists():
+        return []
+    entries = []
+    try:
+        with history_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return entries[-limit:]
+
+
+def _matrix_summary_from_report(report: dict) -> dict:
+    for step in report.get("steps", []):
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "prod_system_matrix_audit":
+            summary = dict(js.get("summary") or {})
+            summary["actionable_warnings_total"] = len(js.get("actionable_warnings") or [])
+            return summary
+    return {}
+
+
+def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
+    latest_prev = previous_entries[-1] if previous_entries else {}
+    current_failed = set(report.get("failed_steps") or [])
+    previous_failed = set(latest_prev.get("failed_steps") or [])
+    current_matrix = _matrix_summary_from_report(report)
+    previous_matrix = {}
+    for step in latest_prev.get("steps") or []:
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "prod_system_matrix_audit":
+            previous_matrix = dict(js.get("summary") or {})
+            previous_matrix["actionable_warnings_total"] = js.get("actionable_warnings_total") or 0
+            break
+
+    repeated_failures = sorted(current_failed & previous_failed)
+    recovered_failures = sorted(previous_failed - current_failed)
+    new_failures = sorted(current_failed - previous_failed)
+    consecutive_failed_runs = 0
+    if report.get("status") == "failed":
+        for entry in reversed(previous_entries):
+            if entry.get("status") != "failed":
+                break
+            consecutive_failed_runs += 1
+        consecutive_failed_runs += 1
+
+    classification_counts = current_matrix.get("endpoint_classification_counts") or {}
+    previous_classification_counts = previous_matrix.get("endpoint_classification_counts") or {}
+    changed_classes = {}
+    all_classes = set(classification_counts) | set(previous_classification_counts)
+    for key in sorted(all_classes):
+        delta = int(classification_counts.get(key, 0)) - int(previous_classification_counts.get(key, 0))
+        if delta:
+            changed_classes[key] = delta
+
+    recent_status_counts = Counter(entry.get("status") or "unknown" for entry in previous_entries[-9:])
+    recent_status_counts[report.get("status") or "unknown"] += 1
+    return {
+        "previous_run_id": latest_prev.get("run_id"),
+        "previous_status": latest_prev.get("status"),
+        "repeated_failures": repeated_failures,
+        "new_failures": new_failures,
+        "recovered_failures": recovered_failures,
+        "consecutive_failed_runs": consecutive_failed_runs,
+        "recent_status_counts": dict(recent_status_counts),
+        "matrix": {
+            "current": current_matrix,
+            "previous": previous_matrix,
+            "changed_classifications": changed_classes,
+        },
+    }
+
+
+def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
+    alerts = []
+    repeated = trend.get("repeated_failures") or []
+    new_failures = trend.get("new_failures") or []
+    recovered = trend.get("recovered_failures") or []
+    consecutive_failed_runs = int(trend.get("consecutive_failed_runs") or 0)
+    matrix = trend.get("matrix") or {}
+    current_matrix = matrix.get("current") or {}
+    previous_matrix = matrix.get("previous") or {}
+    current_actionable = int(current_matrix.get("actionable_warnings_total") or 0)
+    previous_actionable = int(previous_matrix.get("actionable_warnings_total") or 0)
+
+    if repeated:
+        alerts.append(
+            {
+                "severity": "medium" if report.get("status") == "passed" else "high",
+                "type": "repeated_failure",
+                "title": f"Fallo repetido: {', '.join(repeated[:4])}",
+                "detail": f"El mismo fallo aparece en la ejecucion anterior. Rachas fallidas consecutivas: {consecutive_failed_runs or 1}.",
+            }
+        )
+    if new_failures:
+        alerts.append(
+            {
+                "severity": "high",
+                "type": "new_failure",
+                "title": f"Nuevos fallos detectados: {', '.join(new_failures[:4])}",
+                "detail": "Hay pasos fallidos que no estaban presentes en la ejecucion anterior.",
+            }
+        )
+    if current_actionable > previous_actionable:
+        alerts.append(
+            {
+                "severity": "high" if current_actionable else "medium",
+                "type": "actionable_warning_increase",
+                "title": "Han aumentado los avisos accionables",
+                "detail": f"Antes: {previous_actionable}. Ahora: {current_actionable}.",
+            }
+        )
+    if recovered and report.get("status") == "passed":
+        alerts.append(
+            {
+                "severity": "low",
+                "type": "recovered_failure",
+                "title": f"Recuperado respecto a la ejecucion anterior: {', '.join(recovered[:4])}",
+                "detail": "La auditoria actual ya no reproduce algunos fallos previos.",
+            }
+        )
+    return alerts
+
+
 def _append_history(report_dir: Path, report: dict) -> None:
     history_path = report_dir / "system-audit-history.jsonl"
+    matrix_summary = _matrix_summary_from_report(report)
     summary = {
         "run_id": report.get("run_id"),
         "started_at": report.get("started_at"),
@@ -157,6 +291,15 @@ def _append_history(report_dir: Path, report: dict) -> None:
         "status": report.get("status"),
         "failed_steps": report.get("failed_steps"),
         "alerts_total": len(report.get("alerts") or []),
+        "trend": {
+            "previous_run_id": (report.get("trend") or {}).get("previous_run_id"),
+            "previous_status": (report.get("trend") or {}).get("previous_status"),
+            "repeated_failures": (report.get("trend") or {}).get("repeated_failures"),
+            "new_failures": (report.get("trend") or {}).get("new_failures"),
+            "recovered_failures": (report.get("trend") or {}).get("recovered_failures"),
+            "consecutive_failed_runs": (report.get("trend") or {}).get("consecutive_failed_runs"),
+        },
+        "matrix_summary": matrix_summary,
         "steps": [
             {
                 "name": step.get("name"),
@@ -166,6 +309,7 @@ def _append_history(report_dir: Path, report: dict) -> None:
                     "kind": (step.get("json_summary") or {}).get("kind"),
                     "summary": (step.get("json_summary") or {}).get("summary"),
                     "failed_checks": (step.get("json_summary") or {}).get("failed_checks"),
+                    "actionable_warnings_total": len(((step.get("json_summary") or {}).get("actionable_warnings") or [])),
                 }
                 if step.get("json_summary")
                 else None,
@@ -182,6 +326,10 @@ def _write_dashboard(report_dir: Path, report: dict) -> None:
     latest_html = report_dir / "latest-system-audit.html"
     latest_json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     alerts = report.get("alerts") or []
+    trend = report.get("trend") or {}
+    history_entries = _load_history(report_dir, limit=10)
+    matrix = (trend.get("matrix") or {}).get("current") or {}
+    changed_classes = ((trend.get("matrix") or {}).get("changed_classifications") or {})
     step_rows = []
     for step in report.get("steps", []):
         step_rows.append(
@@ -191,12 +339,31 @@ def _write_dashboard(report_dir: Path, report: dict) -> None:
             f"<td>{html.escape(str(step.get('duration_seconds') or ''))}</td>"
             "</tr>"
         )
+    history_rows = []
+    for entry in reversed(history_entries):
+        history_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(entry.get('started_at') or ''))}</td>"
+            f"<td>{html.escape(str(entry.get('status') or ''))}</td>"
+            f"<td>{html.escape(str(entry.get('alerts_total') or 0))}</td>"
+            f"<td>{html.escape(', '.join(entry.get('failed_steps') or []))}</td>"
+            "</tr>"
+        )
     alert_items = "\n".join(
         f"<li><strong>{html.escape(str(item.get('severity') or ''))}</strong> "
         f"{html.escape(str(item.get('title') or ''))} "
         f"<span>{html.escape(str(item.get('detail') or ''))[:300]}</span></li>"
         for item in alerts
     )
+    trend_items = [
+        f"<li>Run previo: {html.escape(str(trend.get('previous_run_id') or 'n/a'))} ({html.escape(str(trend.get('previous_status') or 'n/a'))})</li>",
+        f"<li>Fallos repetidos: {html.escape(', '.join(trend.get('repeated_failures') or []) or 'ninguno')}</li>",
+        f"<li>Nuevos fallos: {html.escape(', '.join(trend.get('new_failures') or []) or 'ninguno')}</li>",
+        f"<li>Recuperados: {html.escape(', '.join(trend.get('recovered_failures') or []) or 'ninguno')}</li>",
+        f"<li>Racha de fallos: {html.escape(str(trend.get('consecutive_failed_runs') or 0))}</li>",
+        f"<li>Avisos accionables actuales: {html.escape(str(matrix.get('actionable_warnings_total') or 0))}</li>",
+        f"<li>Cambios de clasificacion: {html.escape(json.dumps(changed_classes, ensure_ascii=False) if changed_classes else 'sin cambios')}</li>",
+    ]
     latest_html.write_text(
         """<!doctype html>
 <html lang="es">
@@ -212,8 +379,12 @@ table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid
         + f"<p class=\"status {html.escape(str(report.get('status') or ''))}\">Estado: {html.escape(str(report.get('status') or ''))}</p>"
         + f"<p>Run ID: {html.escape(str(report.get('run_id') or ''))}<br>Inicio: {html.escape(str(report.get('started_at') or ''))}<br>Fin: {html.escape(str(report.get('finished_at') or ''))}</p>"
         + f"<h2>Alertas ({len(alerts)})</h2><ul class=\"alerts\">{alert_items or '<li>Sin alertas accionables</li>'}</ul>"
+        + f"<h2>Tendencia</h2><ul>{''.join(trend_items)}</ul>"
         + "<h2>Pasos</h2><table><thead><tr><th>Paso</th><th>Estado</th><th>Segundos</th></tr></thead><tbody>"
         + "\n".join(step_rows)
+        + "</tbody></table>"
+        + "<h2>Historial reciente</h2><table><thead><tr><th>Inicio</th><th>Estado</th><th>Alertas</th><th>Fallos</th></tr></thead><tbody>"
+        + "\n".join(history_rows)
         + "</tbody></table></html>\n",
         encoding="utf-8",
     )
@@ -318,6 +489,7 @@ def main() -> int:
         "include_production": bool(args.include_production),
         "steps": [],
     }
+    previous_entries = _load_history(report_dir)
 
     steps: list[tuple[str, list[str], dict[str, str] | None, int]] = []
     if not args.skip_local:
@@ -367,6 +539,8 @@ def main() -> int:
     report["status"] = "failed" if failed else "passed"
     report["failed_steps"] = [step.get("name") for step in failed]
     report["alerts"] = _build_alerts(report)
+    report["trend"] = _build_trend_data(report, previous_entries)
+    report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _append_history(report_dir, report)
     _write_dashboard(report_dir, report)
@@ -381,6 +555,8 @@ def main() -> int:
         report["steps"].append(summary)
         report["ollama_summary_status"] = summary["status"]
         report["alerts"] = _build_alerts(report)
+        report["trend"] = _build_trend_data(report, previous_entries)
+        report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         _write_dashboard(report_dir, report)
 
@@ -392,6 +568,8 @@ def main() -> int:
         report["steps"].append(autofix)
         report["autofix_plan_status"] = autofix["status"]
         report["alerts"] = _build_alerts(report)
+        report["trend"] = _build_trend_data(report, previous_entries)
+        report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         _write_dashboard(report_dir, report)
 
