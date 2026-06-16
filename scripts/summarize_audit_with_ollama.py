@@ -6,8 +6,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 from pathlib import Path
 
 
@@ -53,20 +54,29 @@ def main() -> int:
         "4) siguiente accion recomendada. No inventes datos que no esten en el JSON.\n\n"
         + json.dumps(_compact_report(report), ensure_ascii=False, indent=2)
     )
-    proc = subprocess.run(
-        ["ollama", "run", model],
-        input=prompt,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=240,
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
+    request = Request(
+        "http://127.0.0.1:11434/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+    try:
+        with urlopen(request, timeout=240) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except URLError as exc:
+        print(f"No se puede conectar con Ollama local: {exc}", file=sys.stderr)
+        return 1
+
+    summary = str(data.get("response") or "").strip()
+    if not summary:
+        print(f"Ollama no devolvio resumen: {data}", file=sys.stderr)
+        return 1
+
     summary_path = report_path.with_suffix(".ollama.md")
-    summary_path.write_text(proc.stdout.strip() + "\n", encoding="utf-8")
+    summary_path.write_text(summary + "\n", encoding="utf-8")
     print(f"Resumen Ollama: {summary_path}")
-    if proc.returncode != 0:
-        print(proc.stdout, file=sys.stderr)
-    return proc.returncode
+    return 0
 
 
 if __name__ == "__main__":
