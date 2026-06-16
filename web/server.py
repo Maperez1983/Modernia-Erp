@@ -39556,6 +39556,14 @@ def _parse_csv_tokens(value):
             parts.append(t)
     return {p for p in parts if p}
 
+def superadmin_allowlist_configured():
+    return bool(
+        APP_SUPERADMIN_ENFORCE
+        or _parse_csv_tokens(APP_SUPERADMIN_IDS)
+        or _parse_csv_tokens(APP_SUPERADMIN_USERNAMES)
+        or _parse_csv_tokens(APP_SUPERADMIN_EMAILS)
+    )
+
 def is_superadmin_actor(conn, session):
     """
     Superadmin por allowlist (env vars). Usado para permisos globales y bypass de membership.
@@ -39596,6 +39604,8 @@ def is_superadmin_actor(conn, session):
         return True
     if allow_emails and semail and semail in allow_emails:
         return True
+    if not superadmin_allowlist_configured():
+        return workspace_session_is_privileged(session)
     return False
 
 def workspace_actor_is_privileged(conn, session):
