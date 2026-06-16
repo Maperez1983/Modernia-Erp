@@ -239,6 +239,8 @@ def main() -> int:
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):
         steps.append(("codebase_inventory", [sys.executable, "scripts/codebase_inventory_for_ollama.py", "--json"], None, 180))
+    if _env_flag("RUN_SYSTEM_AUDIT_BUILD_KNOWLEDGE"):
+        steps.append(("build_system_knowledge", [sys.executable, "scripts/build_system_knowledge.py"], None, 180))
 
     for name, cmd, env, timeout in steps:
         result = _run_step(name, cmd, env=env, timeout=timeout)

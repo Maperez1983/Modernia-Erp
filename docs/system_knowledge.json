@@ -1,0 +1,1427 @@
+{
+  "kind": "modernia_system_knowledge",
+  "generated_at": "2026-06-16T10:20:44+00:00",
+  "git": {
+    "branch": "main",
+    "commit": "30dc0b522a37844feb0e0e9353b26af8d2cabcea",
+    "recent_commits": [
+      "30dc0b5 Expand production system audit matrix",
+      "d77f46d Add production API audit monitor",
+      "fe518f6 Allow remote Ollama audit summaries",
+      "164c67a Use Ollama API for audit summaries",
+      "8227a9a Add CRM system audit runner",
+      "2cb2103 Fix CRM agenda modal state and filters",
+      "7f6ecf0 Prioritize exact gestoria client search matches",
+      "2ba8290 Define gestoria clientes list aggregates"
+    ]
+  },
+  "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
+  "entrypoints": {
+    "backend": [
+      "web/server.py",
+      "web/db_backend.py",
+      "web/schema_support.py"
+    ],
+    "frontend": [
+      "web/app.js",
+      "web/index.html",
+      "web/styles.css"
+    ],
+    "auditoria": [
+      "scripts/run_system_audit.py",
+      "scripts/prod_api_monitor.py",
+      "scripts/prod_system_matrix_audit.py",
+      "scripts/summarize_audit_with_ollama.py"
+    ]
+  },
+  "modules": {
+    "agenda": {
+      "expectations": [
+        "Los usuarios de un workspace deben ver sus citas nuevas y antiguas si pertenecen al workspace.",
+        "El comportamiento de lectura de agenda debe ser equivalente entre admin y no admin dentro del mismo workspace permitido.",
+        "Al crear o editar citas no se deben heredar cliente, tipo de cita, responsable, fechas ni campos de una cita anterior.",
+        "Los filtros de agenda deben acotarse por workspace/servicio, no por estado modal residual del frontend."
+      ],
+      "endpoint_count": 1,
+      "endpoints_sample": [
+        {
+          "path": "/api/acciones",
+          "line": 75464,
+          "module": "agenda"
+        }
+      ],
+      "tests": [
+        "tests/test_agenda_frontend_regressions.py"
+      ],
+      "frontend_functions_sample": [
+        "addMinutesToAgendaTime",
+        "agendaColorVarsForResponsible",
+        "applyCrmAgendaFilters",
+        "applyPendingInmuebleCitaPrefill",
+        "buildAgendaActionParams",
+        "buildAgendaEventButton",
+        "buildAgendaEvents",
+        "buildCrmAgendaDenseTableNode",
+        "buildCrmAgendaEventNode",
+        "citaConfig",
+        "citasVenta30",
+        "ensureCrmAgendaSelectors",
+        "formatAgendaDate",
+        "formatAgendaTimeFromMinutes",
+        "getCrmAgendaEventHour",
+        "getCrmAgendaStorageKey",
+        "getCrmAgendaStorageScope",
+        "initCrmAgendaPrefsIfNeeded",
+        "loadAcciones",
+        "loadAgendaGeneral",
+        "loadCrmAgenda",
+        "loadGestoriaClienteAgenda",
+        "normalizeAgendaTimeRange",
+        "normalizeAgendaTimeString",
+        "normalizeCrmAgendaAmbito",
+        "normalizeCrmAgendaView",
+        "openAgenda",
+        "openCrmAgendaEditModal",
+        "openCrmAgendaEditModalById",
+        "openInmuebleFromAgenda",
+        "parseAgendaDate",
+        "parseAgendaTimeMinutes",
+        "pendingFinAcciones",
+        "pendingGestoriaAcciones",
+        "pendingInmoAcciones",
+        "pendingSegurosAcciones",
+        "persistAgendaUiPrefs",
+        "persistCrmAgendaPrefs",
+        "populateAgendaClienteQuickSelect",
+        "populateAgendaClientes",
+        "populateAgendaClientesFromCandidates",
+        "queueInmuebleCitaPrefill",
+        "readCrmAgendaStorage",
+        "renderAgendaCalendar",
+        "renderCrmAgendaCalendar",
+        "renderCrmAgendaWorkspace",
+        "renderCrmHomeAgendaPreview",
+        "resolveAgendaEmpresaIdForService",
+        "resolveAgendaTipoBadge",
+        "resolveAgendaTipoKey",
+        "resolveCrmAgendaAmbitoKey",
+        "resolveCrmAgendaAmbitoLabel",
+        "resolveCrmAgendaRowById",
+        "setCrmAgendaAnchorDay",
+        "setCrmAgendaView",
+        "shiftCrmAgendaAnchorDay",
+        "syncCrmAgendaControls",
+        "syncFinAgendaContext",
+        "upsertCrmAgendaActionRow",
+        "writeCrmAgendaStorage"
+      ]
+    },
+    "usuarios_permisos": {
+      "expectations": [
+        "Un usuario no privilegiado solo puede ver datos de workspaces donde es miembro.",
+        "Un admin puede auditar usuarios por workspace, pero no debe mezclar tenants sin workspace_id.",
+        "Las diferencias de permisos deben producir 401/403 controlados, nunca 5xx."
+      ],
+      "endpoint_count": 2,
+      "endpoints_sample": [
+        {
+          "path": "/api/usuarios",
+          "line": 78329,
+          "module": "usuarios_permisos"
+        },
+        {
+          "path": "/api/workspace_registro_usuarios",
+          "line": 73186,
+          "module": "usuarios_permisos"
+        }
+      ],
+      "tests": [
+        "tests/test_api_usuarios_scoping.py",
+        "tests/test_privilege_refresh.py",
+        "tests/test_usuarios_uniqueness.py",
+        "tests/test_workspace_membership_autojoin.py"
+      ],
+      "frontend_functions_sample": [
+        "isPrivilegedRole",
+        "isPrivilegedService",
+        "isPrivilegedUser",
+        "loadUsuarios",
+        "renderUsuarios",
+        "renderUsuariosSelect",
+        "renderUsuariosTable"
+      ]
+    },
+    "workspaces": {
+      "expectations": [
+        "Toda consulta operativa debe resolver workspace_id de forma explicita o desde la sesion.",
+        "Los endpoints compartidos deben mantener aislamiento entre workspaces."
+      ],
+      "endpoint_count": 46,
+      "endpoints_sample": [
+        {
+          "path": "/api/workspace_automatizacion_logs",
+          "line": 73967,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_automatizaciones",
+          "line": 72817,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_billing_summary",
+          "line": 72659,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_boot",
+          "line": 72508,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_cliente_360",
+          "line": 72713,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_clientes",
+          "line": 72703,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_cobros",
+          "line": 72685,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_contrato_catalog",
+          "line": 73754,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_contrato_pdf",
+          "line": 73790,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_contratos",
+          "line": 73772,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_detail",
+          "line": 71934,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_document_hub",
+          "line": 72667,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_factura_pdf",
+          "line": 74204,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_factura_pdf_public",
+          "line": 74217,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_facturacion",
+          "line": 72676,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fin_overview",
+          "line": 72756,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_comunidades",
+          "line": 73851,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_contabilidad",
+          "line": 73913,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_documentos",
+          "line": 73949,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_incidencias",
+          "line": 73868,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_juntas",
+          "line": 73904,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_proveedores",
+          "line": 73886,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_fincas_vecinos",
+          "line": 73931,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_gestoria_overview",
+          "line": 72738,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_health",
+          "line": 72726,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_inbox",
+          "line": 72791,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_inmo_overview",
+          "line": 72765,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_kiosk_qr",
+          "line": 73350,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_kiosk_status",
+          "line": 73295,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_links",
+          "line": 72457,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_members",
+          "line": 72630,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_portal",
+          "line": 72800,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_portal_facturas_excel",
+          "line": 74062,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_portal_public",
+          "line": 73986,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_portal_requerimientos",
+          "line": 72808,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_portal_s3_url",
+          "line": 74162,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_presupuesto_encargo_pdf",
+          "line": 73833,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_presupuesto_pdf",
+          "line": 73821,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_presupuesto_templates",
+          "line": 73715,
+          "module": "workspaces"
+        },
+        {
+          "path": "/api/workspace_presupuestos",
+          "line": 49332,
+          "module": "workspaces"
+        }
+      ],
+      "tests": [
+        "tests/test_workspace_presupuestos_insert_placeholders.py",
+        "tests/test_workspace_scope_empresa_ids.py"
+      ],
+      "frontend_functions_sample": [
+        "applyWorkspaceBudgetServiceMode",
+        "applyWorkspaceBudgetTemplate",
+        "applyWorkspaceFincasBudgetQuickBudget",
+        "applyWorkspaceFincasBudgetQuickCommunity",
+        "applyWorkspaceFincasBudgetQuickPrefill",
+        "applyWorkspaceTimeMode",
+        "buildGestoriaWorkspaceParams",
+        "buildWorkspacePresupuestoUpdatePayloadFromRow",
+        "buildWorkspaceSummaryHref",
+        "canManageCurrentWorkspace",
+        "clearCurrentWorkspaceUi",
+        "closeWorkspaceCustomerModal",
+        "closeWorkspaceTimeEmployeeModal",
+        "computeWorkspaceBudgetTotals",
+        "ensureGestoriaBudgetsWorkspaceId",
+        "ensureTenantParams",
+        "ensureWorkspaceCompaniesLoaded",
+        "ensureWorkspaceCompanyFichaPanels",
+        "ensureWorkspaceEngineGroupBoot",
+        "fetchWorkspaceClientOptions",
+        "fillWorkspaceAlertForm",
+        "fillWorkspaceAutomationForm",
+        "fillWorkspaceBillingForm",
+        "fillWorkspaceBudgetForm",
+        "fillWorkspaceCollectionsForm",
+        "fillWorkspaceFincasCommunityForm",
+        "fillWorkspaceFincasIncidentForm",
+        "fillWorkspaceFincasLedgerForm",
+        "fillWorkspaceFincasMeetingForm",
+        "fillWorkspaceFincasProviderForm",
+        "fillWorkspaceForm",
+        "fillWorkspaceInboxForm",
+        "fillWorkspacePortalRequestForm",
+        "fillWorkspaceRemittancesForm",
+        "fillWorkspaceSeriesForm",
+        "fillWorkspaceTimeEmployeeForm",
+        "fillWorkspaceTimeForm",
+        "filterWorkspaceDocumentHubData",
+        "filterWorkspaceFincasRowsByCompany",
+        "filterWorkspaceRowsByCompany",
+        "findWorkspaceClientByLookup",
+        "findWorkspaceRecord",
+        "focusWorkspaceEngine",
+        "focusWorkspaceView",
+        "getGestoriaWorkspaceScopeKey",
+        "getTenantWorkspaceIdFromUrl",
+        "getWorkspaceAccessServiceOptions",
+        "getWorkspaceBudgetTemplatesForService",
+        "getWorkspaceCompanyById",
+        "getWorkspaceCompanyContextLabel",
+        "getWorkspaceCompanyFilter",
+        "getWorkspaceCompanyQuery",
+        "getWorkspaceContabilidadCompanies",
+        "getWorkspaceDefaultCompanyIdForServiceKey",
+        "getWorkspaceDisplayName",
+        "getWorkspaceEnabledModules",
+        "getWorkspaceIdForStorage",
+        "getWorkspaceModuleLabel",
+        "getWorkspaceModuleMeta",
+        "getWorkspacePersonaTimeEntries"
+      ]
+    },
+    "inmobiliaria": {
+      "expectations": [
+        "La informacion de inmuebles, demandas, visitas, compraventas y matching debe estar filtrada por workspace.",
+        "Las vistas de no admin deben devolver datos permitidos, no listas vacias por error de scoping."
+      ],
+      "endpoint_count": 27,
+      "endpoints_sample": [
+        {
+          "path": "/api/audit_inmobiliaria",
+          "line": 79904,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/compraventas",
+          "line": 79938,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/demandas",
+          "line": 81383,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/fin_inmobiliarias",
+          "line": 74961,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble",
+          "line": 80114,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_checklist",
+          "line": 81606,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_compradores",
+          "line": 81564,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_consumo_pdf",
+          "line": 81041,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_docs",
+          "line": 81130,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_encargo_pdf",
+          "line": 80319,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_ensure",
+          "line": 80231,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_expediente_docs",
+          "line": 80763,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_honorarios_pdf",
+          "line": 80963,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_matching",
+          "line": 81552,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_negociacion_pdf",
+          "line": 80905,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_portal_feed",
+          "line": 79711,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_signature_config",
+          "line": 79754,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_signature_document",
+          "line": 74035,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_signature_public",
+          "line": 73998,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_timeline",
+          "line": 81160,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_visita_docs",
+          "line": 80590,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmueble_visita_pdf",
+          "line": 80507,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/inmuebles",
+          "line": 79814,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/matching",
+          "line": 81539,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/portal_inmueble",
+          "line": 79779,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/portal_inmuebles",
+          "line": 79648,
+          "module": "inmobiliaria"
+        },
+        {
+          "path": "/api/visitas",
+          "line": 81473,
+          "module": "inmobiliaria"
+        }
+      ],
+      "tests": [
+        "tests/test_inmobiliaria_archivar_pendientes.py",
+        "tests/test_inmobiliaria_crm_smoke.py",
+        "tests/test_inmobiliaria_e2e_playwright.py",
+        "tests/test_inmobiliaria_encargo_close.py",
+        "tests/test_inmobiliaria_workflow_docs.py"
+      ],
+      "frontend_functions_sample": [
+        "autocompleteInmuebleDireccionFromUi",
+        "buildCrmInmueblesDenseTableNode",
+        "buildCrmInmueblesRecentNode",
+        "buildCrmVisitasDenseTableNode",
+        "buildEncargoClosePrefillFromAction",
+        "buildEncargoConditionUpdates",
+        "buildFiscalPrefillFromCurrentInmueble",
+        "buildInmuebleBadge",
+        "buildInmuebleCatastroLookupPayload",
+        "buildInmuebleDisplayAddress",
+        "buildInmuebleEncargoConditionsDefaults",
+        "canRenewInmuebleDuplicate",
+        "closeInmuebleEncargoCloseModal",
+        "closeInmuebleEncargoModal",
+        "closeInmuebleWorkflowAction",
+        "compraventas",
+        "computeVentaVisitas",
+        "demandas",
+        "ensureInmuebleForCaptacion",
+        "fillCompraventaForm",
+        "filterCrmCompraventasRows",
+        "filterCrmVisitasRows",
+        "filterInmuebleFieldsForOperacion",
+        "filterInmuebleFieldsForStage",
+        "focusInmuebleField",
+        "formatInmobiliariaDuplicateSummary",
+        "generateCurrentInmuebleAnuncio",
+        "generateEncargoPdf",
+        "generateInmuebleChecklist",
+        "generateInmuebleExpedienteDocs",
+        "geocodeInmuebleAddress",
+        "getCrmDemandasSelectedIds",
+        "getInmuebleActividadClienteScope",
+        "getInmuebleCatastroInputMapFromDom",
+        "getInmuebleDireccionInputMapFromDom",
+        "getInmuebleStageRequirements",
+        "inferInmobiliariaCategoria",
+        "inmuebleId",
+        "inmuebleServicioIconFor",
+        "inmuebleServicioIconKeyFor",
+        "inmuebles",
+        "isEncargo",
+        "loadCrmCompraventas",
+        "loadCrmDemandas",
+        "loadCrmInmuebles",
+        "loadCrmMapaInmuebles",
+        "loadCrmVisitas",
+        "loadDemandasList",
+        "loadFinInmobiliarias",
+        "loadInmuebleActividad",
+        "loadInmuebleChecklist",
+        "loadInmuebleCompradores",
+        "loadInmuebleDemandas",
+        "loadInmuebleDocs",
+        "loadInmuebleVisitas",
+        "lookupInmuebleCatastro",
+        "normalizeCrmCompraventasPreset",
+        "normalizeCrmVisitasPreset",
+        "normalizeDemandaFaseKey",
+        "normalizeInmobiliariaPersona"
+      ]
+    },
+    "seguros": {
+      "expectations": [
+        "Los endpoints de seguros deben devolver datos o 403 controlado si el usuario no tiene servicio.",
+        "Los KPIs no deben romper por falta de datos; si falta empresa_id debe responder 400 claro."
+      ],
+      "endpoint_count": 26,
+      "endpoints_sample": [
+        {
+          "path": "/api/fincas_seguros_dashboard",
+          "line": 82690,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_alertas",
+          "line": 83650,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_campanas",
+          "line": 75877,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_checklist",
+          "line": 84252,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_cliente",
+          "line": 76150,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_comisiones",
+          "line": 76072,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_compliance_kpis",
+          "line": 77102,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_consentimientos",
+          "line": 75829,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_data_quality",
+          "line": 76314,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_eventos",
+          "line": 76439,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_idd",
+          "line": 75788,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_insights",
+          "line": 76342,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_kpis",
+          "line": 83926,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_movimientos",
+          "line": 76083,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_ofertas",
+          "line": 75749,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_preferencias",
+          "line": 75772,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos",
+          "line": 76466,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos_export",
+          "line": 76900,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recibos_summary",
+          "line": 76641,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_reclamaciones",
+          "line": 77070,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_recomendacion",
+          "line": 75889,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_referidos",
+          "line": 75864,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_renovaciones_queue",
+          "line": 83723,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_siniestros",
+          "line": 76583,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_version",
+          "line": 76124,
+          "module": "seguros"
+        },
+        {
+          "path": "/api/seguros_versiones",
+          "line": 76106,
+          "module": "seguros"
+        }
+      ],
+      "tests": [
+        "tests/test_ocr_smoke_seguros_upload.py",
+        "tests/test_seguros_activation.py",
+        "tests/test_seguros_contabilidad.py",
+        "tests/test_seguros_contabilidad_sync.py",
+        "tests/test_seguros_e2e_playwright.py",
+        "tests/test_seguros_kpis_vencen_30_ddmmyyyy.py",
+        "tests/test_seguros_ocr_parse.py",
+        "tests/test_seguros_renovaciones_queue_dedup.py"
+      ],
+      "frontend_functions_sample": [
+        "applySegurosBdtDashboardFilter",
+        "buildSeguroHighlights",
+        "buildSeguroSmartData",
+        "buildSegurosCadenceSteps",
+        "buildSegurosOcrPayload",
+        "buildSegurosRecibosParams",
+        "buildSegurosSmartPayloadFromOcr",
+        "closeSeguroPage",
+        "computeSeguroDisplayState",
+        "deleteSeguro",
+        "ensureSegurosBdtData",
+        "ensureSelectedPolizaOption",
+        "fetchSeguroRowById",
+        "fillGestoriaContabilidadPolizaSelect",
+        "fillSegurosBdtOcrFields",
+        "fillSegurosOcrFields",
+        "findSegurosRowById",
+        "formatSegurosBdtLabel",
+        "formatSegurosRecibosMoney",
+        "fromSeguros",
+        "getSeguroRamoLabel",
+        "getSeguroSmartFields",
+        "getSegurosBdtOcrClienteFields",
+        "getSegurosBdtOcrFields",
+        "getSegurosBdtSortValue",
+        "getSegurosColaboradoresCatalog",
+        "getSegurosComisionSuggestion",
+        "getSegurosOcrClienteFields",
+        "getSegurosOcrComisionAmount",
+        "getSegurosPolizaOptions",
+        "getSegurosRamoLabel",
+        "getSegurosRamosCatalog",
+        "hasSeguroRenewalAction",
+        "hydrateSegurosContabilidadFormSelects",
+        "hydrateSegurosRecibosFormSelects",
+        "hydrateSegurosSiniestrosFormSelects",
+        "initSegurosTabs",
+        "isHidden",
+        "isLegacySeguroRow",
+        "isValidDocumento",
+        "linkClienteSegurosService",
+        "loadAllSegurosForContabilidad",
+        "loadClienteSeguros",
+        "loadClientesForSegurosContabilidad",
+        "loadSegurosAlertas",
+        "loadSegurosCampanas",
+        "loadSegurosChecklist",
+        "loadSegurosComisiones",
+        "loadSegurosComplianceForm",
+        "loadSegurosComplianceKpis",
+        "loadSegurosContabilidad",
+        "loadSegurosCrm",
+        "loadSegurosDataQuality",
+        "loadSegurosEventos",
+        "loadSegurosForClienteContabilidad",
+        "loadSegurosHistorial",
+        "loadSegurosInsights",
+        "loadSegurosKpis",
+        "loadSegurosMovimientos",
+        "loadSegurosOfertas"
+      ]
+    },
+    "gestoria": {
+      "expectations": [
+        "Los endpoints de gestoria deben respetar permisos de servicio y workspace.",
+        "La importacion y consulta documental no debe cruzar clientes entre workspaces."
+      ],
+      "endpoint_count": 21,
+      "endpoints_sample": [
+        {
+          "path": "/api/cliente_gestoria",
+          "line": 75150,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_asientos",
+          "line": 77960,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_conta_config",
+          "line": 78265,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_conta_tasks",
+          "line": 78281,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_contabilidad",
+          "line": 77591,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_dashboard",
+          "line": 78591,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_docs",
+          "line": 77339,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_excel_plantilla",
+          "line": 78091,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_facturas",
+          "line": 77733,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_import_documentos",
+          "line": 77790,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_import_excel",
+          "line": 77846,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_import_lotes",
+          "line": 77763,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_libros",
+          "line": 77990,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_modelos",
+          "line": 77197,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_renta_cards",
+          "line": 75255,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_renta_dashboard",
+          "line": 75297,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_renta_debug",
+          "line": 78449,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_renta_export",
+          "line": 75346,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_trabajo_tipos",
+          "line": 77314,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/gestoria_trabajos",
+          "line": 77260,
+          "module": "gestoria"
+        },
+        {
+          "path": "/api/renta_quick_pending",
+          "line": 78394,
+          "module": "gestoria"
+        }
+      ],
+      "tests": [
+        "tests/test_factura_ocr.py",
+        "tests/test_gapp_facturas_excel.py",
+        "tests/test_gestoria_import_backend.py",
+        "tests/test_gestoria_renta_cards_regression.py",
+        "tests/test_ocr_smoke_renta_upload.py",
+        "tests/test_renta_ocr_nif_detection.py",
+        "tests/test_renta_pdf_fields.py",
+        "tests/test_rentas_import.py",
+        "tests/test_rentas_ocr_normalization.py",
+        "tests/test_rentas_paid_2024.py"
+      ],
+      "frontend_functions_sample": [
+        "attachGestoriaRentaQuickToCliente",
+        "bindGestoriaDashboardKpis",
+        "bindGestoriaRentaCampaignBanner",
+        "bindGestoriaTipoDefaults",
+        "buildGestoriaRentaDetailsPayload",
+        "buildGestoriaRentaSearchHaystack",
+        "buildRentaDetallesPayloadWithNewEntry",
+        "buildRentaPrintTableHtml",
+        "buildRentaQuickCtxFromPendingRow",
+        "canAccessGestoriaAdminDashboard",
+        "classifyGestoriaTrabajoCategory",
+        "closeGestoriaRentaQuickModal",
+        "closeGestoriaTrabajoTipoTemplateModal",
+        "createGestoriaContaChecklist",
+        "createGestoriaRentaCampaign",
+        "deleteGestoriaContabilidad",
+        "deleteGestoriaDoc",
+        "deleteGestoriaModelo",
+        "deleteGestoriaTrabajo",
+        "deleteGestoriaTrabajoTipo",
+        "downloadGestoriaRentaExport",
+        "ensureGestoriaDashRentaEjercicioOptions",
+        "ensureGestoriaTrabajoCategorySelects",
+        "facturadoAlquileresYear",
+        "fetchGestoriaTrabajosForDashboard",
+        "fillGestoriaImportReviewForm",
+        "fillGestoriaImportSelectedLoteMeta",
+        "fillGestoriaRentaDetailsForm",
+        "filterGestoriaRentaOverviewRows",
+        "formatRentaCobro",
+        "formatRentaResult",
+        "gestoriaContaRowForCliente",
+        "gestoriaDashComputeDueDate",
+        "gestoriaEmpresaIds",
+        "getGestoriaContabilidadServiceContext",
+        "getGestoriaImportSelectedDoc",
+        "getGestoriaRentaLatestTimestamp",
+        "getGestoriaTipoMeta",
+        "getGestoriaTrabajoCategoryLabel",
+        "getRentaDniMeta",
+        "getRentaPresentacionFecha",
+        "getSelectedRentaEntry",
+        "getSortedRentaEntries",
+        "hydrateGestoriaTrabajoTipoSelect",
+        "initGestoriaDashboardTabs",
+        "initGestoriaRentaCampaignToolbar",
+        "initGestoriaRentaQuickEjercicio",
+        "invalidateGestoriaRentaDashboardCache",
+        "isGestoriaRentaDashboardVisible",
+        "isRentaRemesa",
+        "loadClienteFacturasServicios",
+        "loadClienteGestoria",
+        "loadGestoriaAuditoria",
+        "loadGestoriaBdt",
+        "loadGestoriaClienteContaResultados",
+        "loadGestoriaClienteDashboard",
+        "loadGestoriaClienteImportador",
+        "loadGestoriaClienteLibros",
+        "loadGestoriaContaConfig",
+        "loadGestoriaContaQueue"
+      ]
+    },
+    "financiacion": {
+      "expectations": [
+        "Las alertas/KPIs financieros deben responder con datos o errores 400/403 controlados."
+      ],
+      "endpoint_count": 12,
+      "endpoints_sample": [
+        {
+          "path": "/api/fin_alertas",
+          "line": 84286,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/fin_asesoramientos",
+          "line": 75667,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/fin_checklist",
+          "line": 84269,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/fin_hipotecas_estudio",
+          "line": 75711,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/fin_kpis",
+          "line": 84332,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipoteca_bdt",
+          "line": 82332,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipoteca_dashboard",
+          "line": 81708,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipoteca_ficha_print",
+          "line": 82501,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipoteca_registros",
+          "line": 82540,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipoteca_stats",
+          "line": 81629,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipotecas_audit_descuadres",
+          "line": 82389,
+          "module": "financiacion"
+        },
+        {
+          "path": "/api/hipotecas_firmadas_excel",
+          "line": 82663,
+          "module": "financiacion"
+        }
+      ],
+      "tests": [
+        "tests/test_fin_liquidacion_excel_parity.py",
+        "tests/test_fin_liquidacion_fuzz.py",
+        "tests/test_fin_workflow.py",
+        "tests/test_hipotecas_delete.py"
+      ],
+      "frontend_functions_sample": [
+        "autofillHipotecaLiquidacionFromFicha",
+        "buildHipotecaBdtSearchHaystack",
+        "buildHipotecaOptionLabel",
+        "calcHipotecaGastos",
+        "closeHipotecaFichaPanel",
+        "collectHipotecaFichaJson",
+        "computeHipotecaLiquidacionComputed",
+        "createClienteForHipoteca",
+        "deleteHipoteca",
+        "downloadHipotecasFirmadasExcel",
+        "ensureHipotecaFichaPanel",
+        "fetchHipotecaRowById",
+        "fillHipotecaFichaJson",
+        "filterHipotecaBdtRows",
+        "finSimLookupHipoteca",
+        "findHipotecaBdtRowById",
+        "getHipotecaBdtView",
+        "getHipotecaDisplayName",
+        "getHipotecaFichaFields",
+        "getHipotecaFieldValue",
+        "getHipotecaFirmaTimestamp",
+        "getHipotecaSignedYear",
+        "hipotecaRowToObject",
+        "isHipotecaSignedForExport",
+        "linkFinanciacionServiceToCliente",
+        "loadClienteHipotecasFicha",
+        "loadFinHipotecaActions",
+        "loadFinHipotecasEstudio",
+        "loadFinHipotecasRegistradas",
+        "loadHipotecaBdt",
+        "loadHipotecaContabilidad",
+        "loadHipotecaContabilidadHipotecas",
+        "loadHipotecaDashboard",
+        "loadHomeHipotecaStats",
+        "normalizeHipotecaPrestatariaForSave",
+        "openFinanciacionFichaModal",
+        "openHipotecaBdtFromDashboard",
+        "openHipotecaContabilidadFromDashboard",
+        "openHipotecaFicha",
+        "openHipotecaFichaDraft",
+        "openHipotecaFichaPrint",
+        "openHipotecasFromKpi",
+        "populateHipotecaVincularSelect",
+        "refreshHipotecaLiquidacionComputedControls",
+        "refreshHipotecaTitularesDisplay",
+        "renderFinSelectedHipoteca",
+        "renderHipotecaBdtCards",
+        "renderHipotecaBdtList",
+        "renderHipotecaBdtTable",
+        "renderHipotecaEntityKpis",
+        "resolveHipotecaBankBrand",
+        "saveHipotecaFicha",
+        "selectFinHipoteca",
+        "setHipotecaAltaView",
+        "setHipotecaBdtView",
+        "setHipotecaFichaTab",
+        "setHipotecaLiquidacionTab",
+        "setupHipotecaFichaComputedInputs",
+        "setupHipotecaFichaDomicilioSync",
+        "setupHipotecaFichaMoneyInputs"
+      ]
+    },
+    "fincas": {
+      "expectations": [
+        "Las comunidades, incidencias, proveedores y documentos deben acotarse por workspace."
+      ],
+      "endpoint_count": 2,
+      "endpoints_sample": [
+        {
+          "path": "/api/fincas_alerts",
+          "line": 83619,
+          "module": "fincas"
+        },
+        {
+          "path": "/api/fincas_stats",
+          "line": 82744,
+          "module": "fincas"
+        }
+      ],
+      "tests": [
+        "tests/test_fincas_bank_extract_import.py",
+        "tests/test_fincas_budget_edit_modal_regression.py",
+        "tests/test_fincas_budget_pdf_cover_layout_regression.py",
+        "tests/test_fincas_budget_pdf_map_render_regression.py",
+        "tests/test_fincas_budget_pdf_table_alignment_regression.py",
+        "tests/test_fincas_comunidad_ficha_tabs_regression.py"
+      ],
+      "frontend_functions_sample": [
+        "buildFincasBudgetLineas",
+        "buildFincasContractPayloadFromBudgetRow",
+        "computeFincasBudgetTotalsClient",
+        "computeFincasCuotaSuggestedClient",
+        "fincas",
+        "fincasPreviewLedgerImportFromFile",
+        "fincasRunLedgerImport",
+        "loadFincasRenewalAlert",
+        "loadHomeFincasStats",
+        "loadVecinos",
+        "openFincasBudgetEditModal",
+        "openFincasCommunityFichaModal",
+        "openFincasLedgerImportModal",
+        "readFincasServiciosIncluidos",
+        "renderFincasDashboard",
+        "renderFincasServiciosIncluidos",
+        "shouldScopeFincasByCompany",
+        "syncFincasDashboardYearSelector",
+        "updateFincasBdtTabs"
+      ]
+    },
+    "rrhh": {
+      "expectations": [
+        "El registro horario y personal deben estar acotados por usuario/workspace."
+      ],
+      "endpoint_count": 25,
+      "endpoints_sample": [
+        {
+          "path": "/api/workspace_registro_alerts",
+          "line": 73260,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_audit",
+          "line": 73395,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario",
+          "line": 73209,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_alerts_run",
+          "line": 73413,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_export",
+          "line": 73650,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_pdf",
+          "line": 73578,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_resumen",
+          "line": 73240,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_xlsx",
+          "line": 73604,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_horario_xml",
+          "line": 73556,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_notifications",
+          "line": 73277,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_periodos",
+          "line": 73173,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_personal",
+          "line": 72825,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_registro_sweep_status",
+          "line": 73427,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_ausencias",
+          "line": 73485,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_documentos",
+          "line": 73538,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_economicos_dashboard",
+          "line": 72997,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_gastos",
+          "line": 73518,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_memoria_economica",
+          "line": 73037,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_payroll_export",
+          "line": 73673,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_productividad",
+          "line": 72913,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_productividad_manual",
+          "line": 72968,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_productividad_renta",
+          "line": 72862,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_profile",
+          "line": 73446,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_turnos",
+          "line": 73468,
+          "module": "rrhh"
+        },
+        {
+          "path": "/api/workspace_rrhh_vacaciones_summary",
+          "line": 73505,
+          "module": "rrhh"
+        }
+      ],
+      "tests": [
+        "tests/test_nomina_pdf_fields_empresa_aportacion.py",
+        "tests/test_registro_horario_sweep_timezone.py",
+        "tests/test_rrhh_nominas_import_dedupe.py",
+        "tests/test_rrhh_nominas_split_pdf.py",
+        "tests/test_rrhh_personal_workspace_scoping.py"
+      ],
+      "frontend_functions_sample": [
+        "appendPersonalCard",
+        "buildRrhhContractTypeOptions",
+        "closeRrhhCleanupModal",
+        "isWorkspaceRrhhManager",
+        "loadWorkspaceRrhhEconomicosDashboard",
+        "loadWorkspaceRrhhEconomicosProductividad",
+        "normalizeWorkspaceRrhhTab",
+        "openRrhhCleanupModal",
+        "refreshWorkspaceRrhh",
+        "renderRrhhEconomicosDashboardPanel",
+        "renderRrhhEconomicosPanel",
+        "renderWorkspaceRrhhHub",
+        "requestedRrhh",
+        "requestedRrhhTab",
+        "rrhhTabIcon",
+        "tryNominatim"
+      ]
+    }
+  },
+  "all_api_endpoints_total": 207,
+  "diagnostic_rules": [
+    {
+      "symptom": "Un usuario no admin no ve citas o ve menos que admin en el mismo workspace.",
+      "module": "agenda",
+      "look_at": [
+        "scripts/prod_system_matrix_audit.py endpoint agenda_inmobiliaria",
+        "web/server.py /api/acciones",
+        "fetch_api_usuarios y enforce_workspace_membership",
+        "web/app.js estado modal/filtros de agenda",
+        "tests/test_agenda_frontend_regressions.py",
+        "tests/test_api_usuarios_scoping.py"
+      ]
+    },
+    {
+      "symptom": "Despues de editar/crear una cita se heredan cliente, tipo o responsable.",
+      "module": "agenda",
+      "look_at": [
+        "web/app.js apertura/reset del modal de agenda",
+        "web/app.js serializacion del formulario de cita",
+        "tests/test_agenda_frontend_regressions.py"
+      ]
+    },
+    {
+      "symptom": "Aparecen 500/timeout en endpoints de produccion.",
+      "module": "core",
+      "look_at": [
+        "output_tail del paso fallido",
+        "endpoint exacto en web/server.py",
+        "tests relacionados por nombre de modulo",
+        "schema.sql si el error menciona columna/tabla"
+      ]
+    },
+    {
+      "symptom": "Un endpoint responde 403 a no admin.",
+      "module": "usuarios_permisos",
+      "look_at": [
+        "servicio/rol del usuario en /api/login",
+        "workspace_user_inventory",
+        "controles has_service_access/enforce_workspace_membership"
+      ],
+      "note": "Puede ser correcto si el usuario no tiene ese servicio; no debe considerarse caida si es esperado."
+    }
+  ]
+}

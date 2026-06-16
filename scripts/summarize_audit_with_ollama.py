@@ -13,6 +13,37 @@ from pathlib import Path
 
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_KNOWLEDGE_PATH = Path(__file__).resolve().parents[1] / "docs" / "system_knowledge.json"
+
+
+def _load_system_knowledge() -> dict:
+    path = Path(os.environ.get("CRM_SYSTEM_KNOWLEDGE_PATH") or DEFAULT_KNOWLEDGE_PATH).resolve()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"available": False, "path": str(path)}
+    modules = data.get("modules") if isinstance(data, dict) else {}
+    compact_modules = {}
+    if isinstance(modules, dict):
+        for name, module in modules.items():
+            if not isinstance(module, dict):
+                continue
+            compact_modules[name] = {
+                "expectations": module.get("expectations"),
+                "endpoint_count": module.get("endpoint_count"),
+                "endpoints_sample": module.get("endpoints_sample"),
+                "tests": module.get("tests"),
+                "frontend_functions_sample": module.get("frontend_functions_sample"),
+            }
+    return {
+        "available": True,
+        "path": str(path),
+        "generated_at": data.get("generated_at"),
+        "git": data.get("git"),
+        "entrypoints": data.get("entrypoints"),
+        "modules": compact_modules,
+        "diagnostic_rules": data.get("diagnostic_rules"),
+    }
 
 
 def _compact_report(report: dict) -> dict:
@@ -36,6 +67,7 @@ def _compact_report(report: dict) -> dict:
         "started_at": report.get("started_at"),
         "finished_at": report.get("finished_at"),
         "failed_steps": report.get("failed_steps"),
+        "system_knowledge": _load_system_knowledge(),
         "steps": compact_steps,
     }
 
@@ -50,8 +82,24 @@ def _deterministic_summary(compact: dict) -> str:
         f"- Fin: {compact.get('finished_at') or ''}",
         f"- Fallos: {', '.join(compact.get('failed_steps') or []) if compact.get('failed_steps') else 'ninguno'}",
         "",
-        "## Pasos",
+        "## Base de conocimiento",
     ]
+    knowledge = compact.get("system_knowledge") or {}
+    if knowledge.get("available"):
+        lines.extend(
+            [
+                f"- Archivo: {knowledge.get('path')}",
+                f"- Generada: {knowledge.get('generated_at')}",
+                f"- Commit conocido: {(knowledge.get('git') or {}).get('commit')}",
+                f"- Modulos conocidos: {', '.join((knowledge.get('modules') or {}).keys())}",
+                "",
+            ]
+        )
+    else:
+        lines.extend([f"- No disponible: {knowledge.get('path')}", ""])
+    lines.extend([
+        "## Pasos",
+    ])
     for step in compact.get("steps") or []:
         name = step.get("name") or "paso"
         status = step.get("status") or "desconocido"
@@ -106,9 +154,11 @@ def main() -> int:
     model = os.environ.get("OLLAMA_AUDIT_MODEL") or "qwen2.5-coder:7b"
     base_url = (os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
     prompt = (
-        "Responde solo en castellano. Eres un auditor tecnico de un CRM. Resume este reporte con: "
+        "Responde solo en castellano. Eres un auditor tecnico de un CRM. "
+        "Usa la base de conocimiento incluida para relacionar sintomas con modulos, endpoints, tests y expectativas. "
+        "Resume este reporte con: "
         "1) estado global, 2) fallos concretos, 3) causa probable si se puede inferir, "
-        "4) siguiente accion recomendada. Usa solo el JSON recibido; si no hay fallos, dilo claramente. "
+        "4) donde mirar primero en el codigo, 5) siguiente accion recomendada. Usa solo el JSON recibido; si no hay fallos, dilo claramente. "
         "No menciones pruebas, despliegues ni fallos que no aparezcan literalmente en el JSON.\n\n"
         + json.dumps(compact, ensure_ascii=False, indent=2)
     )
