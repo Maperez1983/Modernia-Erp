@@ -896,6 +896,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/workspace_kiosk_toggle",
     "/api/ingest_facturas_presign",
     "/api/ingest_facturas_ocr",
+    "/api/system_audit_ingest",
 }
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
@@ -2042,6 +2043,99 @@ def log_user_admin_audit(conn, *, action, workspace_id, target_user_id=None, act
         )
     except Exception:
         return
+
+
+def ensure_system_audit_runs_table(conn):
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_audit_runs (
+              run_id TEXT PRIMARY KEY,
+              received_at TEXT NOT NULL,
+              source TEXT,
+              status TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT,
+              alerts_total INTEGER NOT NULL DEFAULT 0,
+              actionable_warnings INTEGER NOT NULL DEFAULT 0,
+              report_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_system_audit_runs_received ON system_audit_runs(received_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_system_audit_runs_status ON system_audit_runs(status, received_at DESC)")
+    except Exception:
+        return
+
+
+def store_system_audit_run(conn, payload, *, received_at=None):
+    if not isinstance(payload, dict):
+        return False
+    ensure_system_audit_runs_table(conn)
+    now_ts = str(received_at or datetime.now(timezone.utc).isoformat())
+    run_id = str(payload.get("run_id") or "").strip() or os.urandom(12).hex()
+    source = str(payload.get("source") or "render_cron").strip() or "render_cron"
+    status = str(payload.get("status") or "unknown").strip() or "unknown"
+    started_at = str(payload.get("started_at") or "").strip() or None
+    finished_at = str(payload.get("finished_at") or "").strip() or None
+    alerts_total = int(payload.get("alerts_total") or len(payload.get("alerts") or []) or 0)
+    actionable_warnings = int(
+        payload.get("actionable_warnings_total")
+        or (((payload.get("matrix_summary") or {}).get("actionable_warnings")) or 0)
+        or 0
+    )
+    report_json = json.dumps(payload, ensure_ascii=False, default=str)
+    conn.execute("DELETE FROM system_audit_runs WHERE run_id = ?", (run_id,))
+    conn.execute(
+        """
+        INSERT INTO system_audit_runs (
+          run_id, received_at, source, status, started_at, finished_at,
+          alerts_total, actionable_warnings, report_json
+        ) VALUES (?, datetime(?), ?, ?, datetime(?), datetime(?), ?, ?, ?)
+        """,
+        (
+            run_id,
+            now_ts,
+            source,
+            status,
+            started_at or now_ts,
+            finished_at or now_ts,
+            alerts_total,
+            actionable_warnings,
+            report_json,
+        ),
+    )
+    return True
+
+
+def fetch_latest_system_audit_run(conn):
+    ensure_system_audit_runs_table(conn)
+    row = conn.execute(
+        """
+        SELECT run_id, received_at, source, status, started_at, finished_at,
+               alerts_total, actionable_warnings, report_json
+        FROM system_audit_runs
+        ORDER BY received_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        report = json.loads(row["report_json"] or "{}")
+    except Exception:
+        report = {}
+    if not isinstance(report, dict):
+        report = {}
+    report.setdefault("run_id", row["run_id"])
+    report.setdefault("status", row["status"])
+    report.setdefault("started_at", row["started_at"])
+    report.setdefault("finished_at", row["finished_at"])
+    report.setdefault("source", row["source"])
+    report.setdefault("alerts_total", row["alerts_total"])
+    report.setdefault("actionable_warnings_total", row["actionable_warnings"])
+    report["received_at"] = row["received_at"]
+    return report
 
 def normalize_person_name(value):
     if not value:
@@ -50863,6 +50957,24 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+        if parsed.path == "/api/system_audit_ingest":
+            if not require_ingest_api_key(self):
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            try:
+                ok = store_system_audit_run(conn, payload, received_at=datetime.now(timezone.utc).isoformat())
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": "No se pudo guardar la auditoria", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            json_response(self, {"ok": bool(ok), "run_id": payload.get("run_id"), "status": payload.get("status")})
+            return
+
         if parsed.path == "/api/logout":
             token = self._parse_cookies().get(SESSION_COOKIE_NAME, "")
             delete_auth_session(token)
@@ -72733,6 +72845,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/system_audit_latest":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_latest_system_audit_run(conn) or {})
             return
 
         if path == "/api/workspace_gestoria_overview":

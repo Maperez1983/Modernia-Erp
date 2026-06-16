@@ -9311,11 +9311,48 @@ const renderWorkspaceKpis = (summary = {}) => {
     .join("");
 };
 
-const renderWorkspaceHealth = (data = {}) => {
+const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
   const companyLabel = getWorkspaceCompanyContextLabel();
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
     const summary = data.summary || {};
+    const audit = systemAudit && typeof systemAudit === "object" ? systemAudit : null;
+    const auditStatus = String(audit?.status || "").trim().toLowerCase();
+    const auditBadge =
+      auditStatus === "passed"
+        ? "Sistema estable"
+        : auditStatus === "failed"
+          ? "Incidencias activas"
+          : auditStatus
+            ? auditStatus
+            : "Sin auditoría publicada";
+    const auditHtml = audit
+      ? `
+          <div class="form-card" style="margin-top:14px;">
+            <div class="section-head">
+              <div>
+                <h3>Salud del sistema</h3>
+                <p class="muted">Última auditoría persistida del CRM.</p>
+              </div>
+              <div class="workspace-document-total">${escapeHtml(auditBadge)}</div>
+            </div>
+            <div class="workspace-summary-list">
+              <div class="workspace-summary-row">
+                <div><strong>Run</strong><div class="muted">${escapeHtml(String(audit.run_id || "-"))}</div></div>
+                <div class="workspace-summary-meta"><span>${escapeHtml(String(audit.finished_at || audit.received_at || "-"))}</span></div>
+              </div>
+              <div class="workspace-summary-row">
+                <div><strong>Alertas</strong><div class="muted">${numberFormatter.format(Number(audit.alerts_total || 0))} totales</div></div>
+                <div class="workspace-summary-meta"><span>${numberFormatter.format(Number(audit.actionable_warnings_total || 0))} accionables</span></div>
+              </div>
+              <div class="workspace-summary-row">
+                <div><strong>Pasos fallidos</strong><div class="muted">${escapeHtml((Array.isArray(audit.failed_steps) ? audit.failed_steps.join(", ") : "") || "Ninguno")}</div></div>
+                <div class="workspace-summary-meta"><span>${escapeHtml(String(audit.source || "render_cron"))}</span></div>
+              </div>
+            </div>
+          </div>
+        `
+      : "";
     workspaceHealthScore.innerHTML = `
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
@@ -9333,6 +9370,7 @@ const renderWorkspaceHealth = (data = {}) => {
           </div>
         </div>
       </div>
+      ${auditHtml}
     `;
   }
   if (workspaceChecklist) {
@@ -23866,7 +23904,16 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.workspaceTimeSummary = timeSummary || null;
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
-  renderWorkspaceHealth(health || {});
+  let systemAudit = null;
+  if (!minimalForRrhh) {
+    try {
+      const auditPayload = await safeWorkspaceApi("/api/system_audit_latest", null);
+      if (auditPayload && typeof auditPayload === "object" && Object.keys(auditPayload).length) {
+        systemAudit = auditPayload;
+      }
+    } catch (e) {}
+  }
+  renderWorkspaceHealth(health || {}, systemAudit);
   renderWorkspaceCommercialPack(detail.workspace || {}, detail.commercial_package || {});
   renderWorkspacePermissionMatrix(detail.permission_matrix || []);
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);

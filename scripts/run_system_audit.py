@@ -14,6 +14,8 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -453,6 +455,77 @@ table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid
     )
 
 
+def _build_publish_payload(report: dict) -> dict:
+    matrix_summary = _matrix_summary_from_report(report)
+    return {
+        "kind": "system_audit_publish",
+        "source": "render_cron",
+        "run_id": report.get("run_id"),
+        "status": report.get("status"),
+        "started_at": report.get("started_at"),
+        "finished_at": report.get("finished_at"),
+        "failed_steps": report.get("failed_steps") or [],
+        "alerts_total": len(report.get("alerts") or []),
+        "alerts": (report.get("alerts") or [])[:20],
+        "trend": report.get("trend") or {},
+        "matrix_summary": matrix_summary,
+        "actionable_warnings_total": int(matrix_summary.get("actionable_warnings_total") or 0),
+        "steps": [
+            {
+                "name": step.get("name"),
+                "status": step.get("status"),
+                "duration_seconds": step.get("duration_seconds"),
+                "failed_checks": ((step.get("json_summary") or {}).get("failed_checks") or [])[:20],
+                "kind": (step.get("json_summary") or {}).get("kind"),
+            }
+            for step in report.get("steps", [])
+        ],
+        "ollama_summary_status": report.get("ollama_summary_status"),
+        "autofix_plan_status": report.get("autofix_plan_status"),
+    }
+
+
+def _publish_report(report: dict) -> dict:
+    publish_url = (os.environ.get("SYSTEM_AUDIT_PUBLISH_URL") or "").strip()
+    token = (os.environ.get("SYSTEM_AUDIT_PUBLISH_TOKEN") or os.environ.get("APP_INGEST_API_KEY") or "").strip()
+    if not publish_url:
+        return {"name": "system_audit_publish", "status": "skipped", "detail": "SYSTEM_AUDIT_PUBLISH_URL no configurado"}
+    if not token:
+        return {"name": "system_audit_publish", "status": "warning", "detail": "Falta SYSTEM_AUDIT_PUBLISH_TOKEN o APP_INGEST_API_KEY"}
+    payload = _build_publish_payload(report)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        publish_url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    try:
+        with urlopen(request, timeout=30) as resp:
+            text = resp.read().decode("utf-8", "replace")
+            return {
+                "name": "system_audit_publish",
+                "status": "passed" if 200 <= int(resp.getcode() or 0) < 300 else "warning",
+                "http_status": int(resp.getcode() or 0),
+                "detail": text[:500],
+            }
+    except HTTPError as exc:
+        text = exc.read().decode("utf-8", "replace")
+        return {
+            "name": "system_audit_publish",
+            "status": "warning",
+            "http_status": exc.code,
+            "detail": text[:500],
+        }
+    except URLError as exc:
+        return {"name": "system_audit_publish", "status": "warning", "detail": f"URLError: {exc.reason}"}
+    except Exception as exc:
+        return {"name": "system_audit_publish", "status": "warning", "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def _run_step(name: str, cmd: list[str], *, env: dict[str, str] | None = None, timeout: int = 900) -> dict:
     started = time.monotonic()
     merged_env = os.environ.copy()
@@ -639,6 +712,12 @@ def main() -> int:
         report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         _write_dashboard(report_dir, report)
+
+    publish_result = _publish_report(report)
+    report["steps"].append(publish_result)
+    report["publish_status"] = publish_result.get("status")
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_dashboard(report_dir, report)
 
     return 1 if failed else 0
 

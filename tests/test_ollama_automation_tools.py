@@ -1,12 +1,26 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import sqlite3
+import sys
+import types
 
 from scripts import ollama_diff_review
 from scripts import ollama_json
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import system_autofix_agent
+if "PIL" not in sys.modules:
+    pil_stub = types.ModuleType("PIL")
+    pil_stub.Image = object()
+    pil_stub.ImageDraw = object()
+    pil_stub.ImageEnhance = object()
+    pil_stub.ImageFilter = object()
+    pil_stub.ImageFont = object()
+    pil_stub.ImageOps = object()
+    sys.modules["PIL"] = pil_stub
+
+from web.server import fetch_latest_system_audit_run, store_system_audit_run
 
 
 class OllamaAutomationToolsTests(unittest.TestCase):
@@ -171,6 +185,45 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         trend = run_system_audit._build_trend_data(report, previous)
         self.assertIn("agenda", trend["module_alerts"]["repeated_modules"])
         self.assertIn("seguros", trend["module_alerts"]["recovered_modules"])
+
+    def test_publish_payload_compacts_report(self):
+        payload = run_system_audit._build_publish_payload(
+            {
+                "run_id": "run-1",
+                "status": "passed",
+                "started_at": "2026-06-16T13:00:00Z",
+                "finished_at": "2026-06-16T13:01:00Z",
+                "alerts": [{"title": "x"}],
+                "failed_steps": [],
+                "trend": {},
+                "steps": [{"name": "production_api_monitor", "status": "passed", "duration_seconds": 1.2, "json_summary": {"kind": "prod_api_monitor", "failed_checks": []}}],
+            }
+        )
+        self.assertEqual(payload["run_id"], "run-1")
+        self.assertEqual(payload["alerts_total"], 1)
+        self.assertEqual(payload["steps"][0]["name"], "production_api_monitor")
+
+    def test_store_and_fetch_latest_system_audit_run(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        ok = store_system_audit_run(
+            conn,
+            {
+                "run_id": "audit-1",
+                "status": "passed",
+                "source": "render_cron",
+                "started_at": "2026-06-16T13:00:00Z",
+                "finished_at": "2026-06-16T13:01:00Z",
+                "alerts_total": 2,
+                "actionable_warnings_total": 1,
+            },
+            received_at="2026-06-16T13:01:05Z",
+        )
+        self.assertTrue(ok)
+        latest = fetch_latest_system_audit_run(conn)
+        self.assertEqual(latest["run_id"], "audit-1")
+        self.assertEqual(latest["alerts_total"], 2)
+        self.assertEqual(latest["actionable_warnings_total"], 1)
 
 
 if __name__ == "__main__":
