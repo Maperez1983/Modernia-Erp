@@ -24128,11 +24128,58 @@ const renderHoldingOrgChart = () => {
       const node = event.currentTarget.closest(".org-node");
       if (!node) return;
       const name = node.dataset.empresa;
+      if (name && openWorkspaceQuickAccessFromCompanyCard(name)) {
+        return;
+      }
       if (name) {
         openCompany(name);
       }
     });
   });
+};
+
+const openWorkspaceQuickAccessFromCompanyCard = (empresaName = "") => {
+  const name = String(empresaName || "").trim();
+  if (!name) return false;
+  if (name === DASHBOARD_COMPANY && userCanAccessService("inmobiliaria")) {
+    openCrmInmobiliario();
+    return true;
+  }
+  if (name === resolveCrmFinEmpresaNombre() && userCanAccessService("financiaciones")) {
+    openFinCrm();
+    return true;
+  }
+  if (name === FINCAS_COMPANY) {
+    const canFincas = userCanAccessService("fincas");
+    const canSeguros = userCanAccessService("seguros");
+    const canGestoria = userCanAccessService("gestoria");
+    if (canFincas && !canSeguros && !canGestoria) {
+      openHolding({
+        mode: "tenant",
+        workspace: resolveActiveTenantWorkspaceId() || state.currentWorkspaceId || state.currentWorkspaceTarget || resolveDefaultTenantWorkspaceSlug(),
+        view: "fincas",
+      });
+      return true;
+    }
+    if (canSeguros && !canGestoria) {
+      openSegurosCrm();
+      return true;
+    }
+    if (canGestoria && !canSeguros) {
+      openGestoriaCrm();
+      return true;
+    }
+  }
+  const authUser = getAuthScopeUser();
+  if (hasAdminWideAccess(authUser)) {
+    openHolding({
+      mode: "tenant",
+      workspace: resolveActiveTenantWorkspaceId() || state.currentWorkspaceId || state.currentWorkspaceTarget || resolveDefaultTenantWorkspaceSlug(),
+      view: "operations",
+    });
+    return true;
+  }
+  return false;
 };
 
 const updateExplorerHeader = (empresaName) => {

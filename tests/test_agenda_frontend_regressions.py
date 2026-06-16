@@ -55,6 +55,8 @@ class AgendaFrontendRegressionTests(unittest.TestCase):
         self.assertIn("if (hasAdminWideAccess(user)) return true;", self.app_js)
         self.assertIn("const isPriv = hasAdminWideAccess(user);", self.app_js)
         self.assertIn("const canManageWorkspace = Boolean(user && hasAdminWideAccess(user));", self.app_js)
+        self.assertIn("const openWorkspaceQuickAccessFromCompanyCard = (empresaName = \"\") => {", self.app_js)
+        self.assertIn("if (hasAdminWideAccess(authUser)) {", self.app_js)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn('if (!userCanAccessService("gestoria")) return;', app_js)
         self.assertIn('if (!userCanAccessService("seguros")) return;', app_js)
         self.assertIn('if (!userCanAccessService("financiaciones")) return;', app_js)
+        self.assertIn("const openWorkspaceQuickAccessFromCompanyCard = (empresaName = \"\") => {", app_js)
+        self.assertIn("if (name && openWorkspaceQuickAccessFromCompanyCard(name)) {", app_js)
 
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
