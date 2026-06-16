@@ -58,6 +58,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("const hasAdminWideAccess = (user) => {", app_js)
         self.assertIn("const canAccessSharedHomeModules = (user) => hasAdminWideAccess(user);", app_js)
         self.assertIn("if (hasAdminWideAccess(user)) return true;", app_js)
+        self.assertIn("const isPriv = hasAdminWideAccess(user);", app_js)
+        self.assertIn("const canManageWorkspace = Boolean(user && hasAdminWideAccess(user));", app_js)
         self.assertIn('if (!userCanAccessService("inmobiliaria")) return;', app_js)
         self.assertIn('if (!userCanAccessService("gestoria")) return;', app_js)
         self.assertIn('if (!userCanAccessService("seguros")) return;', app_js)

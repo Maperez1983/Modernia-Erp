@@ -4849,7 +4849,7 @@ const isWorkspaceMemberManagerRole = (value) => {
 
 const canManageCurrentWorkspace = () => {
   const user = getAuthScopeUser();
-  if (user && isPrivilegedUser(user)) return true;
+  if (user && hasAdminWideAccess(user)) return true;
   return isWorkspaceMemberManagerRole(state.currentWorkspaceMemberRole || "");
 };
 
@@ -4868,7 +4868,7 @@ const canAccessAdminPanel = (user) => {
 const canAccessSharedHomeModules = (user) => hasAdminWideAccess(user);
 
 const getPrimaryRestrictedHomeService = (user) => {
-  if (!user || isPrivilegedUser(user)) return "";
+  if (!user || hasAdminWideAccess(user)) return "";
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   for (const service of services) {
     if (service === "inmobiliaria") return "inmobiliaria";
@@ -5022,7 +5022,7 @@ const syncCurrentUserScope = () => {
 const getServiceFilterParam = () => {
   const user = getAuthScopeUser();
   if (!user) return "";
-  if (isPrivilegedUser(user)) return "";
+  if (hasAdminWideAccess(user)) return "";
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   return services.join(",");
 };
@@ -6159,7 +6159,7 @@ const renderCompanyCards = () => {
   }
   if (coreCards) {
     const user = getAuthScopeUser();
-    const isPriv = isPrivilegedUser(user);
+    const isPriv = hasAdminWideAccess(user);
     const canAdmin = canAccessAdminPanel(user);
     const canInmo = userCanAccessService("inmobiliaria");
     const canGestoria = userCanAccessService("gestoria");
@@ -27929,7 +27929,7 @@ const syncHoldingUrlParams = () => {
 const openHolding = (options = {}) => {
   const user = getAuthScopeUser();
   const mode = options.mode === "tenant" ? "tenant" : "platform";
-  const canManageWorkspace = Boolean(user && isPrivilegedUser(user));
+  const canManageWorkspace = Boolean(user && hasAdminWideAccess(user));
   try {
     debugLog(
       "openHolding()",
