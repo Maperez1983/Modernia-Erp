@@ -47,6 +47,7 @@ class EndpointSpec:
     module: str
     params: dict[str, str]
     requires_workspace: bool = True
+    requires_empresa: bool = False
 
 
 ENDPOINTS = [
@@ -60,14 +61,14 @@ ENDPOINTS = [
     EndpointSpec("demandas", "/api/demandas", "inmobiliaria", {"limit": "20"}),
     EndpointSpec("compraventas", "/api/compraventas", "inmobiliaria", {"limit": "20"}),
     EndpointSpec("seguros_overview", "/api/workspace_seguros_overview", "seguros", {}),
-    EndpointSpec("seguros_kpis", "/api/seguros_kpis", "seguros", {}),
+    EndpointSpec("seguros_kpis", "/api/seguros_kpis", "seguros", {}, requires_empresa=True),
     EndpointSpec("seguros_recibos_summary", "/api/seguros_recibos_summary", "seguros", {}),
     EndpointSpec("gestoria_overview", "/api/workspace_gestoria_overview", "gestoria", {}),
     EndpointSpec("gestoria_dashboard", "/api/gestoria_dashboard", "gestoria", {}),
     EndpointSpec("gestoria_modelos", "/api/gestoria_modelos", "gestoria", {"limit": "20"}),
     EndpointSpec("fin_overview", "/api/workspace_fin_overview", "financiero", {}),
-    EndpointSpec("fin_kpis", "/api/fin_kpis", "financiero", {}),
-    EndpointSpec("fin_alertas", "/api/fin_alertas", "financiero", {"limit": "20"}),
+    EndpointSpec("fin_kpis", "/api/fin_kpis", "financiero", {}, requires_empresa=True),
+    EndpointSpec("fin_alertas", "/api/fin_alertas", "financiero", {"limit": "20"}, requires_empresa=True),
     EndpointSpec("fincas_comunidades", "/api/workspace_fincas_comunidades", "fincas", {"limit": "20"}),
     EndpointSpec("rrhh_personal", "/api/workspace_registro_personal", "rrhh", {"limit": "20"}),
 ]
@@ -159,10 +160,12 @@ def _credentials() -> list[dict[str, str]]:
     return items
 
 
-def _request_url(base_url: str, spec: EndpointSpec, workspace_id: str) -> str:
+def _request_url(base_url: str, spec: EndpointSpec, workspace_id: str, empresa_id: str = "") -> str:
     params = dict(spec.params)
     if spec.requires_workspace:
         params["workspace_id"] = workspace_id
+    if spec.requires_empresa and empresa_id:
+        params["empresa_id"] = empresa_id
     query = urlencode(params)
     return f"{base_url}{spec.path}" + (f"?{query}" if query else "")
 
@@ -288,10 +291,54 @@ def _fetch_workspace_users(base_url: str, session, workspace: dict, timeout: int
     }
 
 
-def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, spec: EndpointSpec, timeout: int) -> dict:
+def _fetch_workspace_empresa_id(base_url: str, session, workspace: dict, timeout: int) -> str:
+    ws_id = str(workspace.get("id") or "").strip()
+    if not ws_id:
+        return ""
+    url = f"{base_url}/api/workspace_detail?{urlencode({'id': ws_id})}"
+    try:
+        resp, data = _get_json(session, url, timeout)
+    except Exception:
+        return ""
+    if resp.status_code != 200 or not isinstance(data, dict):
+        return ""
+    for key in ("companies", "companies_v2"):
+        rows = data.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if int(row.get("activo") if row.get("activo") is not None else 1) != 1:
+                continue
+            legacy_id = str(row.get("legacy_empresa_id") or "").strip()
+            company_id = str(row.get("id") or "").strip()
+            if key == "companies" and company_id:
+                return company_id
+            if legacy_id:
+                return legacy_id
+    return ""
+
+
+def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, spec: EndpointSpec, timeout: int, empresa_id: str = "") -> dict:
     ws_id = str(workspace.get("id") or "").strip()
     started = time.monotonic()
-    url = _request_url(base_url, spec, ws_id)
+    if spec.requires_empresa and not empresa_id:
+        return {
+            "user_label": user_label,
+            "workspace_id": ws_id,
+            "workspace_nombre": workspace.get("nombre"),
+            "module": spec.module,
+            "endpoint": spec.name,
+            "path": spec.path,
+            "status": "skipped",
+            "http_status": None,
+            "rows": 0,
+            "empresa_id": "",
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "detail": "Sin empresa vinculada en workspace para endpoint que requiere empresa_id",
+        }
+    url = _request_url(base_url, spec, ws_id, empresa_id=empresa_id)
     try:
         resp, data = _get_json(session, url, timeout)
         rows = _extract_rows(data)
@@ -306,6 +353,7 @@ def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, sp
             "status": status,
             "http_status": resp.status_code,
             "rows": len(rows),
+            "empresa_id": empresa_id if spec.requires_empresa else "",
             "duration_seconds": round(time.monotonic() - started, 2),
             "detail": "" if status == "passed" else str(data)[:500],
         }
@@ -318,6 +366,7 @@ def _check_endpoint(base_url: str, session, user_label: str, workspace: dict, sp
             "endpoint": spec.name,
             "path": spec.path,
             "status": "failed",
+            "empresa_id": empresa_id if spec.requires_empresa else "",
             "detail": f"{type(exc).__name__}: {exc}",
             "duration_seconds": round(time.monotonic() - started, 2),
         }
@@ -357,10 +406,11 @@ def run() -> dict:
         for workspace in workspaces:
             if not workspace.get("id"):
                 continue
+            workspace_empresa_id = _fetch_workspace_empresa_id(base_url, session, workspace, timeout)
             if label == "admin":
                 workspace_user_inventory.append(_fetch_workspace_users(base_url, session, workspace, timeout))
             for spec in ENDPOINTS:
-                endpoint_matrix.append(_check_endpoint(base_url, session, label, workspace, spec, timeout))
+                endpoint_matrix.append(_check_endpoint(base_url, session, label, workspace, spec, timeout, empresa_id=workspace_empresa_id))
 
     failed_statuses = {"failed"}
     if strict_forbidden:
