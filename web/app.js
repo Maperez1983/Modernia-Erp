@@ -4827,6 +4827,14 @@ const isPrivilegedRole = (value) => {
   return ["administrador", "admin", "direccion", "administracion", "control"].includes(normalized);
 };
 
+const hasAdminWideAccess = (user) => {
+  if (!user) return false;
+  if (Boolean(user.is_superadmin)) return true;
+  if (isPrivilegedRole(user.rol || "")) return true;
+  if (isPrivilegedService(user.servicio || "")) return true;
+  return false;
+};
+
 const isPrivilegedUser = (user) => {
   if (!user) return false;
   // En modo multi-workspace estricto, la "administración global" (home platform/admin)
@@ -4857,7 +4865,7 @@ const canAccessAdminPanel = (user) => {
   return Boolean(user.is_superadmin);
 };
 
-const canAccessSharedHomeModules = (user) => isPrivilegedUser(user);
+const canAccessSharedHomeModules = (user) => hasAdminWideAccess(user);
 
 const getPrimaryRestrictedHomeService = (user) => {
   if (!user || isPrivilegedUser(user)) return "";
@@ -5026,7 +5034,7 @@ const userCanAccessService = (serviceKey) => {
   if (!user) {
     return !(state.usersList && state.usersList.length);
   }
-  if (isPrivilegedUser(user)) return true;
+  if (hasAdminWideAccess(user)) return true;
   const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
   if (!allowed.size) return false;
   if (normalized === "fincas") {
@@ -31167,6 +31175,7 @@ const INMUEBLE_FIELDS = [
   { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Precio" },
   { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Precio" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Precio" },
+  { key: "fecha_encargo", label: "Fecha encargo", type: "date", section: "Precio" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Precio" },
   { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Precio", readonly: true },
   { key: "precio_valoracion", label: "Precio valoración", type: "number", section: "Precio" },
@@ -31293,6 +31302,7 @@ const INMUEBLE_FIELDS_ENCARGO = [
   "precio_objetivo",
   "precio_encargo",
   "honorarios",
+  "fecha_encargo",
   "planificacion_encargo",
   // Equipo
   "asesor",
@@ -31328,6 +31338,7 @@ const INMUEBLE_FIELDS_HIDE_FOR_ALQUILER = new Set([
 const INMUEBLE_FIELDS_HIDE_FOR_EARLY_STAGE = new Set([
   "precio_encargo",
   "honorarios",
+  "fecha_encargo",
   "planificacion_encargo",
   "fecha_valoracion",
   "desviacion_pct",
@@ -46630,7 +46641,7 @@ const renderTableInto = (data, container, infoEl, label) => {
   }
 };
 
-const buildCaptacionConversionPayload = (rowMap, destino) => {
+const buildCaptacionConversionPayload = async (rowMap, destino) => {
   const payload = {
     captacion_id: rowMap.id,
     destino,
@@ -46638,20 +46649,13 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
   };
   const fallbackPrice = rowMap.precio_encargo || rowMap.precio_pedido_cliente || rowMap.precio_objetivo || "";
   if (destino === "encargo") {
-    const precio = window.prompt(
-      "Precio de encargo (opcional). Déjalo vacío para mantener el actual.",
-      fallbackPrice
+    const conditions = await openInmuebleEncargoConditionsModal(
+      { ...rowMap, precio_encargo: fallbackPrice },
+      { statusText: "Estas condiciones se guardarán en la ficha del encargo." }
     );
-    if (precio !== null && String(precio).trim()) {
-      payload.precio_encargo = String(precio).trim();
-    }
-    const honorarios = window.prompt(
-      "Honorarios/comisión de agencia (opcional). Se usa para KPIs si no hay facturación.",
-      rowMap.honorarios || ""
-    );
-    if (honorarios !== null && String(honorarios).trim()) {
-      payload.honorarios = String(honorarios).trim();
-    }
+    if (!conditions) return null;
+    const updates = buildEncargoConditionUpdates(conditions);
+    Object.assign(payload, updates.captacion, updates.inmueble);
   }
   if (destino === "compraventa") {
     const fecha = window.prompt(
@@ -46815,6 +46819,22 @@ const INMO_WORKFLOW_RESULT_OPTIONS = {
   "Cita notaria": ["Firmada", "Reprogramar", "No realizada"],
 };
 
+const isInmoPropuestaActionType = (type) => normalizeInmoActionType(type || "") === "cita_propuesta";
+
+const syncPropuestaMoneyFields = (form) => {
+  if (!form) return;
+  const type = String(form.querySelector('select[name="tipo"]')?.value || "").trim();
+  const show = isInmoPropuestaActionType(type);
+  form.querySelectorAll("[data-propuesta-field]").forEach((wrap) => {
+    wrap.classList.toggle("hidden", !show);
+    if (!show) {
+      wrap.querySelectorAll("input, select, textarea").forEach((input) => {
+        input.value = "";
+      });
+    }
+  });
+};
+
 const getInmuebleActividadClienteScope = (type) => {
   const key = normalizeSimple(type || "");
   if (
@@ -46931,6 +46951,7 @@ const syncInmuebleWorkflowForm = () => {
     }
   }
   refreshInmuebleActividadClientesCandidates(type);
+  syncPropuestaMoneyFields(inmuebleActividadForm);
 };
 
 const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
@@ -46955,7 +46976,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
     `¿Convertir la captación "${rowMap.direccion || rowMap.propietario || captacionId}" a ${destinationLabel}?`
   );
   if (!ok) return;
-  const payload = buildCaptacionConversionPayload({ ...rowMap, id: captacionId }, destino);
+  const payload = await buildCaptacionConversionPayload({ ...rowMap, id: captacionId }, destino);
   if (!payload) return;
   if (crmCaptacionesInfo) {
     crmCaptacionesInfo.textContent = `Convirtiendo a ${destinationLabel}...`;
@@ -47002,7 +47023,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
   }
 };
 
-const runCurrentInmuebleConversion = (destino) => {
+const runCurrentInmuebleConversion = async (destino) => {
   if (destino === "adquisicion" || destino === "valoracion") {
     // Legacy: antes existía el paso "Adquisición". Ahora equivale a "Inmueble".
     destino = "inmueble";
@@ -47016,7 +47037,7 @@ const runCurrentInmuebleConversion = (destino) => {
     return;
   }
   const rowPayload = { ...captacion, ...inmueble, id: captacionId || inmuebleId, inmueble_id: inmuebleId };
-  const payload = buildCaptacionConversionPayload(rowPayload, destino);
+  const payload = await buildCaptacionConversionPayload(rowPayload, destino);
   if (!payload) return;
   if (captacionId) {
     payload.captacion_id = captacionId;
@@ -47343,8 +47364,6 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
 	  const thead = document.createElement("thead");
 	  thead.innerHTML = `
 	    <tr>
-	      <th style="width:34px;"></th>
-	      <th style="width:34px;"></th>
 	      <th>Inmueble</th>
 		      <th>Propietario</th>
 		      <th>Tel.</th>
@@ -47372,19 +47391,6 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
 	        }
 	      });
 	    });
-
-	    const selectTd = document.createElement("td");
-	    selectTd.className = "crm-dense-select";
-	    const checkbox = document.createElement("input");
-	    checkbox.type = "checkbox";
-	    checkbox.addEventListener("click", (event) => event.stopPropagation());
-	    selectTd.appendChild(checkbox);
-	    tr.appendChild(selectTd);
-
-	    const dotTd = document.createElement("td");
-	    dotTd.className = "crm-dense-select";
-	    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(resolveCaptacionDotTone(row))}" aria-hidden="true"></span>`;
-	    tr.appendChild(dotTd);
 
     const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
     const prefix = resolveCaptacionCodePrefix(stage);
@@ -47434,7 +47440,7 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  enableCrmDenseTableResize(table);
+  enableCrmDenseTableResize(table, "crm.dense.widths.crm-captaciones-table.v2");
   return table;
 };
 
@@ -49799,6 +49805,137 @@ const renderCrmResumenDashboard = () => {
   renderCrmResumenYtdBoard().catch(() => {});
 };
 
+const buildInmuebleEncargoConditionsDefaults = (row = {}) => {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    fecha_encargo: row.fecha_encargo || today,
+    precio_encargo: row.precio_encargo || row.precio_pedido_cliente || row.precio_objetivo || "",
+    honorarios: row.honorarios || "",
+    planificacion_encargo: row.planificacion_encargo || row.duracion_encargo_meses || "6",
+  };
+};
+
+const openInmuebleEncargoConditionsModal = (row = {}, opts = {}) =>
+  new Promise((resolve) => {
+    let modal = document.getElementById("inmoEncargoConditionsModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "inmoEncargoConditionsModal";
+      modal.className = "modal hidden";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 680px;">
+          <div class="modal-header">
+            <div>
+              <h3>Condiciones del encargo</h3>
+              <p class="muted" style="margin:0;">Define las condiciones antes de pasar la noticia a encargo.</p>
+            </div>
+            <button type="button" class="ghost" data-encargo-x>Cerrar</button>
+          </div>
+          <form class="modal-body form-grid" data-encargo-form>
+            <label>
+              Fecha encargo
+              <input name="fecha_encargo" type="date" />
+            </label>
+            <label>
+              Duración (meses)
+              <input name="planificacion_encargo" type="number" step="1" min="0" inputmode="numeric" />
+            </label>
+            <label>
+              Precio encargo
+              <input name="precio_encargo" type="number" step="0.01" inputmode="decimal" />
+            </label>
+            <label>
+              Honorarios agencia
+              <input name="honorarios" type="number" step="0.01" inputmode="decimal" />
+            </label>
+            <label class="span-2">
+              Próxima acción
+              <input name="proxima_accion" placeholder="Ej. Preparar hoja de encargo / publicar anuncio" />
+            </label>
+            <div class="modal-actions">
+              <span class="muted" data-encargo-status></span>
+              <button type="button" class="secondary" data-encargo-cancel>Cancelar</button>
+              <button type="submit">Guardar y pasar a Encargo</button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const defaults = buildInmuebleEncargoConditionsDefaults(row);
+    const form = modal.querySelector("[data-encargo-form]");
+    const statusEl = modal.querySelector("[data-encargo-status]");
+    const xBtn = modal.querySelector("[data-encargo-x]");
+    const cancelBtn = modal.querySelector("[data-encargo-cancel]");
+    if (statusEl) statusEl.textContent = opts?.statusText || "";
+    if (form) {
+      form.reset();
+      Object.entries(defaults).forEach(([key, value]) => {
+        const input = form.querySelector(`[name="${key}"]`);
+        if (input) input.value = value ?? "";
+      });
+      const proximaInput = form.querySelector('[name="proxima_accion"]');
+      if (proximaInput) proximaInput.value = row.proxima_accion || "Preparar hoja de encargo";
+    }
+
+    let resolved = false;
+    const cleanup = (value) => {
+      if (resolved) return;
+      resolved = true;
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+      document.body.classList.remove("modal-open");
+      resolve(value);
+    };
+    if (xBtn) xBtn.onclick = () => cleanup(null);
+    if (cancelBtn) cancelBtn.onclick = () => cleanup(null);
+    modal.onclick = (event) => {
+      if (event.target === modal) cleanup(null);
+    };
+    if (form) {
+      form.onsubmit = (event) => {
+        event.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+        const precio = String(data.precio_encargo || "").trim();
+        if (!precio) {
+          if (statusEl) statusEl.textContent = "Indica el precio de encargo.";
+          return;
+        }
+        cleanup({
+          fecha_encargo: String(data.fecha_encargo || "").trim(),
+          precio_encargo: precio,
+          honorarios: String(data.honorarios || "").trim(),
+          planificacion_encargo: String(data.planificacion_encargo || "").trim(),
+          proxima_accion: String(data.proxima_accion || "").trim(),
+        });
+      };
+    }
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+    document.body.classList.add("modal-open");
+  });
+
+const buildEncargoConditionUpdates = (conditions = {}) => {
+  const inmueble = {};
+  const captacion = {};
+  ["precio_encargo", "planificacion_encargo"].forEach((key) => {
+    if (String(conditions[key] || "").trim()) {
+      inmueble[key] = String(conditions[key]).trim();
+      captacion[key] = String(conditions[key]).trim();
+    }
+  });
+  ["fecha_encargo", "honorarios"].forEach((key) => {
+    if (String(conditions[key] || "").trim()) {
+      inmueble[key] = String(conditions[key]).trim();
+    }
+  });
+  if (String(conditions.proxima_accion || "").trim()) {
+    captacion.proxima_accion = String(conditions.proxima_accion).trim();
+  }
+  return { inmueble, captacion };
+};
+
 const updateCaptacionEtapa = async (id, etapa, { fromEtapa = "", label = "" } = {}) => {
   const recordId = String(id || "").trim();
   const nextEtapa = String(etapa || "").trim();
@@ -49809,6 +49946,16 @@ const updateCaptacionEtapa = async (id, etapa, { fromEtapa = "", label = "" } = 
   if (!window.confirm(msg)) return;
   try {
     const empresaNombre = resolveCrmInmoEmpresaNombre();
+    const extra = {};
+    if (normalizeSimple(from) === "noticia" && normalizeSimple(nextEtapa) === "encargo") {
+      const row = (cachedCrmCaptaciones || []).find((item) => String(item?.id || "") === recordId) || {};
+      const conditions = await openInmuebleEncargoConditionsModal(row, {
+        statusText: "Estas condiciones se guardarán en la ficha del encargo.",
+      });
+      if (!conditions) return;
+      const updates = buildEncargoConditionUpdates(conditions);
+      Object.assign(extra, updates.captacion, updates.inmueble);
+    }
     const data = await postJsonWithDbRetry(
       "/api/captaciones_update",
       {
@@ -49816,6 +49963,7 @@ const updateCaptacionEtapa = async (id, etapa, { fromEtapa = "", label = "" } = 
         id: recordId,
         etapa: nextEtapa,
         allow_manual_stage: 1,
+        ...extra,
       },
       { maxRetries: 5, baseDelayMs: 350, timeoutMs: 15000 }
     );
@@ -52869,6 +53017,14 @@ const openCrmAgendaEditModal = (row) => {
               <option>Cerrado negativamente</option>
             </select>
           </label>
+          <label class="hidden" data-propuesta-field>
+            Precio propuesto
+            <input name="importe_propuesta" type="number" step="0.01" inputmode="decimal" />
+          </label>
+          <label class="hidden" data-propuesta-field>
+            Entrega de arras
+            <input name="entrega_2" type="number" step="0.01" inputmode="decimal" />
+          </label>
           <label class="span-2">
             Notas
             <textarea name="notas" rows="3"></textarea>
@@ -52929,6 +53085,7 @@ const openCrmAgendaEditModal = (row) => {
     const showNext = tipoKey === "cita_adquisicion" && estado.toLowerCase() !== "pendiente";
     if (nextWrap) nextWrap.classList.toggle("hidden", !showNext);
     if (!showNext && nextSelect) nextSelect.value = "";
+    syncPropuestaMoneyFields(form);
   };
 
   syncCatalog();
@@ -52950,6 +53107,12 @@ const openCrmAgendaEditModal = (row) => {
       setSelectValueWithoutCarry(estadoSelect, rowSnapshot.estado || "Pendiente", "Pendiente");
     }
     if (form.querySelector('[name="notas"]')) form.querySelector('[name="notas"]').value = rowSnapshot.notas || "";
+    if (form.querySelector('[name="importe_propuesta"]')) {
+      form.querySelector('[name="importe_propuesta"]').value = rowSnapshot.importe_propuesta || "";
+    }
+    if (form.querySelector('[name="entrega_2"]')) {
+      form.querySelector('[name="entrega_2"]').value = rowSnapshot.entrega_2 || rowSnapshot.arras || "";
+    }
   }
 
   syncResultOptions();
@@ -55873,6 +56036,36 @@ if (inmuebleManualSaveBtn) {
 	      syncInmuebleManualSaveButton();
 	      return;
 	    }
+    const currentStageBeforeSave = normalizeCrmMainEtapa(
+      state.currentInmuebleContext?.captacion?.etapa
+      || state.currentInmuebleContext?.captacion?.situacion_comercial
+      || state.currentInmuebleContext?.inmueble?.estado
+      || state.currentInmueble?.estado
+      || ""
+    );
+    const nextStageFromSave = normalizeCrmMainEtapa(
+      captacionUpdates.etapa
+      || captacionUpdates.situacion_comercial
+      || inmuebleUpdates.estado
+      || ""
+    );
+    if (currentStageBeforeSave === "Noticia" && nextStageFromSave === "Encargo") {
+      const conditions = await openInmuebleEncargoConditionsModal(
+        {
+          ...(state.currentInmuebleContext?.captacion || {}),
+          ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}),
+        },
+        { statusText: "Estas condiciones se guardarán en la ficha del encargo." }
+      );
+      if (!conditions) {
+        setInmuebleSaveStatus("Cambio a encargo cancelado.");
+        syncInmuebleManualSaveButton();
+        return;
+      }
+      const updates = buildEncargoConditionUpdates(conditions);
+      Object.assign(inmuebleUpdates, updates.inmueble);
+      Object.assign(captacionUpdates, updates.captacion);
+    }
     setInmuebleSaveStatus("Guardando...");
     inmuebleManualSaveBtn.disabled = true;
     try {
@@ -57162,7 +57355,7 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "notas", "acciones"].forEach((col) => {
+    ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "propuesta", "arras", "notas", "acciones"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -57180,9 +57373,11 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
             row.responsable || "-",
             prettyEstado(row.estado || "-"),
             row.resultado_cierre || "-",
+            row.importe_propuesta ? formatEuros(Number(row.importe_propuesta || 0)) : "-",
+            row.entrega_2 ? formatEuros(Number(row.entrega_2 || 0)) : "-",
             row.notas || "-",
           ];
-      const cols = ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "notas"];
+      const cols = ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "propuesta", "arras", "notas"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const formatted = formatCell(cols[idx], value);
@@ -57211,6 +57406,8 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
             responsable: row.responsable || "",
             estado: row.estado || "Pendiente",
             notas: row.notas || "",
+            importe_propuesta: row.importe_propuesta || "",
+            entrega_2: row.entrega_2 || "",
             recordatorio_min: row.recordatorio_min,
           },
           {
@@ -57703,7 +57900,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         if (xBtn) xBtn.onclick = () => cleanup(null);
         if (cancelBtn) cancelBtn.onclick = () => cleanup(null);
         if (saveBtn) {
-          saveBtn.onclick = () => {
+          saveBtn.onclick = async () => {
             const resultado = String(resultSelect?.value || "").trim();
             if (!resultado) {
               alert("Selecciona un resultado.");
@@ -57712,15 +57909,16 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
             const estadoSiguiente = String(nextSelect?.value || "").trim();
             const extra = {};
             if (resultado === "Positivo" && estadoSiguiente === "Encargo") {
-              const precio = window.prompt("Precio de encargo (EUR)", "");
-              if (precio === null) return;
-              if (String(precio).trim()) extra.precio_encargo = String(precio).trim();
-              const honorarios = window.prompt("Honorarios / comisión (EUR o % según criterio interno)", "");
-              if (honorarios === null) return;
-              if (String(honorarios).trim()) extra.honorarios = String(honorarios).trim();
-              const duracion = window.prompt("Duración del encargo (meses)", "6");
-              if (duracion === null) return;
-              if (String(duracion).trim()) extra.duracion_encargo_meses = String(duracion).trim();
+              const conditions = await openInmuebleEncargoConditionsModal(
+                {
+                  ...(state.currentInmuebleContext?.captacion || {}),
+                  ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}),
+                },
+                { statusText: "Estas condiciones se guardarán en la ficha del encargo." }
+              );
+              if (!conditions) return;
+              const updates = buildEncargoConditionUpdates(conditions);
+              Object.assign(extra, updates.captacion, updates.inmueble);
             }
             cleanup({
               resultado,
@@ -57746,7 +57944,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         documento_tipo: "",
         importe_propuesta: "",
       };
-      ["precio_encargo", "honorarios", "duracion_encargo_meses"].forEach((key) => {
+      ["precio_encargo", "honorarios", "fecha_encargo", "planificacion_encargo"].forEach((key) => {
         if (data[key] !== undefined) {
           payload[key] = data[key];
         }
@@ -57825,10 +58023,18 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         const defaultDoc = isAlquiler ? "Propuesta de alquiler" : "Propuesta de compra";
         const docRaw = window.prompt(docPrompt, "1");
         payload.documento_tipo = docMap[String(docRaw || "").trim()] || defaultDoc;
-        const amountLabel = isAlquiler ? "Renta/importe de la propuesta (opcional)" : "Importe de la propuesta/promesa";
-        const amount = window.prompt(amountLabel, "");
-        if (amount !== null && String(amount).trim()) {
-          payload.importe_propuesta = String(amount).trim();
+        if (!String(payload.importe_propuesta || "").trim()) {
+          const amountLabel = isAlquiler ? "Renta/importe de la propuesta (opcional)" : "Importe de la propuesta/promesa";
+          const amount = window.prompt(amountLabel, "");
+          if (amount !== null && String(amount).trim()) {
+            payload.importe_propuesta = String(amount).trim();
+          }
+        }
+        if (!isAlquiler && !String(payload.entrega_2 || "").trim()) {
+          const arras = window.prompt("Entrega de arras (opcional)", "");
+          if (arras !== null && String(arras).trim()) {
+            payload.entrega_2 = String(arras).trim();
+          }
         }
         if (payload.resultado_cierre === "Aprobada") {
           const fechaContrato = window.prompt(
@@ -57880,7 +58086,8 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     resultado_cierre: resultado,
     estado_siguiente: "",
     documento_tipo: "",
-    importe_propuesta: "",
+    importe_propuesta: row.importe_propuesta || "",
+    entrega_2: row.entrega_2 || row.arras || "",
   };
   if (workflow.followup) {
     const result = workflow.followup(payload);
@@ -74630,6 +74837,13 @@ if (crmAgendaDay) {
 }
 
 if (crmAgendaForm) {
+  const crmAgendaTipoSelect = crmAgendaForm.querySelector('select[name="tipo"]');
+  if (crmAgendaTipoSelect) {
+    crmAgendaTipoSelect.addEventListener("change", () => {
+      syncPropuestaMoneyFields(crmAgendaForm);
+    });
+  }
+  syncPropuestaMoneyFields(crmAgendaForm);
   crmAgendaForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (crmAgendaStatus) crmAgendaStatus.textContent = "Guardando...";
@@ -74645,6 +74859,7 @@ if (crmAgendaForm) {
         if (crmAgendaStatus) crmAgendaStatus.textContent = data.error || "Guardado.";
         if (data.error) return;
         crmAgendaForm.reset();
+        syncPropuestaMoneyFields(crmAgendaForm);
         ensureCrmAgendaSelectors().catch(() => {});
         if (data?.accion) {
           upsertCrmAgendaActionRow(data.accion);

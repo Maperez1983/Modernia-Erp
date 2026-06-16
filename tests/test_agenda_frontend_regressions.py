@@ -47,6 +47,13 @@ class AgendaFrontendRegressionTests(unittest.TestCase):
         self.assertIn('"La acción no pertenece al servicio indicado"', self.server_py)
         self.assertIn('"La acción pertenece a otro workspace"', self.server_py)
 
+    def test_admin_role_or_service_keeps_access_to_crm_cards(self):
+        self.assertIn("const hasAdminWideAccess = (user) => {", self.app_js)
+        self.assertIn('if (isPrivilegedRole(user.rol || "")) return true;', self.app_js)
+        self.assertIn('if (isPrivilegedService(user.servicio || "")) return true;', self.app_js)
+        self.assertIn("const canAccessSharedHomeModules = (user) => hasAdminWideAccess(user);", self.app_js)
+        self.assertIn("if (hasAdminWideAccess(user)) return true;", self.app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
