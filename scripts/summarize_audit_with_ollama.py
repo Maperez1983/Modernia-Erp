@@ -26,7 +26,8 @@ def _compact_report(report: dict) -> dict:
                 "returncode": step.get("returncode"),
                 "duration_seconds": step.get("duration_seconds"),
                 "skip_reason": step.get("skip_reason"),
-                "output_tail": output[-5000:],
+                "json_summary": step.get("json_summary"),
+                "output_tail": output[-1500:] if not step.get("json_summary") else "",
             }
         )
     return {
@@ -37,6 +38,54 @@ def _compact_report(report: dict) -> dict:
         "failed_steps": report.get("failed_steps"),
         "steps": compact_steps,
     }
+
+
+def _deterministic_summary(compact: dict) -> str:
+    lines = [
+        "# Resumen auditoria CRM",
+        "",
+        f"- Estado global: {compact.get('status') or 'desconocido'}",
+        f"- Run ID: {compact.get('run_id') or ''}",
+        f"- Inicio: {compact.get('started_at') or ''}",
+        f"- Fin: {compact.get('finished_at') or ''}",
+        f"- Fallos: {', '.join(compact.get('failed_steps') or []) if compact.get('failed_steps') else 'ninguno'}",
+        "",
+        "## Pasos",
+    ]
+    for step in compact.get("steps") or []:
+        name = step.get("name") or "paso"
+        status = step.get("status") or "desconocido"
+        duration = step.get("duration_seconds")
+        lines.append(f"- {name}: {status} ({duration}s)")
+        js = step.get("json_summary") or {}
+        if not isinstance(js, dict):
+            continue
+        kind = js.get("kind")
+        if kind == "prod_api_monitor":
+            users = js.get("users") or {}
+            lines.append(f"  API produccion: {js.get('base_url')}; fallos={js.get('failed_checks') or []}; usuarios={list(users.keys())}")
+        elif kind == "prod_system_matrix_audit":
+            summary = js.get("summary") or {}
+            warnings = js.get("warning_checks") or []
+            lines.append(
+                "  Matriz sistema: "
+                f"usuarios con login={summary.get('credentialed_users')}; "
+                f"workspaces={summary.get('workspaces_checked')}; "
+                f"endpoints={summary.get('endpoint_checks')}; "
+                f"avisos={len(warnings)}"
+            )
+            lines.append(f"  Modulos: {summary.get('endpoint_status_by_module') or {}}")
+        elif kind == "codebase_inventory_for_ollama":
+            backend = js.get("backend") or {}
+            frontend = js.get("frontend") or {}
+            tests = js.get("tests") or {}
+            lines.append(
+                "  Inventario codigo: "
+                f"endpoints_api={backend.get('api_endpoints_total')}; "
+                f"funciones_frontend={frontend.get('function_count')}; "
+                f"tests={tests.get('total')}"
+            )
+    return "\n".join(lines).strip() + "\n"
 
 
 def main() -> int:
@@ -52,13 +101,16 @@ def main() -> int:
 
     report_path = Path(sys.argv[1]).resolve()
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    compact = _compact_report(report)
+    deterministic = _deterministic_summary(compact)
     model = os.environ.get("OLLAMA_AUDIT_MODEL") or "qwen2.5-coder:7b"
     base_url = (os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
     prompt = (
-        "Eres un auditor tecnico de un CRM. Resume este reporte en castellano con: "
+        "Responde solo en castellano. Eres un auditor tecnico de un CRM. Resume este reporte con: "
         "1) estado global, 2) fallos concretos, 3) causa probable si se puede inferir, "
-        "4) siguiente accion recomendada. No inventes datos que no esten en el JSON.\n\n"
-        + json.dumps(_compact_report(report), ensure_ascii=False, indent=2)
+        "4) siguiente accion recomendada. Usa solo el JSON recibido; si no hay fallos, dilo claramente. "
+        "No menciones pruebas, despliegues ni fallos que no aparezcan literalmente en el JSON.\n\n"
+        + json.dumps(compact, ensure_ascii=False, indent=2)
     )
     if model.lower().startswith("qwen3:"):
         prompt = "/no_think\n" + prompt
@@ -82,7 +134,8 @@ def main() -> int:
         return 1
 
     summary_path = report_path.with_suffix(".ollama.md")
-    summary_path.write_text(summary + "\n", encoding="utf-8")
+    content = deterministic + "\n## Analisis Ollama\n\n" + summary + "\n"
+    summary_path.write_text(content, encoding="utf-8")
     print(f"Resumen Ollama: {summary_path}")
     return 0
 

@@ -44,6 +44,77 @@ def _env_flag(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 
 
+def _summarize_json_output(output: str) -> dict | None:
+    try:
+        data = json.loads(output or "{}")
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    kind = data.get("kind")
+    if kind == "prod_api_monitor":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "base_url": data.get("base_url"),
+            "failed_checks": data.get("failed_checks"),
+            "checks": [
+                {
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "detail": item.get("detail"),
+                    "metrics": item.get("metrics"),
+                }
+                for item in (data.get("checks") or [])
+                if isinstance(item, dict)
+            ],
+            "users": data.get("users"),
+        }
+    if kind == "prod_system_matrix_audit":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "base_url": data.get("base_url"),
+            "failed_checks": data.get("failed_checks"),
+            "warning_checks": (data.get("warning_checks") or [])[:80],
+            "summary": data.get("summary"),
+            "users": data.get("users"),
+            "workspaces_by_user": data.get("workspaces_by_user"),
+            "workspace_user_inventory": [
+                {
+                    "workspace_id": item.get("workspace_id"),
+                    "workspace_nombre": item.get("workspace_nombre"),
+                    "status": item.get("status"),
+                    "users_total": item.get("users_total"),
+                    "users_active": item.get("users_active"),
+                    "users_sample": item.get("users_sample"),
+                }
+                for item in (data.get("workspace_user_inventory") or [])
+                if isinstance(item, dict)
+            ],
+        }
+    if kind == "codebase_inventory_for_ollama":
+        return {
+            "kind": kind,
+            "git": data.get("git"),
+            "files": data.get("files"),
+            "backend": data.get("backend"),
+            "frontend": {
+                "function_count": (data.get("frontend") or {}).get("function_count"),
+                "event_handlers": (data.get("frontend") or {}).get("event_handlers"),
+                "sample_functions": ((data.get("frontend") or {}).get("sample_functions") or [])[:80],
+            },
+            "tests": data.get("tests"),
+            "risk_markers_sample": (data.get("risk_markers") or [])[:80],
+        }
+    return {
+        "kind": kind,
+        "status": data.get("status"),
+        "failed_checks": data.get("failed_checks"),
+        "summary": data.get("summary"),
+    }
+
+
 def _run_step(name: str, cmd: list[str], *, env: dict[str, str] | None = None, timeout: int = 900) -> dict:
     started = time.monotonic()
     merged_env = os.environ.copy()
@@ -62,7 +133,7 @@ def _run_step(name: str, cmd: list[str], *, env: dict[str, str] | None = None, t
         )
         output = proc.stdout or ""
         status = "passed" if proc.returncode == 0 else "failed"
-        return {
+        result = {
             "name": name,
             "status": status,
             "returncode": proc.returncode,
@@ -70,6 +141,10 @@ def _run_step(name: str, cmd: list[str], *, env: dict[str, str] | None = None, t
             "command": cmd,
             "output_tail": output[-12000:],
         }
+        json_summary = _summarize_json_output(output)
+        if json_summary:
+            result["json_summary"] = json_summary
+        return result
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
         return {
@@ -120,6 +195,8 @@ def main() -> int:
     parser.add_argument("--include-e2e", action="store_true", help="Ejecuta E2E Playwright locales.")
     parser.add_argument("--include-production", action="store_true", help="Ejecuta smoke tests contra CRM_BASE_URL/CRM_E2E_URL.")
     parser.add_argument("--include-production-api", action="store_true", help="Ejecuta checks HTTP/API contra produccion sin navegador.")
+    parser.add_argument("--include-system-matrix", action="store_true", help="Ejecuta matriz amplia de usuarios/workspaces/modulos en produccion.")
+    parser.add_argument("--include-code-inventory", action="store_true", help="Genera inventario compacto del codigo para Ollama.")
     parser.add_argument("--ollama", action="store_true", help="Genera resumen local con Ollama si esta disponible.")
     parser.add_argument("--fail-fast", action="store_true", help="Detiene la auditoria en el primer fallo.")
     args = parser.parse_args()
@@ -158,6 +235,10 @@ def main() -> int:
         )
     if args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_api_monitor", [sys.executable, "scripts/prod_api_monitor.py", "--json"], None, 300))
+    if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
+        steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
+    if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):
+        steps.append(("codebase_inventory", [sys.executable, "scripts/codebase_inventory_for_ollama.py", "--json"], None, 180))
 
     for name, cmd, env, timeout in steps:
         result = _run_step(name, cmd, env=env, timeout=timeout)
