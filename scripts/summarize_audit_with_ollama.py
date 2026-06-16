@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import sys
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from pathlib import Path
 
@@ -174,6 +174,15 @@ def main() -> int:
     try:
         with urlopen(request, timeout=240) as response:
             data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 404:
+            summary_path = report_path.with_suffix(".ollama.md")
+            content = deterministic + "\n## Analisis Ollama\n\nOllama no disponible: modelo o endpoint no encontrado (HTTP 404).\n"
+            summary_path.write_text(content, encoding="utf-8")
+            print(f"Resumen Ollama degradado: {summary_path}")
+            return 0
+        print(f"Ollama devolvio HTTP {exc.code}: {exc.reason}", file=sys.stderr)
+        return 1
     except URLError as exc:
         print(f"No se puede conectar con Ollama local: {exc}", file=sys.stderr)
         return 1

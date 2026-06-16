@@ -1,4 +1,16 @@
+import sys
+import types
 import unittest
+
+if "PIL" not in sys.modules:
+    pil_stub = types.ModuleType("PIL")
+    pil_stub.Image = object()
+    pil_stub.ImageDraw = object()
+    pil_stub.ImageEnhance = object()
+    pil_stub.ImageFilter = object()
+    pil_stub.ImageFont = object()
+    pil_stub.ImageOps = object()
+    sys.modules["PIL"] = pil_stub
 
 from web.server import normalize_service_key
 
@@ -22,4 +34,3 @@ class NormalizeServiceKeyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

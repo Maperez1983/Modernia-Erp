@@ -219,16 +219,32 @@ def run() -> dict:
     timeout = _env_int("CRM_AUDIT_HTTP_TIMEOUT", 45)
     results: list[CheckResult] = [_check_health(base_url, timeout)]
     user_summaries = {}
+    warnings = []
+    critical_failures = []
     for label, username, password in _user_specs():
         session, login_data, login_result = _login(base_url, username, password, timeout)
         results.append(login_result)
         if login_result.status != "passed":
+            if label == "admin":
+                warnings.append(login_result.name)
+            else:
+                critical_failures.append(login_result.name)
             continue
         workspace, workspace_result = _check_workspaces(base_url, session, label, timeout)
         results.append(workspace_result)
+        if workspace_result.status != "passed":
+            if label == "admin":
+                warnings.append(workspace_result.name)
+            else:
+                critical_failures.append(workspace_result.name)
         if workspace.get("id"):
             agenda_result = _check_agenda(base_url, session, label, str(workspace["id"]), timeout)
             results.append(agenda_result)
+            if agenda_result.status != "passed":
+                if label == "admin":
+                    warnings.append(agenda_result.name)
+                else:
+                    critical_failures.append(agenda_result.name)
             user_summaries[label] = {
                 "username": username,
                 "workspace_id": workspace.get("id"),
@@ -239,12 +255,16 @@ def run() -> dict:
         results.append(CheckResult("credentials", "skipped", detail="Faltan CRM_ADMIN_USER/CRM_ADMIN_PASSWORD y CRM_INMO_USER/CRM_INMO_PASSWORD"))
 
     failed = [item for item in results if item.status == "failed"]
+    health_failed = any(item.name == "health" and item.status == "failed" for item in results)
+    report_status = "failed" if health_failed or critical_failures else ("passed_with_warnings" if warnings else "passed")
     return {
         "kind": "prod_api_monitor",
         "base_url": base_url,
         "started_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "status": "failed" if failed else "passed",
+        "status": report_status,
         "failed_checks": [item.name for item in failed],
+        "critical_failures": critical_failures,
+        "warnings": warnings,
         "checks": [item.as_dict() for item in results],
         "users": user_summaries,
     }

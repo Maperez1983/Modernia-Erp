@@ -4217,6 +4217,85 @@ def normalize_service_key(value):
     return text.lower().strip()
 
 
+def build_acciones_service_where(alias: str, servicio_raw: str) -> tuple[str, list[str]]:
+    """
+    Devuelve una clausula SQL compatible con datos legacy de agenda.
+
+    Históricamente `acciones.servicio` no siempre se guardó con la clave canónica
+    (`inmobiliaria`, `financiaciones`, ...). En producción existen registros como
+    `Compraventa`, `Alquiler`, etiquetas largas o incluso filas sin `servicio`.
+    La agenda tenant no debe perder esas citas antiguas.
+    """
+    key = normalize_service_key(servicio_raw)
+    if not key:
+        return (f"LOWER(TRIM(COALESCE({alias}.servicio, ''))) = ?", [str(servicio_raw or "").strip().lower()])
+
+    service_expr = f"LOWER(TRIM(COALESCE({alias}.servicio, '')))"
+    related_expr = f"LOWER(TRIM(COALESCE({alias}.related_tipo, '')))"
+    type_expr = f"LOWER(TRIM(COALESCE({alias}.tipo, '')))"
+
+    exact_aliases: dict[str, list[str]] = {
+        "inmobiliaria": ["inmobiliaria"],
+        "financiaciones": ["financiaciones", "hipotecas"],
+        "gestoria": ["gestoria"],
+        "seguros": ["seguros"],
+        "fincas": ["fincas"],
+    }
+    like_aliases: dict[str, list[str]] = {
+        "inmobiliaria": ["%inmob%", "%compraventa%", "%alquil%"],
+        "financiaciones": ["%hipotec%", "%financ%", "%lcci%"],
+        "gestoria": ["%gestor%", "%renta%"],
+        "seguros": ["%seguro%"],
+        "fincas": ["%fincas%", "%comunidad%", "%administracion fincas%", "%administracion de fincas%"],
+    }
+
+    clauses = []
+    values: list[str] = []
+    for exact in exact_aliases.get(key, [key]):
+        clauses.append(f"{service_expr} = ?")
+        values.append(exact)
+    for pattern in like_aliases.get(key, []):
+        clauses.append(f"{service_expr} LIKE ?")
+        values.append(pattern)
+
+    if key == "inmobiliaria":
+        blank_hints = [
+            f"COALESCE({alias}.inmueble_id, '') <> ''",
+            f"{related_expr} IN (?,?,?,?,?,?,?)",
+            f"{type_expr} LIKE ?",
+            f"{type_expr} LIKE ?",
+            f"{type_expr} LIKE ?",
+            f"{type_expr} LIKE ?",
+            f"{type_expr} LIKE ?",
+            f"{type_expr} LIKE ?",
+        ]
+        clauses.append(f"({service_expr} = '' AND ({' OR '.join(blank_hints)}))")
+        values.extend(
+            [
+                "inmueble",
+                "inmuebles",
+                "captacion",
+                "captaciones",
+                "visita",
+                "visitas",
+                "demanda",
+                "%adquis%",
+                "%comprador%",
+                "%propietar%",
+                "%contraoferta%",
+                "%arras%",
+                "%encargo%",
+            ]
+        )
+    elif key == "financiaciones":
+        clauses.append(
+            f"({service_expr} = '' AND (COALESCE({alias}.asesoramiento_id, '') <> '' OR {related_expr} IN (?,?,?,?)))"
+        )
+        values.extend(["hipoteca", "hipotecas", "financiacion", "financiaciones"])
+
+    return ("(" + " OR ".join(clauses) + ")", values)
+
+
 def normalize_procedencia_canal_key(value):
     return normalize_lookup_text(value or "")
 
@@ -75625,8 +75704,9 @@ class Handler(BaseHTTPRequestHandler):
                 if offset_val > 100000:
                     offset_val = 100000
 
-                where = ["a.servicio = ?"]
-                values = [servicio_key]
+                service_where, service_values = build_acciones_service_where("a", servicio_key)
+                where = [service_where]
+                values = list(service_values)
                 workspace_id = str(workspace_id or "").strip()
                 workspace_company_id = str(workspace_company_id or "").strip()
                 empresa_id = str(empresa_id or "").strip()
