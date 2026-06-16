@@ -870,6 +870,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
     "/api/build_info",
     "/api/me",
+    "/api/system_audit_latest",
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
     "/api/portal_inmueble",
@@ -72851,8 +72852,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/system_audit_latest":
             session = getattr(self, "auth_session", None) or self._current_session()
             if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
+                if not require_ingest_api_key(self):
+                    return
             json_response(self, fetch_latest_system_audit_run(conn) or {})
             return
 
