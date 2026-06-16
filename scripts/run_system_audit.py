@@ -214,6 +214,27 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
 
     recent_status_counts = Counter(entry.get("status") or "unknown" for entry in previous_entries[-9:])
     recent_status_counts[report.get("status") or "unknown"] += 1
+    module_alerts = Counter()
+    for step in report.get("steps", []):
+        js = step.get("json_summary") or {}
+        if js.get("kind") != "prod_system_matrix_audit":
+            continue
+        for item in js.get("actionable_warnings") or []:
+            module = str(item.get("module") or "unknown")
+            module_alerts[module] += 1
+    previous_module_alerts = Counter()
+    for step in latest_prev.get("steps") or []:
+        js = step.get("json_summary") or {}
+        if js.get("kind") != "prod_system_matrix_audit":
+            continue
+        for item in js.get("actionable_warnings") or []:
+            module = str(item.get("module") or "unknown")
+            previous_module_alerts[module] += 1
+
+    repeated_modules = sorted(module for module, count in module_alerts.items() if count and previous_module_alerts.get(module))
+    new_modules = sorted(module for module, count in module_alerts.items() if count and not previous_module_alerts.get(module))
+    recovered_modules = sorted(module for module, count in previous_module_alerts.items() if count and not module_alerts.get(module))
+
     return {
         "previous_run_id": latest_prev.get("run_id"),
         "previous_status": latest_prev.get("status"),
@@ -226,6 +247,13 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
             "current": current_matrix,
             "previous": previous_matrix,
             "changed_classifications": changed_classes,
+        },
+        "module_alerts": {
+            "current": dict(module_alerts),
+            "previous": dict(previous_module_alerts),
+            "repeated_modules": repeated_modules,
+            "new_modules": new_modules,
+            "recovered_modules": recovered_modules,
         },
     }
 
@@ -241,6 +269,10 @@ def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
     previous_matrix = matrix.get("previous") or {}
     current_actionable = int(current_matrix.get("actionable_warnings_total") or 0)
     previous_actionable = int(previous_matrix.get("actionable_warnings_total") or 0)
+    module_alerts = trend.get("module_alerts") or {}
+    repeated_modules = module_alerts.get("repeated_modules") or []
+    new_modules = module_alerts.get("new_modules") or []
+    recovered_modules = module_alerts.get("recovered_modules") or []
 
     if repeated:
         alerts.append(
@@ -269,6 +301,24 @@ def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
                 "detail": f"Antes: {previous_actionable}. Ahora: {current_actionable}.",
             }
         )
+    if repeated_modules:
+        alerts.append(
+            {
+                "severity": "high",
+                "type": "repeated_module_warning",
+                "title": f"Modulos con avisos accionables repetidos: {', '.join(repeated_modules[:6])}",
+                "detail": "El mismo modulo vuelve a generar incidencias accionables en ejecuciones consecutivas.",
+            }
+        )
+    if new_modules:
+        alerts.append(
+            {
+                "severity": "medium",
+                "type": "new_module_warning",
+                "title": f"Modulos con avisos nuevos: {', '.join(new_modules[:6])}",
+                "detail": "Hay modulos que no estaban en alerta en la ejecucion anterior.",
+            }
+        )
     if recovered and report.get("status") == "passed":
         alerts.append(
             {
@@ -276,6 +326,15 @@ def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
                 "type": "recovered_failure",
                 "title": f"Recuperado respecto a la ejecucion anterior: {', '.join(recovered[:4])}",
                 "detail": "La auditoria actual ya no reproduce algunos fallos previos.",
+            }
+        )
+    if recovered_modules and current_actionable == 0:
+        alerts.append(
+            {
+                "severity": "low",
+                "type": "recovered_module_warning",
+                "title": f"Modulos recuperados: {', '.join(recovered_modules[:6])}",
+                "detail": "Ya no presentan avisos accionables respecto a la ejecucion anterior.",
             }
         )
     return alerts
@@ -298,6 +357,7 @@ def _append_history(report_dir: Path, report: dict) -> None:
             "new_failures": (report.get("trend") or {}).get("new_failures"),
             "recovered_failures": (report.get("trend") or {}).get("recovered_failures"),
             "consecutive_failed_runs": (report.get("trend") or {}).get("consecutive_failed_runs"),
+            "module_alerts": (report.get("trend") or {}).get("module_alerts"),
         },
         "matrix_summary": matrix_summary,
         "steps": [
@@ -330,6 +390,7 @@ def _write_dashboard(report_dir: Path, report: dict) -> None:
     history_entries = _load_history(report_dir, limit=10)
     matrix = (trend.get("matrix") or {}).get("current") or {}
     changed_classes = ((trend.get("matrix") or {}).get("changed_classifications") or {})
+    module_alerts = trend.get("module_alerts") or {}
     step_rows = []
     for step in report.get("steps", []):
         step_rows.append(
@@ -363,6 +424,8 @@ def _write_dashboard(report_dir: Path, report: dict) -> None:
         f"<li>Racha de fallos: {html.escape(str(trend.get('consecutive_failed_runs') or 0))}</li>",
         f"<li>Avisos accionables actuales: {html.escape(str(matrix.get('actionable_warnings_total') or 0))}</li>",
         f"<li>Cambios de clasificacion: {html.escape(json.dumps(changed_classes, ensure_ascii=False) if changed_classes else 'sin cambios')}</li>",
+        f"<li>Modulos repetidos en alerta: {html.escape(', '.join(module_alerts.get('repeated_modules') or []) or 'ninguno')}</li>",
+        f"<li>Modulos nuevos en alerta: {html.escape(', '.join(module_alerts.get('new_modules') or []) or 'ninguno')}</li>",
     ]
     latest_html.write_text(
         """<!doctype html>
@@ -564,6 +627,10 @@ def main() -> int:
         autofix_cmd = [sys.executable, "scripts/system_autofix_agent.py", str(report_path), "--json"]
         if _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX_TESTS"):
             autofix_cmd.append("--run-tests")
+        if _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX_PREPARE_BRANCH"):
+            autofix_cmd.append("--prepare-branch")
+        if _env_flag("RUN_SYSTEM_AUDIT_AUTOFIX_MATERIALIZE_TEST"):
+            autofix_cmd.append("--materialize-test")
         autofix = _run_step("autofix_plan", autofix_cmd, timeout=900)
         report["steps"].append(autofix)
         report["autofix_plan_status"] = autofix["status"]

@@ -117,6 +117,61 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]["run_id"], "b")
 
+    def test_materialize_regression_test_creates_missing_target(self):
+        with TemporaryDirectory() as tmp:
+            old_root = system_autofix_agent.ROOT
+            try:
+                root = Path(tmp)
+                system_autofix_agent.ROOT = root
+                output_dir = root / "out"
+                plan = {
+                    "regression_test_outline": {
+                        "target_file": "tests/test_generated_regression.py",
+                        "goal": "Goal",
+                        "cases": ["Caso 1"],
+                    }
+                }
+                result = system_autofix_agent._materialize_regression_test(plan, output_dir)
+                self.assertTrue(result["created"])
+                self.assertTrue((root / "tests/test_generated_regression.py").exists())
+            finally:
+                system_autofix_agent.ROOT = old_root
+
+    def test_build_trend_data_tracks_module_alerts(self):
+        report = {
+            "status": "failed",
+            "failed_steps": [],
+            "steps": [
+                {
+                    "json_summary": {
+                        "kind": "prod_system_matrix_audit",
+                        "actionable_warnings": [{"module": "agenda"}],
+                        "summary": {"actionable_warnings": 1},
+                    }
+                }
+            ],
+        }
+        previous = [
+            {
+                "run_id": "prev",
+                "status": "failed",
+                "failed_steps": [],
+                "steps": [
+                    {
+                        "json_summary": {
+                            "kind": "prod_system_matrix_audit",
+                            "actionable_warnings": [{"module": "agenda"}, {"module": "seguros"}],
+                            "summary": {"actionable_warnings": 2},
+                            "actionable_warnings_total": 2,
+                        }
+                    }
+                ],
+            }
+        ]
+        trend = run_system_audit._build_trend_data(report, previous)
+        self.assertIn("agenda", trend["module_alerts"]["repeated_modules"])
+        self.assertIn("seguros", trend["module_alerts"]["recovered_modules"])
+
 
 if __name__ == "__main__":
     unittest.main()

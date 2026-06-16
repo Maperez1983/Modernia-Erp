@@ -47,6 +47,7 @@ La tendencia incluye:
 - fallos nuevos,
 - fallos recuperados,
 - racha de ejecuciones fallidas,
+- modulos con incidencias accionables repetidas o nuevas,
 - cambios en la clasificacion de endpoints,
 - variacion de avisos accionables.
 
@@ -71,6 +72,8 @@ Variables soportadas:
 - `OLLAMA_AUDIT_MODEL`
 - `OLLAMA_AUTOFIX_MODEL`
 - `OLLAMA_REVIEW_MODEL`
+- `RUN_SYSTEM_AUDIT_AUTOFIX_PREPARE_BRANCH=1`
+- `RUN_SYSTEM_AUDIT_AUTOFIX_MATERIALIZE_TEST=1`
 
 Recomendacion:
 
@@ -88,3 +91,17 @@ Se ha anadido `.github/workflows/system-guardrails.yml` para que en cada `push` 
 - render local del dashboard de auditoria.
 
 En CI no se depende de Ollama; la revision usa solo heuristicas y memoria del sistema.
+
+## Autofix mas autonomo
+
+Si una auditoria falla y se activa:
+
+- `RUN_SYSTEM_AUDIT_AUTOFIX=1`
+- `RUN_SYSTEM_AUDIT_AUTOFIX_PREPARE_BRANCH=1`
+- `RUN_SYSTEM_AUDIT_AUTOFIX_MATERIALIZE_TEST=1`
+
+el agente puede:
+
+- crear la rama `autofix/<run_id>` solo si el arbol git esta limpio,
+- materializar un test base en la ruta sugerida solo si no existe todavia,
+- seguir sin tocar produccion ni desplegar.

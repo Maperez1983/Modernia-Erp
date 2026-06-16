@@ -313,6 +313,7 @@ def _write_regression_artifact(plan: dict, output_dir: Path) -> Path:
     outline = plan.get("regression_test_outline") or {}
     target = str(outline.get("target_file") or "tests/test_regression_from_audit.py")
     artifact_path = output_dir / "proposed_regression_test.py"
+    output_dir.mkdir(parents=True, exist_ok=True)
     cases = outline.get("cases") or []
     content = [
         '"""Regresion propuesta por system_autofix_agent.',
@@ -349,6 +350,33 @@ def _write_regression_artifact(plan: dict, output_dir: Path) -> Path:
     return artifact_path
 
 
+def _materialize_regression_test(plan: dict, output_dir: Path) -> dict:
+    outline = plan.get("regression_test_outline") or {}
+    target = str(outline.get("target_file") or "").strip()
+    if not target.startswith("tests/") or ".." in target:
+        return {
+            "created": False,
+            "path": "",
+            "reason": "Ruta de test no segura o no definida.",
+        }
+    destination = ROOT / target
+    if destination.exists():
+        return {
+            "created": False,
+            "path": str(destination),
+            "reason": "El test sugerido ya existe; no se sobreescribe automaticamente.",
+        }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path = _write_regression_artifact(plan, output_dir)
+    content = artifact_path.read_text(encoding="utf-8")
+    destination.write_text(content, encoding="utf-8")
+    return {
+        "created": True,
+        "path": str(destination),
+        "reason": "Se ha materializado un test base pendiente de implementar.",
+    }
+
+
 def _prepare_branch_artifact(plan: dict, report: dict, output_dir: Path, *, create_branch: bool) -> dict:
     run_id = str(report.get("run_id") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     branch = "autofix/" + re.sub(r"[^A-Za-z0-9_.-]+", "-", run_id).strip("-")
@@ -372,7 +400,16 @@ def _prepare_branch_artifact(plan: dict, report: dict, output_dir: Path, *, crea
     return info
 
 
-def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_tests: bool, use_ollama: bool, prepare_branch: bool = False) -> dict:
+def run_agent(
+    report_path: Path,
+    knowledge_path: Path,
+    output_dir: Path,
+    *,
+    run_tests: bool,
+    use_ollama: bool,
+    prepare_branch: bool = False,
+    materialize_test: bool = False,
+) -> dict:
     report = _load_json(report_path)
     knowledge = _load_json(knowledge_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -405,6 +442,9 @@ def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_
 
     prompt_path = _write_prompt_artifact(plan, report_path, output_dir)
     regression_path = _write_regression_artifact(plan, output_dir)
+    materialized_test = {"created": False, "path": "", "reason": "Modo solo plan; no se materializa test."}
+    if materialize_test and plan.get("status") != "no_action":
+        materialized_test = _materialize_regression_test(plan, output_dir)
     branch_plan = _prepare_branch_artifact(plan, report, output_dir, create_branch=prepare_branch)
     result = {
         "kind": "system_autofix_agent",
@@ -419,11 +459,15 @@ def run_agent(report_path: Path, knowledge_path: Path, output_dir: Path, *, run_
             "proposed_regression_test": str(regression_path),
             "branch_plan": str(output_dir / "branch_plan.json"),
         },
+        "materialized_test": materialized_test,
         "branch_plan": branch_plan,
         "safety": {
-            "edits_applied": False,
+            "edits_applied": bool(materialized_test.get("created")),
             "production_touched": False,
-            "reason": "Modo preparacion: diagnostica y prepara plan; no modifica codigo ni despliega.",
+            "reason": (
+                "Diagnostica y prepara plan; puede crear rama y materializar un test base local. "
+                "No modifica produccion ni despliega."
+            ),
         },
     }
     output_path = output_dir / "autofix_plan.json"
@@ -440,6 +484,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="", help="Directorio donde guardar el plan.")
     parser.add_argument("--run-tests", action="store_true", help="Ejecuta tests seguros relacionados con el diagnostico.")
     parser.add_argument("--prepare-branch", action="store_true", help="Crea rama autofix/<run_id> solo si el arbol git esta limpio.")
+    parser.add_argument("--materialize-test", action="store_true", help="Crea el test sugerido solo si la ruta no existe todavia.")
     parser.add_argument("--no-ollama", action="store_true", help="Usa solo heuristica local, sin consultar Ollama.")
     parser.add_argument("--json", action="store_true", help="Imprime JSON completo.")
     args = parser.parse_args()
@@ -453,7 +498,15 @@ def main() -> int:
     else:
         use_ollama = not args.no_ollama
 
-    result = run_agent(report_path, knowledge_path, output_dir, run_tests=args.run_tests, use_ollama=use_ollama, prepare_branch=args.prepare_branch)
+    result = run_agent(
+        report_path,
+        knowledge_path,
+        output_dir,
+        run_tests=args.run_tests,
+        use_ollama=use_ollama,
+        prepare_branch=args.prepare_branch,
+        materialize_test=args.materialize_test,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2 if args.json else None))
     return 0
 
