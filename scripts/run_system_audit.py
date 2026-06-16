@@ -116,8 +116,10 @@ def _production_smoke_steps() -> list[tuple[str, list[str], dict[str, str]]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Auditoria automatica del sistema CRM.")
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), help="Directorio donde guardar el JSON.")
+    parser.add_argument("--skip-local", action="store_true", help="Omite checks locales de sintaxis/pytest.")
     parser.add_argument("--include-e2e", action="store_true", help="Ejecuta E2E Playwright locales.")
     parser.add_argument("--include-production", action="store_true", help="Ejecuta smoke tests contra CRM_BASE_URL/CRM_E2E_URL.")
+    parser.add_argument("--include-production-api", action="store_true", help="Ejecuta checks HTTP/API contra produccion sin navegador.")
     parser.add_argument("--ollama", action="store_true", help="Genera resumen local con Ollama si esta disponible.")
     parser.add_argument("--fail-fast", action="store_true", help="Detiene la auditoria en el primer fallo.")
     args = parser.parse_args()
@@ -136,12 +138,16 @@ def main() -> int:
         "steps": [],
     }
 
-    steps: list[tuple[str, list[str], dict[str, str] | None, int]] = [
-        ("python_syntax_web_server", [sys.executable, "-m", "py_compile", "web/server.py"], None, 120),
-        ("javascript_syntax_app", ["node", "--check", "web/app.js"], None, 120),
-        ("pytest_fast_core", [sys.executable, "-m", "pytest", "-q", *_existing(FAST_PYTESTS)], None, 1200),
-    ]
-    if args.include_e2e or _env_flag("RUN_SYSTEM_AUDIT_E2E"):
+    steps: list[tuple[str, list[str], dict[str, str] | None, int]] = []
+    if not args.skip_local:
+        steps.extend(
+            [
+                ("python_syntax_web_server", [sys.executable, "-m", "py_compile", "web/server.py"], None, 120),
+                ("javascript_syntax_app", ["node", "--check", "web/app.js"], None, 120),
+                ("pytest_fast_core", [sys.executable, "-m", "pytest", "-q", *_existing(FAST_PYTESTS)], None, 1200),
+            ]
+        )
+    if not args.skip_local and (args.include_e2e or _env_flag("RUN_SYSTEM_AUDIT_E2E")):
         steps.append(
             (
                 "pytest_playwright_e2e",
@@ -150,6 +156,8 @@ def main() -> int:
                 1800,
             )
         )
+    if args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
+        steps.append(("production_api_monitor", [sys.executable, "scripts/prod_api_monitor.py", "--json"], None, 300))
 
     for name, cmd, env, timeout in steps:
         result = _run_step(name, cmd, env=env, timeout=timeout)
