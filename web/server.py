@@ -50531,6 +50531,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_contabilidad",
             "/api/workspace_fincas_contabilidad_import_preview",
             "/api/workspace_fincas_contabilidad_import",
+            "/api/system_audit_ingest",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
