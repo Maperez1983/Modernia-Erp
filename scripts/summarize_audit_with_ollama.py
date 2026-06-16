@@ -12,6 +12,9 @@ from urllib.request import Request, urlopen
 from pathlib import Path
 
 
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
 def _compact_report(report: dict) -> dict:
     compact_steps = []
     for step in report.get("steps", []):
@@ -42,21 +45,26 @@ def main() -> int:
         return 2
 
     if not shutil.which("ollama"):
-        print("Ollama no esta instalado o no esta en PATH; se omite el resumen local.")
-        return 0
+        base_url = (os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
+        if base_url == DEFAULT_OLLAMA_BASE_URL:
+            print("Ollama no esta instalado o no esta en PATH; se omite el resumen local.")
+            return 0
 
     report_path = Path(sys.argv[1]).resolve()
     report = json.loads(report_path.read_text(encoding="utf-8"))
     model = os.environ.get("OLLAMA_AUDIT_MODEL") or "qwen2.5-coder:7b"
+    base_url = (os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
     prompt = (
         "Eres un auditor tecnico de un CRM. Resume este reporte en castellano con: "
         "1) estado global, 2) fallos concretos, 3) causa probable si se puede inferir, "
         "4) siguiente accion recomendada. No inventes datos que no esten en el JSON.\n\n"
         + json.dumps(_compact_report(report), ensure_ascii=False, indent=2)
     )
+    if model.lower().startswith("qwen3:"):
+        prompt = "/no_think\n" + prompt
     payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
     request = Request(
-        "http://127.0.0.1:11434/api/generate",
+        f"{base_url}/api/generate",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
