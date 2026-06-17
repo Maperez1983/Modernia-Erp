@@ -83,9 +83,17 @@ Variables soportadas:
 - `RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH=docs/module_smoke_expectations.json`
 - `CRM_AUDIT_IDENTITY_POLICY_PATH=docs/audit_identity_policy.json`
 - `RUN_SYSTEM_AUDIT_AUTO_QUARANTINE=1`
+- `RUN_SYSTEM_AUDIT_BROWSER_MODULE_SMOKE=1`
+- `RUN_SYSTEM_AUDIT_SAFE_AUTOREMEDIATE=1`
 - `RUN_SYSTEM_AUDIT_AUTO_CLEAR_QUARANTINE=1`
 - `RENDER_WEB_SERVICE_ID=<render_web_service_id>`
 - `RENDER_API_KEY=<render_api_key>`
+
+La cuarentena operativa publica:
+
+- `APP_EMERGENCY_MODE=off|read_only|quarantine`
+- `APP_EMERGENCY_SCOPE=<global|modulo|workspace>`
+- `APP_EMERGENCY_REASON=<motivo>`
 - `RUN_SYSTEM_AUDIT_AUTOFIX_PREPARE_BRANCH=1`
 - `RUN_SYSTEM_AUDIT_AUTOFIX_MATERIALIZE_TEST=1`
 

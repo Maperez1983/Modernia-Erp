@@ -9362,7 +9362,21 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
                   ? `
                       <div class="workspace-summary-row">
                         <div><strong>Cuarentena</strong><div class="muted">Modo de proteccion activo</div></div>
-                        <div class="workspace-summary-meta"><span>${escapeHtml(String(audit?.quarantine?.reason || "incidencia critica"))}</span></div>
+                        <div class="workspace-summary-meta"><span>${escapeHtml(String(audit?.quarantine?.mode || "quarantine"))} · ${escapeHtml(String(audit?.quarantine?.scope || "global"))}</span></div>
+                      </div>
+                      <div class="workspace-summary-row">
+                        <div><strong>Motivo</strong><div class="muted">${escapeHtml(String(audit?.quarantine?.reason || "incidencia critica"))}</div></div>
+                        <div class="workspace-summary-meta"><span>Proteccion</span></div>
+                      </div>
+                    `
+                  : ""
+              }
+              ${
+                audit?.remediation?.actions_total
+                  ? `
+                      <div class="workspace-summary-row">
+                        <div><strong>Remediación</strong><div class="muted">${numberFormatter.format(Number(audit?.remediation?.actions_total || 0))} acciones sugeridas</div></div>
+                        <div class="workspace-summary-meta"><span>segura</span></div>
                       </div>
                     `
                   : ""
@@ -9373,13 +9387,32 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
                 ? `
                     <div class="workspace-summary-list" style="margin-top:12px;">
                       ${audit.steps
-                        .filter((row) => ["prod_module_smoke", "prod_auth_drift_audit", "prod_security_posture_audit", "prod_system_matrix_audit"].includes(String(row.kind || "")))
+                        .filter((row) => ["prod_module_smoke", "prod_multi_crm_browser_smoke", "prod_auth_drift_audit", "prod_security_posture_audit", "prod_system_matrix_audit"].includes(String(row.kind || "")))
                         .slice(0, 8)
                         .map(
                           (row) => `
                             <div class="workspace-summary-row">
                               <div><strong>${escapeHtml(String(row.name || row.kind || "-"))}</strong><div class="muted">${escapeHtml(String(row.status || "-"))}</div></div>
                               <div class="workspace-summary-meta"><span>${escapeHtml(String((row.failed_checks || []).slice(0, 3).join(", ") || "ok"))}</span></div>
+                            </div>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                : ""
+            }
+            ${
+              Array.isArray(audit?.remediation?.actions) && audit.remediation.actions.length
+                ? `
+                    <div class="workspace-summary-list" style="margin-top:12px;">
+                      ${audit.remediation.actions
+                        .slice(0, 5)
+                        .map(
+                          (row) => `
+                            <div class="workspace-summary-row">
+                              <div><strong>${escapeHtml(String(row.title || row.id || "-"))}</strong><div class="muted">${escapeHtml(String(row.scope || row.type || ""))}</div></div>
+                              <div class="workspace-summary-meta"><span>${row.apply ? "auto" : "manual"}</span></div>
                             </div>
                           `
                         )

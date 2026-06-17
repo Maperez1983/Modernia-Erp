@@ -113,13 +113,31 @@ def _summarize_json_output(output: str) -> dict | None:
             "warnings": data.get("warnings"),
             "results": data.get("results"),
         }
+    if kind == "prod_multi_crm_browser_smoke":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "failed_checks": data.get("failed_checks"),
+            "warnings": data.get("warnings"),
+            "results": data.get("results"),
+            "detail": data.get("detail"),
+        }
     if kind == "auto_quarantine_guard":
         return {
             "kind": kind,
             "status": data.get("status"),
             "quarantined": data.get("quarantined"),
+            "mode": data.get("mode"),
+            "scope": data.get("scope"),
             "reason": data.get("reason"),
             "detail": data.get("detail"),
+        }
+    if kind == "safe_auto_remediation":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "actions_total": data.get("actions_total"),
+            "actions": data.get("actions"),
         }
     if kind == "prod_system_matrix_audit":
         return {
@@ -225,6 +243,18 @@ def _build_alerts(report: dict) -> list[dict]:
                             "type": "module_smoke",
                             "title": f"Smoke modulo {item.get('module')} ({item.get('user_label')})",
                             "detail": f"workspace={item.get('workspace_nombre')} passed={item.get('passed_endpoints')}/{item.get('endpoints_checked')}",
+                        }
+                    )
+        if js.get("kind") == "prod_multi_crm_browser_smoke":
+            for item in js.get("results") or []:
+                if item.get("status") in {"failed", "warning"}:
+                    alerts.append(
+                        {
+                            "severity": "high" if item.get("status") == "failed" else "medium",
+                            "type": "browser_smoke",
+                            "title": f"Navegacion CRM {item.get('module')} ({item.get('user_label')})",
+                            "detail": item.get("detail") or f"route={item.get('route')}",
+                            "module": item.get("module"),
                         }
                     )
     return alerts
@@ -623,11 +653,13 @@ table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid
 def _build_publish_payload(report: dict) -> dict:
     matrix_summary = _matrix_summary_from_report(report)
     quarantine = {}
+    remediation = {}
     for step in report.get("steps", []):
         js = step.get("json_summary") or {}
         if js.get("kind") == "auto_quarantine_guard":
             quarantine = js
-            break
+        if js.get("kind") == "safe_auto_remediation":
+            remediation = js
     return {
         "kind": "system_audit_publish",
         "source": "render_cron",
@@ -652,6 +684,7 @@ def _build_publish_payload(report: dict) -> dict:
             for step in report.get("steps", [])
         ],
         "quarantine": quarantine,
+        "remediation": remediation,
         "ollama_summary_status": report.get("ollama_summary_status"),
         "autofix_plan_status": report.get("autofix_plan_status"),
     }
@@ -829,6 +862,8 @@ def main() -> int:
         steps.append(("production_security_posture", [sys.executable, "scripts/prod_security_posture_audit.py", "--json"], None, 300))
     if args.include_module_smoke or _env_flag("RUN_SYSTEM_AUDIT_MODULE_SMOKE") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_module_smoke", [sys.executable, "scripts/prod_module_smoke.py", "--json"], None, 300))
+    if _env_flag("RUN_SYSTEM_AUDIT_BROWSER_MODULE_SMOKE"):
+        steps.append(("production_browser_module_smoke", [sys.executable, "scripts/prod_multi_crm_browser_smoke.py", "--json"], None, 600))
     if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):
@@ -902,6 +937,19 @@ def main() -> int:
             timeout=120,
         )
         report["steps"].append(quarantine)
+        report["alerts"] = _build_alerts(report)
+        report["trend"] = _build_trend_data(report, previous_entries)
+        report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
+
+    if _env_flag("RUN_SYSTEM_AUDIT_SAFE_AUTOREMEDIATE"):
+        remediation = _run_step(
+            "safe_auto_remediation",
+            [sys.executable, "scripts/safe_auto_remediation.py", str(report_path), "--json"],
+            timeout=120,
+        )
+        report["steps"].append(remediation)
         report["alerts"] = _build_alerts(report)
         report["trend"] = _build_trend_data(report, previous_entries)
         report["alerts"].extend(_build_trend_alerts(report, report["trend"]))

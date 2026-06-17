@@ -17,14 +17,21 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _should_quarantine(report: dict) -> tuple[bool, str]:
-    critical_types = {"auth_drift", "security_posture", "module_smoke", "module_volume_drop", "user_module_volume_drop", "new_failure"}
+def _quarantine_decision(report: dict) -> dict:
     alerts = report.get("alerts") or []
-    hits = [item for item in alerts if str(item.get("type") or "") in critical_types or str(item.get("severity") or "").lower() == "critical"]
-    if hits:
-        top = hits[0]
-        return True, str(top.get("title") or top.get("type") or "critical_incident")
-    return False, ""
+    quarantine_types = {"auth_drift", "security_posture", "new_failure", "step_failed"}
+    read_only_types = {"module_smoke", "browser_smoke", "module_volume_drop", "user_module_volume_drop"}
+    strongest = {"mode": "off", "scope": "", "reason": ""}
+    for item in alerts:
+        alert_type = str(item.get("type") or "").strip().lower()
+        severity = str(item.get("severity") or "").strip().lower()
+        title = str(item.get("title") or item.get("type") or "incident").strip()
+        scope = str(item.get("module") or item.get("workspace") or "global").strip() or "global"
+        if alert_type in quarantine_types or severity == "critical":
+            return {"mode": "quarantine", "scope": scope, "reason": title}
+        if strongest["mode"] == "off" and (alert_type in read_only_types or severity == "high"):
+            strongest = {"mode": "read_only", "scope": scope, "reason": title}
+    return strongest
 
 
 def _render_env_update(api_key: str, service_id: str, pairs: dict[str, str]) -> dict:
@@ -45,22 +52,31 @@ def run(report_path: Path) -> dict:
     service_id = str(os.environ.get("RENDER_WEB_SERVICE_ID") or "").strip()
     if not api_key or not service_id:
         return {"kind": "auto_quarantine_guard", "status": "skipped", "detail": "Faltan RENDER_API_KEY/RENDER_WEB_SERVICE_ID"}
-    quarantine, reason = _should_quarantine(report)
-    if quarantine:
+    decision = _quarantine_decision(report)
+    if decision["mode"] != "off":
         payload = {
-            "APP_EMERGENCY_MODE": "1",
-            "APP_EMERGENCY_REASON": reason[:180],
+            "APP_EMERGENCY_MODE": decision["mode"],
+            "APP_EMERGENCY_SCOPE": decision["scope"][:180],
+            "APP_EMERGENCY_REASON": decision["reason"][:180],
         }
         _render_env_update(api_key, service_id, payload)
-        return {"kind": "auto_quarantine_guard", "status": "passed", "quarantined": True, "reason": reason}
+        return {
+            "kind": "auto_quarantine_guard",
+            "status": "passed",
+            "quarantined": True,
+            "mode": decision["mode"],
+            "scope": decision["scope"],
+            "reason": decision["reason"],
+        }
     if (os.environ.get("RUN_SYSTEM_AUDIT_AUTO_CLEAR_QUARANTINE") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}:
         payload = {
-            "APP_EMERGENCY_MODE": "0",
+            "APP_EMERGENCY_MODE": "off",
+            "APP_EMERGENCY_SCOPE": "",
             "APP_EMERGENCY_REASON": "",
         }
         _render_env_update(api_key, service_id, payload)
-        return {"kind": "auto_quarantine_guard", "status": "passed", "quarantined": False, "reason": "cleared"}
-    return {"kind": "auto_quarantine_guard", "status": "passed", "quarantined": False, "reason": "not_required"}
+        return {"kind": "auto_quarantine_guard", "status": "passed", "quarantined": False, "mode": "off", "scope": "", "reason": "cleared"}
+    return {"kind": "auto_quarantine_guard", "status": "passed", "quarantined": False, "mode": "off", "scope": "", "reason": "not_required"}
 
 
 def main() -> int:

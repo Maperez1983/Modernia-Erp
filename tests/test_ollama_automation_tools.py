@@ -13,6 +13,8 @@ from scripts import prod_auth_drift_audit
 from scripts import prod_module_smoke
 from scripts import prod_security_posture_audit
 from scripts import auto_quarantine_guard
+from scripts import safe_auto_remediation
+from scripts import prod_multi_crm_browser_smoke
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import build_system_knowledge
@@ -295,8 +297,16 @@ class OllamaAutomationToolsTests(unittest.TestCase):
                 os.environ["RENDER_WEB_SERVICE_ID"] = "srv"
                 result = auto_quarantine_guard.run(report_path)
                 self.assertTrue(result["quarantined"])
+                self.assertEqual(result["mode"], "quarantine")
             finally:
                 auto_quarantine_guard._render_env_update = old_update
+
+    def test_auto_quarantine_guard_uses_read_only_for_browser_smoke(self):
+        decision = auto_quarantine_guard._quarantine_decision(
+            {"alerts": [{"type": "browser_smoke", "title": "rrhh", "severity": "medium", "module": "rrhh"}]}
+        )
+        self.assertEqual(decision["mode"], "read_only")
+        self.assertEqual(decision["scope"], "rrhh")
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()
@@ -414,12 +424,39 @@ class OllamaAutomationToolsTests(unittest.TestCase):
                 "alerts": [{"title": "x"}],
                 "failed_steps": [],
                 "trend": {},
-                "steps": [{"name": "production_api_monitor", "status": "passed", "duration_seconds": 1.2, "json_summary": {"kind": "prod_api_monitor", "failed_checks": []}}],
+                "steps": [
+                    {"name": "production_api_monitor", "status": "passed", "duration_seconds": 1.2, "json_summary": {"kind": "prod_api_monitor", "failed_checks": []}},
+                    {"name": "safe_auto_remediation", "status": "passed", "json_summary": {"kind": "safe_auto_remediation", "actions_total": 1, "actions": [{"id": "x"}]}},
+                ],
             }
         )
         self.assertEqual(payload["run_id"], "run-1")
         self.assertEqual(payload["alerts_total"], 1)
         self.assertEqual(payload["steps"][0]["name"], "production_api_monitor")
+        self.assertEqual(payload["remediation"]["actions_total"], 1)
+
+    def test_safe_auto_remediation_collects_auth_and_browser_actions(self):
+        with TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "steps": [
+                            {"json_summary": {"kind": "prod_auth_drift_audit", "checks": [{"name": "shared_password_login:foo", "status": "failed", "detail": "401"}]}},
+                            {"json_summary": {"kind": "prod_multi_crm_browser_smoke", "results": [{"user_label": "admin", "module": "rrhh", "status": "failed", "route": "/?view=rrhh"}]}},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = safe_auto_remediation.run(report_path)
+            self.assertEqual(result["status"], "passed_with_actions")
+            self.assertGreaterEqual(result["actions_total"], 2)
+
+    def test_browser_smoke_route_for_workspace(self):
+        route = prod_multi_crm_browser_smoke._route_for("verifika", "rrhh")
+        self.assertIn("workspace=verifika", route)
+        self.assertIn("view=rrhh", route)
 
     def test_store_and_fetch_latest_system_audit_run(self):
         conn = sqlite3.connect(":memory:")
