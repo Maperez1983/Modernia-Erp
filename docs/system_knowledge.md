@@ -1,7 +1,7 @@
 # Modernia CRM System Knowledge
 
-Generated: 2026-06-17T12:52:22+00:00
-Commit: ab41b35fe6b5ecb6618beb07ce85a4a27e01f458
+Generated: 2026-06-17T13:18:17+00:00
+Commit: e8ad82ac10885607e0554fdfe58dc4973a6ecc8d
 
 Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.
 
@@ -10,6 +10,7 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
 - Expected behaviors: docs/expected_behaviors.json
 - Incidents: docs/incidents.jsonl
 - Repair playbooks: docs/repair_playbooks.json
+- Security invariants: docs/security_invariants.json
 
 ## Modules
 

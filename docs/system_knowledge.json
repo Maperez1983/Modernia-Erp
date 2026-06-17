@@ -1,18 +1,18 @@
 {
   "kind": "modernia_system_knowledge",
-  "generated_at": "2026-06-17T12:52:22+00:00",
+  "generated_at": "2026-06-17T13:18:17+00:00",
   "git": {
     "branch": "main",
-    "commit": "ab41b35fe6b5ecb6618beb07ce85a4a27e01f458",
+    "commit": "e8ad82ac10885607e0554fdfe58dc4973a6ecc8d",
     "recent_commits": [
+      "e8ad82a Expand Ollama operational playbooks by module",
       "ab41b35 Add Ollama operational memory packs",
       "cbf0a13 Add production auth drift audit",
       "350d26f Fix admin user lookup password scheme detection",
       "3c669aa Guard Render SQLite syncs in Postgres mode",
       "050757b Restore legacy superadmin fallback without allowlist",
       "27d534e Route admin company cards into workspace CRM access",
-      "24a9568 Align admin-wide home routing with CRM access",
-      "b12748d Audit home CRM card access invariants"
+      "24a9568 Align admin-wide home routing with CRM access"
     ]
   },
   "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
@@ -38,6 +38,7 @@
     "expected_behaviors_path": "docs/expected_behaviors.json",
     "incidents_path": "docs/incidents.jsonl",
     "repair_playbooks_path": "docs/repair_playbooks.json",
+    "security_invariants_path": "docs/security_invariants.json",
     "expected_behaviors": {
       "core_home": [
         "Si una card CRM es visible para un usuario, debe poder abrir una vista funcional del CRM correspondiente.",
@@ -397,6 +398,38 @@
           "web/server.py endpoints de fincas/comunidades",
           "tests de scoping multiworkspace"
         ]
+      }
+    ],
+    "security_invariants": [
+      {
+        "id": "backend-postgres-production",
+        "severity": "critical",
+        "rule": "Produccion debe servir backend=postgres salvo override operativo explicito."
+      },
+      {
+        "id": "admin-lookup-available",
+        "severity": "high",
+        "rule": "admin_user_lookup debe responder para que el sistema pueda auditar credenciales y memberships."
+      },
+      {
+        "id": "shared-test-password-cohort",
+        "severity": "high",
+        "rule": "La cohorte de usuarios de pruebas definida en entorno debe autenticar con la contrasena compartida vigente."
+      },
+      {
+        "id": "no-active-user-without-signal",
+        "severity": "medium",
+        "rule": "Un usuario activo sin memberships debe marcarse como warning operativo."
+      },
+      {
+        "id": "crm-card-visible-implies-routable",
+        "severity": "high",
+        "rule": "Si una card CRM es visible, debe abrir una ruta funcional y coherente con el workspace."
+      },
+      {
+        "id": "no-sqlite-sync-in-postgres-mode",
+        "severity": "critical",
+        "rule": "Los syncs legacy a SQLite deben bloquearse si el sistema esta en modo Postgres."
       }
     ]
   },

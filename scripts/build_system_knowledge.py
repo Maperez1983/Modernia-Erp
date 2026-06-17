@@ -18,6 +18,7 @@ KNOWLEDGE_MD = DOCS_DIR / "system_knowledge.md"
 EXPECTED_BEHAVIORS_JSON = DOCS_DIR / "expected_behaviors.json"
 INCIDENTS_JSONL = DOCS_DIR / "incidents.jsonl"
 REPAIR_PLAYBOOKS_JSON = DOCS_DIR / "repair_playbooks.json"
+SECURITY_INVARIANTS_JSON = DOCS_DIR / "security_invariants.json"
 
 
 MODULE_RULES = [
@@ -198,6 +199,7 @@ def build_knowledge() -> dict:
     expected_behaviors = _load_json(EXPECTED_BEHAVIORS_JSON)
     incidents = _load_jsonl(INCIDENTS_JSONL)
     repair_playbooks = _load_json(REPAIR_PLAYBOOKS_JSON)
+    security_invariants = _load_json(SECURITY_INVARIANTS_JSON)
     return {
         "kind": "modernia_system_knowledge",
         "generated_at": _utc_now(),
@@ -215,9 +217,11 @@ def build_knowledge() -> dict:
             "expected_behaviors_path": str(EXPECTED_BEHAVIORS_JSON.relative_to(ROOT)),
             "incidents_path": str(INCIDENTS_JSONL.relative_to(ROOT)),
             "repair_playbooks_path": str(REPAIR_PLAYBOOKS_JSON.relative_to(ROOT)),
+            "security_invariants_path": str(SECURITY_INVARIANTS_JSON.relative_to(ROOT)),
             "expected_behaviors": expected_behaviors.get("modules") or {},
             "recent_incidents": incidents,
             "repair_playbooks": repair_playbooks.get("playbooks") or [],
+            "security_invariants": security_invariants.get("invariants") or [],
         },
         "frontend_api_map": frontend_api_map,
         "modules": {
@@ -311,6 +315,7 @@ def write_markdown(knowledge: dict) -> None:
         f"- Expected behaviors: {knowledge.get('operational_memory', {}).get('expected_behaviors_path', '')}",
         f"- Incidents: {knowledge.get('operational_memory', {}).get('incidents_path', '')}",
         f"- Repair playbooks: {knowledge.get('operational_memory', {}).get('repair_playbooks_path', '')}",
+        f"- Security invariants: {knowledge.get('operational_memory', {}).get('security_invariants_path', '')}",
         "",
         "## Modules",
     ]

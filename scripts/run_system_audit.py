@@ -94,6 +94,16 @@ def _summarize_json_output(output: str) -> dict | None:
                 if isinstance(item, dict)
             ],
         }
+    if kind == "prod_security_posture_audit":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "failed_checks": data.get("failed_checks"),
+            "warnings": data.get("warnings"),
+            "summary": data.get("summary"),
+            "findings": data.get("findings"),
+            "auth_drift_status": data.get("auth_drift_status"),
+        }
     if kind == "prod_system_matrix_audit":
         return {
             "kind": kind,
@@ -179,6 +189,16 @@ def _build_alerts(report: dict) -> list[dict]:
                             "detail": item.get("detail") or "",
                         }
                     )
+        if js.get("kind") == "prod_security_posture_audit":
+            for item in js.get("findings") or []:
+                alerts.append(
+                    {
+                        "severity": item.get("severity") or "medium",
+                        "type": "security_posture",
+                        "title": f"Invariante de seguridad: {item.get('id')}",
+                        "detail": item.get("detail") or "",
+                    }
+                )
     return alerts
 
 
@@ -638,6 +658,7 @@ def main() -> int:
     parser.add_argument("--include-production", action="store_true", help="Ejecuta smoke tests contra CRM_BASE_URL/CRM_E2E_URL.")
     parser.add_argument("--include-production-api", action="store_true", help="Ejecuta checks HTTP/API contra produccion sin navegador.")
     parser.add_argument("--include-auth-drift", action="store_true", help="Ejecuta auditoria de deriva de accesos y contrasenas compartidas.")
+    parser.add_argument("--include-security-posture", action="store_true", help="Ejecuta auditoria de postura operativa de seguridad.")
     parser.add_argument("--include-system-matrix", action="store_true", help="Ejecuta matriz amplia de usuarios/workspaces/modulos en produccion.")
     parser.add_argument("--include-code-inventory", action="store_true", help="Genera inventario compacto del codigo para Ollama.")
     parser.add_argument("--ollama", action="store_true", help="Genera resumen local con Ollama si esta disponible.")
@@ -682,6 +703,8 @@ def main() -> int:
         steps.append(("production_api_monitor", [sys.executable, "scripts/prod_api_monitor.py", "--json"], None, 300))
     if args.include_auth_drift or _env_flag("RUN_SYSTEM_AUDIT_AUTH_DRIFT") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_auth_drift", [sys.executable, "scripts/prod_auth_drift_audit.py", "--json"], None, 300))
+    if args.include_security_posture or _env_flag("RUN_SYSTEM_AUDIT_SECURITY_POSTURE") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
+        steps.append(("production_security_posture", [sys.executable, "scripts/prod_security_posture_audit.py", "--json"], None, 300))
     if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):

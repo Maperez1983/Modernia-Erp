@@ -10,6 +10,7 @@ import types
 from scripts import ollama_diff_review
 from scripts import ollama_json
 from scripts import prod_auth_drift_audit
+from scripts import prod_security_posture_audit
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import build_system_knowledge
@@ -147,6 +148,39 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertIn("expected_behaviors", memory)
         self.assertIn("recent_incidents", memory)
         self.assertIn("repair_playbooks", memory)
+        self.assertIn("security_invariants", memory)
+
+    def test_security_posture_reports_warning_for_missing_membership(self):
+        old_run = prod_security_posture_audit.prod_auth_drift_audit.run
+        try:
+            prod_security_posture_audit.prod_auth_drift_audit.run = lambda: {
+                "checks": [{"name": "backend_mode", "metrics": {"backend": "postgres"}}],
+                "shared_policy": {"expected_backend": "postgres"},
+                "users": {"foo": {"memberships": []}},
+                "status": "passed_with_warnings",
+            }
+            report = prod_security_posture_audit.run()
+            self.assertEqual(report["status"], "passed_with_warnings")
+            self.assertIn("no-active-user-without-signal", report["warnings"])
+        finally:
+            prod_security_posture_audit.prod_auth_drift_audit.run = old_run
+
+    def test_security_posture_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "prod_security_posture_audit",
+                    "status": "failed",
+                    "failed_checks": ["backend-postgres-production"],
+                    "warnings": ["no-active-user-without-signal"],
+                    "summary": {"critical": 1},
+                    "findings": [{"id": "backend-postgres-production", "severity": "critical"}],
+                    "auth_drift_status": "passed",
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "prod_security_posture_audit")
+        self.assertEqual(summary["failed_checks"], ["backend-postgres-production"])
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()

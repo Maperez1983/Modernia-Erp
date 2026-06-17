@@ -1,0 +1,35 @@
+{
+  "kind": "modernia_security_invariants",
+  "invariants": [
+    {
+      "id": "backend-postgres-production",
+      "severity": "critical",
+      "rule": "Produccion debe servir backend=postgres salvo override operativo explicito."
+    },
+    {
+      "id": "admin-lookup-available",
+      "severity": "high",
+      "rule": "admin_user_lookup debe responder para que el sistema pueda auditar credenciales y memberships."
+    },
+    {
+      "id": "shared-test-password-cohort",
+      "severity": "high",
+      "rule": "La cohorte de usuarios de pruebas definida en entorno debe autenticar con la contrasena compartida vigente."
+    },
+    {
+      "id": "no-active-user-without-signal",
+      "severity": "medium",
+      "rule": "Un usuario activo sin memberships debe marcarse como warning operativo."
+    },
+    {
+      "id": "crm-card-visible-implies-routable",
+      "severity": "high",
+      "rule": "Si una card CRM es visible, debe abrir una ruta funcional y coherente con el workspace."
+    },
+    {
+      "id": "no-sqlite-sync-in-postgres-mode",
+      "severity": "critical",
+      "rule": "Los syncs legacy a SQLite deben bloquearse si el sistema esta en modo Postgres."
+    }
+  ]
+}
