@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_DIR = ROOT / "reports" / "system_audit"
+DEFAULT_VOLUME_THRESHOLDS_PATH = ROOT / "docs" / "module_volume_thresholds.json"
 
 FAST_PYTESTS = [
     "tests/test_frontend_smoke.py",
@@ -241,6 +242,21 @@ def _load_history(report_dir: Path, limit: int = 20) -> list[dict]:
     return entries[-limit:]
 
 
+def _load_volume_thresholds() -> dict:
+    path = Path(os.environ.get("RUN_SYSTEM_AUDIT_VOLUME_THRESHOLDS_PATH") or DEFAULT_VOLUME_THRESHOLDS_PATH)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "default_drop_ratio": float(data.get("default_drop_ratio") or os.environ.get("RUN_SYSTEM_AUDIT_MODULE_DROP_THRESHOLD") or 0.5),
+        "by_module": data.get("by_module") or {},
+        "by_user_module": data.get("by_user_module") or {},
+    }
+
+
 def _matrix_summary_from_report(report: dict) -> dict:
     for step in report.get("steps", []):
         js = step.get("json_summary") or {}
@@ -285,8 +301,8 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
         delta = int(classification_counts.get(key, 0)) - int(previous_classification_counts.get(key, 0))
         if delta:
             changed_classes[key] = delta
+    thresholds = _load_volume_thresholds()
     module_row_drops = {}
-    drop_threshold = float(os.environ.get("RUN_SYSTEM_AUDIT_MODULE_DROP_THRESHOLD") or "0.5")
     all_modules = set(current_module_rows) | set(previous_module_rows)
     for key in sorted(all_modules):
         prev = int(previous_module_rows.get(key, 0) or 0)
@@ -294,8 +310,46 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
         if prev <= 0:
             continue
         ratio = curr / prev if prev else 1.0
-        if ratio < (1.0 - drop_threshold):
-            module_row_drops[key] = {"previous": prev, "current": curr, "ratio": round(ratio, 3)}
+        drop_ratio = float((thresholds.get("by_module") or {}).get(key, thresholds.get("default_drop_ratio", 0.5)))
+        if ratio < (1.0 - drop_ratio):
+            module_row_drops[key] = {
+                "previous": prev,
+                "current": curr,
+                "ratio": round(ratio, 3),
+                "threshold": drop_ratio,
+            }
+
+    current_smoke = {}
+    previous_smoke = {}
+    for step in report.get("steps", []):
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "prod_module_smoke":
+            for item in js.get("results") or []:
+                key = f"{item.get('user_label')}:{item.get('module')}"
+                current_smoke[key] = item
+    for step in latest_prev.get("steps") or []:
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "prod_module_smoke":
+            for item in js.get("results") or []:
+                key = f"{item.get('user_label')}:{item.get('module')}"
+                previous_smoke[key] = item
+    user_module_row_drops = {}
+    for key in sorted(set(current_smoke) | set(previous_smoke)):
+        prev_item = previous_smoke.get(key) or {}
+        curr_item = current_smoke.get(key) or {}
+        prev = int(prev_item.get("rows_total") or 0)
+        curr = int(curr_item.get("rows_total") or 0)
+        if prev <= 0:
+            continue
+        ratio = curr / prev if prev else 1.0
+        user_module_threshold = float((thresholds.get("by_user_module") or {}).get(key, (thresholds.get("by_module") or {}).get(key.split(":", 1)[1], thresholds.get("default_drop_ratio", 0.5))))
+        if ratio < (1.0 - user_module_threshold):
+            user_module_row_drops[key] = {
+                "previous": prev,
+                "current": curr,
+                "ratio": round(ratio, 3),
+                "threshold": user_module_threshold,
+            }
 
     recent_status_counts = Counter(entry.get("status") or "unknown" for entry in previous_entries[-9:])
     recent_status_counts[report.get("status") or "unknown"] += 1
@@ -333,6 +387,7 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
             "previous": previous_matrix,
             "changed_classifications": changed_classes,
             "module_row_drops": module_row_drops,
+            "user_module_row_drops": user_module_row_drops,
         },
         "module_alerts": {
             "current": dict(module_alerts),
@@ -393,7 +448,16 @@ def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
                 "severity": "high",
                 "type": "module_volume_drop",
                 "title": f"Caida brusca de volumen en {module}",
-                "detail": f"{info.get('previous')} -> {info.get('current')} (ratio {info.get('ratio')})",
+                "detail": f"{info.get('previous')} -> {info.get('current')} (ratio {info.get('ratio')}, threshold {info.get('threshold')})",
+            }
+        )
+    for key, info in (matrix.get("user_module_row_drops") or {}).items():
+        alerts.append(
+            {
+                "severity": "high",
+                "type": "user_module_volume_drop",
+                "title": f"Caida brusca en cohorte critica {key}",
+                "detail": f"{info.get('previous')} -> {info.get('current')} (ratio {info.get('ratio')}, threshold {info.get('threshold')})",
             }
         )
     if repeated_modules:

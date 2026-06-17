@@ -214,6 +214,23 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         alerts = run_system_audit._build_trend_alerts({"status": "failed"}, trend)
         self.assertTrue(any(item["type"] == "module_volume_drop" for item in alerts))
 
+    def test_user_module_volume_drop_creates_alert(self):
+        trend = {
+            "repeated_failures": [],
+            "new_failures": [],
+            "recovered_failures": [],
+            "consecutive_failed_runs": 0,
+            "matrix": {
+                "current": {"actionable_warnings_total": 0},
+                "previous": {"actionable_warnings_total": 0},
+                "module_row_drops": {},
+                "user_module_row_drops": {"non_admin:inmobiliaria": {"previous": 120, "current": 20, "ratio": 0.167, "threshold": 0.3}},
+            },
+            "module_alerts": {},
+        }
+        alerts = run_system_audit._build_trend_alerts({"status": "failed"}, trend)
+        self.assertTrue(any(item["type"] == "user_module_volume_drop" for item in alerts))
+
     def test_module_smoke_aggregates_rows(self):
         old_run = prod_module_smoke.prod_system_matrix_audit.run
         try:
