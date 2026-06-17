@@ -27,6 +27,8 @@ def run(report_path: Path) -> dict:
     browser = _step_summary(report, "prod_multi_crm_browser_smoke")
     module_smoke = _step_summary(report, "prod_module_smoke")
     quarantine = _step_summary(report, "auto_quarantine_guard")
+    reconciliation = _step_summary(report, "system_business_reconciliation")
+    process_smoke = _step_summary(report, "prod_process_smoke")
 
     for item in auth.get("checks") or []:
         if item.get("status") != "failed":
@@ -74,6 +76,30 @@ def run(report_path: Path) -> dict:
             "apply": False,
             "title": f"Revisar smoke de {item.get('module')} ({item.get('user_label')})",
             "detail": f"rows_total={item.get('rows_total')} min_rows_total={item.get('min_rows_total')}",
+        })
+
+    for item in reconciliation.get("results") or []:
+        if item.get("status") != "failed":
+            continue
+        actions.append({
+            "id": f"business-{item.get('id')}",
+            "type": "business_reconciliation",
+            "scope": item.get("module"),
+            "apply": False,
+            "title": f"Revisar inconsistencia de negocio en {item.get('module')}",
+            "detail": ", ".join(item.get("failed_subchecks") or []) or json.dumps(item.get("detail") or {}, ensure_ascii=False)[:240],
+        })
+
+    for item in process_smoke.get("results") or []:
+        if item.get("status") != "failed":
+            continue
+        actions.append({
+            "id": f"process-{item.get('process_id')}",
+            "type": "process_guard",
+            "scope": item.get("module"),
+            "apply": False,
+            "title": f"Bloqueada regresión en proceso {item.get('process_id')}",
+            "detail": ", ".join(item.get("reasons") or []),
         })
 
     if quarantine.get("quarantined"):

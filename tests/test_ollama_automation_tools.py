@@ -14,8 +14,11 @@ from scripts import prod_module_smoke
 from scripts import prod_security_posture_audit
 from scripts import auto_quarantine_guard
 from scripts import safe_auto_remediation
+from scripts import render_env_sync
 from scripts import prod_multi_crm_browser_smoke
 from scripts import prod_system_matrix_audit
+from scripts import system_business_reconciliation
+from scripts import prod_process_smoke
 from scripts import run_system_audit
 from scripts import build_system_knowledge
 from scripts import system_autofix_agent
@@ -163,6 +166,7 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertIn("process_catalog", memory)
         self.assertIn("business_rules", memory)
         self.assertIn("change_impact_map", memory)
+        self.assertIn("canonical_scenarios", memory)
 
     def test_security_posture_reports_warning_for_missing_membership(self):
         old_run = prod_security_posture_audit.prod_auth_drift_audit.run
@@ -457,6 +461,25 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed_with_actions")
             self.assertGreaterEqual(result["actions_total"], 2)
 
+    def test_safe_auto_remediation_collects_business_and_process_actions(self):
+        with TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "steps": [
+                            {"json_summary": {"kind": "system_business_reconciliation", "results": [{"id": "seguros_dashboard_consistency", "module": "seguros", "status": "failed", "failed_subchecks": ["prima_total_non_negative"]}]}},
+                            {"json_summary": {"kind": "prod_process_smoke", "results": [{"process_id": "gestoria_rentas_import", "module": "gestoria", "status": "failed", "reasons": ["business_reconciliation"]}]}}
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = safe_auto_remediation.run(report_path)
+            ids = {item["id"] for item in result["actions"]}
+            self.assertIn("business-seguros_dashboard_consistency", ids)
+            self.assertIn("process-gestoria_rentas_import", ids)
+
     def test_browser_smoke_route_for_workspace(self):
         route = prod_multi_crm_browser_smoke._route_for("verifika", "rrhh")
         self.assertIn("workspace=verifika", route)
@@ -467,6 +490,10 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         process_ids = {item["process"]["id"] for item in snapshot["processes"]}
         self.assertIn("gestoria_rentas_import", process_ids)
         self.assertIn("gestoria_facturas_accounting", process_ids)
+
+    def test_system_supervisor_snapshot_counts_canonical_scenarios(self):
+        snapshot = system_supervisor.build_snapshot()
+        self.assertGreaterEqual(snapshot["canonical_scenarios_total"], 1)
 
     def test_system_supervisor_health_marks_module_alerts(self):
         report = {
@@ -498,6 +525,125 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertEqual(latest["run_id"], "audit-1")
         self.assertEqual(latest["alerts_total"], 2)
         self.assertEqual(latest["actionable_warnings_total"], 1)
+
+    def test_render_env_sync_merges_without_dropping_existing(self):
+        merged = render_env_sync._merge_env_vars(
+            [{"key": "A", "value": "1"}, {"key": "B", "value": "2"}],
+            {"B": "3", "C": "4"},
+        )
+        by_key = {item["key"]: item["value"] for item in merged}
+        self.assertEqual(by_key, {"A": "1", "B": "3", "C": "4"})
+
+    def test_business_reconciliation_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "system_business_reconciliation",
+                    "status": "failed",
+                    "failed_checks": ["seguros_dashboard_consistency"],
+                    "workspace": {"slug": "verifika"},
+                    "results": [{"id": "seguros_dashboard_consistency", "status": "failed"}],
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "system_business_reconciliation")
+        self.assertEqual(summary["failed_checks"], ["seguros_dashboard_consistency"])
+
+    def test_process_smoke_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "prod_process_smoke",
+                    "status": "failed",
+                    "failed_checks": ["gestoria_rentas_import"],
+                    "warnings": [],
+                    "results": [{"process_id": "gestoria_rentas_import", "status": "failed"}],
+                    "sources": {"module_smoke_status": "passed"},
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "prod_process_smoke")
+        self.assertEqual(summary["failed_checks"], ["gestoria_rentas_import"])
+
+    def test_business_reconciliation_alerts_are_high_signal(self):
+        alerts = run_system_audit._build_alerts(
+            {
+                "steps": [
+                    {
+                        "name": "system_business_reconciliation",
+                        "status": "failed",
+                        "json_summary": {
+                            "kind": "system_business_reconciliation",
+                            "results": [{"module": "seguros", "status": "failed", "failed_subchecks": ["prima_total_non_negative"]}],
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertTrue(any(item["type"] == "business_reconciliation" for item in alerts))
+
+    def test_process_smoke_alerts_are_high_signal(self):
+        alerts = run_system_audit._build_alerts(
+            {
+                "steps": [
+                    {
+                        "name": "production_process_smoke",
+                        "status": "failed",
+                        "json_summary": {
+                            "kind": "prod_process_smoke",
+                            "results": [{"process_id": "gestoria_rentas_import", "module": "gestoria", "status": "failed", "reasons": ["module_smoke"]}],
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertTrue(any(item["type"] == "process_smoke" for item in alerts))
+
+    def test_business_reconciliation_runner_flags_negative_prima(self):
+        old_admin = system_business_reconciliation._admin_session
+        old_workspace = system_business_reconciliation._pick_workspace
+        old_get = system_business_reconciliation._get_json
+        try:
+            system_business_reconciliation._admin_session = lambda: ("session", {}, "")
+            system_business_reconciliation._pick_workspace = lambda session: {"id": "w1", "slug": "verifika"}
+            def fake_get(session, path):
+                if path.startswith("/api/workspace_seguros_overview"):
+                    return 200, {"counts": {"total": 5, "en_vigor": 3, "renovaciones_30d": 1, "prima_total": -10}}
+                if path.startswith("/api/seguros_recibos_summary"):
+                    return 200, {"summary": {"total": 2}}
+                if path.startswith("/api/workspace_gestoria_overview"):
+                    return 200, {"counts": {"rentas_pendientes_presentar": 2}}
+                if path.startswith("/api/gestoria_dashboard"):
+                    return 200, {"counts": {"rentas_total_ejercicio": 5, "rentas_pendientes_presentar": 2, "modelos_mes": 1}}
+                if path.startswith("/api/gestoria_contabilidad"):
+                    return 200, {"summary": {"ingresos": 10, "gastos": 4, "resultado": 6}, "total_rows": 1}
+                if path.startswith("/api/workspace_fin_overview"):
+                    return 200, {"counts": {"total": 2, "firmadas": 1, "comision_total": 10}}
+                return 404, {}
+            system_business_reconciliation._get_json = fake_get
+            report = system_business_reconciliation.run()
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("seguros_dashboard_consistency", report["failed_checks"])
+        finally:
+            system_business_reconciliation._admin_session = old_admin
+            system_business_reconciliation._pick_workspace = old_workspace
+            system_business_reconciliation._get_json = old_get
+
+    def test_process_smoke_fails_when_business_reconciliation_fails(self):
+        old_module = prod_process_smoke.prod_module_smoke.run
+        old_browser = prod_process_smoke.prod_multi_crm_browser_smoke.run
+        old_recon = prod_process_smoke.system_business_reconciliation.run
+        try:
+            prod_process_smoke.prod_module_smoke.run = lambda: {"status": "passed", "results": [{"module": "gestoria", "status": "passed"}]}
+            prod_process_smoke.prod_multi_crm_browser_smoke.run = lambda: {"status": "passed", "results": [{"module": "gestoria", "status": "passed"}]}
+            prod_process_smoke.system_business_reconciliation.run = lambda: {"status": "failed", "results": [{"id": "gestoria_rentas_import", "module": "gestoria", "status": "failed"}]}
+            report = prod_process_smoke.run()
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("gestoria_rentas_import", report["failed_checks"])
+        finally:
+            prod_process_smoke.prod_module_smoke.run = old_module
+            prod_process_smoke.prod_multi_crm_browser_smoke.run = old_browser
+            prod_process_smoke.system_business_reconciliation.run = old_recon
 
 
 if __name__ == "__main__":

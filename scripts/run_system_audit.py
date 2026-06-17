@@ -122,6 +122,23 @@ def _summarize_json_output(output: str) -> dict | None:
             "results": data.get("results"),
             "detail": data.get("detail"),
         }
+    if kind == "system_business_reconciliation":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "failed_checks": data.get("failed_checks"),
+            "workspace": data.get("workspace"),
+            "results": data.get("results"),
+        }
+    if kind == "prod_process_smoke":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "failed_checks": data.get("failed_checks"),
+            "warnings": data.get("warnings"),
+            "results": data.get("results"),
+            "sources": data.get("sources"),
+        }
     if kind == "auto_quarantine_guard":
         return {
             "kind": kind,
@@ -267,6 +284,32 @@ def _build_alerts(report: dict) -> list[dict]:
                             "module": item.get("module"),
                         }
                     )
+        if js.get("kind") == "system_business_reconciliation":
+            for item in js.get("results") or []:
+                if item.get("status") != "failed":
+                    continue
+                alerts.append(
+                    {
+                        "severity": "high",
+                        "type": "business_reconciliation",
+                        "title": f"Inconsistencia de negocio en {item.get('module')}",
+                        "detail": ", ".join(item.get("failed_subchecks") or []),
+                        "module": item.get("module"),
+                    }
+                )
+        if js.get("kind") == "prod_process_smoke":
+            for item in js.get("results") or []:
+                if item.get("status") not in {"failed", "warning"}:
+                    continue
+                alerts.append(
+                    {
+                        "severity": "high" if item.get("status") == "failed" else "medium",
+                        "type": "process_smoke",
+                        "title": f"Proceso crítico {item.get('process_id')}",
+                        "detail": ", ".join(item.get("reasons") or []),
+                        "module": item.get("module"),
+                    }
+                )
     return alerts
 
 
@@ -872,8 +915,12 @@ def main() -> int:
         steps.append(("production_security_posture", [sys.executable, "scripts/prod_security_posture_audit.py", "--json"], None, 300))
     if args.include_module_smoke or _env_flag("RUN_SYSTEM_AUDIT_MODULE_SMOKE") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_module_smoke", [sys.executable, "scripts/prod_module_smoke.py", "--json"], None, 300))
+    if _env_flag("RUN_SYSTEM_AUDIT_BUSINESS_RECONCILIATION"):
+        steps.append(("system_business_reconciliation", [sys.executable, "scripts/system_business_reconciliation.py", "--json"], None, 300))
     if _env_flag("RUN_SYSTEM_AUDIT_BROWSER_MODULE_SMOKE"):
         steps.append(("production_browser_module_smoke", [sys.executable, "scripts/prod_multi_crm_browser_smoke.py", "--json"], None, 600))
+    if _env_flag("RUN_SYSTEM_AUDIT_PROCESS_SMOKE"):
+        steps.append(("production_process_smoke", [sys.executable, "scripts/prod_process_smoke.py", "--json"], None, 600))
     if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):

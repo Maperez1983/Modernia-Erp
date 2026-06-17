@@ -15,6 +15,7 @@ BUSINESS_RULES = DOCS / "business_rules.json"
 SYSTEM_INVARIANTS = DOCS / "system_invariants.json"
 CHANGE_IMPACT_MAP = DOCS / "change_impact_map.json"
 RECONCILIATION_CHECKS = DOCS / "reconciliation_checks.json"
+CANONICAL_SCENARIOS = DOCS / "canonical_scenarios.json"
 
 
 def _load_json(path: Path) -> dict:
@@ -31,6 +32,7 @@ def load_supervisor_memory() -> dict:
         "system_invariants": _load_json(SYSTEM_INVARIANTS),
         "change_impact_map": _load_json(CHANGE_IMPACT_MAP),
         "reconciliation_checks": _load_json(RECONCILIATION_CHECKS),
+        "canonical_scenarios": _load_json(CANONICAL_SCENARIOS),
     }
 
 
@@ -108,6 +110,7 @@ def build_snapshot(*, changed_files: list[str] | None = None, report: dict | Non
         "business_rules_total": len((memory.get("business_rules") or {}).get("rules") or []),
         "global_invariants_total": len((memory.get("system_invariants") or {}).get("global_invariants") or []),
         "reconciliation_checks_total": len((memory.get("reconciliation_checks") or {}).get("checks") or []),
+        "canonical_scenarios_total": len((memory.get("canonical_scenarios") or {}).get("scenarios") or []),
     }
     if changed_files is not None:
         snapshot["impact"] = impacted_processes(changed_files, memory=memory)

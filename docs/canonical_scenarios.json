@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "auth_login_workspace_admin",
+      "process_id": "auth_login_workspace_access",
+      "module": "core",
+      "criticality": "critical",
+      "description": "Un administrador entra, resuelve workspaces y puede navegar a un CRM operativo.",
+      "expected_signals": [
+        "login ok",
+        "al menos un workspace visible",
+        "navegacion tenant visible"
+      ]
+    },
+    {
+      "id": "agenda_visibility_workspace_non_admin",
+      "process_id": "agenda_workspace_visibility",
+      "module": "agenda",
+      "criticality": "critical",
+      "description": "Un usuario no admin del workspace ve la agenda historica autorizada.",
+      "expected_signals": [
+        "api/acciones 200",
+        "rows_total por encima del minimo esperado",
+        "sin divergencia grave frente a admin"
+      ]
+    },
+    {
+      "id": "gestoria_rentas_import_consistency",
+      "process_id": "gestoria_rentas_import",
+      "module": "gestoria",
+      "criticality": "critical",
+      "description": "La capa de rentas mantiene volumen, pendientes y modelos coherentes tras cambios.",
+      "expected_signals": [
+        "dashboard y overview con conteos coherentes",
+        "rentas_pendientes_presentar no mayor que rentas_total_ejercicio",
+        "modelo del mes no negativo"
+      ]
+    },
+    {
+      "id": "gestoria_facturas_accounting_trace",
+      "process_id": "gestoria_facturas_accounting",
+      "module": "gestoria",
+      "criticality": "critical",
+      "description": "La capa documental y la contabilidad mantienen trazabilidad minima coherente.",
+      "expected_signals": [
+        "gestoria_contabilidad responde",
+        "summary cuadra ingresos-gastos=resultado",
+        "total_rows no negativo"
+      ]
+    },
+    {
+      "id": "seguros_dashboard_detail_consistency",
+      "process_id": "seguros_dashboard_consistency",
+      "module": "seguros",
+      "criticality": "critical",
+      "description": "El dashboard de seguros mantiene consistencia basica con overview y recibos.",
+      "expected_signals": [
+        "prima_total no negativa",
+        "en_vigor no supera total",
+        "renovaciones_30d no negativa"
+      ]
+    },
+    {
+      "id": "financiaciones_pipeline_consistency",
+      "process_id": "financiaciones_pipeline_totals",
+      "module": "financiacion",
+      "criticality": "high",
+      "description": "El pipeline de financiaciones sigue cuadrando con el overview.",
+      "expected_signals": [
+        "firmadas no supera total",
+        "comision_total no negativa"
+      ]
+    }
+  ]
+}

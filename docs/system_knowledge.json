@@ -1,18 +1,18 @@
 {
   "kind": "modernia_system_knowledge",
-  "generated_at": "2026-06-17T15:34:59+00:00",
+  "generated_at": "2026-06-17T19:55:53+00:00",
   "git": {
     "branch": "main",
-    "commit": "acda29ee144063051db5d2fcd1ac53edf13ab063",
+    "commit": "c831f933d3d957120791cb62fca360b07c295963",
     "recent_commits": [
+      "c831f93 Add system-wide supervisor knowledge model",
       "acda29e Add browser smoke and graded quarantine",
       "a66f000 Add audit identity policy and auto quarantine",
       "ba8ea30 Add per-module volume thresholds",
       "d0083cf Add module smoke and volume drop alerts",
       "a32a321 Add production security posture audit",
       "e8ad82a Expand Ollama operational playbooks by module",
-      "ab41b35 Add Ollama operational memory packs",
-      "cbf0a13 Add production auth drift audit"
+      "ab41b35 Add Ollama operational memory packs"
     ]
   },
   "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
@@ -437,6 +437,7 @@
     "system_invariants_path": "docs/system_invariants.json",
     "change_impact_map_path": "docs/change_impact_map.json",
     "reconciliation_checks_path": "docs/reconciliation_checks.json",
+    "canonical_scenarios_path": "docs/canonical_scenarios.json",
     "process_catalog": [
       {
         "id": "auth_login_workspace_access",
@@ -888,6 +889,79 @@
         "module": "financiacion",
         "severity": "high",
         "description": "Contrastar totales del dashboard financiero con operaciones cerradas."
+      }
+    ],
+    "canonical_scenarios": [
+      {
+        "id": "auth_login_workspace_admin",
+        "process_id": "auth_login_workspace_access",
+        "module": "core",
+        "criticality": "critical",
+        "description": "Un administrador entra, resuelve workspaces y puede navegar a un CRM operativo.",
+        "expected_signals": [
+          "login ok",
+          "al menos un workspace visible",
+          "navegacion tenant visible"
+        ]
+      },
+      {
+        "id": "agenda_visibility_workspace_non_admin",
+        "process_id": "agenda_workspace_visibility",
+        "module": "agenda",
+        "criticality": "critical",
+        "description": "Un usuario no admin del workspace ve la agenda historica autorizada.",
+        "expected_signals": [
+          "api/acciones 200",
+          "rows_total por encima del minimo esperado",
+          "sin divergencia grave frente a admin"
+        ]
+      },
+      {
+        "id": "gestoria_rentas_import_consistency",
+        "process_id": "gestoria_rentas_import",
+        "module": "gestoria",
+        "criticality": "critical",
+        "description": "La capa de rentas mantiene volumen, pendientes y modelos coherentes tras cambios.",
+        "expected_signals": [
+          "dashboard y overview con conteos coherentes",
+          "rentas_pendientes_presentar no mayor que rentas_total_ejercicio",
+          "modelo del mes no negativo"
+        ]
+      },
+      {
+        "id": "gestoria_facturas_accounting_trace",
+        "process_id": "gestoria_facturas_accounting",
+        "module": "gestoria",
+        "criticality": "critical",
+        "description": "La capa documental y la contabilidad mantienen trazabilidad minima coherente.",
+        "expected_signals": [
+          "gestoria_contabilidad responde",
+          "summary cuadra ingresos-gastos=resultado",
+          "total_rows no negativo"
+        ]
+      },
+      {
+        "id": "seguros_dashboard_detail_consistency",
+        "process_id": "seguros_dashboard_consistency",
+        "module": "seguros",
+        "criticality": "critical",
+        "description": "El dashboard de seguros mantiene consistencia basica con overview y recibos.",
+        "expected_signals": [
+          "prima_total no negativa",
+          "en_vigor no supera total",
+          "renovaciones_30d no negativa"
+        ]
+      },
+      {
+        "id": "financiaciones_pipeline_consistency",
+        "process_id": "financiaciones_pipeline_totals",
+        "module": "financiacion",
+        "criticality": "high",
+        "description": "El pipeline de financiaciones sigue cuadrando con el overview.",
+        "expected_signals": [
+          "firmadas no supera total",
+          "comision_total no negativa"
+        ]
       }
     ]
   },

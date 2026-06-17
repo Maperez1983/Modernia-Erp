@@ -7,7 +7,12 @@ import argparse
 import json
 import os
 from pathlib import Path
-from urllib.request import Request, urlopen
+
+if __package__ in {None, ""}:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import render_env_sync
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,15 +40,7 @@ def _quarantine_decision(report: dict) -> dict:
 
 
 def _render_env_update(api_key: str, service_id: str, pairs: dict[str, str]) -> dict:
-    body = json.dumps([{"key": key, "value": value} for key, value in pairs.items()]).encode("utf-8")
-    req = Request(
-        f"https://api.render.com/v1/services/{service_id}/env-vars",
-        data=body,
-        method="PUT",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    with urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    return render_env_sync.sync_env_vars(api_key, service_id, pairs, dry_run=False)
 
 
 def run(report_path: Path) -> dict:

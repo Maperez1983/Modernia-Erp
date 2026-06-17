@@ -33,6 +33,10 @@ El runner genera `alerts` a partir de:
 - avisos accionables de la matriz de endpoints.
 - deriva de accesos (`production_auth_drift`): backend incorrecto, `admin_user_lookup`
   roto o usuarios de pruebas que dejan de validar la contrasena compartida.
+- reconciliacion de negocio (`system_business_reconciliation`): KPIs, dashboards y
+  resúmenes que dejan de cuadrar con el detalle esperado.
+- smoke por proceso (`production_process_smoke`): procesos críticos que dejan de
+  quedar verdes aunque el módulo siga respondiendo.
 
 El HTML `latest-system-audit.html` resume:
 
@@ -84,11 +88,27 @@ Variables soportadas:
 - `CRM_AUDIT_IDENTITY_POLICY_PATH=docs/audit_identity_policy.json`
 - `RUN_SYSTEM_AUDIT_AUTO_QUARANTINE=1`
 - `RUN_SYSTEM_AUDIT_BROWSER_MODULE_SMOKE=1`
+- `RUN_SYSTEM_AUDIT_BUSINESS_RECONCILIATION=1`
+- `RUN_SYSTEM_AUDIT_PROCESS_SMOKE=1`
 - `RUN_SYSTEM_AUDIT_SUPERVISOR=1`
 - `RUN_SYSTEM_AUDIT_SAFE_AUTOREMEDIATE=1`
 - `RUN_SYSTEM_AUDIT_AUTO_CLEAR_QUARANTINE=1`
+- `RUN_SYSTEM_AUDIT_RECONCILIATION_PATH=docs/reconciliation_checks.json`
 - `RENDER_WEB_SERVICE_ID=<render_web_service_id>`
 - `RENDER_API_KEY=<render_api_key>`
+
+Sincronizacion segura de configuracion Render:
+
+```bash
+python3 scripts/render_env_sync.py \
+  --api-key "$RENDER_API_KEY" \
+  --service-id "$RENDER_WEB_SERVICE_ID" \
+  --set APP_EMERGENCY_MODE=off \
+  --json
+```
+
+Este script primero lee las variables actuales y luego hace merge. Evita el error
+de pisar toda la configuracion con un `PUT` parcial.
 
 La cuarentena operativa publica:
 
@@ -128,3 +148,24 @@ el agente puede:
 - crear la rama `autofix/<run_id>` solo si el arbol git esta limpio,
 - materializar un test base en la ruta sugerida solo si no existe todavia,
 - seguir sin tocar produccion ni desplegar.
+
+## Supervisor de negocio
+
+Capas de conocimiento activas:
+
+- `docs/process_catalog.json`
+- `docs/business_rules.json`
+- `docs/system_invariants.json`
+- `docs/reconciliation_checks.json`
+- `docs/canonical_scenarios.json`
+
+Checks nuevos:
+
+- `scripts/system_business_reconciliation.py`
+- `scripts/prod_process_smoke.py`
+
+Objetivo:
+
+- detectar dashboards que calculan mal,
+- detectar procesos críticos que aparentan cargar pero rompen la lógica,
+- dar a Ollama contexto estructurado de proceso, regla, invariante y escenario canónico.
