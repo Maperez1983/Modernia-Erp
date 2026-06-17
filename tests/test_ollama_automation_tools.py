@@ -20,6 +20,7 @@ from scripts import run_system_audit
 from scripts import build_system_knowledge
 from scripts import system_autofix_agent
 from scripts import frontend_home_access_audit
+from scripts import system_supervisor
 if "PIL" not in sys.modules:
     pil_stub = types.ModuleType("PIL")
     pil_stub.Image = object()
@@ -159,6 +160,9 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertIn("recent_incidents", memory)
         self.assertIn("repair_playbooks", memory)
         self.assertIn("security_invariants", memory)
+        self.assertIn("process_catalog", memory)
+        self.assertIn("business_rules", memory)
+        self.assertIn("change_impact_map", memory)
 
     def test_security_posture_reports_warning_for_missing_membership(self):
         old_run = prod_security_posture_audit.prod_auth_drift_audit.run
@@ -457,6 +461,21 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         route = prod_multi_crm_browser_smoke._route_for("verifika", "rrhh")
         self.assertIn("workspace=verifika", route)
         self.assertIn("view=rrhh", route)
+
+    def test_system_supervisor_impacts_critical_processes(self):
+        snapshot = system_supervisor.impacted_processes(["web/server.py", "scripts/gestoria_renta_import.py"])
+        process_ids = {item["process"]["id"] for item in snapshot["processes"]}
+        self.assertIn("gestoria_rentas_import", process_ids)
+        self.assertIn("gestoria_facturas_accounting", process_ids)
+
+    def test_system_supervisor_health_marks_module_alerts(self):
+        report = {
+            "alerts": [{"type": "browser_smoke", "title": "rrhh roto", "module": "rrhh"}],
+            "failed_steps": [],
+        }
+        health = system_supervisor.process_health_from_report(report)
+        rows = {item["process_id"]: item for item in health["processes"]}
+        self.assertEqual(rows["rrhh_people_documents_time"]["status"], "warning")
 
     def test_store_and_fetch_latest_system_audit_run(self):
         conn = sqlite3.connect(":memory:")

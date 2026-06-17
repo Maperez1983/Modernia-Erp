@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "processes": [
+    {
+      "id": "auth_login_workspace_access",
+      "module": "core",
+      "criticality": "critical",
+      "description": "Login, resolucion de workspaces visibles y entrada a la vista tenant o CRM correspondiente.",
+      "expected_outcomes": [
+        "Un login valido debe desbloquear la sesion.",
+        "El usuario debe ver al menos un workspace si tiene memberships activas.",
+        "Si una card CRM es visible, debe navegar a una vista operativa real."
+      ],
+      "endpoints": ["/api/login", "/api/workspaces", "/api/workspace_detail", "/api/workspace_boot"],
+      "frontend": ["openCrmInmobiliario", "renderCompanyCards", "coreCards.addEventListener", "routeByUrlState"],
+      "tests": ["tests/test_frontend_smoke.py", "tests/test_agenda_frontend_regressions.py"],
+      "checks": ["frontend_home_access_audit", "production_auth_drift", "production_browser_module_smoke"]
+    },
+    {
+      "id": "agenda_workspace_visibility",
+      "module": "agenda",
+      "criticality": "critical",
+      "description": "Visibilidad, edicion y persistencia de agenda/citas por workspace y servicio.",
+      "expected_outcomes": [
+        "Admin y no admin del mismo workspace deben ver el historico permitido.",
+        "La edicion de una cita no debe heredar datos residuales de otra.",
+        "Una agenda con historico no puede pasar a vacia sin alerta."
+      ],
+      "endpoints": ["/api/acciones"],
+      "frontend": ["openCrmAgendaEditModal", "loadAcciones", "renderAgenda"],
+      "tests": ["tests/test_agenda_frontend_regressions.py", "tests/test_acciones_service_scope.py"],
+      "checks": ["production_api_monitor", "production_module_smoke", "production_system_matrix", "production_browser_module_smoke"]
+    },
+    {
+      "id": "gestoria_rentas_import",
+      "module": "gestoria",
+      "criticality": "critical",
+      "description": "Carga de rentas, asignacion a clientes y reflejo posterior en vistas y obligaciones.",
+      "expected_outcomes": [
+        "Un fichero valido debe procesarse sin 500.",
+        "La importacion debe crear o actualizar registros esperados.",
+        "Los totales de rentas importadas deben cuadrar con el resumen del proceso."
+      ],
+      "endpoints": ["/api/gestoria_import_rentas", "/api/gestoria_dashboard", "/api/gestoria_modelos"],
+      "frontend": ["gestoriaImportLotesTable", "gestoriaRentaTable", "renderGestoriaDashboard"],
+      "tests": ["tests/test_ollama_automation_tools.py"],
+      "checks": ["production_module_smoke", "production_browser_module_smoke", "system_business_reconciliation"]
+    },
+    {
+      "id": "gestoria_facturas_accounting",
+      "module": "gestoria",
+      "criticality": "critical",
+      "description": "Subida de facturas y reflejo contable posterior en asientos, colas y listados del cliente.",
+      "expected_outcomes": [
+        "Una factura subida debe quedar visible en la vista documental.",
+        "Si queda contabilizada, debe existir reflejo en colas o asientos esperados.",
+        "Los listados del cliente y la contabilidad no pueden divergir de forma silenciosa."
+      ],
+      "endpoints": ["/api/gestoria_docs", "/api/gestoria_contabilidad", "/api/gestoria_conta_queue"],
+      "frontend": ["gestoriaDocsTable", "gestoriaContabilidadTable", "gestoriaContaQueueTable"],
+      "tests": ["tests/test_ollama_automation_tools.py"],
+      "checks": ["production_module_smoke", "system_business_reconciliation"]
+    },
+    {
+      "id": "seguros_dashboard_consistency",
+      "module": "seguros",
+      "criticality": "critical",
+      "description": "Consistencia entre KPIs de seguros, polizas, renovaciones, recibos y vencimientos.",
+      "expected_outcomes": [
+        "El dashboard no debe calcular totales inconsistentes con el detalle.",
+        "Los vencimientos deben reflejarse en renovaciones y recibos.",
+        "Las vistas de detalle deben cuadrar con los KPIs agregados."
+      ],
+      "endpoints": ["/api/seguros_dashboard", "/api/seguros_kpis", "/api/seguros_recibos_summary"],
+      "frontend": ["segurosKpis", "renderSegurosDashboard", "segurosRenovacionesTable"],
+      "tests": ["tests/test_seguros_e2e_playwright.py"],
+      "checks": ["production_module_smoke", "production_browser_module_smoke", "system_business_reconciliation"]
+    },
+    {
+      "id": "financiaciones_pipeline_totals",
+      "module": "financiacion",
+      "criticality": "high",
+      "description": "Consistencia entre dashboard de financiaciones, expedientes e importes/comisiones.",
+      "expected_outcomes": [
+        "Las comisiones del dashboard deben cuadrar con expedientes cerrados.",
+        "El pipeline no debe perder expedientes por cambio de tab o scoping."
+      ],
+      "endpoints": ["/api/workspace_fin_overview", "/api/hipotecas"],
+      "frontend": ["finDashboardKpis", "finCrmTable"],
+      "tests": ["tests/test_ollama_automation_tools.py"],
+      "checks": ["production_module_smoke", "production_browser_module_smoke", "system_business_reconciliation"]
+    },
+    {
+      "id": "fincas_communities_budget_flow",
+      "module": "fincas",
+      "criticality": "high",
+      "description": "Comunidades, presupuestos, incidencias y conversiones a operativa de fincas.",
+      "expected_outcomes": [
+        "Las comunidades visibles deben pertenecer al workspace.",
+        "Los presupuestos deben poder abrir la comunidad asociada.",
+        "La vista de comunidades no puede quedar vacia sin trazabilidad."
+      ],
+      "endpoints": ["/api/workspace_fincas_comunidades", "/api/workspace_fincas_convert_presupuesto"],
+      "frontend": ["workspaceFincasCommunityList", "workspaceFincasBudgetsTable"],
+      "tests": ["tests/test_ollama_automation_tools.py"],
+      "checks": ["production_module_smoke", "production_browser_module_smoke"]
+    },
+    {
+      "id": "rrhh_people_documents_time",
+      "module": "rrhh",
+      "criticality": "high",
+      "description": "Plantilla, documentos, ausencias y registro horario por persona y workspace.",
+      "expected_outcomes": [
+        "La vista RRHH debe abrir y cargar roster/documentos o self-scope permitido.",
+        "No debe haber divergencia silenciosa entre persona, usuario y registro horario."
+      ],
+      "endpoints": ["/api/workspace_registro_personal", "/api/workspace_rrhh_profile", "/api/workspace_time_entries"],
+      "frontend": ["workspaceRrhhHub", "renderWorkspaceRrhhHub"],
+      "tests": ["tests/test_ollama_automation_tools.py"],
+      "checks": ["production_module_smoke", "production_browser_module_smoke", "production_system_matrix"]
+    }
+  ]
+}

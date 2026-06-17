@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "seguros_dashboard_matches_detail",
+      "module": "seguros",
+      "severity": "critical",
+      "description": "Los KPIs agregados de seguros deben cuadrar con el detalle real de polizas/recibos relevantes."
+    },
+    {
+      "id": "gestoria_factura_requires_accounting_trace",
+      "module": "gestoria",
+      "severity": "critical",
+      "description": "Una factura subida y contabilizada debe tener reflejo verificable en colas o asientos relacionados."
+    },
+    {
+      "id": "rentas_import_summary_matches_created_rows",
+      "module": "gestoria",
+      "severity": "critical",
+      "description": "El resumen de importacion de rentas debe cuadrar con los registros creados o actualizados."
+    },
+    {
+      "id": "agenda_history_cannot_drop_silently",
+      "module": "agenda",
+      "severity": "critical",
+      "description": "Una agenda con historico no puede reducirse bruscamente sin disparar alerta."
+    },
+    {
+      "id": "fin_dashboard_matches_closed_cases",
+      "module": "financiacion",
+      "severity": "high",
+      "description": "Las comisiones e importes del dashboard de financiaciones deben cuadrar con los expedientes cerrados."
+    }
+  ]
+}

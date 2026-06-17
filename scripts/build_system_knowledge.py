@@ -19,6 +19,11 @@ EXPECTED_BEHAVIORS_JSON = DOCS_DIR / "expected_behaviors.json"
 INCIDENTS_JSONL = DOCS_DIR / "incidents.jsonl"
 REPAIR_PLAYBOOKS_JSON = DOCS_DIR / "repair_playbooks.json"
 SECURITY_INVARIANTS_JSON = DOCS_DIR / "security_invariants.json"
+PROCESS_CATALOG_JSON = DOCS_DIR / "process_catalog.json"
+BUSINESS_RULES_JSON = DOCS_DIR / "business_rules.json"
+SYSTEM_INVARIANTS_JSON = DOCS_DIR / "system_invariants.json"
+CHANGE_IMPACT_MAP_JSON = DOCS_DIR / "change_impact_map.json"
+RECONCILIATION_CHECKS_JSON = DOCS_DIR / "reconciliation_checks.json"
 
 
 MODULE_RULES = [
@@ -200,6 +205,11 @@ def build_knowledge() -> dict:
     incidents = _load_jsonl(INCIDENTS_JSONL)
     repair_playbooks = _load_json(REPAIR_PLAYBOOKS_JSON)
     security_invariants = _load_json(SECURITY_INVARIANTS_JSON)
+    process_catalog = _load_json(PROCESS_CATALOG_JSON)
+    business_rules = _load_json(BUSINESS_RULES_JSON)
+    system_invariants = _load_json(SYSTEM_INVARIANTS_JSON)
+    change_impact_map = _load_json(CHANGE_IMPACT_MAP_JSON)
+    reconciliation_checks = _load_json(RECONCILIATION_CHECKS_JSON)
     return {
         "kind": "modernia_system_knowledge",
         "generated_at": _utc_now(),
@@ -222,6 +232,16 @@ def build_knowledge() -> dict:
             "recent_incidents": incidents,
             "repair_playbooks": repair_playbooks.get("playbooks") or [],
             "security_invariants": security_invariants.get("invariants") or [],
+            "process_catalog_path": str(PROCESS_CATALOG_JSON.relative_to(ROOT)),
+            "business_rules_path": str(BUSINESS_RULES_JSON.relative_to(ROOT)),
+            "system_invariants_path": str(SYSTEM_INVARIANTS_JSON.relative_to(ROOT)),
+            "change_impact_map_path": str(CHANGE_IMPACT_MAP_JSON.relative_to(ROOT)),
+            "reconciliation_checks_path": str(RECONCILIATION_CHECKS_JSON.relative_to(ROOT)),
+            "process_catalog": process_catalog.get("processes") or [],
+            "business_rules": business_rules.get("rules") or [],
+            "system_invariants_business": system_invariants.get("global_invariants") or [],
+            "change_impact_map": change_impact_map.get("rules") or [],
+            "reconciliation_checks": reconciliation_checks.get("checks") or [],
         },
         "frontend_api_map": frontend_api_map,
         "modules": {

@@ -1,18 +1,18 @@
 {
   "kind": "modernia_system_knowledge",
-  "generated_at": "2026-06-17T13:18:17+00:00",
+  "generated_at": "2026-06-17T15:34:59+00:00",
   "git": {
     "branch": "main",
-    "commit": "e8ad82ac10885607e0554fdfe58dc4973a6ecc8d",
+    "commit": "acda29ee144063051db5d2fcd1ac53edf13ab063",
     "recent_commits": [
+      "acda29e Add browser smoke and graded quarantine",
+      "a66f000 Add audit identity policy and auto quarantine",
+      "ba8ea30 Add per-module volume thresholds",
+      "d0083cf Add module smoke and volume drop alerts",
+      "a32a321 Add production security posture audit",
       "e8ad82a Expand Ollama operational playbooks by module",
       "ab41b35 Add Ollama operational memory packs",
-      "cbf0a13 Add production auth drift audit",
-      "350d26f Fix admin user lookup password scheme detection",
-      "3c669aa Guard Render SQLite syncs in Postgres mode",
-      "050757b Restore legacy superadmin fallback without allowlist",
-      "27d534e Route admin company cards into workspace CRM access",
-      "24a9568 Align admin-wide home routing with CRM access"
+      "cbf0a13 Add production auth drift audit"
     ]
   },
   "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
@@ -431,74 +431,532 @@
         "severity": "critical",
         "rule": "Los syncs legacy a SQLite deben bloquearse si el sistema esta en modo Postgres."
       }
+    ],
+    "process_catalog_path": "docs/process_catalog.json",
+    "business_rules_path": "docs/business_rules.json",
+    "system_invariants_path": "docs/system_invariants.json",
+    "change_impact_map_path": "docs/change_impact_map.json",
+    "reconciliation_checks_path": "docs/reconciliation_checks.json",
+    "process_catalog": [
+      {
+        "id": "auth_login_workspace_access",
+        "module": "core",
+        "criticality": "critical",
+        "description": "Login, resolucion de workspaces visibles y entrada a la vista tenant o CRM correspondiente.",
+        "expected_outcomes": [
+          "Un login valido debe desbloquear la sesion.",
+          "El usuario debe ver al menos un workspace si tiene memberships activas.",
+          "Si una card CRM es visible, debe navegar a una vista operativa real."
+        ],
+        "endpoints": [
+          "/api/login",
+          "/api/workspaces",
+          "/api/workspace_detail",
+          "/api/workspace_boot"
+        ],
+        "frontend": [
+          "openCrmInmobiliario",
+          "renderCompanyCards",
+          "coreCards.addEventListener",
+          "routeByUrlState"
+        ],
+        "tests": [
+          "tests/test_frontend_smoke.py",
+          "tests/test_agenda_frontend_regressions.py"
+        ],
+        "checks": [
+          "frontend_home_access_audit",
+          "production_auth_drift",
+          "production_browser_module_smoke"
+        ]
+      },
+      {
+        "id": "agenda_workspace_visibility",
+        "module": "agenda",
+        "criticality": "critical",
+        "description": "Visibilidad, edicion y persistencia de agenda/citas por workspace y servicio.",
+        "expected_outcomes": [
+          "Admin y no admin del mismo workspace deben ver el historico permitido.",
+          "La edicion de una cita no debe heredar datos residuales de otra.",
+          "Una agenda con historico no puede pasar a vacia sin alerta."
+        ],
+        "endpoints": [
+          "/api/acciones"
+        ],
+        "frontend": [
+          "openCrmAgendaEditModal",
+          "loadAcciones",
+          "renderAgenda"
+        ],
+        "tests": [
+          "tests/test_agenda_frontend_regressions.py",
+          "tests/test_acciones_service_scope.py"
+        ],
+        "checks": [
+          "production_api_monitor",
+          "production_module_smoke",
+          "production_system_matrix",
+          "production_browser_module_smoke"
+        ]
+      },
+      {
+        "id": "gestoria_rentas_import",
+        "module": "gestoria",
+        "criticality": "critical",
+        "description": "Carga de rentas, asignacion a clientes y reflejo posterior en vistas y obligaciones.",
+        "expected_outcomes": [
+          "Un fichero valido debe procesarse sin 500.",
+          "La importacion debe crear o actualizar registros esperados.",
+          "Los totales de rentas importadas deben cuadrar con el resumen del proceso."
+        ],
+        "endpoints": [
+          "/api/gestoria_import_rentas",
+          "/api/gestoria_dashboard",
+          "/api/gestoria_modelos"
+        ],
+        "frontend": [
+          "gestoriaImportLotesTable",
+          "gestoriaRentaTable",
+          "renderGestoriaDashboard"
+        ],
+        "tests": [
+          "tests/test_ollama_automation_tools.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke",
+          "system_business_reconciliation"
+        ]
+      },
+      {
+        "id": "gestoria_facturas_accounting",
+        "module": "gestoria",
+        "criticality": "critical",
+        "description": "Subida de facturas y reflejo contable posterior en asientos, colas y listados del cliente.",
+        "expected_outcomes": [
+          "Una factura subida debe quedar visible en la vista documental.",
+          "Si queda contabilizada, debe existir reflejo en colas o asientos esperados.",
+          "Los listados del cliente y la contabilidad no pueden divergir de forma silenciosa."
+        ],
+        "endpoints": [
+          "/api/gestoria_docs",
+          "/api/gestoria_contabilidad",
+          "/api/gestoria_conta_queue"
+        ],
+        "frontend": [
+          "gestoriaDocsTable",
+          "gestoriaContabilidadTable",
+          "gestoriaContaQueueTable"
+        ],
+        "tests": [
+          "tests/test_ollama_automation_tools.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "system_business_reconciliation"
+        ]
+      },
+      {
+        "id": "seguros_dashboard_consistency",
+        "module": "seguros",
+        "criticality": "critical",
+        "description": "Consistencia entre KPIs de seguros, polizas, renovaciones, recibos y vencimientos.",
+        "expected_outcomes": [
+          "El dashboard no debe calcular totales inconsistentes con el detalle.",
+          "Los vencimientos deben reflejarse en renovaciones y recibos.",
+          "Las vistas de detalle deben cuadrar con los KPIs agregados."
+        ],
+        "endpoints": [
+          "/api/seguros_dashboard",
+          "/api/seguros_kpis",
+          "/api/seguros_recibos_summary"
+        ],
+        "frontend": [
+          "segurosKpis",
+          "renderSegurosDashboard",
+          "segurosRenovacionesTable"
+        ],
+        "tests": [
+          "tests/test_seguros_e2e_playwright.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke",
+          "system_business_reconciliation"
+        ]
+      },
+      {
+        "id": "financiaciones_pipeline_totals",
+        "module": "financiacion",
+        "criticality": "high",
+        "description": "Consistencia entre dashboard de financiaciones, expedientes e importes/comisiones.",
+        "expected_outcomes": [
+          "Las comisiones del dashboard deben cuadrar con expedientes cerrados.",
+          "El pipeline no debe perder expedientes por cambio de tab o scoping."
+        ],
+        "endpoints": [
+          "/api/workspace_fin_overview",
+          "/api/hipotecas"
+        ],
+        "frontend": [
+          "finDashboardKpis",
+          "finCrmTable"
+        ],
+        "tests": [
+          "tests/test_ollama_automation_tools.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke",
+          "system_business_reconciliation"
+        ]
+      },
+      {
+        "id": "fincas_communities_budget_flow",
+        "module": "fincas",
+        "criticality": "high",
+        "description": "Comunidades, presupuestos, incidencias y conversiones a operativa de fincas.",
+        "expected_outcomes": [
+          "Las comunidades visibles deben pertenecer al workspace.",
+          "Los presupuestos deben poder abrir la comunidad asociada.",
+          "La vista de comunidades no puede quedar vacia sin trazabilidad."
+        ],
+        "endpoints": [
+          "/api/workspace_fincas_comunidades",
+          "/api/workspace_fincas_convert_presupuesto"
+        ],
+        "frontend": [
+          "workspaceFincasCommunityList",
+          "workspaceFincasBudgetsTable"
+        ],
+        "tests": [
+          "tests/test_ollama_automation_tools.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke"
+        ]
+      },
+      {
+        "id": "rrhh_people_documents_time",
+        "module": "rrhh",
+        "criticality": "high",
+        "description": "Plantilla, documentos, ausencias y registro horario por persona y workspace.",
+        "expected_outcomes": [
+          "La vista RRHH debe abrir y cargar roster/documentos o self-scope permitido.",
+          "No debe haber divergencia silenciosa entre persona, usuario y registro horario."
+        ],
+        "endpoints": [
+          "/api/workspace_registro_personal",
+          "/api/workspace_rrhh_profile",
+          "/api/workspace_time_entries"
+        ],
+        "frontend": [
+          "workspaceRrhhHub",
+          "renderWorkspaceRrhhHub"
+        ],
+        "tests": [
+          "tests/test_ollama_automation_tools.py"
+        ],
+        "checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke",
+          "production_system_matrix"
+        ]
+      }
+    ],
+    "business_rules": [
+      {
+        "id": "seguros_dashboard_matches_detail",
+        "module": "seguros",
+        "severity": "critical",
+        "description": "Los KPIs agregados de seguros deben cuadrar con el detalle real de polizas/recibos relevantes."
+      },
+      {
+        "id": "gestoria_factura_requires_accounting_trace",
+        "module": "gestoria",
+        "severity": "critical",
+        "description": "Una factura subida y contabilizada debe tener reflejo verificable en colas o asientos relacionados."
+      },
+      {
+        "id": "rentas_import_summary_matches_created_rows",
+        "module": "gestoria",
+        "severity": "critical",
+        "description": "El resumen de importacion de rentas debe cuadrar con los registros creados o actualizados."
+      },
+      {
+        "id": "agenda_history_cannot_drop_silently",
+        "module": "agenda",
+        "severity": "critical",
+        "description": "Una agenda con historico no puede reducirse bruscamente sin disparar alerta."
+      },
+      {
+        "id": "fin_dashboard_matches_closed_cases",
+        "module": "financiacion",
+        "severity": "high",
+        "description": "Las comisiones e importes del dashboard de financiaciones deben cuadrar con los expedientes cerrados."
+      }
+    ],
+    "system_invariants_business": [
+      {
+        "id": "visible_view_must_be_operable",
+        "severity": "critical",
+        "description": "Si una vista o card es visible para un usuario, debe poder abrirse y responder."
+      },
+      {
+        "id": "workspace_data_must_not_cross_tenants",
+        "severity": "critical",
+        "description": "Los datos de un workspace no deben contaminar ni mezclarse con otro."
+      },
+      {
+        "id": "historical_data_drop_requires_alert",
+        "severity": "critical",
+        "description": "Una caida brusca de historicos o volumen de negocio debe generar alerta."
+      },
+      {
+        "id": "dashboard_totals_must_reconcile",
+        "severity": "critical",
+        "description": "Los dashboards de negocio deben cuadrar con sus tablas base o detalle equivalente."
+      },
+      {
+        "id": "successful_imports_must_leave_trace",
+        "severity": "critical",
+        "description": "Todo import exitoso debe dejar trazabilidad verificable en registros o colas derivadas."
+      }
+    ],
+    "change_impact_map": [
+      {
+        "match_any": [
+          "web/app.js",
+          "web/index.html"
+        ],
+        "processes": [
+          "auth_login_workspace_access",
+          "agenda_workspace_visibility"
+        ],
+        "risk": "high",
+        "required_checks": [
+          "frontend_home_access_audit",
+          "production_browser_module_smoke"
+        ],
+        "required_tests": [
+          "tests/test_frontend_smoke.py",
+          "tests/test_agenda_frontend_regressions.py"
+        ]
+      },
+      {
+        "match_any": [
+          "web/server.py",
+          "web/db_backend.py",
+          "schema.sql"
+        ],
+        "processes": [
+          "auth_login_workspace_access",
+          "agenda_workspace_visibility",
+          "gestoria_facturas_accounting",
+          "seguros_dashboard_consistency"
+        ],
+        "risk": "critical",
+        "required_checks": [
+          "production_auth_drift",
+          "production_system_matrix",
+          "system_business_reconciliation"
+        ],
+        "required_tests": [
+          "tests/test_ollama_automation_tools.py"
+        ]
+      },
+      {
+        "match_any": [
+          "gestoria",
+          "renta",
+          "factura",
+          "modelo",
+          "asiento"
+        ],
+        "processes": [
+          "gestoria_rentas_import",
+          "gestoria_facturas_accounting"
+        ],
+        "risk": "critical",
+        "required_checks": [
+          "production_module_smoke",
+          "system_business_reconciliation"
+        ],
+        "required_tests": [
+          "tests/test_ollama_automation_tools.py"
+        ]
+      },
+      {
+        "match_any": [
+          "seguro",
+          "poliza",
+          "recibo",
+          "siniestro"
+        ],
+        "processes": [
+          "seguros_dashboard_consistency"
+        ],
+        "risk": "critical",
+        "required_checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke",
+          "system_business_reconciliation"
+        ],
+        "required_tests": [
+          "tests/test_seguros_e2e_playwright.py"
+        ]
+      },
+      {
+        "match_any": [
+          "hipoteca",
+          "fin_",
+          "financi"
+        ],
+        "processes": [
+          "financiaciones_pipeline_totals"
+        ],
+        "risk": "high",
+        "required_checks": [
+          "production_module_smoke",
+          "system_business_reconciliation"
+        ],
+        "required_tests": [
+          "tests/test_ollama_automation_tools.py"
+        ]
+      },
+      {
+        "match_any": [
+          "fincas",
+          "comunidad",
+          "vecino",
+          "junta"
+        ],
+        "processes": [
+          "fincas_communities_budget_flow"
+        ],
+        "risk": "high",
+        "required_checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke"
+        ],
+        "required_tests": [
+          "tests/test_ollama_automation_tools.py"
+        ]
+      },
+      {
+        "match_any": [
+          "rrhh",
+          "registro_horario",
+          "nomina",
+          "personal"
+        ],
+        "processes": [
+          "rrhh_people_documents_time"
+        ],
+        "risk": "high",
+        "required_checks": [
+          "production_module_smoke",
+          "production_browser_module_smoke"
+        ],
+        "required_tests": [
+          "tests/test_ollama_automation_tools.py"
+        ]
+      }
+    ],
+    "reconciliation_checks": [
+      {
+        "id": "seguros_dashboard_consistency",
+        "module": "seguros",
+        "severity": "critical",
+        "description": "Contrastar KPIs de seguros con el detalle agregado esperado."
+      },
+      {
+        "id": "gestoria_facturas_accounting",
+        "module": "gestoria",
+        "severity": "critical",
+        "description": "Contrastar facturas documentales con reflejo contable o colas derivadas."
+      },
+      {
+        "id": "gestoria_rentas_import",
+        "module": "gestoria",
+        "severity": "critical",
+        "description": "Contrastar volumen importado de rentas con su persistencia posterior."
+      },
+      {
+        "id": "fin_dashboard_consistency",
+        "module": "financiacion",
+        "severity": "high",
+        "description": "Contrastar totales del dashboard financiero con operaciones cerradas."
+      }
     ]
   },
   "frontend_api_map": {
     "/api/acciones": [
-      "line:63038",
-      "line:66469",
-      "line:74904",
-      "line:75430",
-      "line:82431",
-      "line:82622",
-      "line:82884",
-      "line:82916",
-      "line:83567",
-      "line:83651",
-      "line:83677"
+      "line:63101",
+      "line:66532",
+      "line:74967",
+      "line:75493",
+      "line:82494",
+      "line:82685",
+      "line:82947",
+      "line:82979",
+      "line:83630",
+      "line:83714",
+      "line:83740"
     ],
     "/api/acciones_delete": [
-      "line:57480"
+      "line:57543"
     ],
     "/api/acciones_update": [
       "line:5771",
-      "line:53196",
+      "line:53259",
       "submitClosePayload",
-      "line:66356",
-      "line:75430"
+      "line:66419",
+      "line:75493"
     ],
     "/api/ai_fin_copilot": [
-      "line:81596"
+      "line:81659"
     ],
     "/api/ai_inmo_encargo_copilot": [
-      "line:33650",
-      "line:33675"
+      "line:33713",
+      "line:33738"
     ],
     "/api/ai_seguros_copilot": [
-      "line:75952"
+      "line:76015"
     ],
     "/api/captacion_convert": [
-      "line:47032",
-      "line:47113"
+      "line:47095",
+      "line:47176"
     ],
     "/api/captacion_update": [
-      "line:33989",
-      "line:34023",
-      "line:56145"
+      "line:34052",
+      "line:34086",
+      "line:56208"
     ],
     "/api/captaciones": [
-      "line:25638",
-      "line:84039"
+      "line:25701",
+      "line:84102"
     ],
     "/api/captaciones_update": [
-      "line:50007"
+      "line:50070"
     ],
     "/api/catalogo_poblaciones?limit=50000": [
-      "line:85366"
+      "line:85429"
     ],
     "/api/cliente_empresa_update": [
-      "line:34197"
+      "line:34260"
     ],
     "/api/cliente_gestoria_update": [
       "line:255",
-      "line:68151",
-      "line:68376",
-      "line:81706",
-      "line:81857",
+      "line:68214",
+      "line:68439",
+      "line:81769",
+      "line:81920",
       "keepFlag"
     ],
     "/api/cliente_profesional": [
-      "line:81639"
+      "line:81702"
     ],
     "/api/cliente_profesional_delete": [
       "deleteClienteProfesional"
@@ -507,35 +965,35 @@
       "saveClienteProfesionalField"
     ],
     "/api/cliente_relaciones": [
-      "line:81200"
+      "line:81263"
     ],
     "/api/cliente_relaciones_delete": [
-      "line:45520"
+      "line:45583"
     ],
     "/api/cliente_update": [
-      "line:34081",
-      "line:34165"
+      "line:34144",
+      "line:34228"
     ],
     "/api/clientes": [
-      "line:25553",
-      "line:42847",
-      "line:64656",
-      "line:68347",
-      "line:84408",
-      "line:84616",
-      "line:85083"
+      "line:25616",
+      "line:42910",
+      "line:64719",
+      "line:68410",
+      "line:84471",
+      "line:84679",
+      "line:85146"
     ],
     "/api/clientes_link": [
-      "line:25582",
-      "line:42818",
-      "line:45709",
-      "line:64576",
-      "line:65182",
-      "line:68364",
-      "line:81142",
-      "line:84420",
-      "line:84714",
-      "line:85100"
+      "line:25645",
+      "line:42881",
+      "line:45772",
+      "line:64639",
+      "line:65245",
+      "line:68427",
+      "line:81205",
+      "line:84483",
+      "line:84777",
+      "line:85163"
     ],
     "/api/clientes_link_delete": [
       "deleteClienteEmpresaLink"
@@ -544,75 +1002,75 @@
       "loadClientesCardStats"
     ],
     "/api/compraventas": [
-      "line:84123"
+      "line:84186"
     ],
     "/api/compraventas_close": [
-      "line:84162"
+      "line:84225"
     ],
     "/api/copilot_web_ask": [
-      "line:74245"
+      "line:74308"
     ],
     "/api/copilot_web_fetch": [
-      "line:74245",
-      "line:74258"
+      "line:74308",
+      "line:74321"
     ],
     "/api/crm_": [
       "line:267"
     ],
     "/api/demandas": [
-      "line:82474",
-      "line:84189"
+      "line:82537",
+      "line:84252"
     ],
     "/api/demandas_update": [
-      "line:52426"
+      "line:52489"
     ],
     "/api/empresa_delete": [
-      "line:11135"
+      "line:11198"
     ],
     "/api/empresa_update": [
-      "line:78220"
+      "line:78283"
     ],
     "/api/empresas": [
-      "line:10609",
-      "line:10905",
-      "line:24445",
-      "line:25110",
-      "line:26635",
+      "line:10672",
+      "line:10968",
+      "line:24508",
+      "line:25173",
+      "line:26698",
       "refreshClientesAltaSelects",
       "linkClienteSegurosService",
-      "line:73028",
-      "line:78304"
+      "line:73091",
+      "line:78367"
     ],
     "/api/fin_": [
       "line:263"
     ],
     "/api/fin_asesoramiento_ocr": [
-      "line:81275"
+      "line:81338"
     ],
     "/api/fin_asesoramiento_ocr_auto": [
-      "line:81339"
+      "line:81402"
     ],
     "/api/fin_asesoramiento_ocr_guided": [
-      "line:81412"
+      "line:81475"
     ],
     "/api/fin_asesoramientos": [
-      "line:70277",
-      "line:81470"
+      "line:70340",
+      "line:81533"
     ],
     "/api/fin_asesoramientos_convert": [
-      "line:65675",
-      "line:81525"
+      "line:65738",
+      "line:81588"
     ],
     "/api/fin_asesoramientos_update": [
-      "line:30223",
-      "line:70277",
-      "line:81470"
+      "line:30286",
+      "line:70340",
+      "line:81533"
     ],
     "/api/fin_checklist_generate": [
-      "line:81559"
+      "line:81622"
     ],
     "/api/fin_checklist_update": [
-      "line:65520"
+      "line:65583"
     ],
     "/api/fin_inmobiliarias": [
       "loadFinInmobiliarias"
@@ -621,34 +1079,34 @@
       "line:263"
     ],
     "/api/fiscal_scenario_upsert": [
-      "line:77799"
+      "line:77862"
     ],
     "/api/fiscal_scenarios_list": [
       "loadSlotFromDb"
     ],
     "/api/fiscal_venta_pdf": [
-      "line:77299"
+      "line:77362"
     ],
     "/api/gestoria": [
-      "line:82795",
-      "line:84470"
+      "line:82858",
+      "line:84533"
     ],
     "/api/gestoria_": [
       "line:255"
     ],
     "/api/gestoria_conta_config": [
-      "line:83018"
+      "line:83081"
     ],
     "/api/gestoria_conta_task_update": [
       "updateGestoriaContaTask"
     ],
     "/api/gestoria_conta_tasks_bulk": [
-      "line:36881"
+      "line:36944"
     ],
     "/api/gestoria_contabilidad": [
-      "line:76400",
-      "line:82961",
-      "line:85004"
+      "line:76463",
+      "line:83024",
+      "line:85067"
     ],
     "/api/gestoria_contabilidad_delete": [
       "deleteGestoriaContabilidad"
@@ -657,13 +1115,13 @@
       "saveGestoriaContabilidadField"
     ],
     "/api/gestoria_docs": [
-      "line:82052",
-      "line:82124",
-      "line:82206",
-      "line:82386"
+      "line:82115",
+      "line:82187",
+      "line:82269",
+      "line:82449"
     ],
     "/api/gestoria_docs_delete": [
-      "line:27896",
+      "line:27959",
       "deleteGestoriaDoc"
     ],
     "/api/gestoria_docs_update": [
@@ -671,19 +1129,19 @@
       "saveGestoriaDocField"
     ],
     "/api/gestoria_factura_ocr": [
-      "line:69713"
+      "line:69776"
     ],
     "/api/gestoria_import_aplicar": [
-      "line:83153"
+      "line:83216"
     ],
     "/api/gestoria_import_documento_resolver": [
-      "line:83231"
+      "line:83294"
     ],
     "/api/gestoria_import_upload": [
-      "line:83099"
+      "line:83162"
     ],
     "/api/gestoria_modelos": [
-      "line:81752"
+      "line:81815"
     ],
     "/api/gestoria_modelos_delete": [
       "deleteGestoriaModelo"
@@ -698,8 +1156,8 @@
       "persistGestoriaTrabajoTipo"
     ],
     "/api/gestoria_trabajos": [
-      "line:66797",
-      "line:82849"
+      "line:66860",
+      "line:82912"
     ],
     "/api/gestoria_trabajos_delete": [
       "deleteGestoriaTrabajo"
@@ -709,10 +1167,10 @@
     ],
     "/api/gestoria_update": [
       "line:255",
-      "line:46028",
-      "line:46031",
-      "line:58561",
-      "line:58579"
+      "line:46091",
+      "line:46094",
+      "line:58624",
+      "line:58642"
     ],
     "/api/health": [
       "probeDbHealth",
@@ -720,26 +1178,26 @@
     ],
     "/api/hipotecas": [
       "line:263",
-      "line:42420",
-      "line:85237"
+      "line:42483",
+      "line:85300"
     ],
     "/api/hipotecas/firmar": [
-      "line:46197"
+      "line:46260"
     ],
     "/api/hipotecas_delete": [
       "deleteHipoteca"
     ],
     "/api/hipotecas_update": [
-      "line:42438",
-      "line:42899",
-      "line:46029",
-      "line:65763"
+      "line:42501",
+      "line:42962",
+      "line:46092",
+      "line:65826"
     ],
     "/api/home_time_status": [
-      "line:19856",
+      "line:19919",
       "openHomeTimePunchModal",
       "refresh",
-      "line:73031"
+      "line:73094"
     ],
     "/api/iivtnu_cp_lookup": [
       "line:7600"
@@ -751,30 +1209,30 @@
       "line:7678"
     ],
     "/api/iivtnu_pdf_parse": [
-      "line:77366"
+      "line:77429"
     ],
     "/api/iivtnu_simulate": [
-      "line:77146",
-      "line:77275"
+      "line:77209",
+      "line:77338"
     ],
     "/api/inmo_": [
       "line:267"
     ],
     "/api/inmueble_anuncio_generate": [
-      "line:33919"
+      "line:33982"
     ],
     "/api/inmueble_archive_pending_actions": [
-      "line:56183"
+      "line:56246"
     ],
     "/api/inmueble_catastro_lookup": [
-      "line:35702",
-      "line:35765"
+      "line:35765",
+      "line:35828"
     ],
     "/api/inmueble_catastro_sync": [
-      "line:35839"
+      "line:35902"
     ],
     "/api/inmueble_checklist_generate": [
-      "line:57139"
+      "line:57202"
     ],
     "/api/inmueble_checklist_update": [
       "updateInmuebleChecklist"
@@ -783,35 +1241,35 @@
       "upsertInmuebleComprador"
     ],
     "/api/inmueble_delete": [
-      "line:80218"
+      "line:80281"
     ],
     "/api/inmueble_docs": [
-      "line:82693"
+      "line:82756"
     ],
     "/api/inmueble_encargo_close": [
-      "line:56304"
+      "line:56367"
     ],
     "/api/inmueble_guided_prepare": [
-      "line:80641"
+      "line:80704"
     ],
     "/api/inmueble_propietario_create": [
-      "line:38448"
+      "line:38511"
     ],
     "/api/inmueble_propietarios_update": [
-      "line:38393",
-      "line:55787"
+      "line:38456",
+      "line:55850"
     ],
     "/api/inmueble_renovar": [
-      "line:83489"
+      "line:83552"
     ],
     "/api/inmueble_servicios_update": [
-      "line:55640"
+      "line:55703"
     ],
     "/api/inmueble_signature_request": [
-      "line:56856"
+      "line:56919"
     ],
     "/api/inmueble_signature_sign": [
-      "line:28920"
+      "line:28983"
     ],
     "/api/inmueble_update": [
       "saveInmuebleFields"
@@ -820,85 +1278,85 @@
       "line:267"
     ],
     "/api/irpf_alquiler_simulate": [
-      "line:78095"
+      "line:78158"
     ],
     "/api/irpf_ganancia_compare_pdf": [
-      "line:77846"
+      "line:77909"
     ],
     "/api/irpf_ganancia_pdf": [
       "line:8908",
-      "line:78062"
+      "line:78125"
     ],
     "/api/irpf_ganancia_simulate": [
       "line:8893",
       "line:8915",
-      "line:77274",
-      "line:77661",
-      "line:78076"
+      "line:77337",
+      "line:77724",
+      "line:78139"
     ],
     "/api/legal_copilot": [
-      "line:74204"
+      "line:74267"
     ],
     "/api/legal_copilot_catalog": [
       "loadLegalCatalog"
     ],
     "/api/legal_dgt_lookup": [
-      "line:74441",
-      "line:77237"
+      "line:74504",
+      "line:77300"
     ],
     "/api/legal_library_import": [
       "area"
     ],
     "/api/legal_radar_digest": [
-      "line:74402"
+      "line:74465"
     ],
     "/api/legal_radar_items": [
-      "line:74329"
+      "line:74392"
     ],
     "/api/legal_radar_items_update": [
-      "line:74479"
+      "line:74542"
     ],
     "/api/legal_radar_scan": [
-      "line:74368"
+      "line:74431"
     ],
     "/api/me": [
       "api"
     ],
     "/api/movimientos": [
-      "line:83943",
-      "line:84287",
-      "line:84793"
+      "line:84006",
+      "line:84350",
+      "line:84856"
     ],
     "/api/portal_inmuebles?limit=120": [
-      "line:28748"
+      "line:28811"
     ],
     "/api/portal_lead": [
-      "line:28729"
+      "line:28792"
     ],
     "/api/portal_owner_access_create": [
-      "line:50963"
+      "line:51026"
     ],
     "/api/portal_publish_update": [
-      "line:50927"
+      "line:50990"
     ],
     "/api/renta_campaign_document": [
-      "line:68843"
+      "line:68906"
     ],
     "/api/renta_entry_ocr_reprocess": [
-      "line:68994"
+      "line:69057"
     ],
     "/api/renta_quick_attach": [
-      "line:68468"
+      "line:68531"
     ],
     "/api/renta_quick_note": [
-      "line:68627"
+      "line:68690"
     ],
     "/api/renta_quick_ocr": [
-      "line:68571",
-      "line:68585"
+      "line:68634",
+      "line:68648"
     ],
     "/api/resumen": [
-      "line:73030"
+      "line:73093"
     ],
     "/api/s3_multipart_abort": [
       "line:609"
@@ -916,7 +1374,7 @@
     ],
     "/api/s3_presign": [
       "line:646",
-      "line:68551"
+      "line:68614"
     ],
     "/api/s3_redirect?key=": [
       "line:919"
@@ -927,35 +1385,35 @@
     "/api/seguros": [
       "line:259",
       "line:1625",
-      "line:65165",
-      "line:84517"
+      "line:65228",
+      "line:84580"
     ],
     "/api/seguros_": [
       "line:259"
     ],
     "/api/seguros_cambio_compania": [
-      "line:71605"
+      "line:71668"
     ],
     "/api/seguros_campanas": [
       "loadSegurosCampanas",
-      "line:76118"
+      "line:76181"
     ],
     "/api/seguros_campanas_import_email": [
-      "line:76152"
+      "line:76215"
     ],
     "/api/seguros_checklist_generate": [
-      "line:75765"
+      "line:75828"
     ],
     "/api/seguros_checklist_update": [
-      "line:63317"
+      "line:63380"
     ],
     "/api/seguros_comisiones": [
       "refreshSegurosOcrComisionSuggestion",
       "loadSegurosComisiones",
-      "line:76200"
+      "line:76263"
     ],
     "/api/seguros_consentimientos_update": [
-      "line:62181"
+      "line:62244"
     ],
     "/api/seguros_delete": [
       "deleteSeguro"
@@ -963,18 +1421,18 @@
     "/api/seguros_enrich": [
       "line:1358",
       "line:1595",
-      "line:76773",
-      "line:76866",
-      "line:77109"
+      "line:76836",
+      "line:76929",
+      "line:77172"
     ],
     "/api/seguros_idd_update": [
-      "line:62177"
+      "line:62240"
     ],
     "/api/seguros_ipid_register": [
-      "line:75889"
+      "line:75952"
     ],
     "/api/seguros_movimientos": [
-      "line:76297"
+      "line:76360"
     ],
     "/api/seguros_ocr": [
       "runSegurosOcrDirectPayload"
@@ -983,174 +1441,174 @@
       "startSegurosOcrJob"
     ],
     "/api/seguros_ofertas": [
-      "line:76045"
+      "line:76108"
     ],
     "/api/seguros_poliza_accion": [
-      "line:63014",
-      "line:63227",
-      "line:63900",
-      "line:71587",
-      "line:71591",
-      "line:71595",
-      "line:75850"
+      "line:63077",
+      "line:63290",
+      "line:63963",
+      "line:71650",
+      "line:71654",
+      "line:71658",
+      "line:75913"
     ],
     "/api/seguros_preferencias": [
-      "line:76007"
+      "line:76070"
     ],
     "/api/seguros_recibos": [
-      "line:76243"
+      "line:76306"
     ],
     "/api/seguros_recibos_delete": [
-      "line:62830"
+      "line:62893"
     ],
     "/api/seguros_recibos_update": [
-      "line:62605",
-      "line:62629",
-      "line:62641",
-      "line:62670",
-      "line:62691",
-      "line:62780",
-      "line:62796",
-      "line:62814"
+      "line:62668",
+      "line:62692",
+      "line:62704",
+      "line:62733",
+      "line:62754",
+      "line:62843",
+      "line:62859",
+      "line:62877"
     ],
     "/api/seguros_reclamacion": [
-      "line:75923"
+      "line:75986"
     ],
     "/api/seguros_reclamacion_update": [
-      "line:62420"
+      "line:62483"
     ],
     "/api/seguros_referidos": [
       "loadSegurosReferidos",
-      "line:76087"
+      "line:76150"
     ],
     "/api/seguros_renovaciones_update": [
       "updateSegurosRenovacion"
     ],
     "/api/seguros_siniestros": [
-      "line:76330"
+      "line:76393"
     ],
     "/api/seguros_siniestros_delete": [
-      "line:62951"
+      "line:63014"
     ],
     "/api/seguros_siniestros_update": [
-      "line:62922",
-      "line:62934"
+      "line:62985",
+      "line:62997"
     ],
     "/api/seguros_update": [
       "line:259",
       "line:1364",
       "line:1611",
       "sendTableUpdate",
-      "line:63919",
-      "line:71585",
-      "line:71893",
-      "line:76742",
-      "line:76851",
-      "line:76876",
-      "line:77052"
+      "line:63982",
+      "line:71648",
+      "line:71956",
+      "line:76805",
+      "line:76914",
+      "line:76939",
+      "line:77115"
     ],
     "/api/seguros_version_snapshot": [
-      "line:76273"
+      "line:76336"
     ],
     "/api/system_audit_latest": [
-      "line:23918"
+      "line:23981"
     ],
     "/api/tablas": [
-      "line:73029"
+      "line:73092"
     ],
     "/api/usuarios": [
-      "line:16379",
-      "line:17192",
+      "line:16442",
+      "line:17255",
       "loadUsuarios",
-      "line:82261"
+      "line:82324"
     ],
     "/api/usuarios_delete": [
-      "line:15400",
-      "line:17271",
-      "line:37819"
+      "line:15463",
+      "line:17334",
+      "line:37882"
     ],
     "/api/usuarios_invitar": [
-      "line:16436",
-      "line:17239",
-      "line:37794"
+      "line:16499",
+      "line:17302",
+      "line:37857"
     ],
     "/api/usuarios_update": [
-      "line:16315",
-      "line:16462",
-      "line:16503",
-      "line:17192",
-      "line:37772"
+      "line:16378",
+      "line:16525",
+      "line:16566",
+      "line:17255",
+      "line:37835"
     ],
     "/api/visitas": [
-      "line:82513",
-      "line:84251"
+      "line:82576",
+      "line:84314"
     ],
     "/api/workspace_automatizaciones": [
-      "line:79955"
+      "line:80018"
     ],
     "/api/workspace_cobros": [
-      "line:79840"
+      "line:79903"
     ],
     "/api/workspace_company_create": [
-      "line:10669",
-      "line:10967"
+      "line:10732",
+      "line:11030"
     ],
     "/api/workspace_company_logo_upload": [
-      "line:78288"
+      "line:78351"
     ],
     "/api/workspace_company_update": [
-      "line:11127"
+      "line:11190"
     ],
     "/api/workspace_contrato_catalog": [
       "loadContractTemplates"
     ],
     "/api/workspace_contrato_copilot": [
-      "line:12411"
+      "line:12474"
     ],
     "/api/workspace_contratos": [
-      "line:12311",
-      "line:12350",
-      "line:18568",
-      "line:23112"
+      "line:12374",
+      "line:12413",
+      "line:18631",
+      "line:23175"
     ],
     "/api/workspace_customer_create": [
-      "line:78622"
+      "line:78685"
     ],
     "/api/workspace_delete": [
-      "line:78411",
-      "line:78420"
+      "line:78474",
+      "line:78483"
     ],
     "/api/workspace_document_assign": [
-      "line:23534"
+      "line:23597"
     ],
     "/api/workspace_empresa_link": [
-      "line:10641",
-      "line:10938"
+      "line:10704",
+      "line:11001"
     ],
     "/api/workspace_empresa_unlink": [
-      "line:11108"
+      "line:11171"
     ],
     "/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18125"
+      "line:18188"
     ],
     "/api/workspace_factura_pdf_public?token=${encodeURIComponent(token)}&id=${encodeURIComponent(row.id || ": [
-      "line:28483"
+      "line:28546"
     ],
     "/api/workspace_facturacion": [
-      "line:78736"
+      "line:78799"
     ],
     "/api/workspace_fincas_comunidad_delete": [
-      "line:22002"
+      "line:22065"
     ],
     "/api/workspace_fincas_comunidades": [
-      "line:20345",
-      "line:21132",
-      "line:80077"
+      "line:20408",
+      "line:21195",
+      "line:80140"
     ],
     "/api/workspace_fincas_contabilidad": [
-      "line:20828",
-      "line:21553",
-      "line:79285"
+      "line:20891",
+      "line:21616",
+      "line:79348"
     ],
     "/api/workspace_fincas_contabilidad_import": [
       "line:826"
@@ -1159,200 +1617,200 @@
       "line:800"
     ],
     "/api/workspace_fincas_convert_presupuesto": [
-      "line:23085"
+      "line:23148"
     ],
     "/api/workspace_fincas_documentos": [
-      "line:20980",
-      "line:21849"
+      "line:21043",
+      "line:21912"
     ],
     "/api/workspace_fincas_incidencias": [
-      "line:20647",
-      "line:21369",
-      "line:80110"
+      "line:20710",
+      "line:21432",
+      "line:80173"
     ],
     "/api/workspace_fincas_juntas": [
-      "line:80154"
+      "line:80217"
     ],
     "/api/workspace_fincas_proveedores": [
-      "line:20544",
-      "line:21247",
-      "line:80132"
+      "line:20607",
+      "line:21310",
+      "line:80195"
     ],
     "/api/workspace_fincas_vecinos": [
-      "line:20453",
-      "line:21722"
+      "line:20516",
+      "line:21785"
     ],
     "/api/workspace_inbox": [
-      "line:79754",
-      "line:79808"
+      "line:79817",
+      "line:79871"
     ],
     "/api/workspace_inbox_review": [
       "runInboxAction"
     ],
     "/api/workspace_kiosk_qr?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(String(employee?.id || ": [
-      "line:14147"
+      "line:14210"
     ],
     "/api/workspace_kiosk_token": [
-      "line:16541"
+      "line:16604"
     ],
     "/api/workspace_link_delete": [
-      "line:11621"
+      "line:11684"
     ],
     "/api/workspace_link_upsert": [
-      "line:11597"
+      "line:11660"
     ],
     "/api/workspace_member_delete": [
-      "line:11498",
-      "line:37968"
+      "line:11561",
+      "line:38031"
     ],
     "/api/workspace_member_set": [
-      "line:37992"
+      "line:38055"
     ],
     "/api/workspace_member_upsert": [
-      "line:11450",
-      "line:16394"
+      "line:11513",
+      "line:16457"
     ],
     "/api/workspace_members_reset": [
-      "line:11479"
+      "line:11542"
     ],
     "/api/workspace_module_update": [
-      "line:17746"
+      "line:17809"
     ],
     "/api/workspace_portal": [
-      "line:79910"
+      "line:79973"
     ],
     "/api/workspace_portal_facturas_excel?token=${encodeURIComponent(token)}": [
-      "line:28153"
+      "line:28216"
     ],
     "/api/workspace_portal_presign": [
       "line:854"
     ],
     "/api/workspace_portal_public_request": [
-      "line:28638"
+      "line:28701"
     ],
     "/api/workspace_portal_requerimientos": [
-      "line:79932"
+      "line:79995"
     ],
     "/api/workspace_portal_upload": [
-      "line:28515",
-      "line:28559"
+      "line:28578",
+      "line:28622"
     ],
     "/api/workspace_presupuesto_delete": [
-      "line:23339",
-      "line:23448"
+      "line:23402",
+      "line:23511"
     ],
     "/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18477"
+      "line:18540"
     ],
     "/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || ": [
-      "line:18476"
+      "line:18539"
     ],
     "/api/workspace_presupuestos": [
-      "line:18522",
+      "line:18585",
       "updateWorkspacePresupuestoFromRow",
-      "line:78826",
-      "line:79495",
-      "line:79717"
+      "line:78889",
+      "line:79558",
+      "line:79780"
     ],
     "/api/workspace_registro_alerts": [
-      "line:78917"
+      "line:78980"
     ],
     "/api/workspace_registro_horario": [
-      "line:20045",
-      "line:79977"
+      "line:20108",
+      "line:80040"
     ],
     "/api/workspace_registro_horario_toggle": [
-      "line:17306",
-      "line:19711",
+      "line:17369",
+      "line:19774",
       "runToggle"
     ],
     "/api/workspace_registro_periodo_lock": [
-      "line:79019"
+      "line:79082"
     ],
     "/api/workspace_registro_personal": [
-      "line:15297",
-      "line:16249",
-      "line:16401",
-      "line:16623",
-      "line:16660",
-      "line:16759",
-      "line:80002"
+      "line:15360",
+      "line:16312",
+      "line:16464",
+      "line:16686",
+      "line:16723",
+      "line:16822",
+      "line:80065"
     ],
     "/api/workspace_registro_personal_delete": [
-      "line:15339",
-      "line:15386"
+      "line:15402",
+      "line:15449"
     ],
     "/api/workspace_registro_personal_self_photo": [
-      "line:15198"
+      "line:15261"
     ],
     "/api/workspace_registro_usuario_toggle": [
-      "line:16587",
-      "line:17102",
-      "line:17214",
-      "line:19435"
+      "line:16650",
+      "line:17165",
+      "line:17277",
+      "line:19498"
     ],
     "/api/workspace_remesas": [
-      "line:79864"
+      "line:79927"
     ],
     "/api/workspace_rrhh_ausencia": [
-      "line:17367"
+      "line:17430"
     ],
     "/api/workspace_rrhh_ausencia_estado": [
-      "line:17409"
+      "line:17472"
     ],
     "/api/workspace_rrhh_cleanup": [
-      "line:17024"
+      "line:17087"
     ],
     "/api/workspace_rrhh_documento": [
-      "line:17621"
+      "line:17684"
     ],
     "/api/workspace_rrhh_gasto": [
-      "line:17468"
+      "line:17531"
     ],
     "/api/workspace_rrhh_gasto_estado": [
-      "line:17509"
+      "line:17572"
     ],
     "/api/workspace_rrhh_nomina_ocr": [
-      "line:15476"
+      "line:15539"
     ],
     "/api/workspace_rrhh_nominas_import": [
-      "line:17551"
+      "line:17614"
     ],
     "/api/workspace_rrhh_productividad_manual_bulk_update": [
-      "line:15910"
+      "line:15973"
     ],
     "/api/workspace_rrhh_productividad_manual_delete": [
-      "line:15775"
+      "line:15838"
     ],
     "/api/workspace_rrhh_productividad_manual_upsert": [
-      "line:15976"
+      "line:16039"
     ],
     "/api/workspace_rrhh_profile": [
-      "line:17331"
+      "line:17394"
     ],
     "/api/workspace_rrhh_reset": [
-      "line:16889"
+      "line:16952"
     ],
     "/api/workspace_rrhh_turnos": [
-      "line:15162"
+      "line:15225"
     ],
     "/api/workspace_series": [
-      "line:79887"
+      "line:79950"
     ],
     "/api/workspace_service_matrix_delete": [
-      "line:11322"
+      "line:11385"
     ],
     "/api/workspace_service_matrix_upsert": [
-      "line:11311"
+      "line:11374"
     ],
     "/api/workspace_update": [
-      "line:78375"
+      "line:78438"
     ],
     "/api/workspaces": [
       "line:6400",
-      "line:24018",
+      "line:24081",
       "isStale",
-      "line:69840"
+      "line:69903"
     ],
     "/api/years": [
       "ensureYearOptions"
@@ -1444,17 +1902,17 @@
         {
           "path": "/api/acciones",
           "frontend_functions": [
-            "line:63038",
-            "line:66469",
-            "line:74904",
-            "line:75430",
-            "line:82431",
-            "line:82622",
-            "line:82884",
-            "line:82916",
-            "line:83567",
-            "line:83651",
-            "line:83677"
+            "line:63101",
+            "line:66532",
+            "line:74967",
+            "line:75493",
+            "line:82494",
+            "line:82685",
+            "line:82947",
+            "line:82979",
+            "line:83630",
+            "line:83714",
+            "line:83740"
           ]
         }
       ]
@@ -1497,10 +1955,10 @@
         {
           "path": "/api/usuarios",
           "frontend_functions": [
-            "line:16379",
-            "line:17192",
+            "line:16442",
+            "line:17255",
             "loadUsuarios",
-            "line:82261"
+            "line:82324"
           ]
         }
       ]
@@ -1783,13 +2241,13 @@
         {
           "path": "/api/workspace_automatizaciones",
           "frontend_functions": [
-            "line:79955"
+            "line:80018"
           ]
         },
         {
           "path": "/api/workspace_cobros",
           "frontend_functions": [
-            "line:79840"
+            "line:79903"
           ]
         },
         {
@@ -1801,118 +2259,118 @@
         {
           "path": "/api/workspace_contratos",
           "frontend_functions": [
-            "line:12311",
-            "line:12350",
-            "line:18568",
-            "line:23112"
+            "line:12374",
+            "line:12413",
+            "line:18631",
+            "line:23175"
           ]
         },
         {
           "path": "/api/workspace_facturacion",
           "frontend_functions": [
-            "line:78736"
+            "line:78799"
           ]
         },
         {
           "path": "/api/workspace_fincas_comunidades",
           "frontend_functions": [
-            "line:20345",
-            "line:21132",
-            "line:80077"
+            "line:20408",
+            "line:21195",
+            "line:80140"
           ]
         },
         {
           "path": "/api/workspace_fincas_contabilidad",
           "frontend_functions": [
-            "line:20828",
-            "line:21553",
-            "line:79285"
+            "line:20891",
+            "line:21616",
+            "line:79348"
           ]
         },
         {
           "path": "/api/workspace_fincas_documentos",
           "frontend_functions": [
-            "line:20980",
-            "line:21849"
+            "line:21043",
+            "line:21912"
           ]
         },
         {
           "path": "/api/workspace_fincas_incidencias",
           "frontend_functions": [
-            "line:20647",
-            "line:21369",
-            "line:80110"
+            "line:20710",
+            "line:21432",
+            "line:80173"
           ]
         },
         {
           "path": "/api/workspace_fincas_juntas",
           "frontend_functions": [
-            "line:80154"
+            "line:80217"
           ]
         },
         {
           "path": "/api/workspace_fincas_proveedores",
           "frontend_functions": [
-            "line:20544",
-            "line:21247",
-            "line:80132"
+            "line:20607",
+            "line:21310",
+            "line:80195"
           ]
         },
         {
           "path": "/api/workspace_fincas_vecinos",
           "frontend_functions": [
-            "line:20453",
-            "line:21722"
+            "line:20516",
+            "line:21785"
           ]
         },
         {
           "path": "/api/workspace_inbox",
           "frontend_functions": [
-            "line:79754",
-            "line:79808"
+            "line:79817",
+            "line:79871"
           ]
         },
         {
           "path": "/api/workspace_portal",
           "frontend_functions": [
-            "line:79910"
+            "line:79973"
           ]
         },
         {
           "path": "/api/workspace_portal_requerimientos",
           "frontend_functions": [
-            "line:79932"
+            "line:79995"
           ]
         },
         {
           "path": "/api/workspace_presupuestos",
           "frontend_functions": [
-            "line:18522",
+            "line:18585",
             "updateWorkspacePresupuestoFromRow",
-            "line:78826",
-            "line:79495",
-            "line:79717"
+            "line:78889",
+            "line:79558",
+            "line:79780"
           ]
         },
         {
           "path": "/api/workspace_remesas",
           "frontend_functions": [
-            "line:79864"
+            "line:79927"
           ]
         },
         {
           "path": "/api/workspace_series",
           "frontend_functions": [
-            "line:79887"
+            "line:79950"
           ]
         },
         {
           "path": "/api/workspaces",
           "frontend_functions": [
             "line:6400",
-            "line:24018",
+            "line:24081",
             "isStale",
-            "line:69840"
+            "line:69903"
           ]
         }
       ]
@@ -2219,25 +2677,25 @@
         {
           "path": "/api/cliente_profesional",
           "frontend_functions": [
-            "line:81639"
+            "line:81702"
           ]
         },
         {
           "path": "/api/cliente_relaciones",
           "frontend_functions": [
-            "line:81200"
+            "line:81263"
           ]
         },
         {
           "path": "/api/clientes",
           "frontend_functions": [
-            "line:25553",
-            "line:42847",
-            "line:64656",
-            "line:68347",
-            "line:84408",
-            "line:84616",
-            "line:85083"
+            "line:25616",
+            "line:42910",
+            "line:64719",
+            "line:68410",
+            "line:84471",
+            "line:84679",
+            "line:85146"
           ]
         },
         {
@@ -2249,24 +2707,24 @@
         {
           "path": "/api/empresas",
           "frontend_functions": [
-            "line:10609",
-            "line:10905",
-            "line:24445",
-            "line:25110",
-            "line:26635",
+            "line:10672",
+            "line:10968",
+            "line:24508",
+            "line:25173",
+            "line:26698",
             "refreshClientesAltaSelects",
             "linkClienteSegurosService",
-            "line:73028",
-            "line:78304"
+            "line:73091",
+            "line:78367"
           ]
         },
         {
           "path": "/api/home_time_status",
           "frontend_functions": [
-            "line:19856",
+            "line:19919",
             "openHomeTimePunchModal",
             "refresh",
-            "line:73031"
+            "line:73094"
           ]
         },
         {
@@ -2278,7 +2736,7 @@
         {
           "path": "/api/legal_radar_items",
           "frontend_functions": [
-            "line:74329"
+            "line:74392"
           ]
         },
         {
@@ -2290,19 +2748,19 @@
         {
           "path": "/api/resumen",
           "frontend_functions": [
-            "line:73030"
+            "line:73093"
           ]
         },
         {
           "path": "/api/system_audit_latest",
           "frontend_functions": [
-            "line:23918"
+            "line:23981"
           ]
         },
         {
           "path": "/api/tablas",
           "frontend_functions": [
-            "line:73029"
+            "line:73092"
           ]
         },
         {
@@ -2529,14 +2987,14 @@
         {
           "path": "/api/compraventas",
           "frontend_functions": [
-            "line:84123"
+            "line:84186"
           ]
         },
         {
           "path": "/api/demandas",
           "frontend_functions": [
-            "line:82474",
-            "line:84189"
+            "line:82537",
+            "line:84252"
           ]
         },
         {
@@ -2554,7 +3012,7 @@
         {
           "path": "/api/inmueble_docs",
           "frontend_functions": [
-            "line:82693"
+            "line:82756"
           ]
         },
         {
@@ -2566,8 +3024,8 @@
         {
           "path": "/api/visitas",
           "frontend_functions": [
-            "line:82513",
-            "line:84251"
+            "line:82576",
+            "line:84314"
           ]
         }
       ]
@@ -2787,7 +3245,7 @@
           "path": "/api/seguros_campanas",
           "frontend_functions": [
             "loadSegurosCampanas",
-            "line:76118"
+            "line:76181"
           ]
         },
         {
@@ -2795,44 +3253,44 @@
           "frontend_functions": [
             "refreshSegurosOcrComisionSuggestion",
             "loadSegurosComisiones",
-            "line:76200"
+            "line:76263"
           ]
         },
         {
           "path": "/api/seguros_movimientos",
           "frontend_functions": [
-            "line:76297"
+            "line:76360"
           ]
         },
         {
           "path": "/api/seguros_ofertas",
           "frontend_functions": [
-            "line:76045"
+            "line:76108"
           ]
         },
         {
           "path": "/api/seguros_preferencias",
           "frontend_functions": [
-            "line:76007"
+            "line:76070"
           ]
         },
         {
           "path": "/api/seguros_recibos",
           "frontend_functions": [
-            "line:76243"
+            "line:76306"
           ]
         },
         {
           "path": "/api/seguros_referidos",
           "frontend_functions": [
             "loadSegurosReferidos",
-            "line:76087"
+            "line:76150"
           ]
         },
         {
           "path": "/api/seguros_siniestros",
           "frontend_functions": [
-            "line:76330"
+            "line:76393"
           ]
         }
       ]
@@ -3028,37 +3486,37 @@
         {
           "path": "/api/gestoria_conta_config",
           "frontend_functions": [
-            "line:83018"
+            "line:83081"
           ]
         },
         {
           "path": "/api/gestoria_contabilidad",
           "frontend_functions": [
-            "line:76400",
-            "line:82961",
-            "line:85004"
+            "line:76463",
+            "line:83024",
+            "line:85067"
           ]
         },
         {
           "path": "/api/gestoria_docs",
           "frontend_functions": [
-            "line:82052",
-            "line:82124",
-            "line:82206",
-            "line:82386"
+            "line:82115",
+            "line:82187",
+            "line:82269",
+            "line:82449"
           ]
         },
         {
           "path": "/api/gestoria_modelos",
           "frontend_functions": [
-            "line:81752"
+            "line:81815"
           ]
         },
         {
           "path": "/api/gestoria_trabajos",
           "frontend_functions": [
-            "line:66797",
-            "line:82849"
+            "line:66860",
+            "line:82912"
           ]
         }
       ]
@@ -3202,8 +3660,8 @@
         {
           "path": "/api/fin_asesoramientos",
           "frontend_functions": [
-            "line:70277",
-            "line:81470"
+            "line:70340",
+            "line:81533"
           ]
         }
       ]
@@ -3417,38 +3875,38 @@
         {
           "path": "/api/workspace_registro_alerts",
           "frontend_functions": [
-            "line:78917"
+            "line:78980"
           ]
         },
         {
           "path": "/api/workspace_registro_horario",
           "frontend_functions": [
-            "line:20045",
-            "line:79977"
+            "line:20108",
+            "line:80040"
           ]
         },
         {
           "path": "/api/workspace_registro_personal",
           "frontend_functions": [
-            "line:15297",
-            "line:16249",
-            "line:16401",
-            "line:16623",
-            "line:16660",
-            "line:16759",
-            "line:80002"
+            "line:15360",
+            "line:16312",
+            "line:16464",
+            "line:16686",
+            "line:16723",
+            "line:16822",
+            "line:80065"
           ]
         },
         {
           "path": "/api/workspace_rrhh_profile",
           "frontend_functions": [
-            "line:17331"
+            "line:17394"
           ]
         },
         {
           "path": "/api/workspace_rrhh_turnos",
           "frontend_functions": [
-            "line:15162"
+            "line:15225"
           ]
         }
       ]

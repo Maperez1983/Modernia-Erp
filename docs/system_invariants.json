@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "global_invariants": [
+    {
+      "id": "visible_view_must_be_operable",
+      "severity": "critical",
+      "description": "Si una vista o card es visible para un usuario, debe poder abrirse y responder."
+    },
+    {
+      "id": "workspace_data_must_not_cross_tenants",
+      "severity": "critical",
+      "description": "Los datos de un workspace no deben contaminar ni mezclarse con otro."
+    },
+    {
+      "id": "historical_data_drop_requires_alert",
+      "severity": "critical",
+      "description": "Una caida brusca de historicos o volumen de negocio debe generar alerta."
+    },
+    {
+      "id": "dashboard_totals_must_reconcile",
+      "severity": "critical",
+      "description": "Los dashboards de negocio deben cuadrar con sus tablas base o detalle equivalente."
+    },
+    {
+      "id": "successful_imports_must_leave_trace",
+      "severity": "critical",
+      "description": "Todo import exitoso debe dejar trazabilidad verificable en registros o colas derivadas."
+    }
+  ]
+}

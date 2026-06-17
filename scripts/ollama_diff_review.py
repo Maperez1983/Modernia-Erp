@@ -19,6 +19,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.ollama_json import generate_json
+from scripts.system_supervisor import impacted_processes, load_supervisor_memory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +121,8 @@ def _module_hints(files: list[str], knowledge: dict) -> dict:
 
 def _heuristic_review(files: list[str], knowledge: dict) -> dict:
     hints = _module_hints(files, knowledge)
+    supervisor_memory = load_supervisor_memory()
+    impact = impacted_processes(files, memory=supervisor_memory)
     tests = []
     expectations = []
     for data in hints.values():
@@ -127,6 +130,14 @@ def _heuristic_review(files: list[str], knowledge: dict) -> dict:
             if test not in tests:
                 tests.append(test)
         for exp in data.get("expectations") or []:
+            if exp not in expectations:
+                expectations.append(exp)
+    for process in impact.get("processes") or []:
+        for test in process.get("required_tests") or []:
+            if test not in tests:
+                tests.append(test)
+        proc = process.get("process") or {}
+        for exp in proc.get("expected_outcomes") or []:
             if exp not in expectations:
                 expectations.append(exp)
     findings = []
@@ -148,11 +159,21 @@ def _heuristic_review(files: list[str], knowledge: dict) -> dict:
                 "detail": f"Ficheros sensibles: {', '.join(touched_sensitive)}. Revisar invariantes de workspace, permisos y agenda.",
             }
         )
+    for process in impact.get("processes") or []:
+        proc = process.get("process") or {}
+        findings.append(
+            {
+                "severity": "high" if process.get("risk") == "critical" else "medium",
+                "title": f"Proceso critico afectado: {proc.get('id')}",
+                "detail": f"Modulo={proc.get('module')} checks={', '.join(process.get('required_checks') or []) or '-'}",
+            }
+        )
     return {
         "source": "heuristic",
         "status": "review_required" if findings else "passed",
         "changed_files": files,
         "module_hints": hints,
+        "impacted_processes": impact.get("processes") or [],
         "findings": findings,
         "recommended_tests": tests[:30],
         "expectations_to_check": expectations[:30],
@@ -172,6 +193,13 @@ def _ollama_review(diff: str, heuristic: dict, knowledge: dict) -> dict:
             for name, data in (knowledge.get("modules") or {}).items()
         },
         "diagnostic_rules": knowledge.get("diagnostic_rules"),
+        "operational_memory": {
+            "process_catalog": (knowledge.get("operational_memory") or {}).get("process_catalog"),
+            "business_rules": (knowledge.get("operational_memory") or {}).get("business_rules"),
+            "system_invariants_business": (knowledge.get("operational_memory") or {}).get("system_invariants_business"),
+            "change_impact_map": (knowledge.get("operational_memory") or {}).get("change_impact_map"),
+            "reconciliation_checks": (knowledge.get("operational_memory") or {}).get("reconciliation_checks"),
+        },
     }
     prompt = (
         "Responde solo JSON valido, sin markdown. Eres revisor senior del CRM Modernia. "

@@ -139,6 +139,16 @@ def _summarize_json_output(output: str) -> dict | None:
             "actions_total": data.get("actions_total"),
             "actions": data.get("actions"),
         }
+    if kind == "system_supervisor_snapshot":
+        return {
+            "kind": kind,
+            "processes_total": data.get("processes_total"),
+            "business_rules_total": data.get("business_rules_total"),
+            "global_invariants_total": data.get("global_invariants_total"),
+            "reconciliation_checks_total": data.get("reconciliation_checks_total"),
+            "process_health": data.get("process_health"),
+            "impact": data.get("impact"),
+        }
     if kind == "prod_system_matrix_audit":
         return {
             "kind": kind,
@@ -940,6 +950,16 @@ def main() -> int:
         report["alerts"] = _build_alerts(report)
         report["trend"] = _build_trend_data(report, previous_entries)
         report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
+
+    if _env_flag("RUN_SYSTEM_AUDIT_SUPERVISOR"):
+        supervisor = _run_step(
+            "system_supervisor_snapshot",
+            [sys.executable, "scripts/system_supervisor.py", "--report", str(report_path), "--json"],
+            timeout=120,
+        )
+        report["steps"].append(supervisor)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         _write_dashboard(report_dir, report)
 

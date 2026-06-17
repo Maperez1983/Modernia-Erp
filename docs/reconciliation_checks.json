@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "checks": [
+    {
+      "id": "seguros_dashboard_consistency",
+      "module": "seguros",
+      "severity": "critical",
+      "description": "Contrastar KPIs de seguros con el detalle agregado esperado."
+    },
+    {
+      "id": "gestoria_facturas_accounting",
+      "module": "gestoria",
+      "severity": "critical",
+      "description": "Contrastar facturas documentales con reflejo contable o colas derivadas."
+    },
+    {
+      "id": "gestoria_rentas_import",
+      "module": "gestoria",
+      "severity": "critical",
+      "description": "Contrastar volumen importado de rentas con su persistencia posterior."
+    },
+    {
+      "id": "fin_dashboard_consistency",
+      "module": "financiacion",
+      "severity": "high",
+      "description": "Contrastar totales del dashboard financiero con operaciones cerradas."
+    }
+  ]
+}

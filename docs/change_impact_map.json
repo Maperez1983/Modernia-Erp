@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "match_any": ["web/app.js", "web/index.html"],
+      "processes": ["auth_login_workspace_access", "agenda_workspace_visibility"],
+      "risk": "high",
+      "required_checks": ["frontend_home_access_audit", "production_browser_module_smoke"],
+      "required_tests": ["tests/test_frontend_smoke.py", "tests/test_agenda_frontend_regressions.py"]
+    },
+    {
+      "match_any": ["web/server.py", "web/db_backend.py", "schema.sql"],
+      "processes": ["auth_login_workspace_access", "agenda_workspace_visibility", "gestoria_facturas_accounting", "seguros_dashboard_consistency"],
+      "risk": "critical",
+      "required_checks": ["production_auth_drift", "production_system_matrix", "system_business_reconciliation"],
+      "required_tests": ["tests/test_ollama_automation_tools.py"]
+    },
+    {
+      "match_any": ["gestoria", "renta", "factura", "modelo", "asiento"],
+      "processes": ["gestoria_rentas_import", "gestoria_facturas_accounting"],
+      "risk": "critical",
+      "required_checks": ["production_module_smoke", "system_business_reconciliation"],
+      "required_tests": ["tests/test_ollama_automation_tools.py"]
+    },
+    {
+      "match_any": ["seguro", "poliza", "recibo", "siniestro"],
+      "processes": ["seguros_dashboard_consistency"],
+      "risk": "critical",
+      "required_checks": ["production_module_smoke", "production_browser_module_smoke", "system_business_reconciliation"],
+      "required_tests": ["tests/test_seguros_e2e_playwright.py"]
+    },
+    {
+      "match_any": ["hipoteca", "fin_", "financi"],
+      "processes": ["financiaciones_pipeline_totals"],
+      "risk": "high",
+      "required_checks": ["production_module_smoke", "system_business_reconciliation"],
+      "required_tests": ["tests/test_ollama_automation_tools.py"]
+    },
+    {
+      "match_any": ["fincas", "comunidad", "vecino", "junta"],
+      "processes": ["fincas_communities_budget_flow"],
+      "risk": "high",
+      "required_checks": ["production_module_smoke", "production_browser_module_smoke"],
+      "required_tests": ["tests/test_ollama_automation_tools.py"]
+    },
+    {
+      "match_any": ["rrhh", "registro_horario", "nomina", "personal"],
+      "processes": ["rrhh_people_documents_time"],
+      "risk": "high",
+      "required_checks": ["production_module_smoke", "production_browser_module_smoke"],
+      "required_tests": ["tests/test_ollama_automation_tools.py"]
+    }
+  ]
+}
