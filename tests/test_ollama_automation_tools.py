@@ -35,10 +35,103 @@ if "PIL" not in sys.modules:
     pil_stub.ImageOps = object()
     sys.modules["PIL"] = pil_stub
 
-from web.server import fetch_latest_system_audit_run, store_system_audit_run
+from web.server import (
+    _normalize_legal_llm_enrichment,
+    build_legal_radar_digest_prompt,
+    copilot_web_answer,
+    fetch_latest_system_audit_run,
+    store_system_audit_run,
+)
 
 
 class OllamaAutomationToolsTests(unittest.TestCase):
+    def test_legal_llm_enrichment_normalizes_topic_lists_and_confidence(self):
+        enriched = _normalize_legal_llm_enrichment(
+            "inmobiliaria",
+            {"topic_key": "visitas", "impacto": "Medio", "summary": "base"},
+            {
+                "topic_key": "no_valido",
+                "impacto": "alto",
+                "summary": "Cambio operativo",
+                "accion_recomendada": "Actualizar plantilla",
+                "affected_documents": ["Contrato", "Contrato", "Hoja de visita"],
+                "affected_workflows": "captacion;captacion;visitas",
+                "affected_clauses": ["preaviso"],
+                "llm_impact_summary": "Afecta al circuito comercial.",
+                "llm_actions_json": "revisar checklist;actualizar dashboard",
+                "llm_confidence": "1.3",
+                "llm_review_needed": "true",
+            },
+        )
+
+        self.assertEqual(enriched["topic_key"], "visitas")
+        self.assertEqual(enriched["impacto"], "Alto")
+        self.assertEqual(enriched["affected_documents"], ["Contrato", "Hoja de visita"])
+        self.assertEqual(enriched["affected_workflows"], ["captacion", "visitas"])
+        self.assertEqual(enriched["llm_actions_json"], ["revisar checklist", "actualizar dashboard"])
+        self.assertEqual(enriched["llm_confidence"], 1.0)
+        self.assertEqual(enriched["llm_review_needed"], 1)
+
+    def test_legal_radar_digest_prompt_includes_llm_fields(self):
+        prompt = build_legal_radar_digest_prompt(
+            {
+                "area": "rrhh",
+                "estado": "pendiente",
+                "rows": [
+                    {
+                        "titulo": "Nueva obligación",
+                        "fecha_publicacion": "2026-06-17",
+                        "fuente": "BOE",
+                        "referencia": "BOE-A-2026-1",
+                        "topic_key": "vacaciones_convenio",
+                        "impacto": "Alto",
+                        "url": "https://boe.es/test",
+                        "resumen": "Resumen base",
+                        "accion_recomendada": "Acción base",
+                        "llm_impact_summary": "Impacto CRM",
+                        "llm_actions_json": ["Actualizar export", "Revisar plantilla"],
+                        "llm_confidence": 0.82,
+                        "llm_review_needed": 1,
+                        "library_text": "Texto legal",
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Resumen LLM: Impacto CRM", prompt)
+        self.assertIn("Acciones LLM: Actualizar export, Revisar plantilla", prompt)
+        self.assertIn("Confianza LLM: 0.82", prompt)
+        self.assertIn("Revisión manual LLM: sí", prompt)
+
+    def test_copilot_web_answer_falls_back_to_ollama(self):
+        import web.server as server
+
+        old_fetch = server.copilot_web_fetch_url
+        old_openai = server.openai_available
+        old_ollama = server.ollama_available
+        old_call_ollama = server.call_ollama
+        try:
+            server.copilot_web_fetch_url = lambda *_args, **_kwargs: {
+                "ok": True,
+                "url": "https://ejemplo.test",
+                "title": "Norma",
+                "text": "Contenido legal de prueba.",
+                "fetched_at": "2026-06-17T00:00:00Z",
+            }
+            server.openai_available = lambda: False
+            server.ollama_available = lambda: True
+            server.call_ollama = lambda *args, **kwargs: ("Respuesta Ollama", "")
+
+            result = copilot_web_answer("¿Qué cambia?", "https://ejemplo.test")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["mode"], "ollama")
+            self.assertEqual(result["answer"], "Respuesta Ollama")
+        finally:
+            server.copilot_web_fetch_url = old_fetch
+            server.openai_available = old_openai
+            server.ollama_available = old_ollama
+            server.call_ollama = old_call_ollama
+
     def test_agenda_regression_outline_targets_agenda_tests(self):
         outline = system_autofix_agent._regression_outline(
             ["agenda", "usuarios_permisos"],

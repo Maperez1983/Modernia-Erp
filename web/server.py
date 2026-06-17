@@ -16834,6 +16834,267 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
     return extract_openai_output(res), ""
 
 
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+def ollama_available():
+    base_url = str(os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_LEGAL_BASE_URL") or "").strip()
+    if base_url:
+        return True
+    return bool(shutil.which("ollama"))
+
+
+def call_ollama(prompt, model=None, temperature=0.1, timeout=45, system_text=None):
+    base_url = str(os.environ.get("OLLAMA_LEGAL_BASE_URL") or os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
+    model_name = (
+        str(model or "").strip()
+        or str(os.environ.get("OLLAMA_LEGAL_MODEL") or "").strip()
+        or str(os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip()
+        or "qwen2.5-coder:7b"
+    )
+    if not base_url:
+        return "", "OLLAMA_BASE_URL no configurada"
+    full_prompt = str(prompt or "")
+    if system_text:
+        full_prompt = f"{system_text.strip()}\n\n{full_prompt}"
+    if model_name.lower().startswith("qwen3:"):
+        full_prompt = "/no_think\n" + full_prompt
+    payload = json.dumps(
+        {
+            "model": model_name,
+            "prompt": full_prompt,
+            "stream": False,
+            "options": {"temperature": float(temperature or 0.0)},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            res = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        body = ""
+        try:
+            body = err.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        details = body or str(err)
+        return "", f"Ollama error ({err.code}): {details}"
+    except Exception as err:
+        return "", f"Ollama error: {err}"
+    return str(res.get("response") or "").strip(), ""
+
+
+def _json_object_from_text(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def call_ollama_json(prompt, *, required_keys=None, timeout=60, retries=1, model=None, system_text=None):
+    required = set(required_keys or [])
+    last_output = ""
+    last_error = ""
+    for attempt in range(max(1, int(retries or 0)) + 1):
+        strict_prompt = str(prompt or "")
+        if attempt:
+            strict_prompt = (
+                "Tu respuesta anterior no fue JSON valido o faltaban claves. "
+                "Responde SOLO con un objeto JSON valido, sin markdown ni explicaciones.\n\n"
+                + strict_prompt
+            )
+        output, err = call_ollama(
+            strict_prompt,
+            model=model,
+            temperature=0.0,
+            timeout=timeout,
+            system_text=system_text,
+        )
+        if err:
+            last_error = err
+            continue
+        last_output = output
+        parsed = _json_object_from_text(output)
+        if not parsed:
+            last_error = "respuesta sin JSON"
+            continue
+        if required and not required.issubset(parsed.keys()):
+            last_error = f"faltan claves: {sorted(required - set(parsed.keys()))}"
+            continue
+        parsed["raw_response_tail"] = output[-2000:]
+        return parsed, ""
+    return {}, last_error or f"Ollama no devolvio JSON valido: {last_output[-1000:]}"
+
+
+def _normalize_text_list(value, *, max_items=12, max_chars=200):
+    items = []
+    if isinstance(value, str):
+        source = re.split(r"[\n;,]+", value)
+    elif isinstance(value, (list, tuple)):
+        source = value
+    else:
+        source = []
+    seen = set()
+    for item in source:
+        text = re.sub(r"\s+", " ", str(item or "")).strip(" -\t\r\n")
+        if not text:
+            continue
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + "…"
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(text)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _normalize_legal_llm_enrichment(area, detection, payload):
+    if not isinstance(payload, dict):
+        return {}
+    area_key = normalize_legal_area(area)
+    topic_candidates = set((get_legal_copilot_topics(area_key) or {}).keys())
+    current_topic = str(detection.get("topic_key") or "").strip()
+    topic_key = str(payload.get("topic_key") or "").strip()
+    if topic_key not in topic_candidates:
+        topic_key = current_topic if current_topic in topic_candidates else current_topic
+    impact = str(payload.get("impacto") or detection.get("impacto") or "Medio").strip().title() or "Medio"
+    if impact not in {"Alto", "Medio", "Bajo"}:
+        impact = str(detection.get("impacto") or "Medio").strip().title() or "Medio"
+    confidence = payload.get("llm_confidence")
+    try:
+        confidence = float(confidence)
+    except Exception:
+        confidence = None
+    if confidence is not None:
+        confidence = max(0.0, min(1.0, confidence))
+    actions = _normalize_text_list(payload.get("llm_actions_json") or payload.get("acciones") or [])
+    review_needed = payload.get("llm_review_needed")
+    review_needed = str(review_needed).strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+    enriched = {
+        "topic_key": topic_key or current_topic or None,
+        "impacto": impact,
+        "summary": str(payload.get("summary") or detection.get("summary") or "").strip() or None,
+        "accion_recomendada": str(payload.get("accion_recomendada") or detection.get("accion_recomendada") or "").strip() or None,
+        "affected_documents": _normalize_text_list(payload.get("affected_documents") or detection.get("affected_documents") or []),
+        "affected_workflows": _normalize_text_list(payload.get("affected_workflows") or detection.get("affected_workflows") or []),
+        "affected_clauses": _normalize_text_list(payload.get("affected_clauses") or detection.get("affected_clauses") or []),
+        "llm_impact_summary": str(payload.get("llm_impact_summary") or payload.get("impact_summary") or "").strip() or None,
+        "llm_actions_json": actions,
+        "llm_confidence": confidence,
+        "llm_review_needed": 1 if review_needed else 0,
+    }
+    return enriched
+
+
+def enrich_legal_detection_with_ollama(area, source_config, entry, detection):
+    if not detection or not ollama_available():
+        return detection
+    area_key = normalize_legal_area(area)
+    topics = get_legal_copilot_topics(area_key) or {}
+    prompt = (
+        "Analiza una novedad legislativa para un CRM/ERP español. "
+        "Responde SOLO con un objeto JSON valido, sin markdown, con estas claves: "
+        "topic_key, impacto, summary, accion_recomendada, affected_documents, affected_workflows, "
+        "affected_clauses, llm_impact_summary, llm_actions_json, llm_confidence, llm_review_needed. "
+        "No inventes documentos ni flujos si no hay base suficiente; en ese caso devuelve listas vacias y llm_review_needed=true.\n\n"
+        f"Area: {area_key}\n"
+        f"Temas validos: {json.dumps(sorted(topics.keys()), ensure_ascii=False)}\n"
+        f"Deteccion inicial: {json.dumps(detection, ensure_ascii=False)}\n"
+        f"Fuente: {json.dumps({'source': source_config.get('fuente'), 'source_key': source_config.get('key')}, ensure_ascii=False)}\n"
+        f"Entrada: {json.dumps(entry, ensure_ascii=False)}"
+    )
+    parsed, err = call_ollama_json(
+        prompt,
+        required_keys={
+            "topic_key",
+            "impacto",
+            "summary",
+            "accion_recomendada",
+            "affected_documents",
+            "affected_workflows",
+            "affected_clauses",
+            "llm_impact_summary",
+            "llm_actions_json",
+            "llm_confidence",
+            "llm_review_needed",
+        },
+        timeout=60,
+        retries=1,
+        system_text="Eres un copiloto legal interno. Responde en JSON valido y en castellano.",
+    )
+    if err or not parsed:
+        merged = dict(detection)
+        merged["llm_review_needed"] = 1
+        return merged
+    enrichment = _normalize_legal_llm_enrichment(area_key, detection, parsed)
+    merged = dict(detection)
+    merged.update({k: v for k, v in enrichment.items() if v not in (None, "", [])})
+    return merged
+
+
+def build_legal_copilot_ollama_analysis(area, topic_key, response, question):
+    if not ollama_available():
+        return {}
+    area_key = normalize_legal_area(area)
+    compact = {
+        "area": area_key,
+        "topic_key": topic_key,
+        "question": str(question or "").strip(),
+        "title": response.get("title"),
+        "summary": response.get("summary"),
+        "mandatory_docs": list(response.get("mandatory_docs") or [])[:10],
+        "workflow_checkpoints": list(response.get("workflow_checkpoints") or [])[:10],
+        "review_recommendations": list(response.get("review_recommendations") or [])[:10],
+        "recent_updates": list(response.get("recent_updates") or [])[:6],
+        "company": response.get("company") or {},
+    }
+    prompt = (
+        "Actua como copiloto legal operativo de un CRM. "
+        "Responde SOLO JSON valido con estas claves: crm_impact, actions, affected_documents, "
+        "affected_workflows, review_points, risk_level, review_needed. "
+        "Debes centrarte en como afecta al sistema, a las plantillas, a los datos y a los flujos internos.\n\n"
+        + json.dumps(compact, ensure_ascii=False)
+    )
+    parsed, err = call_ollama_json(
+        prompt,
+        required_keys={"crm_impact", "actions", "affected_documents", "affected_workflows", "review_points", "risk_level", "review_needed"},
+        timeout=60,
+        retries=1,
+        system_text="Eres un copiloto legal de producto. Responde en JSON valido y en castellano.",
+    )
+    if err or not parsed:
+        return {}
+    return {
+        "crm_impact": str(parsed.get("crm_impact") or "").strip(),
+        "actions": _normalize_text_list(parsed.get("actions") or []),
+        "affected_documents": _normalize_text_list(parsed.get("affected_documents") or []),
+        "affected_workflows": _normalize_text_list(parsed.get("affected_workflows") or []),
+        "review_points": _normalize_text_list(parsed.get("review_points") or []),
+        "risk_level": str(parsed.get("risk_level") or "").strip().lower() or "medio",
+        "review_needed": str(parsed.get("review_needed") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"},
+    }
+
+
 def _is_ip_literal(hostname):
     value = str(hostname or "").strip()
     if not value:
@@ -17048,8 +17309,6 @@ def copilot_web_answer(question, url, *, timeout_seconds=None):
     fetched = copilot_web_fetch_url(url, timeout_seconds=timeout_seconds)
     if fetched.get("error"):
         return fetched
-    if not openai_available():
-        return {"error": "OPENAI_API_KEY no configurada"}
     q = str(question or "").strip()
     if not q:
         q = "Resume el contenido y extrae los puntos operativos clave."
@@ -17070,10 +17329,33 @@ def copilot_web_answer(question, url, *, timeout_seconds=None):
         "1) Respuesta (máximo 12 líneas)\n"
         "2) Citas: 3-6 bullets con frases cortas textuales del contenido que sustentan la respuesta\n"
     )
-    output, err = call_openai(prompt, temperature=0.2, max_tokens=900)
-    if err:
-        return {"error": err}
-    return {"ok": True, "url": source, "title": title, "answer": output, "fetched_at": fetched.get("fetched_at")}
+    mode = "basic"
+    output = ""
+    if ollama_available():
+        output, err = call_ollama(
+            prompt,
+            temperature=0.1,
+            timeout=60,
+            system_text="Responde en castellano. Usa solo la fuente dada. No inventes.",
+        )
+        if not err and str(output or "").strip():
+            mode = "ollama"
+    if not output and openai_available():
+        output, err = call_openai(prompt, temperature=0.2, max_tokens=900)
+        if not err and str(output or "").strip():
+            mode = "openai"
+    if not output:
+        answer_lines = []
+        if title:
+            answer_lines.append(f"Título: {title}")
+        snippets = _split_sentences(content, max_sentences=4)
+        if snippets:
+            answer_lines.append("Resumen: " + " ".join(snippets[:2]))
+        if len(snippets) > 2:
+            answer_lines.append("Citas:")
+            answer_lines.extend([f"- {item[:220]}" for item in snippets[2:5]])
+        output = "\n".join(answer_lines).strip() or "No se pudo generar respuesta con el contenido disponible."
+    return {"ok": True, "url": source, "title": title, "answer": output, "mode": mode, "fetched_at": fetched.get("fetched_at")}
 
 
 def pdf_to_png_data_urls(pdf_path, max_pages=2, dpi=220):
@@ -24350,6 +24632,7 @@ def classify_legal_feed_entry(area, source_config, entry):
                 "impact_score": rule.get("impact_score") if rule.get("impact_score") not in (None, "") else operations.get("impact_score"),
                 "matched_keywords": matched,
                 "auto_detected": 1,
+                "llm_review_needed": 0,
             }
     return best_match
 
@@ -24391,6 +24674,7 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
     affected_documents = json.dumps(list(detection.get("affected_documents") or operations.get("documents") or []), ensure_ascii=False)
     affected_workflows = json.dumps(list(detection.get("affected_workflows") or operations.get("workflows") or []), ensure_ascii=False)
     affected_clauses = json.dumps(list(detection.get("affected_clauses") or operations.get("clauses") or []), ensure_ascii=False)
+    llm_actions_json = json.dumps(list(detection.get("llm_actions_json") or []), ensure_ascii=False)
     impact_score = detection.get("impact_score")
     if impact_score in (None, ""):
         impact_score = operations.get("impact_score") or None
@@ -24410,6 +24694,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
                 affected_workflows = COALESCE(?, affected_workflows),
                 affected_clauses = COALESCE(?, affected_clauses),
                 impact_score = COALESCE(?, impact_score),
+                llm_impact_summary = COALESCE(?, llm_impact_summary),
+                llm_actions_json = COALESCE(?, llm_actions_json),
+                llm_confidence = COALESCE(?, llm_confidence),
+                llm_review_needed = CASE WHEN ? IS NOT NULL THEN ? ELSE llm_review_needed END,
                 source_key = COALESCE(?, source_key),
                 matched_keywords = COALESCE(?, matched_keywords),
                 auto_detected = CASE WHEN ? THEN 1 ELSE auto_detected END,
@@ -24429,6 +24717,11 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
                 affected_workflows,
                 affected_clauses,
                 impact_score,
+                detection.get("llm_impact_summary"),
+                llm_actions_json,
+                detection.get("llm_confidence"),
+                detection.get("llm_review_needed"),
+                detection.get("llm_review_needed"),
                 detection.get("source_key"),
                 matched_keywords,
                 int(bool(detection.get("auto_detected"))),
@@ -24443,10 +24736,11 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
         INSERT INTO legal_radar_items (
           id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
           topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
-          affected_clauses, impact_score, source_key, matched_keywords,
+          affected_clauses, impact_score, llm_impact_summary, llm_actions_json, llm_confidence,
+          llm_review_needed, source_key, matched_keywords,
           auto_detected, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -24465,6 +24759,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
             affected_workflows,
             affected_clauses,
             impact_score,
+            detection.get("llm_impact_summary"),
+            llm_actions_json,
+            detection.get("llm_confidence"),
+            detection.get("llm_review_needed"),
             detection.get("source_key"),
             matched_keywords,
             int(bool(detection.get("auto_detected"))),
@@ -24493,7 +24791,8 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
         """
         SELECT id, fuente, referencia, titulo, fecha_publicacion, impacto, topic_key, url,
                resumen, accion_recomendada, affected_documents, affected_workflows,
-               affected_clauses, impact_score, source_key, matched_keywords
+               affected_clauses, impact_score, llm_impact_summary, llm_actions_json,
+               llm_confidence, llm_review_needed, source_key, matched_keywords
         FROM legal_radar_items
         WHERE area = ?
           AND auto_detected = 1
@@ -24534,6 +24833,10 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
                 "affected_workflows": json.loads(row["affected_workflows"] or "[]") if str(row["affected_workflows"] or "").strip() else [],
                 "affected_clauses": json.loads(row["affected_clauses"] or "[]") if str(row["affected_clauses"] or "").strip() else [],
                 "impact_score": row["impact_score"],
+                "llm_impact_summary": row["llm_impact_summary"] or "",
+                "llm_actions_json": json.loads(row["llm_actions_json"] or "[]") if str(row["llm_actions_json"] or "").strip() else [],
+                "llm_confidence": row["llm_confidence"],
+                "llm_review_needed": int(row["llm_review_needed"] or 0),
                 "source_key": row["source_key"],
                 "matched_keywords": [item.strip() for item in str(row["matched_keywords"] or "").split(",") if item.strip()],
                 "synced_at": now_value,
@@ -24597,6 +24900,7 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
                     detection = classify_legal_feed_entry(area_value, source_for_url, entry)
                     if not detection:
                         continue
+                    detection = enrich_legal_detection_with_ollama(area_value, source_for_url, entry, detection)
                     matched += 1
                     outcome = upsert_legal_radar_item_from_detection(conn, detection, now_value)
                     created += 1 if outcome["created"] else 0
@@ -24727,7 +25031,8 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
         """
         SELECT id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
                topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
-               affected_clauses, impact_score, reviewed_at, reviewed_by,
+               affected_clauses, impact_score, llm_impact_summary, llm_actions_json,
+               llm_confidence, llm_review_needed, reviewed_at, reviewed_by,
                applied_at, source_key, matched_keywords, auto_detected, knowledge_synced_at,
                created_at, updated_at
         FROM legal_radar_items
@@ -24761,7 +25066,7 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
     parsed_rows = []
     for row in rows:
         item = dict(row)
-        for key in ("affected_documents", "affected_workflows", "affected_clauses"):
+        for key in ("affected_documents", "affected_workflows", "affected_clauses", "llm_actions_json"):
             raw_value = str(item.get(key) or "").strip()
             if raw_value:
                 try:
@@ -25026,6 +25331,10 @@ def fetch_legal_radar_items_for_digest(conn, *, area="rrhh", estado="pendiente",
           id, fuente, referencia, titulo, fecha_publicacion, impacto, topic_key, url,
           COALESCE(resumen,'') AS resumen,
           COALESCE(accion_recomendada,'') AS accion_recomendada,
+          COALESCE(llm_impact_summary,'') AS llm_impact_summary,
+          COALESCE(llm_actions_json,'') AS llm_actions_json,
+          llm_confidence,
+          COALESCE(llm_review_needed,0) AS llm_review_needed,
           COALESCE(matched_keywords,'') AS matched_keywords,
           COALESCE(library_doc_id,'') AS library_doc_id,
           COALESCE(imported_at,'') AS imported_at,
@@ -25063,6 +25372,10 @@ def fetch_legal_radar_items_for_digest(conn, *, area="rrhh", estado="pendiente",
                 "url": row["url"] or "",
                 "resumen": row["resumen"] or "",
                 "accion_recomendada": row["accion_recomendada"] or "",
+                "llm_impact_summary": row["llm_impact_summary"] or "",
+                "llm_actions_json": json.loads(row["llm_actions_json"] or "[]") if str(row["llm_actions_json"] or "").strip() else [],
+                "llm_confidence": row["llm_confidence"],
+                "llm_review_needed": int(row["llm_review_needed"] or 0),
                 "matched_keywords": str(row["matched_keywords"] or ""),
                 "library_doc_id": doc_id,
                 "imported_at": row["imported_at"] or "",
@@ -25098,6 +25411,10 @@ def build_legal_radar_digest_prompt(payload, *, include_text=True):
                     f"- URL: {item.get('url') or '-'}",
                     f"- Resumen previo: {str(item.get('resumen') or '').strip()[:400] or '-'}",
                     f"- Acción recomendada previa: {str(item.get('accion_recomendada') or '').strip()[:240] or '-'}",
+                    f"- Resumen LLM: {str(item.get('llm_impact_summary') or '').strip()[:400] or '-'}",
+                    f"- Acciones LLM: {', '.join(_normalize_text_list(item.get('llm_actions_json') or [])) or '-'}",
+                    f"- Confianza LLM: {item.get('llm_confidence') if item.get('llm_confidence') is not None else '-'}",
+                    f"- Revisión manual LLM: {'sí' if int(item.get('llm_review_needed') or 0) else 'no'}",
                     f"- Texto (si disponible): {text or '(no disponible)'}",
                 ]
             )
@@ -25221,6 +25538,12 @@ def build_basic_legal_radar_digest(payload):
             accion = str(it.get("accion_recomendada") or "").strip()
             if accion:
                 blocks.append(f"    - Acción sugerida: {accion[:240]}")
+            llm_summary = str(it.get("llm_impact_summary") or "").strip()
+            if llm_summary:
+                blocks.append(f"    - Impacto CRM (LLM): {llm_summary[:280]}")
+            llm_actions = _normalize_text_list(it.get("llm_actions_json") or [], max_items=4, max_chars=140)
+            if llm_actions:
+                blocks.append("    - Acciones LLM: " + " / ".join(llm_actions))
         if len(items) > 3:
             blocks.append(f"  • +{len(items)-3} más…")
     blocks.append("")
@@ -25251,7 +25574,8 @@ def fetch_legal_radar_recent_updates(conn, *, area="inmobiliaria", topic_key="",
     rows = conn.execute(
         """
         SELECT id, fuente, referencia, titulo, fecha_publicacion, impacto, url,
-               accion_recomendada, auto_detected, created_at, updated_at
+               accion_recomendada, llm_impact_summary, llm_actions_json, llm_confidence,
+               llm_review_needed, auto_detected, created_at, updated_at
         FROM legal_radar_items
         WHERE area = ?
           AND topic_key = ?
@@ -25273,6 +25597,10 @@ def fetch_legal_radar_recent_updates(conn, *, area="inmobiliaria", topic_key="",
                 "impacto": row_value(row, "impacto") or "",
                 "url": row_value(row, "url") or "",
                 "accion_recomendada": row_value(row, "accion_recomendada") or "",
+                "llm_impact_summary": row_value(row, "llm_impact_summary") or "",
+                "llm_actions_json": json.loads(row_value(row, "llm_actions_json") or "[]") if str(row_value(row, "llm_actions_json") or "").strip() else [],
+                "llm_confidence": row_value(row, "llm_confidence"),
+                "llm_review_needed": int(row_value(row, "llm_review_needed") or 0),
                 "title": row_value(row, "titulo") or "",
                 "auto_detected": int(row_value(row, "auto_detected") or 0),
                 "created_at": row_value(row, "created_at") or "",
@@ -34802,6 +35130,10 @@ def ensure_tables(db_path):
     ensure_column(conn, "legal_radar_items", "library_doc_id", "library_doc_id TEXT")
     ensure_column(conn, "legal_radar_items", "imported_at", "imported_at TEXT")
     ensure_column(conn, "legal_radar_items", "import_error", "import_error TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_impact_summary", "llm_impact_summary TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_actions_json", "llm_actions_json TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_confidence", "llm_confidence REAL")
+    ensure_column(conn, "legal_radar_items", "llm_review_needed", "llm_review_needed INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS legal_library_documents (
@@ -65693,6 +66025,23 @@ class Handler(BaseHTTPRequestHandler):
                     response["warnings"] = list(response["warnings"]) + [
                         "Revisar penalizaciones, prórrogas, representación y efectos económicos antes de activar la plantilla.",
                     ]
+            response["copilot_mode"] = "basic"
+            ollama_analysis = build_legal_copilot_ollama_analysis(area, topic_key, response, question)
+            if ollama_analysis:
+                response["copilot_mode"] = "ollama"
+                response["copilot_analysis"] = ollama_analysis
+                response["document_templates"] = _normalize_text_list(
+                    list(response.get("document_templates") or []) + list(ollama_analysis.get("affected_documents") or []),
+                    max_items=16,
+                )
+                response["workflow_checkpoints"] = _normalize_text_list(
+                    list(response.get("workflow_checkpoints") or []) + list(ollama_analysis.get("affected_workflows") or []),
+                    max_items=16,
+                )
+                response["review_recommendations"] = _normalize_text_list(
+                    list(response.get("review_recommendations") or []) + list(ollama_analysis.get("review_points") or []),
+                    max_items=18,
+                )
             json_response(self, response)
             return
         elif parsed.path == "/api/legal_dgt_lookup":
@@ -65836,8 +66185,19 @@ class Handler(BaseHTTPRequestHandler):
             items_payload = fetch_legal_radar_items_for_digest(conn, area=area, estado=estado, limit=limit)
             mode = "basic"
             output = ""
-            if openai_available():
-                prompt = build_legal_radar_digest_prompt(items_payload, include_text=include_text)
+            prompt = build_legal_radar_digest_prompt(items_payload, include_text=include_text)
+            if ollama_available():
+                output, err = call_ollama(
+                    prompt,
+                    temperature=0.1,
+                    timeout=60,
+                    system_text="Eres un copiloto legal interno de un ERP/CRM. Responde en español de forma accionable y precisa.",
+                )
+                if not err and str(output or "").strip():
+                    mode = "ollama"
+                else:
+                    output = ""
+            if not output and openai_available():
                 output, err = call_openai(
                     prompt,
                     temperature=0.15,
@@ -65847,8 +66207,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not err and str(output or "").strip():
                     mode = "openai"
                 else:
-                    output = build_basic_legal_radar_digest(items_payload)
-            else:
+                    output = ""
+            if not output:
                 output = build_basic_legal_radar_digest(items_payload)
             json_response(
                 self,
@@ -65925,13 +66285,17 @@ class Handler(BaseHTTPRequestHandler):
                 "affected_workflows",
                 "affected_clauses",
                 "impact_score",
+                "llm_impact_summary",
+                "llm_actions_json",
+                "llm_confidence",
+                "llm_review_needed",
                 "reviewed_by",
             )
             updates = {}
             for key in allowed:
                 if key in payload:
                     raw_value = payload.get(key)
-                    if key in {"affected_documents", "affected_workflows", "affected_clauses"} and isinstance(raw_value, (list, tuple)):
+                    if key in {"affected_documents", "affected_workflows", "affected_clauses", "llm_actions_json"} and isinstance(raw_value, (list, tuple)):
                         value = json.dumps(list(raw_value), ensure_ascii=False)
                     else:
                         value = str(raw_value or "").strip()
