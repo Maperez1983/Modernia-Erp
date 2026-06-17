@@ -534,6 +534,15 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         by_key = {item["key"]: item["value"] for item in merged}
         self.assertEqual(by_key, {"A": "1", "B": "3", "C": "4"})
 
+    def test_render_env_sync_normalizes_render_api_shape(self):
+        rows = render_env_sync._normalize_env_list(
+            [
+                {"envVar": {"key": "A", "value": "1"}, "cursor": "x"},
+                {"envVar": {"key": "B", "previewValue": "2"}, "cursor": "y"},
+            ]
+        )
+        self.assertEqual(rows, [{"key": "A", "value": "1"}, {"key": "B", "value": "2"}])
+
     def test_business_reconciliation_summary_is_compacted(self):
         summary = run_system_audit._summarize_json_output(
             json.dumps(

@@ -19,24 +19,40 @@ def _normalize_env_list(payload: object) -> list[dict]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        key = str(row.get("key") or "").strip()
+        env_row = row.get("envVar") if isinstance(row.get("envVar"), dict) else row
+        key = str(env_row.get("key") or "").strip()
         if not key:
             continue
-        value = row.get("value")
+        value = env_row.get("value")
         if value is None:
-            value = row.get("previewValue") or ""
+            value = env_row.get("previewValue") or ""
         normalized.append({"key": key, "value": str(value)})
     return normalized
 
 
 def _fetch_env_vars(api_key: str, service_id: str) -> list[dict]:
-    req = Request(
-        f"https://api.render.com/v1/services/{service_id}/env-vars",
-        headers=_api_headers(api_key),
-        method="GET",
-    )
-    with urlopen(req, timeout=30) as resp:
-        return _normalize_env_list(json.loads(resp.read().decode("utf-8")))
+    rows = []
+    cursor = ""
+    while True:
+        url = f"https://api.render.com/v1/services/{service_id}/env-vars"
+        if cursor:
+            url += f"?cursor={cursor}"
+        req = Request(url, headers=_api_headers(api_key), method="GET")
+        with urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        normalized = _normalize_env_list(payload)
+        if not normalized:
+            break
+        rows.extend(normalized)
+        last = payload[-1] if isinstance(payload, list) and payload else {}
+        next_cursor = str(last.get("cursor") or "").strip()
+        if not next_cursor or next_cursor == cursor:
+            break
+        cursor = next_cursor
+    dedup = {}
+    for row in rows:
+        dedup[row["key"]] = row["value"]
+    return [{"key": key, "value": dedup[key]} for key in sorted(dedup)]
 
 
 def _merge_env_vars(current_rows: list[dict], updates: dict[str, str]) -> list[dict]:
@@ -108,4 +124,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
