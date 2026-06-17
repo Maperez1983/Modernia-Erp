@@ -38,6 +38,7 @@ if "PIL" not in sys.modules:
 from web.server import (
     _choose_ollama_model_name,
     _normalize_legal_llm_enrichment,
+    build_legal_copilot_ollama_analysis,
     build_legal_radar_digest_prompt,
     copilot_web_answer,
     fetch_latest_system_audit_run,
@@ -144,6 +145,29 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             server.openai_available = old_openai
             server.ollama_available = old_ollama
             server.call_ollama = old_call_ollama
+
+    def test_legal_copilot_ollama_analysis_falls_back_to_text(self):
+        import web.server as server
+
+        old_available = server.ollama_available
+        old_json = server.call_ollama_json
+        old_call = server.call_ollama
+        try:
+            server.ollama_available = lambda: True
+            server.call_ollama_json = lambda *args, **kwargs: ({}, "json inválido")
+            server.call_ollama = lambda *args, **kwargs: ("Revisar plantilla y flujo de firma.", "")
+            analysis = build_legal_copilot_ollama_analysis(
+                "inmobiliaria",
+                "visitas",
+                {"title": "Hoja de visita", "summary": "Base", "mandatory_docs": [], "workflow_checkpoints": [], "review_recommendations": [], "recent_updates": []},
+                "¿Qué cambia?",
+            )
+            self.assertEqual(analysis["crm_impact"], "Revisar plantilla y flujo de firma.")
+            self.assertTrue(analysis["review_needed"])
+        finally:
+            server.ollama_available = old_available
+            server.call_ollama_json = old_json
+            server.call_ollama = old_call
 
     def test_agenda_regression_outline_targets_agenda_tests(self):
         outline = system_autofix_agent._regression_outline(

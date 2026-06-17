@@ -17088,6 +17088,19 @@ def enrich_legal_detection_with_ollama(area, source_config, entry, detection):
     )
     if err or not parsed:
         merged = dict(detection)
+        fallback_prompt = (
+            "Resume en 3-5 lineas el impacto operativo de esta novedad legal en un CRM/ERP. "
+            "Incluye si requiere revisar plantillas, flujos o validaciones. No inventes.\n\n"
+            + json.dumps({"area": area_key, "detection": detection, "entry": entry}, ensure_ascii=False)
+        )
+        fallback_text, fallback_err = call_ollama(
+            fallback_prompt,
+            temperature=0.1,
+            timeout=45,
+            system_text="Responde en castellano, de forma breve y accionable.",
+        )
+        if not fallback_err and str(fallback_text or "").strip():
+            merged["llm_impact_summary"] = str(fallback_text).strip()[:1200]
         merged["llm_review_needed"] = 1
         return merged
     enrichment = _normalize_legal_llm_enrichment(area_key, detection, parsed)
@@ -17127,7 +17140,29 @@ def build_legal_copilot_ollama_analysis(area, topic_key, response, question):
         system_text="Eres un copiloto legal de producto. Responde en JSON valido y en castellano.",
     )
     if err or not parsed:
-        return {}
+        fallback_prompt = (
+            "Actua como copiloto legal operativo del CRM. "
+            "Explica en un texto breve: impacto en CRM, documentos a revisar, flujos a revisar y principal riesgo. "
+            "No inventes datos no presentes.\n\n"
+            + json.dumps(compact, ensure_ascii=False)
+        )
+        fallback_text, fallback_err = call_ollama(
+            fallback_prompt,
+            temperature=0.1,
+            timeout=45,
+            system_text="Responde en castellano, breve y accionable.",
+        )
+        if fallback_err or not str(fallback_text or "").strip():
+            return {}
+        return {
+            "crm_impact": str(fallback_text).strip(),
+            "actions": [],
+            "affected_documents": [],
+            "affected_workflows": [],
+            "review_points": [],
+            "risk_level": "medio",
+            "review_needed": True,
+        }
     return {
         "crm_impact": str(parsed.get("crm_impact") or "").strip(),
         "actions": _normalize_text_list(parsed.get("actions") or []),
