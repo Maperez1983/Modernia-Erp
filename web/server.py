@@ -16835,6 +16835,7 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
 
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_MODEL_CACHE = {"base_url": "", "fetched_at": 0.0, "names": []}
 
 
 def ollama_available():
@@ -16844,14 +16845,57 @@ def ollama_available():
     return bool(shutil.which("ollama"))
 
 
+def _fetch_ollama_model_names(base_url, timeout=15):
+    now_ts = time.time()
+    if (
+        OLLAMA_MODEL_CACHE.get("base_url") == base_url
+        and OLLAMA_MODEL_CACHE.get("names")
+        and now_ts - float(OLLAMA_MODEL_CACHE.get("fetched_at") or 0.0) <= 300.0
+    ):
+        return list(OLLAMA_MODEL_CACHE.get("names") or [])
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/tags",
+        headers={"Content-Type": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return []
+    names = []
+    for row in list(payload.get("models") or []):
+        name = str(row.get("name") or row.get("model") or "").strip()
+        if name:
+            names.append(name)
+    OLLAMA_MODEL_CACHE["base_url"] = base_url
+    OLLAMA_MODEL_CACHE["fetched_at"] = now_ts
+    OLLAMA_MODEL_CACHE["names"] = list(names)
+    return names
+
+
+def _choose_ollama_model_name(requested, available_names):
+    available = [str(item or "").strip() for item in list(available_names or []) if str(item or "").strip()]
+    requested_name = str(requested or "").strip()
+    fallback_name = str(os.environ.get("OLLAMA_FALLBACK_MODEL") or "").strip()
+    if requested_name and requested_name in available:
+        return requested_name
+    if fallback_name and fallback_name in available:
+        return fallback_name
+    if available:
+        return available[0]
+    return requested_name
+
+
 def call_ollama(prompt, model=None, temperature=0.1, timeout=45, system_text=None):
     base_url = str(os.environ.get("OLLAMA_LEGAL_BASE_URL") or os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip().rstrip("/")
-    model_name = (
+    requested_model_name = (
         str(model or "").strip()
         or str(os.environ.get("OLLAMA_LEGAL_MODEL") or "").strip()
         or str(os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip()
         or "qwen2.5-coder:7b"
     )
+    model_name = _choose_ollama_model_name(requested_model_name, _fetch_ollama_model_names(base_url))
     if not base_url:
         return "", "OLLAMA_BASE_URL no configurada"
     full_prompt = str(prompt or "")

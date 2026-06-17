@@ -36,6 +36,7 @@ if "PIL" not in sys.modules:
     sys.modules["PIL"] = pil_stub
 
 from web.server import (
+    _choose_ollama_model_name,
     _normalize_legal_llm_enrichment,
     build_legal_radar_digest_prompt,
     copilot_web_answer,
@@ -45,6 +46,18 @@ from web.server import (
 
 
 class OllamaAutomationToolsTests(unittest.TestCase):
+    def test_choose_ollama_model_name_falls_back_to_available(self):
+        old_fallback = os.environ.get("OLLAMA_FALLBACK_MODEL")
+        try:
+            os.environ["OLLAMA_FALLBACK_MODEL"] = "llama3.2:1b"
+            chosen = _choose_ollama_model_name("qwen2.5-coder:7b", ["llama3.2:1b", "mistral:7b"])
+            self.assertEqual(chosen, "llama3.2:1b")
+        finally:
+            if old_fallback is None:
+                os.environ.pop("OLLAMA_FALLBACK_MODEL", None)
+            else:
+                os.environ["OLLAMA_FALLBACK_MODEL"] = old_fallback
+
     def test_legal_llm_enrichment_normalizes_topic_lists_and_confidence(self):
         enriched = _normalize_legal_llm_enrichment(
             "inmobiliaria",
