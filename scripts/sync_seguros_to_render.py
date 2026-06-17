@@ -35,6 +35,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    from .render_backend_guard import guard_remote_sqlite_sync
+except ImportError:
+    from render_backend_guard import guard_remote_sqlite_sync
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SSH_OPTIONS = [
@@ -426,7 +431,10 @@ def main() -> None:
     ap.add_argument("--force-fields", action="store_true", help="Sobrescribe campos de ficha si vienen en el CSV.")
     ap.add_argument("--limit", type=int, default=0, help="Limita nº de pólizas a sincronizar (0=sin límite).")
     ap.add_argument("--dry-run", action="store_true", help="Genera payload+tar pero no sube a Render.")
+    ap.add_argument("--force-sqlite-target", action="store_true", help="Permite escribir en SQLite remota aunque el proyecto este en modo Postgres.")
     args = ap.parse_args()
+
+    guard_remote_sqlite_sync(force=args.force_sqlite_target, script_name=Path(__file__).name)
 
     csv_path = Path(args.extract_csv).expanduser().resolve()
     if not csv_path.exists():

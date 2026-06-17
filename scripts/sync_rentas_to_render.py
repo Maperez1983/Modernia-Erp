@@ -20,6 +20,11 @@ import tempfile
 import tarfile
 from pathlib import Path
 
+try:
+    from .render_backend_guard import guard_remote_sqlite_sync
+except ImportError:
+    from render_backend_guard import guard_remote_sqlite_sync
+
 
 GESTORIA_COMPANY = "Fincas Velazquez"
 ROOT = Path(__file__).resolve().parents[1]
@@ -544,7 +549,10 @@ def main() -> None:
     parser.add_argument("--render-db", default="/var/data/erp_import2.sqlite", help="Ruta SQLite en Render.")
     parser.add_argument("--render-uploads", default="/var/data/uploads", help="Carpeta persistente de uploads en Render.")
     parser.add_argument("--dry-run", action="store_true", help="Genera el payload pero no lo sube.")
+    parser.add_argument("--force-sqlite-target", action="store_true", help="Permite escribir en SQLite remota aunque el proyecto este en modo Postgres.")
     args = parser.parse_args()
+
+    guard_remote_sqlite_sync(force=args.force_sqlite_target, script_name=Path(__file__).name)
 
     local_db = Path(args.local_db).expanduser().resolve()
     local_uploads = Path(args.local_uploads).expanduser().resolve()

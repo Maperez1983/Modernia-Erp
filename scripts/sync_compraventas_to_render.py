@@ -21,6 +21,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    from .render_backend_guard import guard_remote_sqlite_sync
+except ImportError:
+    from render_backend_guard import guard_remote_sqlite_sync
+
 
 DEFAULT_COMPANY = "Estudio Velazquez 2012 SL"
 SSH_OPTIONS = [
@@ -397,7 +402,10 @@ def main() -> None:
     parser.add_argument("--render-host", required=True, help="Host SSH de Render, ej. srv-xxx@ssh.frankfurt.render.com")
     parser.add_argument("--render-db", default="/var/data/erp_import2.sqlite", help="Ruta SQLite en Render.")
     parser.add_argument("--dry-run", action="store_true", help="Prepara el payload pero no lo sube.")
+    parser.add_argument("--force-sqlite-target", action="store_true", help="Permite escribir en SQLite remota aunque el proyecto este en modo Postgres.")
     args = parser.parse_args()
+
+    guard_remote_sqlite_sync(force=args.force_sqlite_target, script_name=Path(__file__).name)
 
     local_db = Path(args.local_db).expanduser().resolve()
     if not local_db.exists():
