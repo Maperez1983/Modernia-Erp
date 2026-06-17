@@ -1,0 +1,45 @@
+{
+  "kind": "modernia_expected_behaviors",
+  "generated_for": "ollama_operational_memory",
+  "modules": {
+    "core_home": [
+      "Si una card CRM es visible para un usuario, debe poder abrir una vista funcional del CRM correspondiente.",
+      "No puede existir una card visible pero inerte por guards de permisos incoherentes con el render.",
+      "Tras login, la navegacion debe preservar deep links y destino de workspace cuando proceda."
+    ],
+    "auth_access": [
+      "Produccion debe operar sobre Postgres, no sobre SQLite, salvo override operativo explicito.",
+      "Los usuarios de pruebas definidos por operacion deben validar la contrasena compartida vigente.",
+      "Los fallos de login deben ser 401 o 403 controlados; nunca 500.",
+      "admin_user_lookup debe funcionar para auditar estado de credenciales, memberships y esquema de hash."
+    ],
+    "agenda_inmobiliaria": [
+      "Un usuario miembro del workspace debe ver sus citas nuevas y antiguas del servicio permitido.",
+      "El historico de agenda no puede desaparecer por cambiar de backend o por sync parcial.",
+      "Admin y no admin con acceso al mismo workspace/servicio deben ver el mismo conjunto de citas salvo restricciones funcionales explicitamente documentadas.",
+      "Crear o editar una cita no debe heredar cliente, tipo, responsable, fechas ni estado residual de una cita previa."
+    ],
+    "usuarios_permisos": [
+      "Un usuario no privilegiado solo puede ver datos de workspaces donde es miembro.",
+      "Las diferencias de servicio deben resolverse como 403 controlado, no como lista vacia silenciosa ni 5xx.",
+      "Un usuario activo sin membership debe marcarse como warning operativo."
+    ],
+    "workspaces_datos": [
+      "Toda consulta multi-tenant debe resolver workspace_id de forma explicita o desde la sesion.",
+      "No se deben mezclar empresas, usuarios ni documentos entre workspaces.",
+      "Los syncs legacy hacia SQLite deben quedar bloqueados si produccion usa Postgres."
+    ],
+    "gestoria": [
+      "Busquedas, agenda y documentos de gestoria deben respetar servicio y workspace.",
+      "Los listados no deben duplicar o mezclar clientes entre tenants."
+    ],
+    "seguros": [
+      "Los endpoints de seguros deben devolver datos del workspace o 403 controlado si el servicio no aplica.",
+      "Los KPIs no deben romper por empresa_id ausente; deben responder 400 claro."
+    ],
+    "financiacion": [
+      "Hipotecas, seguimientos y alertas deben responder con datos validos o errores 4xx controlados.",
+      "Los flujos no deben degradarse por joins entre backends heterogeneos."
+    ]
+  }
+}

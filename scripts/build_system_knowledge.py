@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS_DIR = ROOT / "docs"
 KNOWLEDGE_JSON = DOCS_DIR / "system_knowledge.json"
 KNOWLEDGE_MD = DOCS_DIR / "system_knowledge.md"
+EXPECTED_BEHAVIORS_JSON = DOCS_DIR / "expected_behaviors.json"
+INCIDENTS_JSONL = DOCS_DIR / "incidents.jsonl"
+REPAIR_PLAYBOOKS_JSON = DOCS_DIR / "repair_playbooks.json"
 
 
 MODULE_RULES = [
@@ -103,6 +106,29 @@ def _read(path: Path) -> str:
         return ""
 
 
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_jsonl(path: Path, limit: int = 20) -> list[dict]:
+    items = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                items.append(json.loads(raw))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return items[-limit:]
+
+
 def _extract_endpoints(server_text: str) -> list[dict]:
     items = []
     for match in re.finditer(r'if\s+path\s*==\s*["\'](/api/[^"\']+)["\']', server_text):
@@ -169,6 +195,9 @@ def build_knowledge() -> dict:
         name = match.group(1)
         frontend_functions[_classify(name)].append(name)
     frontend_api_map = _extract_frontend_api_map(app_text)
+    expected_behaviors = _load_json(EXPECTED_BEHAVIORS_JSON)
+    incidents = _load_jsonl(INCIDENTS_JSONL)
+    repair_playbooks = _load_json(REPAIR_PLAYBOOKS_JSON)
     return {
         "kind": "modernia_system_knowledge",
         "generated_at": _utc_now(),
@@ -182,6 +211,14 @@ def build_knowledge() -> dict:
             "endpoint, frontend, test y expectativa funcional correspondiente."
         ),
         "entrypoints": MODULE_ENTRYPOINTS,
+        "operational_memory": {
+            "expected_behaviors_path": str(EXPECTED_BEHAVIORS_JSON.relative_to(ROOT)),
+            "incidents_path": str(INCIDENTS_JSONL.relative_to(ROOT)),
+            "repair_playbooks_path": str(REPAIR_PLAYBOOKS_JSON.relative_to(ROOT)),
+            "expected_behaviors": expected_behaviors.get("modules") or {},
+            "recent_incidents": incidents,
+            "repair_playbooks": repair_playbooks.get("playbooks") or [],
+        },
         "frontend_api_map": frontend_api_map,
         "modules": {
             module: {
@@ -269,6 +306,12 @@ def write_markdown(knowledge: dict) -> None:
         "",
         knowledge["purpose"],
         "",
+        "## Operational Memory",
+        "",
+        f"- Expected behaviors: {knowledge.get('operational_memory', {}).get('expected_behaviors_path', '')}",
+        f"- Incidents: {knowledge.get('operational_memory', {}).get('incidents_path', '')}",
+        f"- Repair playbooks: {knowledge.get('operational_memory', {}).get('repair_playbooks_path', '')}",
+        "",
         "## Modules",
     ]
     for module, data in knowledge["modules"].items():
@@ -285,6 +328,19 @@ def write_markdown(knowledge: dict) -> None:
             lines.append(f"  - {item}")
         if rule.get("note"):
             lines.append(f"- Note: {rule['note']}")
+    incidents = knowledge.get("operational_memory", {}).get("recent_incidents") or []
+    if incidents:
+        lines.extend(["", "## Recent Incidents"])
+        for item in incidents:
+            lines.extend(
+                [
+                    "",
+                    f"### {item.get('incident_id')}",
+                    f"- Symptom: {item.get('symptom')}",
+                    f"- Root cause: {item.get('root_cause')}",
+                    f"- Fix commit: {item.get('fix_commit')}",
+                ]
+            )
     KNOWLEDGE_MD.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
 

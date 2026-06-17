@@ -28,6 +28,9 @@ from scripts.ollama_json import generate_json
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_DIR = ROOT / "reports" / "system_audit"
 DEFAULT_KNOWLEDGE_PATH = ROOT / "docs" / "system_knowledge.json"
+DEFAULT_EXPECTED_BEHAVIORS_PATH = ROOT / "docs" / "expected_behaviors.json"
+DEFAULT_INCIDENTS_PATH = ROOT / "docs" / "incidents.jsonl"
+DEFAULT_PLAYBOOKS_PATH = ROOT / "docs" / "repair_playbooks.json"
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 
@@ -66,6 +69,22 @@ def _run(cmd: list[str], timeout: int = 900) -> dict:
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_jsonl(path: Path, limit: int = 20) -> list[dict]:
+    items = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                items.append(json.loads(raw))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return items[-limit:]
 
 
 def _latest_report(report_dir: Path) -> Path:
@@ -113,8 +132,32 @@ def _compact_knowledge(knowledge: dict) -> dict:
         "generated_at": knowledge.get("generated_at"),
         "git": knowledge.get("git"),
         "entrypoints": knowledge.get("entrypoints"),
+        "operational_memory": knowledge.get("operational_memory"),
         "modules": modules,
         "diagnostic_rules": knowledge.get("diagnostic_rules"),
+    }
+
+
+def _load_operational_inputs() -> dict:
+    expected = {}
+    incidents = []
+    playbooks = {}
+    try:
+        expected = _load_json(Path(os.environ.get("CRM_EXPECTED_BEHAVIORS_PATH") or DEFAULT_EXPECTED_BEHAVIORS_PATH))
+    except Exception:
+        expected = {}
+    try:
+        incidents = _load_jsonl(Path(os.environ.get("CRM_INCIDENTS_PATH") or DEFAULT_INCIDENTS_PATH))
+    except Exception:
+        incidents = []
+    try:
+        playbooks = _load_json(Path(os.environ.get("CRM_REPAIR_PLAYBOOKS_PATH") or DEFAULT_PLAYBOOKS_PATH))
+    except Exception:
+        playbooks = {}
+    return {
+        "expected_behaviors": expected.get("modules") or {},
+        "recent_incidents": incidents,
+        "repair_playbooks": playbooks.get("playbooks") or [],
     }
 
 
@@ -169,8 +212,32 @@ def _heuristic_plan(report: dict, knowledge: dict) -> dict:
             "Inspeccionar el endpoint/funcion indicado por el modulo afectado.",
             "Aplicar cambio pequeno y verificar con tests + auditoria de produccion no destructiva.",
         ],
+        "operational_memory_hits": _operational_memory_hits(knowledge, ordered, text),
         "regression_test_outline": _regression_outline(ordered, text),
         "autofix_allowed": False,
+    }
+
+
+def _operational_memory_hits(knowledge: dict, modules: list[str], report_text: str) -> dict:
+    memory = (knowledge.get("operational_memory") or {}) if isinstance(knowledge, dict) else {}
+    expected = memory.get("expected_behaviors") or {}
+    incidents = memory.get("recent_incidents") or []
+    playbooks = memory.get("repair_playbooks") or []
+    expected_hits = {name: expected.get(name) for name in modules if expected.get(name)}
+    incident_hits = []
+    for item in incidents:
+        haystack = json.dumps(item, ensure_ascii=False).lower()
+        if any(module.lower() in haystack for module in modules) or any(token in haystack for token in report_text.split()[:80]):
+            incident_hits.append(item)
+    playbook_hits = []
+    for item in playbooks:
+        haystack = json.dumps(item, ensure_ascii=False).lower()
+        if any(module.lower() in haystack for module in modules) or any(trigger in report_text for trigger in (item.get("triggers") or [])):
+            playbook_hits.append(item)
+    return {
+        "expected_behaviors": expected_hits,
+        "incidents": incident_hits[:5],
+        "repair_playbooks": playbook_hits[:5],
     }
 
 
@@ -412,6 +479,8 @@ def run_agent(
 ) -> dict:
     report = _load_json(report_path)
     knowledge = _load_json(knowledge_path)
+    if not knowledge.get("operational_memory"):
+        knowledge["operational_memory"] = _load_operational_inputs()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if report.get("status") != "failed":

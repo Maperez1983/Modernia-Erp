@@ -14,6 +14,9 @@ from pathlib import Path
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_KNOWLEDGE_PATH = Path(__file__).resolve().parents[1] / "docs" / "system_knowledge.json"
+DEFAULT_EXPECTED_BEHAVIORS_PATH = Path(__file__).resolve().parents[1] / "docs" / "expected_behaviors.json"
+DEFAULT_INCIDENTS_PATH = Path(__file__).resolve().parents[1] / "docs" / "incidents.jsonl"
+DEFAULT_PLAYBOOKS_PATH = Path(__file__).resolve().parents[1] / "docs" / "repair_playbooks.json"
 
 
 def _load_system_knowledge() -> dict:
@@ -46,6 +49,40 @@ def _load_system_knowledge() -> dict:
     }
 
 
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_jsonl(path: Path, limit: int = 20) -> list[dict]:
+    items = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                items.append(json.loads(raw))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return items[-limit:]
+
+
+def _load_operational_memory() -> dict:
+    expected = _load_json(Path(os.environ.get("CRM_EXPECTED_BEHAVIORS_PATH") or DEFAULT_EXPECTED_BEHAVIORS_PATH))
+    incidents = _load_jsonl(Path(os.environ.get("CRM_INCIDENTS_PATH") or DEFAULT_INCIDENTS_PATH))
+    playbooks = _load_json(Path(os.environ.get("CRM_REPAIR_PLAYBOOKS_PATH") or DEFAULT_PLAYBOOKS_PATH))
+    return {
+        "expected_behaviors": expected.get("modules") or {},
+        "recent_incidents": incidents,
+        "repair_playbooks": playbooks.get("playbooks") or [],
+    }
+
+
 def _compact_report(report: dict) -> dict:
     compact_steps = []
     for step in report.get("steps", []):
@@ -68,6 +105,7 @@ def _compact_report(report: dict) -> dict:
         "finished_at": report.get("finished_at"),
         "failed_steps": report.get("failed_steps"),
         "system_knowledge": _load_system_knowledge(),
+        "operational_memory": _load_operational_memory(),
         "steps": compact_steps,
     }
 
@@ -133,6 +171,12 @@ def _deterministic_summary(compact: dict) -> str:
                 f"funciones_frontend={frontend.get('function_count')}; "
                 f"tests={tests.get('total')}"
             )
+    op_memory = compact.get("operational_memory") or {}
+    incidents = op_memory.get("recent_incidents") or []
+    if incidents:
+        lines.extend(["", "## Incidentes conocidos"])
+        for item in incidents[:5]:
+            lines.append(f"- {item.get('incident_id')}: {item.get('symptom')}")
     return "\n".join(lines).strip() + "\n"
 
 

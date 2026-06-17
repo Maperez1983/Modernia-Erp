@@ -1,9 +1,15 @@
 # Modernia CRM System Knowledge
 
-Generated: 2026-06-16T15:18:57+00:00
-Commit: 4226b4a71f8a2a71c1ec5931cc9e47bf13c60da2
+Generated: 2026-06-17T12:42:00+00:00
+Commit: cbf0a13a28e7e3fe7ce3a07faf79d47755bc67ee
 
 Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.
+
+## Operational Memory
+
+- Expected behaviors: docs/expected_behaviors.json
+- Incidents: docs/incidents.jsonl
+- Repair playbooks: docs/repair_playbooks.json
 
 ## Modules
 
@@ -37,7 +43,7 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
 ### core
 
 - API endpoints: 46
-- Tests: tests/test_admin_force_reset_password_invite.py, tests/test_aon_diario_to_miconversor.py, tests/test_auth_invites_table_does_not_close_conn.py, tests/test_auth_security.py, tests/test_cliente_ficha.py, tests/test_fiscal_venta_pdf.py, tests/test_fiscal_venta_presets.py, tests/test_frontend_smoke.py, tests/test_iivtnu_hacienda_excel2022_catalog.py, tests/test_iivtnu_malaga_proxies.py, tests/test_iivtnu_max_coefs.py, tests/test_iivtnu_param_upsert.py
+- Tests: tests/test_admin_force_reset_password_invite.py, tests/test_admin_user_lookup.py, tests/test_aon_diario_to_miconversor.py, tests/test_auth_invites_table_does_not_close_conn.py, tests/test_auth_security.py, tests/test_cliente_ficha.py, tests/test_fiscal_venta_pdf.py, tests/test_fiscal_venta_presets.py, tests/test_frontend_smoke.py, tests/test_iivtnu_hacienda_excel2022_catalog.py, tests/test_iivtnu_malaga_proxies.py, tests/test_iivtnu_max_coefs.py
 - Expectations:
   - Si una card del home es visible para el usuario, debe abrir una vista real o tener href funcional.
   - No puede existir una card CRM visible pero inerte por guards frontend inconsistentes con el render.
@@ -131,3 +137,20 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
   - workspace_user_inventory
   - controles has_service_access/enforce_workspace_membership
 - Note: Puede ser correcto si el usuario no tiene ese servicio; no debe considerarse caida si es esperado.
+
+## Recent Incidents
+
+### INC-AGENDA-SQLITE-POSTGRES-MIX
+- Symptom: Usuarios admin y no admin dejaron de ver citas historicas en agenda inmobiliaria.
+- Root cause: La web de produccion estaba conectada a SQLite mientras la agenda historica correcta residia en Postgres; coexistian syncs legacy a SQLite con despliegue operacional en Postgres.
+- Fix commit: 3c669aa
+
+### INC-AUTH-DRIFT-SHARED-PASSWORDS
+- Symptom: Usuarios que podian entrar el dia anterior dejaron de autenticar tras la unificacion de backend.
+- Root cause: En Postgres habia hashes divergentes entre usuarios de pruebas; la politica de contrasena compartida no estaba auditada y el admin lookup estaba roto por NameError.
+- Fix commit: 350d26f
+
+### INC-HOME-CARD-INERT
+- Symptom: Al pulsar cards del home de CRM no se abria ningun modulo.
+- Root cause: Guards frontend incoherentes con la visibilidad de las cards y routing legado hacia explorador de empresa en lugar de workspace CRM.
+- Fix commit: 27d534e

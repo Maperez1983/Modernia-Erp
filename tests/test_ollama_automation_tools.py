@@ -12,6 +12,7 @@ from scripts import ollama_json
 from scripts import prod_auth_drift_audit
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
+from scripts import build_system_knowledge
 from scripts import system_autofix_agent
 from scripts import frontend_home_access_audit
 if "PIL" not in sys.modules:
@@ -139,6 +140,13 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             }
         )
         self.assertTrue(any(item["type"] == "auth_drift" for item in alerts))
+
+    def test_build_system_knowledge_includes_operational_memory(self):
+        knowledge = build_system_knowledge.build_knowledge()
+        memory = knowledge.get("operational_memory") or {}
+        self.assertIn("expected_behaviors", memory)
+        self.assertIn("recent_incidents", memory)
+        self.assertIn("repair_playbooks", memory)
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()

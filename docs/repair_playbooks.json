@@ -1,0 +1,70 @@
+{
+  "kind": "modernia_repair_playbooks",
+  "playbooks": [
+    {
+      "id": "auth-backend-drift",
+      "module": "auth_access",
+      "triggers": [
+        "usuarios que ayer entraban hoy no",
+        "login 401 masivo",
+        "dudas sobre cambio de backend"
+      ],
+      "steps": [
+        "Consultar /api/build_info y confirmar backend real.",
+        "Validar login de admin y cohorte de usuarios de pruebas.",
+        "Ejecutar admin_user_lookup sobre usuarios fallidos.",
+        "Comprobar que password_scheme y memberships son coherentes.",
+        "Si el backend cambio a Postgres, auditar divergencia de credenciales entre backends.",
+        "Restaurar politica de contrasena compartida solo en entorno de pruebas si aplica."
+      ],
+      "look_at": [
+        "scripts/prod_auth_drift_audit.py",
+        "web/server.py /api/login",
+        "web/server.py /api/admin_user_lookup",
+        "web/auth_security.py"
+      ]
+    },
+    {
+      "id": "agenda-historical-loss",
+      "module": "agenda_inmobiliaria",
+      "triggers": [
+        "agenda vacia",
+        "no aparecen citas antiguas",
+        "admin y no admin ven distinto"
+      ],
+      "steps": [
+        "Consultar /api/build_info y backend activo.",
+        "Comprobar /api/acciones por workspace y servicio con usuario admin y no admin.",
+        "Comparar counts entre Postgres y SQLite si hay sospecha de mezcla.",
+        "Verificar memberships del usuario y scoping por workspace.",
+        "Revisar si hay syncs legacy a SQLite en entorno Postgres."
+      ],
+      "look_at": [
+        "scripts/prod_api_monitor.py",
+        "scripts/prod_system_matrix_audit.py",
+        "scripts/render_backend_guard.py",
+        "web/server.py /api/acciones",
+        "tests/test_agenda_frontend_regressions.py"
+      ]
+    },
+    {
+      "id": "home-card-no-navigation",
+      "module": "core_home",
+      "triggers": [
+        "pulso la card y no hace nada",
+        "visible pero no abre CRM"
+      ],
+      "steps": [
+        "Verificar si la card visible tiene action y href coherentes.",
+        "Comprobar guards frontend de acceso amplio admin.",
+        "Comprobar que el click enruta a workspace CRM y no a un flujo legacy incorrecto.",
+        "Ejecutar frontend_home_access_audit y frontend smoke."
+      ],
+      "look_at": [
+        "scripts/frontend_home_access_audit.py",
+        "web/app.js",
+        "tests/test_frontend_smoke.py"
+      ]
+    }
+  ]
+}
