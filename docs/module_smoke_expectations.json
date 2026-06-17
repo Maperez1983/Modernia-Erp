@@ -1,0 +1,19 @@
+{
+  "kind": "modernia_module_smoke_expectations",
+  "defaults": {
+    "min_rows_total": 1
+  },
+  "by_user_module": {
+    "admin:inmobiliaria": { "min_rows_total": 50 },
+    "non_admin:inmobiliaria": { "min_rows_total": 50 },
+    "admin:core": { "min_rows_total": 1 },
+    "non_admin:core": { "min_rows_total": 1 }
+  },
+  "by_module": {
+    "gestoria": { "min_rows_total": 0 },
+    "seguros": { "min_rows_total": 0 },
+    "financiero": { "min_rows_total": 0 },
+    "fincas": { "min_rows_total": 0 },
+    "rrhh": { "min_rows_total": 0 }
+  }
+}

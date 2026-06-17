@@ -12,6 +12,7 @@ from scripts import ollama_json
 from scripts import prod_auth_drift_audit
 from scripts import prod_module_smoke
 from scripts import prod_security_posture_audit
+from scripts import auto_quarantine_guard
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import build_system_knowledge
@@ -95,8 +96,10 @@ class OllamaAutomationToolsTests(unittest.TestCase):
     def test_auth_drift_shared_user_fallbacks_to_non_admin(self):
         old_shared = os.environ.get("CRM_AUDIT_SHARED_LOGIN_USERS")
         old_inmo = os.environ.get("CRM_INMO_USER")
+        old_policy = os.environ.get("CRM_AUDIT_IDENTITY_POLICY_PATH")
         try:
             os.environ.pop("CRM_AUDIT_SHARED_LOGIN_USERS", None)
+            os.environ["CRM_AUDIT_IDENTITY_POLICY_PATH"] = str(Path("missing-policy.json"))
             os.environ["CRM_INMO_USER"] = "SLallana"
             self.assertEqual(prod_auth_drift_audit._shared_login_users(), ["SLallana"])
         finally:
@@ -108,6 +111,10 @@ class OllamaAutomationToolsTests(unittest.TestCase):
                 os.environ.pop("CRM_INMO_USER", None)
             else:
                 os.environ["CRM_INMO_USER"] = old_inmo
+            if old_policy is None:
+                os.environ.pop("CRM_AUDIT_IDENTITY_POLICY_PATH", None)
+            else:
+                os.environ["CRM_AUDIT_IDENTITY_POLICY_PATH"] = old_policy
 
     def test_auth_drift_summary_is_compacted(self):
         summary = run_system_audit._summarize_json_output(
@@ -233,18 +240,63 @@ class OllamaAutomationToolsTests(unittest.TestCase):
 
     def test_module_smoke_aggregates_rows(self):
         old_run = prod_module_smoke.prod_system_matrix_audit.run
+        old_path = os.environ.get("RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH")
         try:
-            prod_module_smoke.prod_system_matrix_audit.run = lambda: {
-                "endpoint_matrix": [
-                    {"user_label": "admin", "module": "inmobiliaria", "endpoint": "agenda_inmobiliaria", "status": "passed", "rows": 5, "workspace_nombre": "Verifika²"},
-                    {"user_label": "admin", "module": "inmobiliaria", "endpoint": "inmuebles", "status": "passed", "rows": 2, "workspace_nombre": "Verifika²"},
-                ]
-            }
-            report = prod_module_smoke.run()
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["results"][0]["rows_total"], 7)
+            with TemporaryDirectory() as tmp:
+                cfg = Path(tmp) / "module_expectations.json"
+                cfg.write_text(json.dumps({"defaults": {"min_rows_total": 1}, "by_user_module": {"admin:inmobiliaria": {"min_rows_total": 1}}}), encoding="utf-8")
+                os.environ["RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH"] = str(cfg)
+                prod_module_smoke.prod_system_matrix_audit.run = lambda: {
+                    "endpoint_matrix": [
+                        {"user_label": "admin", "module": "inmobiliaria", "endpoint": "agenda_inmobiliaria", "status": "passed", "rows": 5, "workspace_nombre": "Verifika²"},
+                        {"user_label": "admin", "module": "inmobiliaria", "endpoint": "inmuebles", "status": "passed", "rows": 2, "workspace_nombre": "Verifika²"},
+                    ]
+                }
+                report = prod_module_smoke.run()
+                self.assertEqual(report["status"], "passed")
+                self.assertEqual(report["results"][0]["rows_total"], 7)
         finally:
             prod_module_smoke.prod_system_matrix_audit.run = old_run
+            if old_path is None:
+                os.environ.pop("RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH", None)
+            else:
+                os.environ["RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH"] = old_path
+
+    def test_module_smoke_warns_when_below_expectation(self):
+        old_run = prod_module_smoke.prod_system_matrix_audit.run
+        old_path = os.environ.get("RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH")
+        try:
+            with TemporaryDirectory() as tmp:
+                cfg = Path(tmp) / "module_expectations.json"
+                cfg.write_text(json.dumps({"defaults": {"min_rows_total": 10}}), encoding="utf-8")
+                os.environ["RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH"] = str(cfg)
+                prod_module_smoke.prod_system_matrix_audit.run = lambda: {
+                    "endpoint_matrix": [
+                        {"user_label": "admin", "module": "core", "endpoint": "workspace_health", "status": "passed", "rows": 1, "workspace_nombre": "Verifika²"},
+                    ]
+                }
+                report = prod_module_smoke.run()
+                self.assertEqual(report["status"], "passed_with_warnings")
+        finally:
+            prod_module_smoke.prod_system_matrix_audit.run = old_run
+            if old_path is None:
+                os.environ.pop("RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH", None)
+            else:
+                os.environ["RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH"] = old_path
+
+    def test_auto_quarantine_guard_triggers_on_critical_alert(self):
+        with TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            report_path.write_text(json.dumps({"alerts": [{"type": "auth_drift", "title": "drift", "severity": "high"}]}), encoding="utf-8")
+            old_update = auto_quarantine_guard._render_env_update
+            try:
+                auto_quarantine_guard._render_env_update = lambda api_key, service_id, pairs: {"ok": True, "pairs": pairs}
+                os.environ["RENDER_API_KEY"] = "x"
+                os.environ["RENDER_WEB_SERVICE_ID"] = "srv"
+                result = auto_quarantine_guard.run(report_path)
+                self.assertTrue(result["quarantined"])
+            finally:
+                auto_quarantine_guard._render_env_update = old_update
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()

@@ -113,6 +113,14 @@ def _summarize_json_output(output: str) -> dict | None:
             "warnings": data.get("warnings"),
             "results": data.get("results"),
         }
+    if kind == "auto_quarantine_guard":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "quarantined": data.get("quarantined"),
+            "reason": data.get("reason"),
+            "detail": data.get("detail"),
+        }
     if kind == "prod_system_matrix_audit":
         return {
             "kind": kind,
@@ -614,6 +622,12 @@ table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid
 
 def _build_publish_payload(report: dict) -> dict:
     matrix_summary = _matrix_summary_from_report(report)
+    quarantine = {}
+    for step in report.get("steps", []):
+        js = step.get("json_summary") or {}
+        if js.get("kind") == "auto_quarantine_guard":
+            quarantine = js
+            break
     return {
         "kind": "system_audit_publish",
         "source": "render_cron",
@@ -637,6 +651,7 @@ def _build_publish_payload(report: dict) -> dict:
             }
             for step in report.get("steps", [])
         ],
+        "quarantine": quarantine,
         "ollama_summary_status": report.get("ollama_summary_status"),
         "autofix_plan_status": report.get("autofix_plan_status"),
     }
@@ -874,6 +889,19 @@ def main() -> int:
         autofix = _run_step("autofix_plan", autofix_cmd, timeout=900)
         report["steps"].append(autofix)
         report["autofix_plan_status"] = autofix["status"]
+        report["alerts"] = _build_alerts(report)
+        report["trend"] = _build_trend_data(report, previous_entries)
+        report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
+
+    if _env_flag("RUN_SYSTEM_AUDIT_AUTO_QUARANTINE"):
+        quarantine = _run_step(
+            "auto_quarantine_guard",
+            [sys.executable, "scripts/auto_quarantine_guard.py", str(report_path), "--json"],
+            timeout=120,
+        )
+        report["steps"].append(quarantine)
         report["alerts"] = _build_alerts(report)
         report["trend"] = _build_trend_data(report, previous_entries)
         report["alerts"].extend(_build_trend_alerts(report, report["trend"]))

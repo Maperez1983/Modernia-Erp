@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
+from pathlib import Path
 
 
 @dataclass
@@ -36,6 +37,10 @@ class HttpResponse:
     def __init__(self, status_code: int, text: str):
         self.status_code = status_code
         self.text = text
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_IDENTITY_POLICY_PATH = ROOT / "docs" / "audit_identity_policy.json"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -140,6 +145,10 @@ def _admin_lookup(base_url: str, session, login: str, timeout: int) -> tuple[dic
 
 
 def _shared_login_users() -> list[str]:
+    policy = _identity_policy()
+    shared_policy = policy.get("shared_password_users") or []
+    if shared_policy:
+        return [str(item).strip() for item in shared_policy if str(item).strip()]
     explicit = _csv_env("CRM_AUDIT_SHARED_LOGIN_USERS")
     if explicit:
         return explicit
@@ -155,6 +164,15 @@ def _shared_login_users() -> list[str]:
 
 def _shared_password() -> str:
     return str(os.environ.get("CRM_AUDIT_SHARED_PASSWORD") or os.environ.get("CRM_INMO_PASSWORD") or "").strip()
+
+
+def _identity_policy() -> dict:
+    path = Path(os.environ.get("CRM_AUDIT_IDENTITY_POLICY_PATH") or DEFAULT_IDENTITY_POLICY_PATH)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def run() -> dict:
@@ -254,6 +272,7 @@ def run() -> dict:
             "shared_login_users": shared_users,
             "shared_password_configured": bool(shared_password),
         },
+        "identity_policy": _identity_policy(),
         "admin_user": (login_data.get("user") or {}) if isinstance(login_data, dict) else {},
     }
 

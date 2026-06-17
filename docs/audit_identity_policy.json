@@ -1,0 +1,30 @@
+{
+  "kind": "modernia_audit_identity_policy",
+  "admin_users": [
+    "MPerez"
+  ],
+  "shared_password_users": [
+    "AMelgar",
+    "AMostazo",
+    "B.salazar",
+    "C.anca",
+    "DGallardo",
+    "D.Garcia",
+    "G.BARTHA",
+    "Icanamero",
+    "Jbernal",
+    "Rmiera",
+    "Sbuggea",
+    "SLallana",
+    "S.sanchez",
+    "Tramos"
+  ],
+  "critical_users": {
+    "inmobiliaria": ["MPerez", "SLallana", "B.salazar"],
+    "gestoria": ["AMelgar", "AMostazo"],
+    "seguros": ["B.salazar", "Rmiera"],
+    "financiero": ["Jbernal", "Icanamero"],
+    "rrhh": ["C.anca", "S.sanchez"],
+    "fincas": ["DGallardo", "Icanamero"]
+  }
+}
