@@ -25,6 +25,7 @@ SYSTEM_INVARIANTS_JSON = DOCS_DIR / "system_invariants.json"
 CHANGE_IMPACT_MAP_JSON = DOCS_DIR / "change_impact_map.json"
 RECONCILIATION_CHECKS_JSON = DOCS_DIR / "reconciliation_checks.json"
 CANONICAL_SCENARIOS_JSON = DOCS_DIR / "canonical_scenarios.json"
+IMPROVEMENTS_JSONL = DOCS_DIR / "improvement_opportunities.jsonl"
 
 
 MODULE_RULES = [
@@ -212,6 +213,7 @@ def build_knowledge() -> dict:
     change_impact_map = _load_json(CHANGE_IMPACT_MAP_JSON)
     reconciliation_checks = _load_json(RECONCILIATION_CHECKS_JSON)
     canonical_scenarios = _load_json(CANONICAL_SCENARIOS_JSON)
+    improvements = _load_jsonl(IMPROVEMENTS_JSONL)
     return {
         "kind": "modernia_system_knowledge",
         "generated_at": _utc_now(),
@@ -240,12 +242,14 @@ def build_knowledge() -> dict:
             "change_impact_map_path": str(CHANGE_IMPACT_MAP_JSON.relative_to(ROOT)),
             "reconciliation_checks_path": str(RECONCILIATION_CHECKS_JSON.relative_to(ROOT)),
             "canonical_scenarios_path": str(CANONICAL_SCENARIOS_JSON.relative_to(ROOT)),
+            "improvement_opportunities_path": str(IMPROVEMENTS_JSONL.relative_to(ROOT)),
             "process_catalog": process_catalog.get("processes") or [],
             "business_rules": business_rules.get("rules") or [],
             "system_invariants_business": system_invariants.get("global_invariants") or [],
             "change_impact_map": change_impact_map.get("rules") or [],
             "reconciliation_checks": reconciliation_checks.get("checks") or [],
             "canonical_scenarios": canonical_scenarios.get("scenarios") or [],
+            "improvement_opportunities": improvements,
         },
         "frontend_api_map": frontend_api_map,
         "modules": {

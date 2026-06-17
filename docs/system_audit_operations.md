@@ -92,6 +92,7 @@ Variables soportadas:
 - `RUN_SYSTEM_AUDIT_PROCESS_SMOKE=1`
 - `RUN_SYSTEM_AUDIT_SUPERVISOR=1`
 - `RUN_SYSTEM_AUDIT_SAFE_AUTOREMEDIATE=1`
+- `RUN_SYSTEM_AUDIT_IMPROVEMENT_ADVISOR=1`
 - `RUN_SYSTEM_AUDIT_AUTO_CLEAR_QUARANTINE=1`
 - `RUN_SYSTEM_AUDIT_RECONCILIATION_PATH=docs/reconciliation_checks.json`
 - `RENDER_WEB_SERVICE_ID=<render_web_service_id>`
@@ -158,6 +159,7 @@ Capas de conocimiento activas:
 - `docs/system_invariants.json`
 - `docs/reconciliation_checks.json`
 - `docs/canonical_scenarios.json`
+- `docs/improvement_opportunities.jsonl`
 
 Checks nuevos:
 
@@ -169,3 +171,15 @@ Objetivo:
 - detectar dashboards que calculan mal,
 - detectar procesos críticos que aparentan cargar pero rompen la lógica,
 - dar a Ollama contexto estructurado de proceso, regla, invariante y escenario canónico.
+
+## Asesor de mejoras
+
+El asesor:
+
+- lee auditoría, tendencia, incidentes y memoria del sistema,
+- propone mejoras priorizadas con evidencia,
+- y las persiste en `docs/improvement_opportunities.jsonl`.
+
+Script:
+
+- `scripts/system_improvement_advisor.py`

@@ -16,6 +16,7 @@ SYSTEM_INVARIANTS = DOCS / "system_invariants.json"
 CHANGE_IMPACT_MAP = DOCS / "change_impact_map.json"
 RECONCILIATION_CHECKS = DOCS / "reconciliation_checks.json"
 CANONICAL_SCENARIOS = DOCS / "canonical_scenarios.json"
+IMPROVEMENT_OPPORTUNITIES = DOCS / "improvement_opportunities.jsonl"
 
 
 def _load_json(path: Path) -> dict:
@@ -23,6 +24,22 @@ def _load_json(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _load_jsonl(path: Path, limit: int = 50) -> list[dict]:
+    items = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                items.append(json.loads(raw))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return items[-limit:]
 
 
 def load_supervisor_memory() -> dict:
@@ -33,6 +50,7 @@ def load_supervisor_memory() -> dict:
         "change_impact_map": _load_json(CHANGE_IMPACT_MAP),
         "reconciliation_checks": _load_json(RECONCILIATION_CHECKS),
         "canonical_scenarios": _load_json(CANONICAL_SCENARIOS),
+        "improvement_opportunities": _load_jsonl(IMPROVEMENT_OPPORTUNITIES),
     }
 
 
@@ -111,6 +129,7 @@ def build_snapshot(*, changed_files: list[str] | None = None, report: dict | Non
         "global_invariants_total": len((memory.get("system_invariants") or {}).get("global_invariants") or []),
         "reconciliation_checks_total": len((memory.get("reconciliation_checks") or {}).get("checks") or []),
         "canonical_scenarios_total": len((memory.get("canonical_scenarios") or {}).get("scenarios") or []),
+        "improvement_opportunities_total": len(memory.get("improvement_opportunities") or []),
     }
     if changed_files is not None:
         snapshot["impact"] = impacted_processes(changed_files, memory=memory)

@@ -17,6 +17,7 @@ DEFAULT_KNOWLEDGE_PATH = Path(__file__).resolve().parents[1] / "docs" / "system_
 DEFAULT_EXPECTED_BEHAVIORS_PATH = Path(__file__).resolve().parents[1] / "docs" / "expected_behaviors.json"
 DEFAULT_INCIDENTS_PATH = Path(__file__).resolve().parents[1] / "docs" / "incidents.jsonl"
 DEFAULT_PLAYBOOKS_PATH = Path(__file__).resolve().parents[1] / "docs" / "repair_playbooks.json"
+DEFAULT_IMPROVEMENTS_PATH = Path(__file__).resolve().parents[1] / "docs" / "improvement_opportunities.jsonl"
 
 
 def _load_system_knowledge() -> dict:
@@ -76,10 +77,12 @@ def _load_operational_memory() -> dict:
     expected = _load_json(Path(os.environ.get("CRM_EXPECTED_BEHAVIORS_PATH") or DEFAULT_EXPECTED_BEHAVIORS_PATH))
     incidents = _load_jsonl(Path(os.environ.get("CRM_INCIDENTS_PATH") or DEFAULT_INCIDENTS_PATH))
     playbooks = _load_json(Path(os.environ.get("CRM_REPAIR_PLAYBOOKS_PATH") or DEFAULT_PLAYBOOKS_PATH))
+    improvements = _load_jsonl(Path(os.environ.get("CRM_IMPROVEMENT_OPPORTUNITIES_PATH") or DEFAULT_IMPROVEMENTS_PATH))
     return {
         "expected_behaviors": expected.get("modules") or {},
         "recent_incidents": incidents,
         "repair_playbooks": playbooks.get("playbooks") or [],
+        "improvement_opportunities": improvements,
     }
 
 
@@ -177,6 +180,11 @@ def _deterministic_summary(compact: dict) -> str:
         lines.extend(["", "## Incidentes conocidos"])
         for item in incidents[:5]:
             lines.append(f"- {item.get('incident_id')}: {item.get('symptom')}")
+    improvements = op_memory.get("improvement_opportunities") or []
+    if improvements:
+        lines.extend(["", "## Mejoras sugeridas"])
+        for item in improvements[:5]:
+            lines.append(f"- {item.get('priority')}: {item.get('title')}")
     return "\n".join(lines).strip() + "\n"
 
 

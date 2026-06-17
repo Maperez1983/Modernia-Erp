@@ -139,6 +139,14 @@ def _summarize_json_output(output: str) -> dict | None:
             "results": data.get("results"),
             "sources": data.get("sources"),
         }
+    if kind == "system_improvement_advisor":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "proposals_total": data.get("proposals_total"),
+            "appended_total": data.get("appended_total"),
+            "proposals": data.get("proposals"),
+        }
     if kind == "auto_quarantine_guard":
         return {
             "kind": kind,
@@ -308,6 +316,17 @@ def _build_alerts(report: dict) -> list[dict]:
                         "title": f"Proceso crítico {item.get('process_id')}",
                         "detail": ", ".join(item.get("reasons") or []),
                         "module": item.get("module"),
+                    }
+                    )
+        if js.get("kind") == "system_improvement_advisor":
+            total = int(js.get("proposals_total") or 0)
+            if total:
+                alerts.append(
+                    {
+                        "severity": "low",
+                        "type": "improvement_advisor",
+                        "title": "Ollama ha propuesto mejoras estructuradas",
+                        "detail": f"{total} propuestas priorizadas disponibles.",
                     }
                 )
     return alerts
@@ -707,12 +726,15 @@ def _build_publish_payload(report: dict) -> dict:
     matrix_summary = _matrix_summary_from_report(report)
     quarantine = {}
     remediation = {}
+    improvements = {}
     for step in report.get("steps", []):
         js = step.get("json_summary") or {}
         if js.get("kind") == "auto_quarantine_guard":
             quarantine = js
         if js.get("kind") == "safe_auto_remediation":
             remediation = js
+        if js.get("kind") == "system_improvement_advisor":
+            improvements = js
     return {
         "kind": "system_audit_publish",
         "source": "render_cron",
@@ -738,6 +760,7 @@ def _build_publish_payload(report: dict) -> dict:
         ],
         "quarantine": quarantine,
         "remediation": remediation,
+        "improvements": improvements,
         "ollama_summary_status": report.get("ollama_summary_status"),
         "autofix_plan_status": report.get("autofix_plan_status"),
     }
@@ -1017,6 +1040,19 @@ def main() -> int:
             timeout=120,
         )
         report["steps"].append(remediation)
+        report["alerts"] = _build_alerts(report)
+        report["trend"] = _build_trend_data(report, previous_entries)
+        report["alerts"].extend(_build_trend_alerts(report, report["trend"]))
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_dashboard(report_dir, report)
+
+    if _env_flag("RUN_SYSTEM_AUDIT_IMPROVEMENT_ADVISOR"):
+        improvements = _run_step(
+            "system_improvement_advisor",
+            [sys.executable, "scripts/system_improvement_advisor.py", str(report_path), "--json"],
+            timeout=120,
+        )
+        report["steps"].append(improvements)
         report["alerts"] = _build_alerts(report)
         report["trend"] = _build_trend_data(report, previous_entries)
         report["alerts"].extend(_build_trend_alerts(report, report["trend"]))

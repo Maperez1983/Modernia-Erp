@@ -9381,6 +9381,16 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
                     `
                   : ""
               }
+              ${
+                audit?.improvements?.proposals_total
+                  ? `
+                      <div class="workspace-summary-row">
+                        <div><strong>Mejoras</strong><div class="muted">${numberFormatter.format(Number(audit?.improvements?.proposals_total || 0))} propuestas priorizadas</div></div>
+                        <div class="workspace-summary-meta"><span>advisor</span></div>
+                      </div>
+                    `
+                  : ""
+              }
             </div>
             ${
               Array.isArray(audit?.steps)
@@ -9413,6 +9423,25 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
                             <div class="workspace-summary-row">
                               <div><strong>${escapeHtml(String(row.title || row.id || "-"))}</strong><div class="muted">${escapeHtml(String(row.scope || row.type || ""))}</div></div>
                               <div class="workspace-summary-meta"><span>${row.apply ? "auto" : "manual"}</span></div>
+                            </div>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                : ""
+            }
+            ${
+              Array.isArray(audit?.improvements?.proposals) && audit.improvements.proposals.length
+                ? `
+                    <div class="workspace-summary-list" style="margin-top:12px;">
+                      ${audit.improvements.proposals
+                        .slice(0, 5)
+                        .map(
+                          (row) => `
+                            <div class="workspace-summary-row">
+                              <div><strong>${escapeHtml(String(row.title || row.improvement_id || "-"))}</strong><div class="muted">${escapeHtml(String(row.category || ""))}</div></div>
+                              <div class="workspace-summary-meta"><span>${escapeHtml(String(row.priority || "media"))}</span></div>
                             </div>
                           `
                         )

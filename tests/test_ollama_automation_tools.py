@@ -19,6 +19,7 @@ from scripts import prod_multi_crm_browser_smoke
 from scripts import prod_system_matrix_audit
 from scripts import system_business_reconciliation
 from scripts import prod_process_smoke
+from scripts import system_improvement_advisor
 from scripts import run_system_audit
 from scripts import build_system_knowledge
 from scripts import system_autofix_agent
@@ -167,6 +168,7 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         self.assertIn("business_rules", memory)
         self.assertIn("change_impact_map", memory)
         self.assertIn("canonical_scenarios", memory)
+        self.assertIn("improvement_opportunities", memory)
 
     def test_security_posture_reports_warning_for_missing_membership(self):
         old_run = prod_security_posture_audit.prod_auth_drift_audit.run
@@ -608,6 +610,35 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertTrue(any(item["type"] == "process_smoke" for item in alerts))
 
+    def test_improvement_advisor_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "system_improvement_advisor",
+                    "status": "passed",
+                    "proposals_total": 2,
+                    "appended_total": 1,
+                    "proposals": [{"title": "X"}],
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "system_improvement_advisor")
+        self.assertEqual(summary["proposals_total"], 2)
+
+    def test_improvement_advisor_alert_is_low_signal(self):
+        alerts = run_system_audit._build_alerts(
+            {
+                "steps": [
+                    {
+                        "name": "system_improvement_advisor",
+                        "status": "passed",
+                        "json_summary": {"kind": "system_improvement_advisor", "proposals_total": 3},
+                    }
+                ]
+            }
+        )
+        self.assertTrue(any(item["type"] == "improvement_advisor" for item in alerts))
+
     def test_business_reconciliation_runner_flags_negative_prima(self):
         old_admin = system_business_reconciliation._admin_session
         old_workspace = system_business_reconciliation._pick_workspace
@@ -653,6 +684,32 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             prod_process_smoke.prod_module_smoke.run = old_module
             prod_process_smoke.prod_multi_crm_browser_smoke.run = old_browser
             prod_process_smoke.system_business_reconciliation.run = old_recon
+
+    def test_improvement_advisor_builds_proposals_from_repeated_modules(self):
+        memory = system_supervisor.load_supervisor_memory()
+        report = {
+            "trend": {"module_alerts": {"repeated_modules": ["gestoria"]}},
+            "steps": [],
+        }
+        proposals = system_improvement_advisor._build_proposals(report, memory, [], [], [])
+        self.assertTrue(any("gestoria" in str(item.get("title") or "").lower() for item in proposals))
+
+    def test_publish_payload_includes_improvements(self):
+        payload = run_system_audit._build_publish_payload(
+            {
+                "run_id": "run-2",
+                "status": "passed",
+                "started_at": "2026-06-17T20:00:00Z",
+                "finished_at": "2026-06-17T20:01:00Z",
+                "alerts": [],
+                "failed_steps": [],
+                "trend": {},
+                "steps": [
+                    {"name": "system_improvement_advisor", "status": "passed", "json_summary": {"kind": "system_improvement_advisor", "proposals_total": 1, "proposals": [{"title": "Mejora"}]}}
+                ],
+            }
+        )
+        self.assertEqual(payload["improvements"]["proposals_total"], 1)
 
 
 if __name__ == "__main__":
