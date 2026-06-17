@@ -74,6 +74,26 @@ def _summarize_json_output(output: str) -> dict | None:
             ],
             "users": data.get("users"),
         }
+    if kind == "prod_auth_drift_audit":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "base_url": data.get("base_url"),
+            "failed_checks": data.get("failed_checks"),
+            "warnings": data.get("warnings"),
+            "shared_policy": data.get("shared_policy"),
+            "users": data.get("users"),
+            "checks": [
+                {
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "detail": item.get("detail"),
+                    "metrics": item.get("metrics"),
+                }
+                for item in (data.get("checks") or [])
+                if isinstance(item, dict)
+            ],
+        }
     if kind == "prod_system_matrix_audit":
         return {
             "kind": kind,
@@ -148,6 +168,17 @@ def _build_alerts(report: dict) -> list[dict]:
                         "user_label": item.get("user_label"),
                     }
                 )
+        if js.get("kind") == "prod_auth_drift_audit":
+            for item in js.get("checks") or []:
+                if item.get("status") == "failed":
+                    alerts.append(
+                        {
+                            "severity": "high",
+                            "type": "auth_drift",
+                            "title": f"Credencial o acceso desalineado: {item.get('name')}",
+                            "detail": item.get("detail") or "",
+                        }
+                    )
     return alerts
 
 
@@ -606,6 +637,7 @@ def main() -> int:
     parser.add_argument("--include-e2e", action="store_true", help="Ejecuta E2E Playwright locales.")
     parser.add_argument("--include-production", action="store_true", help="Ejecuta smoke tests contra CRM_BASE_URL/CRM_E2E_URL.")
     parser.add_argument("--include-production-api", action="store_true", help="Ejecuta checks HTTP/API contra produccion sin navegador.")
+    parser.add_argument("--include-auth-drift", action="store_true", help="Ejecuta auditoria de deriva de accesos y contrasenas compartidas.")
     parser.add_argument("--include-system-matrix", action="store_true", help="Ejecuta matriz amplia de usuarios/workspaces/modulos en produccion.")
     parser.add_argument("--include-code-inventory", action="store_true", help="Genera inventario compacto del codigo para Ollama.")
     parser.add_argument("--ollama", action="store_true", help="Genera resumen local con Ollama si esta disponible.")
@@ -648,6 +680,8 @@ def main() -> int:
         )
     if args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_api_monitor", [sys.executable, "scripts/prod_api_monitor.py", "--json"], None, 300))
+    if args.include_auth_drift or _env_flag("RUN_SYSTEM_AUDIT_AUTH_DRIFT") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
+        steps.append(("production_auth_drift", [sys.executable, "scripts/prod_auth_drift_audit.py", "--json"], None, 300))
     if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):

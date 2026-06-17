@@ -31,6 +31,8 @@ El runner genera `alerts` a partir de:
 
 - pasos fallidos o timeout,
 - avisos accionables de la matriz de endpoints.
+- deriva de accesos (`production_auth_drift`): backend incorrecto, `admin_user_lookup`
+  roto o usuarios de pruebas que dejan de validar la contrasena compartida.
 
 El HTML `latest-system-audit.html` resume:
 
@@ -72,6 +74,10 @@ Variables soportadas:
 - `OLLAMA_AUDIT_MODEL`
 - `OLLAMA_AUTOFIX_MODEL`
 - `OLLAMA_REVIEW_MODEL`
+- `RUN_SYSTEM_AUDIT_AUTH_DRIFT=1`
+- `CRM_EXPECTED_BACKEND=postgres`
+- `CRM_AUDIT_SHARED_LOGIN_USERS=usuario1,usuario2,...`
+- `CRM_AUDIT_SHARED_PASSWORD=Modernia2026`
 - `RUN_SYSTEM_AUDIT_AUTOFIX_PREPARE_BRANCH=1`
 - `RUN_SYSTEM_AUDIT_AUTOFIX_MATERIALIZE_TEST=1`
 

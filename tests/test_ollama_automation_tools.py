@@ -1,3 +1,5 @@
+import json
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,6 +9,7 @@ import types
 
 from scripts import ollama_diff_review
 from scripts import ollama_json
+from scripts import prod_auth_drift_audit
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
 from scripts import system_autofix_agent
@@ -85,6 +88,57 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertEqual(result["class"], "server_error")
         self.assertTrue(result["action_required"])
+
+    def test_auth_drift_shared_user_fallbacks_to_non_admin(self):
+        old_shared = os.environ.get("CRM_AUDIT_SHARED_LOGIN_USERS")
+        old_inmo = os.environ.get("CRM_INMO_USER")
+        try:
+            os.environ.pop("CRM_AUDIT_SHARED_LOGIN_USERS", None)
+            os.environ["CRM_INMO_USER"] = "SLallana"
+            self.assertEqual(prod_auth_drift_audit._shared_login_users(), ["SLallana"])
+        finally:
+            if old_shared is None:
+                os.environ.pop("CRM_AUDIT_SHARED_LOGIN_USERS", None)
+            else:
+                os.environ["CRM_AUDIT_SHARED_LOGIN_USERS"] = old_shared
+            if old_inmo is None:
+                os.environ.pop("CRM_INMO_USER", None)
+            else:
+                os.environ["CRM_INMO_USER"] = old_inmo
+
+    def test_auth_drift_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "prod_auth_drift_audit",
+                    "status": "failed",
+                    "failed_checks": ["shared_password_login:foo"],
+                    "warnings": ["no_membership:bar"],
+                    "shared_policy": {"shared_login_users": ["foo"], "shared_password_configured": True},
+                    "users": {"foo": {"login_with_shared_password": False}},
+                    "checks": [{"name": "shared_password_login:foo", "status": "failed", "detail": "401"}],
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "prod_auth_drift_audit")
+        self.assertEqual(summary["failed_checks"], ["shared_password_login:foo"])
+
+    def test_auth_drift_alerts_are_high_signal(self):
+        alerts = run_system_audit._build_alerts(
+            {
+                "steps": [
+                    {
+                        "name": "production_auth_drift",
+                        "status": "failed",
+                        "json_summary": {
+                            "kind": "prod_auth_drift_audit",
+                            "checks": [{"name": "shared_password_login:foo", "status": "failed", "detail": "401"}],
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertTrue(any(item["type"] == "auth_drift" for item in alerts))
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()
