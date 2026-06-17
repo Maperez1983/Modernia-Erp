@@ -104,6 +104,14 @@ def _summarize_json_output(output: str) -> dict | None:
             "findings": data.get("findings"),
             "auth_drift_status": data.get("auth_drift_status"),
         }
+    if kind == "prod_module_smoke":
+        return {
+            "kind": kind,
+            "status": data.get("status"),
+            "failed_checks": data.get("failed_checks"),
+            "warnings": data.get("warnings"),
+            "results": data.get("results"),
+        }
     if kind == "prod_system_matrix_audit":
         return {
             "kind": kind,
@@ -199,6 +207,17 @@ def _build_alerts(report: dict) -> list[dict]:
                         "detail": item.get("detail") or "",
                     }
                 )
+        if js.get("kind") == "prod_module_smoke":
+            for item in js.get("results") or []:
+                if item.get("status") in {"failed", "warning"}:
+                    alerts.append(
+                        {
+                            "severity": "high" if item.get("status") == "failed" else "medium",
+                            "type": "module_smoke",
+                            "title": f"Smoke modulo {item.get('module')} ({item.get('user_label')})",
+                            "detail": f"workspace={item.get('workspace_nombre')} passed={item.get('passed_endpoints')}/{item.get('endpoints_checked')}",
+                        }
+                    )
     return alerts
 
 
@@ -258,12 +277,25 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
 
     classification_counts = current_matrix.get("endpoint_classification_counts") or {}
     previous_classification_counts = previous_matrix.get("endpoint_classification_counts") or {}
+    current_module_rows = current_matrix.get("module_row_totals") or {}
+    previous_module_rows = previous_matrix.get("module_row_totals") or {}
     changed_classes = {}
     all_classes = set(classification_counts) | set(previous_classification_counts)
     for key in sorted(all_classes):
         delta = int(classification_counts.get(key, 0)) - int(previous_classification_counts.get(key, 0))
         if delta:
             changed_classes[key] = delta
+    module_row_drops = {}
+    drop_threshold = float(os.environ.get("RUN_SYSTEM_AUDIT_MODULE_DROP_THRESHOLD") or "0.5")
+    all_modules = set(current_module_rows) | set(previous_module_rows)
+    for key in sorted(all_modules):
+        prev = int(previous_module_rows.get(key, 0) or 0)
+        curr = int(current_module_rows.get(key, 0) or 0)
+        if prev <= 0:
+            continue
+        ratio = curr / prev if prev else 1.0
+        if ratio < (1.0 - drop_threshold):
+            module_row_drops[key] = {"previous": prev, "current": curr, "ratio": round(ratio, 3)}
 
     recent_status_counts = Counter(entry.get("status") or "unknown" for entry in previous_entries[-9:])
     recent_status_counts[report.get("status") or "unknown"] += 1
@@ -300,6 +332,7 @@ def _build_trend_data(report: dict, previous_entries: list[dict]) -> dict:
             "current": current_matrix,
             "previous": previous_matrix,
             "changed_classifications": changed_classes,
+            "module_row_drops": module_row_drops,
         },
         "module_alerts": {
             "current": dict(module_alerts),
@@ -352,6 +385,15 @@ def _build_trend_alerts(report: dict, trend: dict) -> list[dict]:
                 "type": "actionable_warning_increase",
                 "title": "Han aumentado los avisos accionables",
                 "detail": f"Antes: {previous_actionable}. Ahora: {current_actionable}.",
+            }
+        )
+    for module, info in (matrix.get("module_row_drops") or {}).items():
+        alerts.append(
+            {
+                "severity": "high",
+                "type": "module_volume_drop",
+                "title": f"Caida brusca de volumen en {module}",
+                "detail": f"{info.get('previous')} -> {info.get('current')} (ratio {info.get('ratio')})",
             }
         )
     if repeated_modules:
@@ -659,6 +701,7 @@ def main() -> int:
     parser.add_argument("--include-production-api", action="store_true", help="Ejecuta checks HTTP/API contra produccion sin navegador.")
     parser.add_argument("--include-auth-drift", action="store_true", help="Ejecuta auditoria de deriva de accesos y contrasenas compartidas.")
     parser.add_argument("--include-security-posture", action="store_true", help="Ejecuta auditoria de postura operativa de seguridad.")
+    parser.add_argument("--include-module-smoke", action="store_true", help="Ejecuta smoke funcional por modulos con usuarios reales.")
     parser.add_argument("--include-system-matrix", action="store_true", help="Ejecuta matriz amplia de usuarios/workspaces/modulos en produccion.")
     parser.add_argument("--include-code-inventory", action="store_true", help="Genera inventario compacto del codigo para Ollama.")
     parser.add_argument("--ollama", action="store_true", help="Genera resumen local con Ollama si esta disponible.")
@@ -705,6 +748,8 @@ def main() -> int:
         steps.append(("production_auth_drift", [sys.executable, "scripts/prod_auth_drift_audit.py", "--json"], None, 300))
     if args.include_security_posture or _env_flag("RUN_SYSTEM_AUDIT_SECURITY_POSTURE") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
         steps.append(("production_security_posture", [sys.executable, "scripts/prod_security_posture_audit.py", "--json"], None, 300))
+    if args.include_module_smoke or _env_flag("RUN_SYSTEM_AUDIT_MODULE_SMOKE") or args.include_production_api or _env_flag("RUN_SYSTEM_AUDIT_PRODUCTION_API"):
+        steps.append(("production_module_smoke", [sys.executable, "scripts/prod_module_smoke.py", "--json"], None, 300))
     if args.include_system_matrix or _env_flag("RUN_SYSTEM_AUDIT_SYSTEM_MATRIX"):
         steps.append(("production_system_matrix", [sys.executable, "scripts/prod_system_matrix_audit.py", "--json"], None, 900))
     if args.include_code_inventory or _env_flag("RUN_SYSTEM_AUDIT_CODE_INVENTORY"):

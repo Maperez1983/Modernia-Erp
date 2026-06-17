@@ -448,6 +448,7 @@ def run() -> dict:
     failed_checks = [item.get("name") or item.get("endpoint") for item in checks + endpoint_matrix + workspace_user_inventory if item.get("status") in failed_statuses]
     warning_checks = [item.get("name") or item.get("endpoint") for item in checks + endpoint_matrix + workspace_user_inventory if item.get("status") == "warning"]
     by_module: dict[str, dict[str, int]] = {}
+    module_row_totals: dict[str, int] = {}
     warning_classes: dict[str, int] = {}
     actionable_warnings = []
     for item in endpoint_matrix:
@@ -455,6 +456,7 @@ def run() -> dict:
         status = str(item.get("status") or "unknown")
         by_module.setdefault(module, {})
         by_module[module][status] = by_module[module].get(status, 0) + 1
+        module_row_totals[module] = module_row_totals.get(module, 0) + int(item.get("rows") or 0)
         classification = item.get("classification") or _classify_endpoint_result(item)
         class_name = str(classification.get("class") or "unknown")
         warning_classes[class_name] = warning_classes.get(class_name, 0) + 1
@@ -486,6 +488,7 @@ def run() -> dict:
             "workspace_user_inventories": len(workspace_user_inventory),
             "endpoint_checks": len(endpoint_matrix),
             "endpoint_status_by_module": by_module,
+            "module_row_totals": module_row_totals,
             "endpoint_classification_counts": warning_classes,
             "actionable_warnings": len(actionable_warnings),
         },

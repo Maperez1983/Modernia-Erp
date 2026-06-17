@@ -10,6 +10,7 @@ import types
 from scripts import ollama_diff_review
 from scripts import ollama_json
 from scripts import prod_auth_drift_audit
+from scripts import prod_module_smoke
 from scripts import prod_security_posture_audit
 from scripts import prod_system_matrix_audit
 from scripts import run_system_audit
@@ -181,6 +182,52 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertEqual(summary["kind"], "prod_security_posture_audit")
         self.assertEqual(summary["failed_checks"], ["backend-postgres-production"])
+
+    def test_module_smoke_summary_is_compacted(self):
+        summary = run_system_audit._summarize_json_output(
+            json.dumps(
+                {
+                    "kind": "prod_module_smoke",
+                    "status": "failed",
+                    "failed_checks": ["admin:inmobiliaria"],
+                    "warnings": [],
+                    "results": [{"user_label": "admin", "module": "inmobiliaria", "status": "failed"}],
+                }
+            )
+        )
+        self.assertEqual(summary["kind"], "prod_module_smoke")
+        self.assertEqual(summary["failed_checks"], ["admin:inmobiliaria"])
+
+    def test_module_volume_drop_creates_alert(self):
+        trend = {
+            "repeated_failures": [],
+            "new_failures": [],
+            "recovered_failures": [],
+            "consecutive_failed_runs": 0,
+            "matrix": {
+                "current": {"actionable_warnings_total": 0},
+                "previous": {"actionable_warnings_total": 0},
+                "module_row_drops": {"inmobiliaria": {"previous": 100, "current": 10, "ratio": 0.1}},
+            },
+            "module_alerts": {},
+        }
+        alerts = run_system_audit._build_trend_alerts({"status": "failed"}, trend)
+        self.assertTrue(any(item["type"] == "module_volume_drop" for item in alerts))
+
+    def test_module_smoke_aggregates_rows(self):
+        old_run = prod_module_smoke.prod_system_matrix_audit.run
+        try:
+            prod_module_smoke.prod_system_matrix_audit.run = lambda: {
+                "endpoint_matrix": [
+                    {"user_label": "admin", "module": "inmobiliaria", "endpoint": "agenda_inmobiliaria", "status": "passed", "rows": 5, "workspace_nombre": "Verifika²"},
+                    {"user_label": "admin", "module": "inmobiliaria", "endpoint": "inmuebles", "status": "passed", "rows": 2, "workspace_nombre": "Verifika²"},
+                ]
+            }
+            report = prod_module_smoke.run()
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["results"][0]["rows_total"], 7)
+        finally:
+            prod_module_smoke.prod_system_matrix_audit.run = old_run
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()
