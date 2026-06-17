@@ -1,7 +1,7 @@
 # Modernia CRM System Knowledge
 
-Generated: 2026-06-17T12:42:00+00:00
-Commit: cbf0a13a28e7e3fe7ce3a07faf79d47755bc67ee
+Generated: 2026-06-17T12:52:22+00:00
+Commit: ab41b35fe6b5ecb6618beb07ce85a4a27e01f458
 
 Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.
 
@@ -154,3 +154,18 @@ Memoria estable para que Ollama relacione fallos de produccion con el modulo, en
 - Symptom: Al pulsar cards del home de CRM no se abria ningun modulo.
 - Root cause: Guards frontend incoherentes con la visibilidad de las cards y routing legado hacia explorador de empresa en lugar de workspace CRM.
 - Fix commit: 27d534e
+
+### INC-GESTORIA-CLIENT-SEARCH-AGGREGATES
+- Symptom: Las busquedas de clientes en gestoria devolvian agregados o columnas inconsistentes y degradaban la localizacion del cliente correcto.
+- Root cause: La consulta de listado y agregados de clientes de gestoria no priorizaba coincidencias exactas y mezclaba campos agregados en la vista.
+- Fix commit: 7f6ecf0
+
+### INC-AUTH-NO-MEMBERSHIP-WARNINGS
+- Symptom: Usuarios activos podian autenticar pero no tenian memberships asociadas a ningun workspace.
+- Root cause: Existian cuentas operativas sin vinculacion tenant, lo que genera accesos parciales y diagnósticos confusos.
+- Fix commit: cbf0a13
+
+### INC-HOME-ADMIN-ROUTING-MISMATCH
+- Symptom: Usuarios administradores veian cards o workspaces pero el enrutado real no abria el CRM correcto o les llevaba a un flujo legacy.
+- Root cause: El criterio de acceso admin amplio no estaba alineado entre render de home, click handlers y routing tenant.
+- Fix commit: 24a9568

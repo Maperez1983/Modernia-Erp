@@ -40,6 +40,26 @@
     "financiacion": [
       "Hipotecas, seguimientos y alertas deben responder con datos validos o errores 4xx controlados.",
       "Los flujos no deben degradarse por joins entre backends heterogeneos."
+    ],
+    "rrhh": [
+      "Registro horario, personal y accesos de RRHH deben acotarse al workspace o al usuario autorizado.",
+      "La activacion de registro horario no debe exponer usuarios de otros tenants.",
+      "Los fallos de scoping en RRHH deben detectarse como incidencia funcional aunque el endpoint responda 200."
+    ],
+    "fincas": [
+      "Comunidades, incidencias, proveedores y documentos de fincas deben mantenerse aislados por workspace.",
+      "Las vistas de administracion de fincas no deben quedarse vacias por resolver mal empresa_id o workspace_id.",
+      "Los errores de permisos en fincas deben responder con 403 controlado, no 5xx."
+    ],
+    "gestoria_clientes": [
+      "Las busquedas de clientes en gestoria deben priorizar coincidencias exactas antes que agregados ambiguos.",
+      "Los listados de clientes no deben cambiar columnas o agregados de forma que rompan filtros existentes.",
+      "Los buscadores de agenda, documentos y trabajos deben reutilizar la misma cartera deduplicada."
+    ],
+    "multi_crm": [
+      "Un mismo usuario puede tener acceso a varios CRM, pero cada modulo debe resolver permisos y datos con el mismo criterio.",
+      "Los cambios de backend o credenciales no pueden dejar un CRM operativo y otro roto sin alerta explicita.",
+      "Las auditorias deben cubrir home, login, agenda y modulo por modulo con usuarios reales de produccion."
     ]
   }
 }

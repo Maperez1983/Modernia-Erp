@@ -1,18 +1,18 @@
 {
   "kind": "modernia_system_knowledge",
-  "generated_at": "2026-06-17T12:42:00+00:00",
+  "generated_at": "2026-06-17T12:52:22+00:00",
   "git": {
     "branch": "main",
-    "commit": "cbf0a13a28e7e3fe7ce3a07faf79d47755bc67ee",
+    "commit": "ab41b35fe6b5ecb6618beb07ce85a4a27e01f458",
     "recent_commits": [
+      "ab41b35 Add Ollama operational memory packs",
       "cbf0a13 Add production auth drift audit",
       "350d26f Fix admin user lookup password scheme detection",
       "3c669aa Guard Render SQLite syncs in Postgres mode",
       "050757b Restore legacy superadmin fallback without allowlist",
       "27d534e Route admin company cards into workspace CRM access",
       "24a9568 Align admin-wide home routing with CRM access",
-      "b12748d Audit home CRM card access invariants",
-      "4226b4a Fix CRM card access for admin home users"
+      "b12748d Audit home CRM card access invariants"
     ]
   },
   "purpose": "Memoria estable para que Ollama relacione fallos de produccion con el modulo, endpoint, frontend, test y expectativa funcional correspondiente.",
@@ -77,6 +77,26 @@
       "financiacion": [
         "Hipotecas, seguimientos y alertas deben responder con datos validos o errores 4xx controlados.",
         "Los flujos no deben degradarse por joins entre backends heterogeneos."
+      ],
+      "rrhh": [
+        "Registro horario, personal y accesos de RRHH deben acotarse al workspace o al usuario autorizado.",
+        "La activacion de registro horario no debe exponer usuarios de otros tenants.",
+        "Los fallos de scoping en RRHH deben detectarse como incidencia funcional aunque el endpoint responda 200."
+      ],
+      "fincas": [
+        "Comunidades, incidencias, proveedores y documentos de fincas deben mantenerse aislados por workspace.",
+        "Las vistas de administracion de fincas no deben quedarse vacias por resolver mal empresa_id o workspace_id.",
+        "Los errores de permisos en fincas deben responder con 403 controlado, no 5xx."
+      ],
+      "gestoria_clientes": [
+        "Las busquedas de clientes en gestoria deben priorizar coincidencias exactas antes que agregados ambiguos.",
+        "Los listados de clientes no deben cambiar columnas o agregados de forma que rompan filtros existentes.",
+        "Los buscadores de agenda, documentos y trabajos deben reutilizar la misma cartera deduplicada."
+      ],
+      "multi_crm": [
+        "Un mismo usuario puede tener acceso a varios CRM, pero cada modulo debe resolver permisos y datos con el mismo criterio.",
+        "Los cambios de backend o credenciales no pueden dejar un CRM operativo y otro roto sin alerta explicita.",
+        "Las auditorias deben cubrir home, login, agenda y modulo por modulo con usuarios reales de produccion."
       ]
     },
     "recent_incidents": [
@@ -145,6 +165,70 @@
           "Si una card es visible debe abrir una ruta funcional.",
           "Auditar invariantes de home en cada pasada automatica."
         ]
+      },
+      {
+        "date": "2026-06-15",
+        "incident_id": "INC-GESTORIA-CLIENT-SEARCH-AGGREGATES",
+        "module": "gestoria_clientes",
+        "symptom": "Las busquedas de clientes en gestoria devolvian agregados o columnas inconsistentes y degradaban la localizacion del cliente correcto.",
+        "root_cause": "La consulta de listado y agregados de clientes de gestoria no priorizaba coincidencias exactas y mezclaba campos agregados en la vista.",
+        "impact": "Resultados ambiguos, filtros menos fiables y riesgo de trabajar sobre el cliente equivocado.",
+        "fix_commit": "7f6ecf0",
+        "followup_commits": [
+          "2ba8290",
+          "eebbb81",
+          "f684fa6"
+        ],
+        "tests_or_audits": [
+          "scripts/audit_gestoria_searches.py",
+          "tests/test_usuarios_uniqueness.py"
+        ],
+        "prevention_rules": [
+          "Priorizar coincidencias exactas en buscadores criticos.",
+          "Mantener contratos estables de columnas en listados de gestoria.",
+          "Auditar consultas de clientes cuando cambian agregados o joins."
+        ]
+      },
+      {
+        "date": "2026-06-17",
+        "incident_id": "INC-AUTH-NO-MEMBERSHIP-WARNINGS",
+        "module": "usuarios_permisos",
+        "symptom": "Usuarios activos podian autenticar pero no tenian memberships asociadas a ningun workspace.",
+        "root_cause": "Existian cuentas operativas sin vinculacion tenant, lo que genera accesos parciales y diagnósticos confusos.",
+        "impact": "El usuario puede entrar pero no ver datos del sistema o quedar en estados vacios sin error explicito.",
+        "fix_commit": "cbf0a13",
+        "followup_commits": [
+          "ab41b35"
+        ],
+        "tests_or_audits": [
+          "scripts/prod_auth_drift_audit.py",
+          "scripts/prod_system_matrix_audit.py"
+        ],
+        "prevention_rules": [
+          "Marcar usuarios sin membership como warning operativo en cada auditoria.",
+          "No tratar login correcto como sistema sano si el usuario no puede resolver workspace util."
+        ]
+      },
+      {
+        "date": "2026-06-16",
+        "incident_id": "INC-HOME-ADMIN-ROUTING-MISMATCH",
+        "module": "multi_crm",
+        "symptom": "Usuarios administradores veian cards o workspaces pero el enrutado real no abria el CRM correcto o les llevaba a un flujo legacy.",
+        "root_cause": "El criterio de acceso admin amplio no estaba alineado entre render de home, click handlers y routing tenant.",
+        "impact": "Experiencia incoherente entre modulos y falsa percepcion de falta de permisos.",
+        "fix_commit": "24a9568",
+        "followup_commits": [
+          "27d534e",
+          "4226b4a"
+        ],
+        "tests_or_audits": [
+          "scripts/frontend_home_access_audit.py",
+          "tests/test_frontend_smoke.py"
+        ],
+        "prevention_rules": [
+          "Alinear render, guards y rutas de CRM para usuarios admin.",
+          "Auditar con usuarios multiworkspace y multiplataforma tras cambios de home."
+        ]
       }
     ],
     "repair_playbooks": [
@@ -211,6 +295,107 @@
           "scripts/frontend_home_access_audit.py",
           "web/app.js",
           "tests/test_frontend_smoke.py"
+        ]
+      },
+      {
+        "id": "gestoria-search-regression",
+        "module": "gestoria_clientes",
+        "triggers": [
+          "el buscador de clientes devuelve resultados raros",
+          "no encuentra el cliente correcto",
+          "columnas de listado incoherentes en gestoria"
+        ],
+        "steps": [
+          "Reproducir con una busqueda exacta y una parcial sobre el mismo cliente.",
+          "Comprobar si la consulta prioriza coincidencias exactas antes que agregados ambiguos.",
+          "Revisar contratos de columnas del listado y de los agregados asociados.",
+          "Ejecutar auditoria de gestoria search y tests del modulo."
+        ],
+        "look_at": [
+          "scripts/audit_gestoria_searches.py",
+          "web/server.py endpoints de clientes/gestoria",
+          "tests asociadas a busqueda y scoping"
+        ]
+      },
+      {
+        "id": "seguros-scope-kpi-failure",
+        "module": "seguros",
+        "triggers": [
+          "kpi de seguros roto",
+          "seguros vacio para un usuario con acceso",
+          "error por empresa_id en seguros"
+        ],
+        "steps": [
+          "Validar servicio del usuario en /api/login.",
+          "Comprobar empresa_id y workspace_id resueltos por el frontend y backend.",
+          "Distinguir 403 esperado de 500 o lista vacia por scoping erroneo.",
+          "Ejecutar smoke/auditoria de seguros y revisar endpoints afectados."
+        ],
+        "look_at": [
+          "scripts/audit_seguros_dashboard.py",
+          "scripts/prod_system_matrix_audit.py",
+          "tests/test_seguros_activation.py",
+          "web/server.py endpoints de seguros"
+        ]
+      },
+      {
+        "id": "financiacion-workflow-break",
+        "module": "financiacion",
+        "triggers": [
+          "hipoteca o seguimiento no aparece",
+          "alerta financiera rota",
+          "workflow de financiacion inconsistente"
+        ],
+        "steps": [
+          "Comprobar login, servicio y workspace del usuario.",
+          "Reproducir el endpoint o workflow financiero afectado.",
+          "Verificar joins de cliente/asesoramiento/acciones y filtros por workspace.",
+          "Ejecutar tests de workflow financiero."
+        ],
+        "look_at": [
+          "tests/test_fin_workflow.py",
+          "web/server.py endpoints fin_* y hipotecas",
+          "scripts/run_system_audit.py"
+        ]
+      },
+      {
+        "id": "rrhh-workspace-leak",
+        "module": "rrhh",
+        "triggers": [
+          "rrhh muestra usuarios de otros workspaces",
+          "registro horario no coincide con el usuario",
+          "personal visible fuera de tenant"
+        ],
+        "steps": [
+          "Comprobar workspace_id efectivo y memberships del usuario.",
+          "Revisar fallback de autojoin/autoreparacion de memberships.",
+          "Validar que RRHH no cae al directorio global sin workspace_id.",
+          "Ejecutar tests de scoping y registro horario."
+        ],
+        "look_at": [
+          "tests/test_workspace_membership_autojoin.py",
+          "web/server.py fetch_api_usuarios y flujos RRHH",
+          "docs/system_knowledge.json"
+        ]
+      },
+      {
+        "id": "fincas-empty-or-cross-tenant",
+        "module": "fincas",
+        "triggers": [
+          "administracion de fincas vacia",
+          "comunidades mezcladas",
+          "proveedores o incidencias de otro tenant"
+        ],
+        "steps": [
+          "Confirmar servicio y memberships del usuario.",
+          "Comprobar resolucion de empresa_id/workspace_id en el endpoint de fincas.",
+          "Distinguir lista vacia real de scoping mal resuelto.",
+          "Cruzar con auditoria de matriz y revisar endpoints de fincas."
+        ],
+        "look_at": [
+          "scripts/prod_system_matrix_audit.py",
+          "web/server.py endpoints de fincas/comunidades",
+          "tests de scoping multiworkspace"
         ]
       }
     ]

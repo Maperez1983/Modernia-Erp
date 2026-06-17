@@ -65,6 +65,107 @@
         "web/app.js",
         "tests/test_frontend_smoke.py"
       ]
+    },
+    {
+      "id": "gestoria-search-regression",
+      "module": "gestoria_clientes",
+      "triggers": [
+        "el buscador de clientes devuelve resultados raros",
+        "no encuentra el cliente correcto",
+        "columnas de listado incoherentes en gestoria"
+      ],
+      "steps": [
+        "Reproducir con una busqueda exacta y una parcial sobre el mismo cliente.",
+        "Comprobar si la consulta prioriza coincidencias exactas antes que agregados ambiguos.",
+        "Revisar contratos de columnas del listado y de los agregados asociados.",
+        "Ejecutar auditoria de gestoria search y tests del modulo."
+      ],
+      "look_at": [
+        "scripts/audit_gestoria_searches.py",
+        "web/server.py endpoints de clientes/gestoria",
+        "tests asociadas a busqueda y scoping"
+      ]
+    },
+    {
+      "id": "seguros-scope-kpi-failure",
+      "module": "seguros",
+      "triggers": [
+        "kpi de seguros roto",
+        "seguros vacio para un usuario con acceso",
+        "error por empresa_id en seguros"
+      ],
+      "steps": [
+        "Validar servicio del usuario en /api/login.",
+        "Comprobar empresa_id y workspace_id resueltos por el frontend y backend.",
+        "Distinguir 403 esperado de 500 o lista vacia por scoping erroneo.",
+        "Ejecutar smoke/auditoria de seguros y revisar endpoints afectados."
+      ],
+      "look_at": [
+        "scripts/audit_seguros_dashboard.py",
+        "scripts/prod_system_matrix_audit.py",
+        "tests/test_seguros_activation.py",
+        "web/server.py endpoints de seguros"
+      ]
+    },
+    {
+      "id": "financiacion-workflow-break",
+      "module": "financiacion",
+      "triggers": [
+        "hipoteca o seguimiento no aparece",
+        "alerta financiera rota",
+        "workflow de financiacion inconsistente"
+      ],
+      "steps": [
+        "Comprobar login, servicio y workspace del usuario.",
+        "Reproducir el endpoint o workflow financiero afectado.",
+        "Verificar joins de cliente/asesoramiento/acciones y filtros por workspace.",
+        "Ejecutar tests de workflow financiero."
+      ],
+      "look_at": [
+        "tests/test_fin_workflow.py",
+        "web/server.py endpoints fin_* y hipotecas",
+        "scripts/run_system_audit.py"
+      ]
+    },
+    {
+      "id": "rrhh-workspace-leak",
+      "module": "rrhh",
+      "triggers": [
+        "rrhh muestra usuarios de otros workspaces",
+        "registro horario no coincide con el usuario",
+        "personal visible fuera de tenant"
+      ],
+      "steps": [
+        "Comprobar workspace_id efectivo y memberships del usuario.",
+        "Revisar fallback de autojoin/autoreparacion de memberships.",
+        "Validar que RRHH no cae al directorio global sin workspace_id.",
+        "Ejecutar tests de scoping y registro horario."
+      ],
+      "look_at": [
+        "tests/test_workspace_membership_autojoin.py",
+        "web/server.py fetch_api_usuarios y flujos RRHH",
+        "docs/system_knowledge.json"
+      ]
+    },
+    {
+      "id": "fincas-empty-or-cross-tenant",
+      "module": "fincas",
+      "triggers": [
+        "administracion de fincas vacia",
+        "comunidades mezcladas",
+        "proveedores o incidencias de otro tenant"
+      ],
+      "steps": [
+        "Confirmar servicio y memberships del usuario.",
+        "Comprobar resolucion de empresa_id/workspace_id en el endpoint de fincas.",
+        "Distinguir lista vacia real de scoping mal resuelto.",
+        "Cruzar con auditoria de matriz y revisar endpoints de fincas."
+      ],
+      "look_at": [
+        "scripts/prod_system_matrix_audit.py",
+        "web/server.py endpoints de fincas/comunidades",
+        "tests de scoping multiworkspace"
+      ]
     }
   ]
 }
