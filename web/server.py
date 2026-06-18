@@ -41961,6 +41961,41 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                         ]
                     },
                 }
+                ,
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "rentas_missing_document",
+                        "items": [
+                            {
+                                "cliente_id": item["cliente_id"],
+                                "entry_id": item["entry_id"],
+                                "ejercicio": item["ejercicio"],
+                            }
+                            for item in missing
+                            if item.get("cliente_id")
+                        ],
+                    },
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "gestoria_rentas_missing_document",
+                        "items": [
+                            {
+                                "cliente_id": item["cliente_id"],
+                                "entry_id": item["entry_id"],
+                                "ejercicio": item["ejercicio"],
+                                "title": f"Renta {item['ejercicio'] or '-'}",
+                                "summary": f"{item['cliente_nombre'] or 'Cliente'} · estado {item['estado'] or '-'}",
+                            }
+                            for item in missing
+                            if item.get("cliente_id")
+                        ],
+                    },
+                },
             ],
         }
     if "dashboard" in text and any(token in text for token in ("no cuadra", "descuadra", "descuadrado", "detalle real", "detalle")):
@@ -42167,6 +42202,40 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                             if str(row_value(row, "id") or "").strip() and str(row_value(row, "doc_key") or "").strip()
                         ],
                     },
+                },
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "facturas_without_asiento",
+                        "facturas": [
+                            {
+                                "factura_id": str(row_value(row, "id") or "").strip(),
+                                "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                                "doc_key": str(row_value(row, "doc_key") or "").strip(),
+                                "tipo": str(row_value(row, "tipo") or "compra").strip() or "compra",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "gestoria_facturas_without_asiento",
+                        "items": [
+                            {
+                                "factura_id": str(row_value(row, "id") or "").strip(),
+                                "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                                "title": str(row_value(row, "numero") or row_value(row, "id") or "Factura").strip(),
+                                "summary": f"{str(row_value(row, 'fecha_emision') or '').strip()} · total {row_value(row, 'total') or '-'}",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
                 }
             ],
         }
@@ -42194,6 +42263,8 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
     label_map = {
         "seguros_missing_pdf": "póliza",
         "hipotecas_missing_base": "hipoteca",
+        "gestoria_rentas_missing_document": "renta",
+        "gestoria_facturas_without_asiento": "factura",
     }
     item_label = label_map.get(queue_text, "registro")
     if not current:
@@ -42209,7 +42280,7 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
     navigation = None
     cliente_id = str(current.get("cliente_id") or "").strip()
     if cliente_id:
-        entity_type = "seguro" if queue_text == "seguros_missing_pdf" else ("hipoteca" if queue_text == "hipotecas_missing_base" else "")
+        entity_type = "seguro" if queue_text == "seguros_missing_pdf" else ("hipoteca" if queue_text == "hipotecas_missing_base" else ("gestoria_factura" if queue_text == "gestoria_facturas_without_asiento" else ("renta_attach" if queue_text == "gestoria_rentas_missing_document" else "")))
         navigation = {"kind": "cliente", "cliente_id": cliente_id, "entity_type": entity_type}
     message = (
         f"Abriendo {item_label} para revisión. Quedan {len(remaining)} pendiente(s)."
@@ -42987,12 +43058,84 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=seguros"
             elif queue_type == "hipotecas_missing_base":
                 route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=fin"
+            elif queue_type in {"gestoria_rentas_missing_document", "gestoria_facturas_without_asiento"}:
+                route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=gestoria"
         return _workspace_internal_copilot_review_queue_result(
             queue_type,
             payload.get("items") or [],
             route=route,
             start=action_text == "start_review_queue",
         )
+    if action_text == "resolve_domain_safe":
+        domain = str(payload.get("domain") or "").strip()
+        if domain == "rentas_missing_document":
+            items = [item for item in (payload.get("items") or []) if isinstance(item, dict) and str(item.get("cliente_id") or "").strip()]
+            post_actions = []
+            for item in items:
+                post_actions.append(
+                    {
+                        "post_endpoint": "/api/renta_entry_ocr_reprocess",
+                        "payload": {
+                            "workspace_id": workspace_text,
+                            "cliente_id": str(item.get("cliente_id") or "").strip(),
+                            "entry_id": str(item.get("entry_id") or "").strip(),
+                            "ejercicio": str(item.get("ejercicio") or "").strip(),
+                        },
+                    }
+                )
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Se ha preparado la corrección segura de {len(post_actions)} renta(s).",
+                "post_actions": post_actions,
+                "updated": len(post_actions),
+                "refresh_supervisor": True,
+            }
+        if domain == "facturas_without_asiento":
+            facturas = [item for item in (payload.get("facturas") or []) if isinstance(item, dict) and str(item.get("factura_id") or "").strip()]
+            post_actions = []
+            revalidated = 0
+            resolved = 0
+            for item in facturas:
+                doc_key = str(item.get("doc_key") or "").strip()
+                if doc_key:
+                    post_actions.append(
+                        {
+                            "post_endpoint": "/api/gestoria_factura_ocr",
+                            "payload": {
+                                "workspace_id": workspace_text,
+                                "cliente_id": str(item.get("cliente_id") or "").strip(),
+                                "tipo_factura": str(item.get("tipo") or "compra").strip() or "compra",
+                                "s3_key": doc_key,
+                            },
+                        }
+                    )
+                    continue
+                result = run_workspace_process_supervision(
+                    conn,
+                    process_type="gestoria_factura",
+                    servicio="gestoria",
+                    empresa_id=empresa_id,
+                    workspace_id=workspace_text,
+                    entity_type="gestoria_factura",
+                    entity_id=str(item.get("factura_id") or "").strip(),
+                    actor=actor,
+                    context={"operation": "revalidate"},
+                    now=now,
+                )
+                revalidated += 1
+                if str(result.get("status") or "").strip() == "ok":
+                    resolved += 1
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Corrección segura preparada. OCR: {len(post_actions)} · revalidaciones: {revalidated} · resueltas: {resolved}.",
+                "post_actions": post_actions,
+                "updated": len(post_actions) + revalidated,
+                "resolved": resolved,
+                "refresh_supervisor": True,
+            }
+        return {"error": "domain no soportado"}
     if action_text == "bulk_revalidate_processes":
         process_types = [str(item or "").strip() for item in (payload.get("process_types") or []) if str(item or "").strip()]
         dates = {str(item or "").strip() for item in (payload.get("dates") or []) if str(item or "").strip()}

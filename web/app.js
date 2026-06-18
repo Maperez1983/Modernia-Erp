@@ -13363,6 +13363,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           setUiToast("OCR masivo preparado", String(result?.message || "Se ha preparado el reprocesado OCR de facturas."));
         } else if (String(action.id || "").trim() === "bulk_refresh_mismatched_dashboards") {
           setUiToast("Dashboards revalidados", String(result?.message || "Se han recalculado y revalidado los dashboards afectados."));
+        } else if (String(action.id || "").trim() === "resolve_domain_safe") {
+          setUiToast("Corrección segura preparada", String(result?.message || "Se han lanzado las acciones seguras del dominio seleccionado."));
         } else if (String(action.id || "").trim() === "start_review_queue" || String(action.id || "").trim() === "continue_review_queue") {
           setUiToast("Revisión guiada", String(result?.message || "Se ha abierto el siguiente registro de la revisión guiada."));
         } else {

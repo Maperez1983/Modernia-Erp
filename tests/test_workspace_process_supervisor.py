@@ -1688,6 +1688,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("renta", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "cliente_gestoria")
         self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_rentas_missing_document")
+        self.assertEqual(reply["actions"][1]["id"], "resolve_domain_safe")
+        self.assertEqual(reply["actions"][2]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_dashboard_mismatch(self):
         self.conn.execute(
@@ -1737,6 +1739,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_facturas_without_asiento")
         self.assertEqual(reply["actions"][1]["id"], "bulk_rerun_facturas_ocr")
+        self.assertEqual(reply["actions"][2]["id"], "resolve_domain_safe")
+        self.assertEqual(reply["actions"][3]["id"], "start_review_queue")
 
     def test_internal_copilot_action_bulk_revalidate_missing_hipotecas(self):
         self.conn.execute(
@@ -1866,6 +1870,34 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/gestoria_factura_ocr")
         self.assertEqual(result["post_actions"][0]["payload"]["s3_key"], "docs/f-op3.pdf")
 
+    def test_internal_copilot_action_resolve_domain_safe_rentas(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "rentas_missing_document", "items": [{"cliente_id": "c74b", "entry_id": "r2", "ejercicio": "2025"}]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:32:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/renta_entry_ocr_reprocess")
+        self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_resolve_domain_safe_facturas(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "facturas_without_asiento", "facturas": [{"factura_id": "f-op3", "cliente_id": "c1", "doc_key": "docs/f-op3.pdf", "tipo": "compra"}]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:33:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/gestoria_factura_ocr")
+        self.assertTrue(result["refresh_supervisor"])
+
     def test_internal_copilot_action_review_queue_returns_next_action(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -1887,6 +1919,25 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["navigation"]["cliente_id"], "c1")
         self.assertTrue(result["cards"])
         self.assertEqual(result["actions"][0]["id"], "continue_review_queue")
+
+    def test_internal_copilot_action_review_queue_rentas_uses_cliente_navigation(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "start_review_queue",
+            {
+                "queue_type": "gestoria_rentas_missing_document",
+                "items": [
+                    {"cliente_id": "c74", "entry_id": "r1", "ejercicio": "2025", "title": "Renta 2025", "summary": "Cliente · estado Borrador"},
+                ],
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:36:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "cliente")
+        self.assertEqual(result["navigation"]["cliente_id"], "c74")
 
 
 if __name__ == "__main__":
