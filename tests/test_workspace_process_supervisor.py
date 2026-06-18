@@ -944,6 +944,66 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["resolved"])
         self.assertEqual(result["process_supervision"]["status"], "ok")
 
+    def test_internal_copilot_review_reply_filters_today_rentas(self):
+        today = "2026-06-18T12:20:00Z"
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt9', 'ws1', 'e1', 'gestoria', 'renta_attach', 'renta_attach', 'c1', '',
+              '', 'warning', 'warning', 'Renta incompleta', 'Falta documento', '[]', '[]', '{}',
+              'd9', 0, NULL, ?, ?
+            )
+            """,
+            (today, today),
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa todas las rentas de hoy",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "incident")
+        self.assertIn("He encontrado 1 incidencia", reply["answer"])
+        self.assertTrue(reply["cards"])
+
+    def test_internal_copilot_duplicate_review_promotes_concrete_fix(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email) VALUES ('c10', 'Cliente Uno', '12345678A', 'uno@test.local')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email) VALUES ('c11', 'Cliente Dos', '12345678A', 'dos@test.local')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce10', 'c10', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce11', 'c11', 'e1', 'gestoria')")
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt10', 'ws1', 'e1', 'gestoria', 'renta_attach', 'renta_attach', 'c10', '',
+              '', 'warning', 'warning', 'Renta duplicada', 'Posible duplicado de cliente',
+              '[{\"code\":\"duplicate_client_nif\",\"related_rows\":[{\"id\":\"c11\",\"nombre\":\"Cliente Dos\",\"nif\":\"12345678A\"}]}]', '[]', '{}',
+              'd10', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué clientes están duplicados",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertTrue(reply["cards"])
+        self.assertEqual(reply["cards"][0]["title"], "Posible corrección de duplicado")
+
 
 if __name__ == "__main__":
     unittest.main()

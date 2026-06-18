@@ -40487,7 +40487,7 @@ def _workspace_internal_copilot_intent(message):
     text = normalize_lookup_text(message or "").lower()
     legal_tokens = ("ley", "legal", "boe", "dgt", "obligacion", "contrato", "clausula", "normativa", "convenio")
     tutorial_tokens = ("como", "cómo", "pasos", "usar", "tutorial", "donde", "dónde", "explica")
-    incident_tokens = ("falla", "error", "no se ha", "no se crea", "no se creo", "por que no", "porque no", "duplic", "dashboard", "incidencia", "proceso", "incompleto")
+    incident_tokens = ("falla", "error", "no se ha", "no se crea", "no se creo", "por que no", "porque no", "duplic", "dashboard", "incidencia", "proceso", "incompleto", "que le falta", "qué le falta", "incoherente", "hoy", "todas", "todas las", "revisa", "listar")
     if any(token in text for token in legal_tokens):
         return "legal"
     if any(token in text for token in incident_tokens):
@@ -40523,6 +40523,122 @@ def _workspace_internal_copilot_pick_processes(message, processes):
     return matches[:4]
 
 
+def _workspace_internal_copilot_process_filter(message):
+    text = normalize_lookup_text(message or "").lower()
+    mapping = {
+        "renta": {"renta_attach"},
+        "rentas": {"renta_attach"},
+        "poliza": {"seguro_update"},
+        "polizas": {"seguro_update"},
+        "póliza": {"seguro_update"},
+        "pólizas": {"seguro_update"},
+        "recibo": {"seguro_recibo"},
+        "recibos": {"seguro_recibo"},
+        "siniestro": {"seguro_siniestro"},
+        "siniestros": {"seguro_siniestro"},
+        "hipoteca": {"hipoteca_update"},
+        "hipotecas": {"hipoteca_update"},
+        "factura": {"gestoria_factura"},
+        "facturas": {"gestoria_factura"},
+        "contabilidad": {"gestoria_accounting", "fincas_contabilidad"},
+        "asiento": {"gestoria_accounting"},
+        "asientos": {"gestoria_accounting"},
+        "rrhh": {"rrhh_document", "rrhh_ausencia", "rrhh_gasto"},
+        "documento": {"rrhh_document"},
+        "documentos": {"rrhh_document"},
+        "ausencia": {"rrhh_ausencia"},
+        "ausencias": {"rrhh_ausencia"},
+        "gasto": {"rrhh_gasto"},
+        "gastos": {"rrhh_gasto"},
+        "comunidad": {"fincas_community"},
+        "comunidades": {"fincas_community"},
+        "incidencia": {"fincas_incidencia"},
+        "incidencias": {"fincas_incidencia"},
+        "proveedor": {"fincas_provider"},
+        "proveedores": {"fincas_provider"},
+        "junta": {"fincas_junta"},
+        "juntas": {"fincas_junta"},
+        "agenda": {"agenda_action"},
+        "cita": {"agenda_action"},
+        "citas": {"agenda_action"},
+    }
+    found = set()
+    for token, process_ids in mapping.items():
+        if token in text:
+            found.update(process_ids)
+    return found
+
+
+def _workspace_internal_copilot_card_from_event(row):
+    return {
+        "event_id": str(row.get("id") or "").strip(),
+        "title": str(row.get("title") or row.get("process_type") or "Incidencia"),
+        "summary": str(row.get("summary") or "").strip(),
+        "priority": str(row.get("priority") or "media"),
+        "impact_area": str(row.get("impact_area") or "operativo"),
+        "route": str(row.get("target_route") or "").strip(),
+        "actions": row.get("action_items") or [],
+        "entity": row.get("entity_snapshot") or {},
+    }
+
+
+def _workspace_internal_copilot_review_reply(message, open_events, history):
+    text = normalize_lookup_text(message or "").lower()
+    process_filter = _workspace_internal_copilot_process_filter(message)
+    rows = list(open_events or [])
+    if process_filter:
+        rows = [row for row in rows if str(row.get("process_type") or "").strip() in process_filter]
+    if "hoy" in text:
+        rows = [row for row in rows if str(row.get("created_at") or "")[:10] == date.today().isoformat()]
+    if not rows and process_filter:
+        historical = [row for row in list(history or []) if str(row.get("process_type") or "").strip() in process_filter]
+        if "hoy" in text:
+            historical = [row for row in historical if str(row.get("created_at") or "")[:10] == date.today().isoformat()]
+        rows = historical[:5]
+    if not rows:
+        return None
+    grouped = {}
+    for row in rows:
+        key = str(row.get("process_type") or row.get("servicio") or "general").strip()
+        grouped[key] = grouped.get(key, 0) + 1
+    summary = ", ".join(f"{value} {key}" for key, value in list(grouped.items())[:4])
+    answer = f"He encontrado {len(rows)} incidencia(s) en la revisión solicitada. Resumen: {summary}."
+    suggestions = ["Revalidar proceso", "Refrescar listado", "Abrir módulo"]
+    duplicate_rows = []
+    for row in rows:
+        for anomaly in list(row.get("anomalies") or []):
+            code = str(anomaly.get("code") or "").strip()
+            if "duplicate" in code:
+                duplicate_rows.append((row, anomaly))
+    cards = [_workspace_internal_copilot_card_from_event(row) for row in rows[:5]]
+    if duplicate_rows:
+        row, anomaly = duplicate_rows[0]
+        related = anomaly.get("related_rows") or []
+        if related:
+            cards.insert(
+                0,
+                {
+                    "event_id": str(row.get("id") or "").strip(),
+                    "title": "Posible corrección de duplicado",
+                    "summary": f"Se han detectado {len(related)} registro(s) relacionados para revisar manualmente.",
+                    "priority": "alta",
+                    "impact_area": "datos",
+                    "route": str(row.get("target_route") or "").strip(),
+                    "actions": row.get("action_items") or [],
+                    "entity": row.get("entity_snapshot") or {},
+                },
+            )
+            suggestions = ["Refrescar ficha cliente", "Revalidar proceso", "Abrir módulo"]
+    return {
+        "ok": True,
+        "intent": "incident",
+        "answer": answer,
+        "sources": ["workspace_process_supervisor", "workspace_process_supervisor_history"],
+        "suggestions": suggestions,
+        "cards": cards[:5],
+    }
+
+
 def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None):
     workspace_text = str(workspace_id or "").strip()
     company_text = str(empresa_id or "").strip()
@@ -40548,6 +40664,13 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         "cards": [],
     }
     if intent == "incident":
+        review_reply = _workspace_internal_copilot_review_reply(message_text, open_events, history)
+        review_tokens = ("revisa", "hoy", "todas", "listar", "que le falta", "qué le falta", "incoherente", "incoherentes", "duplicado", "duplicados", "duplicada", "duplicadas")
+        if review_reply and any(token in normalize_lookup_text(message_text).lower() for token in review_tokens):
+            response.update(review_reply)
+            response["message"] = message_text
+            response["workspace_id"] = workspace_text
+            return response
         relevant = []
         haystack = normalize_lookup_text(message_text).lower()
         for row in open_events:
@@ -40660,6 +40783,12 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             max_chars=180,
         )
         response["sources"] = ["legal_copilot", "legal_radar", "legal_library"]
+        return response
+    review_reply = _workspace_internal_copilot_review_reply(message_text, open_events, history)
+    if review_reply:
+        response.update(review_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
         return response
     open_total = len(open_events)
     readiness = int(health.get("readiness_score") or 0)
