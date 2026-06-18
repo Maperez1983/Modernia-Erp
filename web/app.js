@@ -13369,6 +13369,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           setUiToast("Autorrevisión completada", String(result?.message || "Se ha revisado el trabajo pendiente del dominio."));
         } else if (String(action.id || "").trim() === "autorreview_global") {
           setUiToast("Bandeja unificada preparada", String(result?.message || "Se ha preparado la vista priorizada de pendientes."));
+        } else if (String(action.id || "").trim() === "daily_review_agenda") {
+          setUiToast("Agenda diaria preparada", String(result?.message || "Se ha preparado la agenda diaria de revisión."));
         } else if (String(action.id || "").trim() === "revalidate_current_and_continue") {
           setUiToast("Revisión guiada actualizada", String(result?.message || "Se ha revalidado el registro actual y se ha abierto el siguiente."));
         } else if (String(action.id || "").trim() === "start_review_queue" || String(action.id || "").trim() === "continue_review_queue") {

@@ -2125,6 +2125,18 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["actions"][0]["id"], "autorreview_global")
 
+    def test_internal_copilot_reply_offers_daily_review_agenda(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "prepara la agenda diaria de revision",
+            empresa_id="e1",
+            service_hint="core",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["actions"][0]["id"], "daily_review_agenda")
+
     def test_internal_copilot_action_autorreview_global(self):
         self.conn.execute(
             """
@@ -2177,6 +2189,58 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["cards"])
         self.assertTrue(result["actions"])
         self.assertIn("workspace_process_supervisor", result["sources"])
+
+    def test_internal_copilot_action_daily_review_agenda(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-urgent-2', 'ws1', 'e1', 'rrhh', 'rrhh_document', 'rrhh_documento', 'rd-exp-2', '',
+              '', 'failed', 'error', 'Documento RRHH vencido', 'Impacto laboral alto', '[]', '[]', '{}',
+              'urgent-2', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, fecha_caducidad, permanente, estado, created_at, updated_at
+            ) VALUES (
+              'rd-exp-4', 'ws1', 'e1', 'p1', 'Documento', 'permiso.pdf', 'rrhh/permiso.pdf', '2025-01-01', 0, 'Activo', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "daily_review_agenda",
+            {"scope": "today"},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:43:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["cards"])
+        self.assertIn("Urgente hoy", " ".join(str(card.get("title") or "") for card in result["cards"]))
 
 
 if __name__ == "__main__":
