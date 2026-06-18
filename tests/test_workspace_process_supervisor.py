@@ -1623,6 +1623,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("póliza", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "seguros")
         self.assertEqual(reply["actions"][0]["id"], "open_module")
+        self.assertEqual(reply["actions"][1]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_hipotecas_missing_amounts(self):
         self.conn.execute(
@@ -1662,6 +1663,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("hipoteca", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "hipotecas")
         self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_missing_hipotecas")
+        self.assertEqual(reply["actions"][1]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_rentas_missing_document(self):
         self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c74', 'Cliente Renta', '50505050E', 'renta@test.local', 'now', 'now')")
@@ -1734,6 +1736,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_facturas_without_asiento")
+        self.assertEqual(reply["actions"][1]["id"], "bulk_rerun_facturas_ocr")
 
     def test_internal_copilot_action_bulk_revalidate_missing_hipotecas(self):
         self.conn.execute(
@@ -1824,6 +1827,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(int(result["updated"] or 0), 1)
         self.assertTrue(result["refresh_supervisor"])
+        self.assertIn("revalidado", result["message"].lower())
 
     def test_internal_copilot_action_bulk_revalidate_facturas_without_asiento(self):
         self.conn.execute(
@@ -1847,6 +1851,42 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(int(result["updated"] or 0), 1)
         self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_bulk_rerun_facturas_ocr(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_rerun_facturas_ocr",
+            {"facturas": [{"factura_id": "f-op3", "cliente_id": "c1", "doc_key": "docs/f-op3.pdf", "tipo": "compra"}]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/gestoria_factura_ocr")
+        self.assertEqual(result["post_actions"][0]["payload"]["s3_key"], "docs/f-op3.pdf")
+
+    def test_internal_copilot_action_review_queue_returns_next_action(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "start_review_queue",
+            {
+                "queue_type": "seguros_missing_pdf",
+                "items": [
+                    {"seguro_id": "s1", "cliente_id": "c1", "title": "P-1", "summary": "Mapfre · Contratada"},
+                    {"seguro_id": "s2", "cliente_id": "c2", "title": "P-2", "summary": "Allianz · Contratada"},
+                ],
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:35:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "cliente")
+        self.assertEqual(result["navigation"]["cliente_id"], "c1")
+        self.assertTrue(result["cards"])
+        self.assertEqual(result["actions"][0]["id"], "continue_review_queue")
 
 
 if __name__ == "__main__":

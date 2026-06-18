@@ -41799,7 +41799,24 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                     "id": "open_module",
                     "label": "Abrir seguros",
                     "payload": {"route": f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(str(workspace_id or '').strip())}&crm=seguros"},
-                }
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "seguros_missing_pdf",
+                        "items": [
+                            {
+                                "seguro_id": str(row_value(row, "id") or "").strip(),
+                                "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                                "title": str(row_value(row, "poliza_numero") or row_value(row, "tomador") or "Póliza").strip(),
+                                "summary": f"{str(row_value(row, 'compania') or '').strip()} · {str(row_value(row, 'estado') or '').strip()}",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
+                },
             ],
         }
     if ("hipoteca" in text or "hipotecas" in text or "financiacion" in text or "financiación" in text) and any(token in text for token in ("sin importes", "sin importe", "sin datos base", "sin precio")):
@@ -41850,6 +41867,23 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                     "id": "bulk_revalidate_missing_hipotecas",
                     "label": "Revalidar hipotecas",
                     "payload": {"hipoteca_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "hipotecas_missing_base",
+                        "items": [
+                            {
+                                "hipoteca_id": str(row_value(row, "id") or "").strip(),
+                                "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                                "title": str(row_value(row, "cliente") or row_value(row, "banco") or "Hipoteca").strip(),
+                                "summary": f"precio {row_value(row, 'precio') or '-'} · hipoteca {row_value(row, 'importe_hipoteca') or '-'} · {str(row_value(row, 'estado') or '').strip()}",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
                 }
             ],
         }
@@ -41975,7 +42009,7 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "actions": [
                 {
                     "id": "bulk_refresh_mismatched_dashboards",
-                    "label": "Recalcular dashboards",
+                    "label": "Recalcular y revalidar",
                     "payload": {"event_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
                 }
             ],
@@ -42073,6 +42107,8 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
         rows = conn.execute(
             """
             SELECT f.id, f.numero, f.fecha_emision, f.total, f.cliente_id
+                 , COALESCE(f.doc_key, '') AS doc_key
+                 , COALESCE(f.tipo, 'compra') AS tipo
             FROM gestoria_facturas f
             LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
             WHERE f.empresa_id = ?
@@ -42115,10 +42151,92 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                     "id": "bulk_revalidate_facturas_without_asiento",
                     "label": "Revalidar facturas",
                     "payload": {"factura_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                },
+                {
+                    "id": "bulk_rerun_facturas_ocr",
+                    "label": "Relanzar OCR facturas",
+                    "payload": {
+                        "facturas": [
+                            {
+                                "factura_id": str(row_value(row, "id") or "").strip(),
+                                "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                                "doc_key": str(row_value(row, "doc_key") or "").strip(),
+                                "tipo": str(row_value(row, "tipo") or "compra").strip() or "compra",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip() and str(row_value(row, "doc_key") or "").strip()
+                        ],
+                    },
                 }
             ],
         }
     return None
+
+
+def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route="", start=False):
+    queue_text = str(queue_type or "").strip()
+    pending = [item for item in (items or []) if isinstance(item, dict)]
+    current = pending[0] if pending else {}
+    remaining = pending[1:] if len(pending) > 1 else []
+    title = str(current.get("title") or "Registro").strip()
+    summary = str(current.get("summary") or "").strip()
+    current_cards = []
+    if current:
+        current_cards.append(
+            {
+                "title": title,
+                "summary": summary,
+                "priority": "alta",
+                "impact_area": "operativo",
+                "entity": dict(current),
+            }
+        )
+    label_map = {
+        "seguros_missing_pdf": "póliza",
+        "hipotecas_missing_base": "hipoteca",
+    }
+    item_label = label_map.get(queue_text, "registro")
+    if not current:
+        return {
+            "ok": True,
+            "action_id": "continue_review_queue" if not start else "start_review_queue",
+            "message": "No quedan elementos pendientes en la revisión guiada.",
+            "cards": [],
+            "actions": [],
+            "sources": ["internal_copilot_action"],
+            "suggestions": [],
+        }
+    navigation = None
+    cliente_id = str(current.get("cliente_id") or "").strip()
+    if cliente_id:
+        entity_type = "seguro" if queue_text == "seguros_missing_pdf" else ("hipoteca" if queue_text == "hipotecas_missing_base" else "")
+        navigation = {"kind": "cliente", "cliente_id": cliente_id, "entity_type": entity_type}
+    message = (
+        f"Abriendo {item_label} para revisión. Quedan {len(remaining)} pendiente(s)."
+        if not start
+        else f"Inicio de revisión guiada: abriendo {item_label}. Quedan {len(remaining)} pendiente(s)."
+    )
+    actions = []
+    if remaining:
+        actions.append(
+            {
+                "id": "continue_review_queue",
+                "label": f"Siguiente {item_label}",
+                "payload": {"queue_type": queue_text, "items": remaining, "route": route},
+            }
+        )
+    if route:
+        actions.append({"id": "open_module", "label": "Abrir módulo", "payload": {"route": route}})
+    return {
+        "ok": True,
+        "action_id": "start_review_queue" if start else "continue_review_queue",
+        "message": message,
+        "navigation": navigation,
+        "cards": current_cards,
+        "actions": actions,
+        "sources": ["internal_copilot_action"],
+        "suggestions": ["Marcar revisado cuando cierres la revisión"] if remaining else [],
+    }
 
 
 def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
@@ -42861,6 +42979,20 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": "Abriendo el módulo solicitado.",
             "route": route,
         }
+    if action_text in {"start_review_queue", "continue_review_queue"}:
+        queue_type = str(payload.get("queue_type") or "").strip()
+        route = str(payload.get("route") or "").strip()
+        if not route:
+            if queue_type == "seguros_missing_pdf":
+                route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=seguros"
+            elif queue_type == "hipotecas_missing_base":
+                route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=fin"
+        return _workspace_internal_copilot_review_queue_result(
+            queue_type,
+            payload.get("items") or [],
+            route=route,
+            start=action_text == "start_review_queue",
+        )
     if action_text == "bulk_revalidate_processes":
         process_types = [str(item or "").strip() for item in (payload.get("process_types") or []) if str(item or "").strip()]
         dates = {str(item or "").strip() for item in (payload.get("dates") or []) if str(item or "").strip()}
@@ -43008,6 +43140,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
     if action_text == "bulk_refresh_mismatched_dashboards":
         event_ids = [str(item or "").strip() for item in (payload.get("event_ids") or []) if str(item or "").strip()]
         updated = 0
+        resolved = 0
         for event_id in event_ids:
             perform_workspace_process_supervisor_action(
                 conn,
@@ -43017,12 +43150,23 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 actor=actor,
                 now=now,
             )
+            revalidation = perform_workspace_process_supervisor_action(
+                conn,
+                workspace_text,
+                event_id,
+                "revalidate_process",
+                actor=actor,
+                now=now,
+            )
             updated += 1
+            if revalidation.get("resolved"):
+                resolved += 1
         return {
             "ok": True,
             "action_id": action_text,
-            "message": f"Se han recalculado {updated} dashboard(s) con descuadre.",
+            "message": f"Se han recalculado y revalidado {updated} dashboard(s). Resueltos: {resolved}.",
             "updated": updated,
+            "resolved": resolved,
             "refresh_supervisor": True,
         }
     if action_text == "bulk_revalidate_facturas_without_asiento":
@@ -43051,6 +43195,29 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": f"Se han revalidado {updated} factura(s). Resueltas: {resolved}.",
             "updated": updated,
             "resolved": resolved,
+            "refresh_supervisor": True,
+        }
+    if action_text == "bulk_rerun_facturas_ocr":
+        facturas = [item for item in (payload.get("facturas") or []) if isinstance(item, dict) and str(item.get("doc_key") or "").strip()]
+        post_actions = []
+        for item in facturas:
+            post_actions.append(
+                {
+                    "post_endpoint": "/api/gestoria_factura_ocr",
+                    "payload": {
+                        "workspace_id": workspace_text,
+                        "cliente_id": str(item.get("cliente_id") or "").strip(),
+                        "tipo_factura": str(item.get("tipo") or "compra").strip() or "compra",
+                        "s3_key": str(item.get("doc_key") or "").strip(),
+                    },
+                }
+            )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han preparado {len(post_actions)} reprocesado(s) OCR de facturas compatibles.",
+            "post_actions": post_actions,
+            "updated": len(post_actions),
             "refresh_supervisor": True,
         }
     if action_text == "update_client_basic":

@@ -13348,10 +13348,10 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           role: "assistant",
           message: String(result?.message || "Acción ejecutada.").trim(),
           intent: "action_result",
-          suggestions: [],
-          cards: [],
-          actions: [],
-          sources: ["internal_copilot_action"],
+          suggestions: Array.isArray(result?.suggestions) ? result.suggestions : [],
+          cards: Array.isArray(result?.cards) ? result.cards : [],
+          actions: Array.isArray(result?.actions) ? result.actions : [],
+          sources: Array.isArray(result?.sources) && result.sources.length ? result.sources : ["internal_copilot_action"],
         }];
         state.currentWorkspaceInternalCopilotMessages = nextMessages.slice(-20);
         renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
@@ -13359,6 +13359,12 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           setUiToast("Revisión masiva completada", String(result?.message || "Se han revalidado las incidencias seleccionadas."));
         } else if (String(action.id || "").trim() === "bulk_safe_repair") {
           setUiToast("Corrección masiva preparada", String(result?.message || "Se han lanzado las correcciones seguras de la revisión actual."));
+        } else if (String(action.id || "").trim() === "bulk_rerun_facturas_ocr") {
+          setUiToast("OCR masivo preparado", String(result?.message || "Se ha preparado el reprocesado OCR de facturas."));
+        } else if (String(action.id || "").trim() === "bulk_refresh_mismatched_dashboards") {
+          setUiToast("Dashboards revalidados", String(result?.message || "Se han recalculado y revalidado los dashboards afectados."));
+        } else if (String(action.id || "").trim() === "start_review_queue" || String(action.id || "").trim() === "continue_review_queue") {
+          setUiToast("Revisión guiada", String(result?.message || "Se ha abierto el siguiente registro de la revisión guiada."));
         } else {
           setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
         }
