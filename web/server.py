@@ -40091,6 +40091,53 @@ def _workspace_process_entity_snapshot(conn, row):
                     "summary": f"Total {row_value(data, 'total') or '-'} · OCR {row_value(data, 'estado_ocr') or '-'}",
                     "doc_key": str(row_value(data, "doc_key") or "").strip(),
                 }
+        if entity_type == "seguro":
+            data = conn.execute(
+                """
+                SELECT id, cliente_id, poliza_numero, compania, ramo, estado
+                FROM seguros
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "cliente_id") or "").strip(),
+                    "title": str(row_value(data, "poliza_numero") or "Póliza").strip(),
+                    "summary": " · ".join(
+                        [
+                            str(row_value(data, "compania") or "").strip(),
+                            str(row_value(data, "ramo") or "").strip(),
+                            str(row_value(data, "estado") or "").strip(),
+                        ]
+                    ).strip(" ·"),
+                }
+        if entity_type == "hipoteca":
+            data = conn.execute(
+                """
+                SELECT id, cliente_id, banco, fecha_firma, estado
+                FROM hipotecas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "cliente_id") or "").strip(),
+                    "title": str(row_value(data, "banco") or "Hipoteca").strip(),
+                    "summary": " · ".join(
+                        [
+                            str(row_value(data, "fecha_firma") or "").strip(),
+                            str(row_value(data, "estado") or "").strip(),
+                        ]
+                    ).strip(" ·"),
+                }
         if entity_type in {"gestoria_contabilidad", "fincas_contabilidad"}:
             table = "gestoria_contabilidad" if entity_type == "gestoria_contabilidad" else "workspace_fincas_contabilidad"
             data = conn.execute(
@@ -40318,6 +40365,33 @@ def _workspace_process_dashboard_block(row):
     return {}
 
 
+def _workspace_process_records_refresh(row, workspace_id):
+    workspace_text = str(workspace_id or "").strip()
+    process_type = str((row or {}).get("process_type") or "").strip()
+    if not workspace_text:
+        return {}
+    mapping = {
+        "gestoria_factura": ("/api/gestoria_facturas", "facturas", "Refrescar listado"),
+        "gestoria_accounting": ("/api/gestoria_contabilidad", "contabilidad", "Refrescar listado"),
+        "rrhh_document": ("/api/workspace_rrhh_documentos", "rrhh_docs", "Refrescar listado"),
+        "rrhh_ausencia": ("/api/workspace_rrhh_ausencias", "rrhh_ausencias", "Refrescar listado"),
+        "rrhh_gasto": ("/api/workspace_rrhh_gastos", "rrhh_gastos", "Refrescar listado"),
+        "fincas_community": ("/api/workspace_fincas_comunidades", "fincas_comunidades", "Refrescar listado"),
+        "fincas_incidencia": ("/api/workspace_fincas_incidencias", "fincas_incidencias", "Refrescar listado"),
+        "fincas_provider": ("/api/workspace_fincas_proveedores", "fincas_proveedores", "Refrescar listado"),
+        "fincas_junta": ("/api/workspace_fincas_juntas", "fincas_juntas", "Refrescar listado"),
+        "fincas_contabilidad": ("/api/workspace_fincas_contabilidad", "fincas_contabilidad", "Refrescar listado"),
+    }
+    endpoint, target, label = mapping.get(process_type, ("", "", ""))
+    if not endpoint:
+        return {}
+    return {
+        "endpoint": f"{endpoint}?workspace_id={urllib.parse.quote(workspace_text)}",
+        "target": target,
+        "label": label,
+    }
+
+
 def _workspace_process_action_items(row, workspace_id):
     process_type = str((row or {}).get("process_type") or "").strip()
     acknowledged = int((row or {}).get("acknowledged") or 0) == 1
@@ -40328,10 +40402,15 @@ def _workspace_process_action_items(row, workspace_id):
     dashboard_block = _workspace_process_dashboard_block(row)
     if dashboard_block:
         items.append({"id": "reload_dashboard_block", "label": str(dashboard_block.get("label") or "Refrescar bloque"), "kind": "refresh"})
+    refresh_records = _workspace_process_records_refresh(row, workspace_id)
+    if refresh_records:
+        items.append({"id": "reload_records", "label": str(refresh_records.get("label") or "Refrescar listado"), "kind": "refresh"})
     if process_type in {"gestoria_dashboard", "seguros_dashboard"}:
         items.append({"id": "reload_dashboard", "label": "Recalcular dashboard", "kind": "refresh"})
     if process_type in {"gestoria_factura", "rrhh_document", "gestoria_accounting", "renta_attach", "agenda_action", "fincas_community", "fincas_incidencia", "fincas_provider", "fincas_junta", "fincas_contabilidad", "rrhh_ausencia", "rrhh_gasto"}:
         items.append({"id": "open_record", "label": "Ir al registro", "kind": "navigate", "route": target_route})
+    if process_type in {"fincas_community", "fincas_incidencia", "fincas_provider", "fincas_junta", "fincas_contabilidad"}:
+        items.append({"id": "open_record_edit", "label": "Editar registro", "kind": "navigate", "route": target_route})
     if process_type in {"renta_attach", "rrhh_document"}:
         items.append({"id": "rerun_ocr", "label": "Relanzar OCR", "kind": "repair"})
     if not acknowledged:
@@ -40991,7 +41070,7 @@ def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, ac
     if action_text == "acknowledge":
         acknowledge_workspace_process_supervisor_event(conn, workspace_text, event_text, actor=actor, now=now)
         return {"ok": True, "action_id": action_text, "applied": True}
-    if action_text in {"open_module", "open_record"}:
+    if action_text in {"open_module", "open_record", "open_record_edit"}:
         return {
             "ok": True,
             "action_id": action_text,
@@ -41025,6 +41104,15 @@ def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, ac
             "applied": True,
             "dashboard": str(block.get("dashboard") or "").strip(),
             "dashboard_block": str(block.get("block") or "").strip(),
+        }
+    if action_text == "reload_records":
+        refresh = _workspace_process_records_refresh(item, workspace_text)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "applied": True,
+            "route": str(refresh.get("endpoint") or "").strip(),
+            "refresh_target": str(refresh.get("target") or "").strip(),
         }
     if action_text == "rerun_ocr":
         process_type = str(item.get("process_type") or "").strip()

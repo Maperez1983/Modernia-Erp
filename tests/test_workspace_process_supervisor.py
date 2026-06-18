@@ -797,6 +797,76 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["dashboard"], "gestoria")
         self.assertEqual(result["dashboard_block"], "documentos")
 
+    def test_supervisor_reload_records_maps_rrhh_docs_endpoint(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt6', 'ws1', 'e1', 'rrhh', 'rrhh_document', 'rrhh_documento', 'doc1', '',
+              '', 'warning', 'warning', 'Documento RRHH pendiente', 'Falta validación', '[]', '[]', '{}',
+              'd6', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt6",
+            "reload_records",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("/api/workspace_rrhh_documentos", result["route"])
+        self.assertEqual(result["refresh_target"], "rrhh_docs")
+
+    def test_seguro_open_record_returns_cliente_navigation(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seguros (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              poliza_numero TEXT,
+              compania TEXT,
+              ramo TEXT,
+              estado TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO seguros (id, cliente_id, poliza_numero, compania, ramo, estado)
+            VALUES ('seg1', 'c1', 'POL-1', 'Zurich', 'Hogar', 'Activa')
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt7', 'ws1', 'e1', 'seguros', 'seguro_update', 'seguro', 'seg1', '',
+              '', 'warning', 'warning', 'Póliza incompleta', 'Falta vínculo', '[]', '[]', '{}',
+              'd7', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt7",
+            "open_record",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:05:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "cliente")
+        self.assertEqual(result["navigation"]["cliente_id"], "c1")
+
 
 if __name__ == "__main__":
     unittest.main()

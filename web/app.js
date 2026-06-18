@@ -12983,7 +12983,31 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
   });
   const applyWorkspaceSupervisorNavigation = async (result = {}) => {
     const navigation = result?.navigation && typeof result.navigation === "object" ? result.navigation : null;
+    const actionId = String(result?.action_id || "").trim();
     if (navigation?.kind === "cliente" && navigation?.cliente_id) {
+      try {
+        const entityType = String(navigation.entity_type || "").trim();
+        if (entityType === "gestoria_factura" || entityType === "gestoria_contabilidad" || entityType === "renta_attach") {
+          state.pendingClienteOpen = {
+            id: String(navigation.cliente_id || "").trim(),
+            clienteTab: "servicios",
+            operativaTab: "gestoria",
+            gestoriaModule: entityType === "renta_attach" ? "renta" : "contabilidad",
+          };
+        } else if (entityType === "seguro") {
+          state.pendingClienteOpen = {
+            id: String(navigation.cliente_id || "").trim(),
+            clienteTab: "servicios",
+            operativaTab: "seguros",
+          };
+        } else if (entityType === "hipoteca") {
+          state.pendingClienteOpen = {
+            id: String(navigation.cliente_id || "").trim(),
+            clienteTab: "servicios",
+            operativaTab: "financiaciones",
+          };
+        }
+      } catch (error) {}
       openClienteDetail(String(navigation.cliente_id || "").trim());
       return true;
     }
@@ -13009,7 +13033,9 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
         if (entityId) {
           window.setTimeout(() => {
             const selectorMap = {
-              fincas_community: [`[data-community-open="${entityId}"]`, `[data-community-card-open="${entityId}"]`],
+              fincas_community: actionId === "open_record_edit"
+                ? [`[data-community-edit="${entityId}"]`]
+                : [`[data-community-open="${entityId}"]`, `[data-community-card-open="${entityId}"]`],
               fincas_incidencia: [`[data-incident-edit="${entityId}"]`],
               fincas_provider: [`[data-provider-edit="${entityId}"]`],
               fincas_junta: [`[data-meeting-edit="${entityId}"]`],
@@ -13068,9 +13094,46 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
         openSegurosCrm();
         await safeWorkspaceApi(`/api/fincas_seguros_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, {});
       }
+    } else if (actionId === "reload_records" && result?.route) {
+      const data = await safeWorkspaceApi(String(result.route || "").trim(), { rows: [] });
+      const target = String(result?.refresh_target || "").trim();
+      if (target === "rrhh_docs") {
+        state.workspaceRrhhDocsRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderWorkspaceRrhhHub();
+      } else if (target === "rrhh_ausencias") {
+        state.workspaceRrhhAusenciasRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderWorkspaceRrhhHub();
+      } else if (target === "rrhh_gastos") {
+        state.workspaceRrhhGastosRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderWorkspaceRrhhHub();
+      } else if (target === "fincas_comunidades") {
+        await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+      } else if (target === "fincas_contabilidad") {
+        await refreshWorkspaceFincasLedger({ force: true, silent: true });
+      } else if (target === "fincas_incidencias") {
+        if (Array.isArray(data?.rows)) {
+          const scoped = filterWorkspaceFincasRowsByCompany((state.currentWorkspaceData || {}).fincasCommunities || []);
+          const communityIds = new Set(scoped.map((row) => String(row.id || "")).filter(Boolean));
+          renderWorkspaceFincasIncidentList((data.rows || []).filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || ""))));
+        }
+      } else if (target === "fincas_proveedores") {
+        if (Array.isArray(data?.rows)) {
+          const scoped = filterWorkspaceFincasRowsByCompany((state.currentWorkspaceData || {}).fincasCommunities || []);
+          const communityIds = new Set(scoped.map((row) => String(row.id || "")).filter(Boolean));
+          renderWorkspaceFincasProviderList((data.rows || []).filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || ""))));
+        }
+      } else if (target === "fincas_juntas") {
+        if (Array.isArray(data?.rows)) {
+          renderWorkspaceFincasMeetingList(data.rows || []);
+        }
+      } else if (target === "contabilidad") {
+        loadGestoriaContabilidad();
+      } else if (target === "facturas") {
+        loadGestoriaFact();
+      }
     } else if (result?.route && actionId === "reload_dashboard") {
       await safeWorkspaceApi(result.route, {});
-    } else if (actionId === "open_module" || actionId === "open_record") {
+    } else if (actionId === "open_module" || actionId === "open_record" || actionId === "open_record_edit") {
       await applyWorkspaceSupervisorNavigation(result);
     }
     return result;
@@ -13089,6 +13152,8 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
         } else if (actionId === "reload_dashboard_block") {
           setUiToast("Bloque refrescado", "Se ha recargado el bloque afectado del dashboard.");
+        } else if (actionId === "reload_records") {
+          setUiToast("Listado refrescado", "Se ha recargado el listado relacionado con la incidencia.");
         } else if (actionId === "rerun_ocr") {
           setUiToast("OCR relanzado", "Se ha reencolado el proceso OCR para este registro.");
         }
@@ -13196,6 +13261,34 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
             await safeWorkspaceApi(`/api/fincas_seguros_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, {});
           }
           setUiToast("Bloque refrescado", "Se ha recargado el bloque afectado del dashboard.");
+        } else if (actionId === "reload_records" && result?.route) {
+          const data = await safeWorkspaceApi(String(result.route || "").trim(), { rows: [] });
+          const targetKey = String(result?.refresh_target || "").trim();
+          if (targetKey === "rrhh_docs") {
+            state.workspaceRrhhDocsRows = Array.isArray(data?.rows) ? data.rows : [];
+            renderWorkspaceRrhhHub();
+          } else if (targetKey === "rrhh_ausencias") {
+            state.workspaceRrhhAusenciasRows = Array.isArray(data?.rows) ? data.rows : [];
+            renderWorkspaceRrhhHub();
+          } else if (targetKey === "rrhh_gastos") {
+            state.workspaceRrhhGastosRows = Array.isArray(data?.rows) ? data.rows : [];
+            renderWorkspaceRrhhHub();
+          } else if (targetKey === "fincas_comunidades") {
+            await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+          } else if (targetKey === "fincas_contabilidad") {
+            await refreshWorkspaceFincasLedger({ force: true, silent: true });
+          } else if (targetKey === "fincas_incidencias") {
+            if (Array.isArray(data?.rows)) renderWorkspaceFincasIncidentList(data.rows || []);
+          } else if (targetKey === "fincas_proveedores") {
+            if (Array.isArray(data?.rows)) renderWorkspaceFincasProviderList(data.rows || []);
+          } else if (targetKey === "fincas_juntas") {
+            if (Array.isArray(data?.rows)) renderWorkspaceFincasMeetingList(data.rows || []);
+          } else if (targetKey === "contabilidad") {
+            loadGestoriaContabilidad();
+          } else if (targetKey === "facturas") {
+            loadGestoriaFact();
+          }
+          setUiToast("Listado refrescado", "Se ha recargado el listado relacionado con la incidencia.");
         } else if (result?.route && actionId === "reload_dashboard") {
           await safeWorkspaceApi(result.route, {});
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
