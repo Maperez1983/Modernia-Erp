@@ -40647,6 +40647,10 @@ def _workspace_internal_copilot_action_intent(message):
         return "update_client_basic"
     if "renta" in text and any(token in text for token in ("carga", "sube", "mete", "adjunta", "procesa")):
         return "attach_renta"
+    if "factura" in text and any(token in text for token in ("carga", "sube", "mete", "ocr", "procesa", "importa")):
+        return "ingest_factura"
+    if any(token in text for token in ("hipoteca", "financiacion", "financiación")) and any(token in text for token in ("crea", "mete", "alta", "abre", "registra")):
+        return "create_hipoteca"
     if any(token in text for token in ("poliza", "póliza", "seguro")) and any(token in text for token in ("carga", "sube", "mete", "crea", "alta", "dar de alta")):
         return "create_seguro"
     return ""
@@ -40722,6 +40726,23 @@ def _workspace_internal_copilot_extract_client_query(message, context=None):
         "email": email,
         "phone": phone,
     }
+
+
+def _workspace_internal_copilot_pick_attachment(context=None, *, kind=""):
+    attachments = list((dict(context or {}).get("attachments") or []))
+    if not attachments:
+        return {}
+    kind_text = normalize_lookup_text(kind or "").lower()
+    for item in attachments:
+        name = normalize_lookup_text(item.get("filename") or "").lower()
+        ctype = str(item.get("content_type") or "").lower()
+        if kind_text == "renta" and ("renta" in name or "modelo100" in name or "pdf" in ctype):
+            return dict(item)
+        if kind_text == "seguro" and ("poliza" in name or "seguro" in name or "pdf" in ctype):
+            return dict(item)
+        if kind_text == "factura" and ("factura" in name or "invoice" in name or "pdf" in ctype or "image/" in ctype):
+            return dict(item)
+    return dict(attachments[0] or {})
 
 
 def _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, query_data, limit=5):
@@ -40824,8 +40845,10 @@ def _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, q
     return scored[:limit_i]
 
 
-def _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=None):
+def _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=None, *, prefer_current=False):
     query_data = _workspace_internal_copilot_extract_client_query(message, context=context)
+    if prefer_current and not str(query_data.get("query") or "").strip() and str((context or {}).get("current_client_id") or "").strip():
+        query_data = {"mode": "current", "cliente_id": str((context or {}).get("current_client_id") or "").strip(), "query": ""}
     candidates = _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, query_data, limit=5)
     exact = candidates[0] if len(candidates) == 1 else None
     return {"query": query_data, "candidates": candidates, "exact": exact}
@@ -40845,6 +40868,22 @@ def _workspace_internal_copilot_extract_contact_patch(message):
     match = re.search(r"(?:direccion|direcci[oó]n)\s*(?:es|:|=)?\s*([^,;]+)", str(message or ""), re.I)
     if match:
         patch["direccion"] = str(match.group(1) or "").strip()
+    cp_match = re.search(r"(?:cp|c[oó]digo postal)\s*(?:es|:|=)?\s*([0-9]{4,8})", str(message or ""), re.I)
+    if cp_match:
+        patch["codigo_postal"] = str(cp_match.group(1) or "").strip()
+    poblacion_match = re.search(r"(?:poblacion|población|localidad)\s*(?:es|:|=)?\s*([^,;]+)", str(message or ""), re.I)
+    if poblacion_match:
+        patch["poblacion"] = str(poblacion_match.group(1) or "").strip()
+    provincia_match = re.search(r"(?:provincia)\s*(?:es|:|=)?\s*([^,;]+)", str(message or ""), re.I)
+    if provincia_match:
+        patch["provincia"] = str(provincia_match.group(1) or "").strip()
+    birth_match = re.search(r"(?:fecha de nacimiento|nacimiento)\s*(?:es|:|=)?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", str(message or ""), re.I)
+    if birth_match:
+        raw_birth = str(birth_match.group(1) or "").strip()
+        patch["fecha_nacimiento"] = raw_birth if re.match(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", raw_birth) else (_parse_date_ddmmyyyy_to_iso(raw_birth) or raw_birth)
+    name_match = re.search(r"(?:nombre)\s*(?:es|:|=)?\s*([^,;]+)", str(message or ""), re.I)
+    if name_match:
+        patch["nombre"] = str(name_match.group(1) or "").strip()
     return patch
 
 
@@ -40874,11 +40913,43 @@ def _workspace_internal_copilot_extract_seguro_payload(message, resolved_client)
     return payload
 
 
+def _workspace_internal_copilot_extract_hipoteca_payload(message, resolved_client):
+    text = str(message or "").strip()
+    payload = {}
+    payload["cliente_id"] = str(((resolved_client or {}).get("id")) or "").strip()
+    payload["cliente"] = str(((resolved_client or {}).get("nombre")) or "").strip()
+    banco_match = re.search(r"(?:banco|entidad)\s*(?:es|:|=)?\s*([^,;]+)", text, re.I)
+    precio_match = re.search(r"(?:precio(?: de compra)?)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    importe_match = re.search(r"(?:importe(?: de la)? hipoteca|hipoteca)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    comision_match = re.search(r"(?:comision|comisión)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    fecha_match = re.search(r"(?:fecha(?: de)? encargo)\s*(?:es|:|=)?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", text, re.I)
+    if banco_match:
+        payload["banco"] = str(banco_match.group(1) or "").strip()
+    if precio_match:
+        payload["precio"] = parse_money_value(precio_match.group(1))
+    if importe_match:
+        payload["importe_hipoteca"] = parse_money_value(importe_match.group(1))
+    if comision_match:
+        payload["comision"] = parse_money_value(comision_match.group(1))
+    if fecha_match:
+        raw_fecha = str(fecha_match.group(1) or "").strip()
+        payload["fecha_encargo"] = raw_fecha if re.match(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", raw_fecha) else (_parse_date_ddmmyyyy_to_iso(raw_fecha) or raw_fecha)
+    if payload.get("precio") not in (None, "") and payload.get("importe_hipoteca") not in (None, "") and float(payload["precio"] or 0) > 0:
+        try:
+            payload["porcentaje"] = round((float(payload["importe_hipoteca"]) / float(payload["precio"])) * 100.0, 2)
+        except Exception:
+            pass
+    payload["estado"] = "Encargo" if re.search(r"\bencargo\b", text, re.I) else "Estudio"
+    return payload
+
+
 def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", context=None):
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
         return None
-    client_resolution = _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=context)
+    low_text = normalize_lookup_text(message or "").lower()
+    prefer_current = any(token in low_text for token in ("esta renta", "esta poliza", "esta póliza", "esta hipoteca", "esta factura", "subela", "súbela", "metela", "métela"))
+    client_resolution = _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=context, prefer_current=prefer_current and intent != "open_client")
     candidates = list(client_resolution.get("candidates") or [])
     exact = client_resolution.get("exact") or {}
     actions = []
@@ -40932,13 +41003,39 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         if candidates:
             answer = "Antes de ejecutar la acción necesito que elijas el cliente correcto."
             for candidate in candidates[:4]:
-                actions.append({"id": "open_client", "label": f"Abrir {str(candidate.get('nombre') or 'cliente').strip()}", "payload": {"cliente_id": str(candidate.get("id") or "").strip()}})
+                candidate_id = str(candidate.get("id") or "").strip()
+                candidate_name = str(candidate.get("nombre") or "cliente").strip()
+                if intent == "update_client_basic":
+                    patch = _workspace_internal_copilot_extract_contact_patch(message)
+                    actions.append({"id": "update_client_basic", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se actualizará la ficha de {candidate_name}.", "payload": {"cliente_id": candidate_id, "patch": patch}})
+                elif intent == "attach_renta":
+                    year = _workspace_internal_copilot_extract_year(message)
+                    doc_ref = _workspace_internal_copilot_extract_doc_ref(message)
+                    if not (doc_ref.get("doc_key") or doc_ref.get("doc_url")):
+                        attachment = _workspace_internal_copilot_pick_attachment(context, kind="renta")
+                        doc_ref = {"doc_key": str(attachment.get("key") or "").strip(), "doc_url": str(attachment.get("public_url") or "").strip()}
+                    actions.append({"id": "attach_renta", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se cargará la renta para {candidate_name}.", "payload": {"cliente_id": candidate_id, "ejercicio": year, "estado_presentacion": "Presentada" if "presentad" in low_text else "Borrador", "doc_key": doc_ref.get("doc_key") or "", "doc_url": doc_ref.get("doc_url") or ""}})
+                elif intent == "create_seguro":
+                    seguro_payload = _workspace_internal_copilot_extract_seguro_payload(message, candidate)
+                    attachment = _workspace_internal_copilot_pick_attachment(context, kind="seguro")
+                    if attachment:
+                        seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
+                        seguro_payload.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
+                    actions.append({"id": "create_seguro", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se creará la póliza para {candidate_name}.", "payload": seguro_payload})
+                elif intent == "create_hipoteca":
+                    hip_payload = _workspace_internal_copilot_extract_hipoteca_payload(message, candidate)
+                    actions.append({"id": "create_hipoteca", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se creará la hipoteca para {candidate_name}.", "payload": hip_payload})
+                elif intent == "ingest_factura":
+                    attachment = _workspace_internal_copilot_pick_attachment(context, kind="factura")
+                    actions.append({"id": "ingest_factura", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se procesará la factura para {candidate_name}.", "payload": {"cliente_id": candidate_id, "s3_key": str(attachment.get("key") or "").strip(), "filename": str(attachment.get("filename") or "factura.pdf").strip()}})
+                else:
+                    actions.append({"id": "open_client", "label": f"Abrir {candidate_name}", "payload": {"cliente_id": candidate_id}})
                 cards.append({
-                    "title": str(candidate.get("nombre") or "Cliente").strip(),
+                    "title": candidate_name,
                     "summary": " · ".join([str(candidate.get("nif") or "").strip(), str(candidate.get("email") or "").strip()]).strip(" ·"),
                     "priority": "alta",
                     "impact_area": "cliente",
-                    "entity": {"cliente_id": str(candidate.get("id") or "").strip(), "title": str(candidate.get("nombre") or "").strip()},
+                    "entity": {"cliente_id": candidate_id, "title": candidate_name},
                 })
             return {"ok": True, "intent": "action", "answer": answer, "sources": ["clientes"], "suggestions": ["Elegir cliente"], "cards": cards, "actions": actions[:4]}
         return {
@@ -40984,6 +41081,9 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
     if intent == "attach_renta":
         year = _workspace_internal_copilot_extract_year(message)
         doc_ref = _workspace_internal_copilot_extract_doc_ref(message)
+        if not (doc_ref.get("doc_key") or doc_ref.get("doc_url")):
+            attachment = _workspace_internal_copilot_pick_attachment(context, kind="renta")
+            doc_ref = {"doc_key": str(attachment.get("key") or "").strip(), "doc_url": str(attachment.get("public_url") or "").strip()}
         status = "Presentada" if "presentad" in normalize_lookup_text(message).lower() else "Borrador"
         missing = []
         if not year:
@@ -41017,8 +41117,69 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         )
         cards.append({"title": f"Renta {year}", "summary": f"Cliente: {str(exact.get('nombre') or '').strip()} · estado {status}", "priority": "alta", "impact_area": "gestoria", "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()}})
         return {"ok": True, "intent": "action", "answer": f"Puedo cargar la renta {year} en la ficha de {str(exact.get('nombre') or '').strip()}.", "sources": ["gestoria", "clientes"], "suggestions": ["Cargar renta"], "cards": cards, "actions": actions}
+    if intent == "ingest_factura":
+        attachment = _workspace_internal_copilot_pick_attachment(context, kind="factura")
+        if not attachment:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Ya tengo el cliente, pero me falta adjuntar la factura para poder procesarla por OCR.",
+                "sources": ["gestoria", "clientes"],
+                "suggestions": ["Adjuntar factura"],
+                "cards": [],
+                "actions": [],
+            }
+        factura_payload = {
+            "cliente_id": str(exact.get("id") or "").strip(),
+            "s3_key": str(attachment.get("key") or "").strip(),
+            "filename": str(attachment.get("filename") or "factura.pdf").strip(),
+            "tipo_factura": "venta" if "venta" in low_text else "compra",
+        }
+        actions.append(
+            {
+                "id": "ingest_factura",
+                "label": "Procesar factura",
+                "requires_confirmation": True,
+                "confirm_text": f"Se procesará la factura adjunta para {str(exact.get('nombre') or '').strip()}.",
+                "payload": factura_payload,
+            }
+        )
+        cards.append({"title": str(attachment.get("filename") or "Factura").strip(), "summary": f"Cliente: {str(exact.get('nombre') or '').strip()} · OCR", "priority": "alta", "impact_area": "gestoria", "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()}})
+        return {"ok": True, "intent": "action", "answer": f"Puedo procesar la factura adjunta para {str(exact.get('nombre') or '').strip()}.", "sources": ["gestoria", "clientes"], "suggestions": ["Procesar factura"], "cards": cards, "actions": actions}
+    if intent == "create_hipoteca":
+        hip_payload = _workspace_internal_copilot_extract_hipoteca_payload(message, exact)
+        missing = []
+        if hip_payload.get("importe_hipoteca") in (None, "", 0):
+            missing.append("importe de hipoteca")
+        if not str(hip_payload.get("banco") or "").strip():
+            missing.append("banco")
+        if missing:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Puedo preparar la hipoteca para {str(exact.get('nombre') or '').strip()}, pero faltan: {', '.join(missing)}.",
+                "sources": ["financiaciones", "clientes"],
+                "suggestions": ["Indicar banco", "Indicar importe"],
+                "cards": [],
+                "actions": [],
+            }
+        actions.append(
+            {
+                "id": "create_hipoteca",
+                "label": "Crear hipoteca",
+                "requires_confirmation": True,
+                "confirm_text": f"Se creará o actualizará una hipoteca para {str(exact.get('nombre') or '').strip()}.",
+                "payload": hip_payload,
+            }
+        )
+        cards.append({"title": f"Hipoteca {str(hip_payload.get('banco') or '').strip()}", "summary": f"Cliente: {str(exact.get('nombre') or '').strip()} · {hip_payload.get('importe_hipoteca') or '-'}", "priority": "alta", "impact_area": "financiaciones", "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()}})
+        return {"ok": True, "intent": "action", "answer": f"Puedo crear la hipoteca para {str(exact.get('nombre') or '').strip()}.", "sources": ["financiaciones", "clientes"], "suggestions": ["Crear hipoteca"], "cards": cards, "actions": actions}
     if intent == "create_seguro":
         seguro_payload = _workspace_internal_copilot_extract_seguro_payload(message, exact)
+        attachment = _workspace_internal_copilot_pick_attachment(context, kind="seguro")
+        if attachment:
+            seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
+            seguro_payload.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
         missing = []
         if not str(seguro_payload.get("compania") or "").strip():
             missing.append("compañía")
@@ -41696,6 +41857,183 @@ def _workspace_internal_copilot_create_seguro(conn, workspace_id, empresa_id, pa
     return {"ok": True, "id": poliza_id, "cliente_id": cliente_id, "doc_id": doc_id, "contabilidad_id": contabilidad_id, "duplicate_of": dup_id, "process_supervision": process_supervision}
 
 
+def _workspace_internal_copilot_create_hipoteca(conn, workspace_id, empresa_id, payload, *, actor=None, now=""):
+    now = now or datetime.now(timezone.utc).isoformat()
+    empresa_row = _workspace_internal_copilot_resolve_empresa_row(conn, workspace_id, empresa_id, actor=actor)
+    if not empresa_row:
+        raise ValueError("No se pudo resolver la empresa para hipotecas")
+    force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
+    cliente = str(payload.get("cliente") or "").strip()
+    cliente_id = str(payload.get("cliente_id") or "").strip() or None
+    fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
+    precio = parse_optional_float(payload.get("precio"))
+    importe_hipoteca = parse_optional_float(payload.get("importe_hipoteca"))
+    porcentaje = parse_optional_float(payload.get("porcentaje"))
+    entrada = parse_optional_float(payload.get("entrada"))
+    comision = parse_optional_float(payload.get("comision"))
+    anio = parse_optional_int(payload.get("anio"))
+    estado_busqueda = ("estudio", "encargo", "pendiente")
+    existing = None
+    if (not force_new) and cliente:
+        where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
+        values = [row_value(empresa_row, "id"), *estado_busqueda, cliente]
+        if fecha_encargo:
+            where += " AND fecha_encargo = ?"
+            values.append(fecha_encargo)
+        if precio is not None:
+            where += " AND precio = ?"
+            values.append(precio)
+        if importe_hipoteca is not None:
+            where += " AND importe_hipoteca = ?"
+            values.append(importe_hipoteca)
+        existing = conn.execute(f"SELECT id FROM hipotecas WHERE {where} LIMIT 1", values).fetchone()
+    existing_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (existing["id"],)).fetchone() if existing else None
+    effective_comision = comision if comision is not None else (row_value(existing_row, "comision") if existing_row else 0)
+    effective_agencia = (
+        (payload.get("oficina") or "")
+        or (payload.get("inmobiliaria_compra") or "")
+        or (row_value(existing_row, "oficina") if existing_row else "")
+        or (row_value(existing_row, "inmobiliaria_compra") if existing_row else "")
+    )
+    commission_split = derive_hipoteca_commissions(effective_comision, effective_agencia)
+    financing_split = derive_hipoteca_financing(
+        precio if precio not in (None, "") else (row_value(existing_row, "precio") if existing_row else None),
+        importe_hipoteca if importe_hipoteca not in (None, "") else (row_value(existing_row, "importe_hipoteca") if existing_row else None),
+    )
+    if existing:
+        conn.execute(
+            """
+            UPDATE hipotecas SET
+              cliente_id = COALESCE(?, cliente_id),
+              banco = COALESCE(?, banco),
+              precio = COALESCE(?, precio),
+              importe_hipoteca = COALESCE(?, importe_hipoteca),
+              porcentaje = COALESCE(?, porcentaje),
+              entrada = COALESCE(?, entrada),
+              comision = COALESCE(?, comision),
+              oficina = COALESCE(?, oficina),
+              fecha_encargo = COALESCE(?, fecha_encargo),
+              encargo = COALESCE(?, encargo),
+              tipo_hipoteca = COALESCE(?, tipo_hipoteca),
+              fecha_firma = COALESCE(?, fecha_firma),
+              cesion = ?,
+              comision_juan = ?,
+              comision_modernia = ?,
+              inmobiliaria_compra = COALESCE(?, inmobiliaria_compra),
+              asesor = COALESCE(?, asesor),
+              estado = COALESCE(?, estado),
+              anio = COALESCE(?, anio),
+              updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                cliente_id,
+                (payload.get("banco") or None),
+                financing_split["precio"] if financing_split else precio,
+                financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
+                financing_split["porcentaje"] if financing_split else porcentaje,
+                entrada,
+                comision,
+                (payload.get("oficina") or None),
+                fecha_encargo,
+                (payload.get("encargo") or None),
+                (payload.get("tipo_hipoteca") or None),
+                (payload.get("fecha_firma") or None),
+                commission_split["cesion"],
+                commission_split["comision_juan"],
+                commission_split["comision_modernia"],
+                (payload.get("inmobiliaria_compra") or None),
+                (payload.get("asesor") or None),
+                (payload.get("estado") or None),
+                anio,
+                now,
+                existing["id"],
+            ),
+        )
+        out_id = existing["id"]
+        created_flag = False
+    else:
+        out_id = os.urandom(16).hex()
+        created_flag = True
+        conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca,
+              porcentaje, entrada, comision, oficina, fecha_encargo,
+              encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan,
+              comision_modernia, inmobiliaria_compra, asesor, estado, anio,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                out_id,
+                row_value(empresa_row, "id"),
+                cliente,
+                cliente_id,
+                (payload.get("banco") or None),
+                financing_split["precio"] if financing_split else precio,
+                financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
+                financing_split["porcentaje"] if financing_split else porcentaje,
+                entrada,
+                comision,
+                (payload.get("oficina") or None),
+                fecha_encargo,
+                (payload.get("encargo") or None),
+                (payload.get("tipo_hipoteca") or None),
+                (payload.get("fecha_firma") or None),
+                commission_split["cesion"],
+                commission_split["comision_juan"],
+                commission_split["comision_modernia"],
+                (payload.get("inmobiliaria_compra") or None),
+                (payload.get("asesor") or None),
+                (payload.get("estado") or None),
+                anio,
+                now,
+                now,
+            ),
+        )
+    process_supervision = run_workspace_process_supervision(
+        conn,
+        process_type="hipoteca_update",
+        servicio="financiaciones",
+        empresa_id=str(row_value(empresa_row, "id") or "").strip(),
+        workspace_id=str(workspace_id or "").strip(),
+        entity_type="hipoteca",
+        entity_id=str(out_id or "").strip(),
+        actor=actor,
+        context={"operation": "create", "payload_keys": sorted(list(payload.keys()))},
+        now=now,
+    )
+    return {"ok": True, "id": out_id, "created": created_flag, "process_supervision": process_supervision}
+
+
+def _workspace_internal_copilot_ingest_factura(conn, workspace_id, empresa_id, payload, *, actor=None, now=""):
+    now = now or datetime.now(timezone.utc).isoformat()
+    empresa_row = _workspace_internal_copilot_resolve_empresa_row(conn, workspace_id, empresa_id, actor=actor)
+    if not empresa_row:
+        raise ValueError("No se pudo resolver la empresa para facturas")
+    ocr_payload = dict(payload or {})
+    if workspace_id:
+        ocr_payload["workspace_id"] = str(workspace_id or "").strip()
+    result = process_gestoria_factura_ocr(ocr_payload, conn, empresa_id=str(row_value(empresa_row, "id") or "").strip(), now=now, session=actor)
+    factura_id = str(result.get("factura_id") or result.get("duplicate_of") or "").strip()
+    result["process_supervision"] = run_workspace_process_supervision(
+        conn,
+        process_type="gestoria_factura",
+        servicio="gestoria",
+        empresa_id=str(row_value(empresa_row, "id") or "").strip(),
+        workspace_id=str(workspace_id or "").strip(),
+        entity_type="gestoria_factura",
+        entity_id=factura_id,
+        actor=actor,
+        context={"operation": "ocr", "duplicate_of": str(result.get("duplicate_of") or "").strip(), "cliente_id": str(payload.get("cliente_id") or "").strip() or None},
+        now=now,
+    )
+    return result
+
+
 def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, action_payload=None, *, empresa_id="", actor=None, now=None):
     workspace_text = str(workspace_id or "").strip()
     action_text = str(action_id or "").strip()
@@ -41721,7 +42059,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
         if not cliente_id or not patch:
             return {"error": "cliente_id y patch requeridos"}
-        allowed_fields = {"email", "telefono", "nif", "direccion", "fecha_nacimiento"}
+        allowed_fields = {"nombre", "email", "telefono", "movil", "otro_telefono", "nif", "direccion", "fecha_nacimiento", "codigo_postal", "poblacion", "provincia", "localidad"}
         updates = {key: value for key, value in patch.items() if key in allowed_fields and str(value or "").strip()}
         if not updates:
             return {"error": "No hay campos válidos para actualizar"}
@@ -41741,6 +42079,22 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "message": f"Renta {str(payload.get('ejercicio') or '').strip()} cargada correctamente en la ficha del cliente.",
+            **result,
+        }
+    if action_text == "ingest_factura":
+        result = _workspace_internal_copilot_ingest_factura(conn, workspace_text, empresa_id, payload, actor=actor, now=now)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Factura procesada por OCR correctamente.",
+            **result,
+        }
+    if action_text == "create_hipoteca":
+        result = _workspace_internal_copilot_create_hipoteca(conn, workspace_text, empresa_id, payload, actor=actor, now=now)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Hipoteca creada o actualizada correctamente.",
             **result,
         }
     if action_text == "create_seguro":

@@ -1208,6 +1208,41 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIsNotNone(cg)
         self.assertGreaterEqual(int(docs["total"] or 0), 1)
 
+    def test_internal_copilot_uses_current_client_for_implicit_renta_action(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, telefono, created_at, updated_at) VALUES ('c40', 'Cliente Actual', '55555555E', 'actual@test.local', '+34600111444', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce40', 'c40', 'e1', 'gestoria')")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "carga esta renta 2025",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+            context={"current_client_id": "c40", "attachments": [{"key": "rentas/doc40.pdf", "public_url": "", "filename": "renta.pdf", "content_type": "application/pdf"}]},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertTrue(reply["actions"])
+        self.assertEqual(reply["actions"][0]["id"], "attach_renta")
+
+    def test_internal_copilot_offers_candidate_confirmation_for_seguro(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c50', 'Ana Seguro', '66666666F', 'ana1@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c51', 'Ana Segura', '77777777G', 'ana2@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce50', 'c50', 'e1', 'seguros')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce51', 'c51', 'e1', 'seguros')")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "mete una póliza de Mapfre para Ana",
+            empresa_id="e1",
+            service_hint="seguros",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertTrue(reply["actions"])
+        self.assertEqual(reply["actions"][0]["id"], "create_seguro")
+
 
 if __name__ == "__main__":
     unittest.main()

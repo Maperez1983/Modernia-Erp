@@ -2066,6 +2066,7 @@ const state = {
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
+  currentRentaEntryId: "",
   gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
@@ -12237,6 +12238,10 @@ const renderWorkspaceCopilotHub = () => {
           Mensaje
           <textarea name="message" rows="3" placeholder="Ej. por qué no se creó esta póliza, cómo cargo una renta o qué cambio legal afecta a este proceso"></textarea>
         </label>
+        <label class="span-2">
+          Adjunto
+          <input type="file" name="attachment" accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
+        </label>
         <div class="form-actions span-2">
           <button type="submit">Preguntar</button>
           <button type="button" id="workspaceInternalCopilotClearBtn" class="secondary ghost">Limpiar</button>
@@ -12419,6 +12424,8 @@ const renderWorkspaceCopilotHub = () => {
         message,
         context: {
           current_client_id: String(state.currentClienteId || "").trim(),
+          current_seguro_id: String(state.currentSeguroId || "").trim(),
+          current_renta_entry_id: String(state.currentRentaEntryId || "").trim(),
           current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
           current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
           current_workspace_view: String(state.currentWorkspaceView || "").trim(),
@@ -12432,6 +12439,31 @@ const renderWorkspaceCopilotHub = () => {
       renderWorkspaceInternalCopilotFeed(history);
       if (internalCopilotStatus) internalCopilotStatus.textContent = "Consultando...";
       try {
+        const attachmentFile = formData.get("attachment");
+        if (attachmentFile instanceof File && attachmentFile.size > 0) {
+          const lowerMsg = normalizeSimple(message).toLowerCase();
+          const serviceHint = String(params.get("crm") || "").trim().toLowerCase();
+          let prefix = "copilot";
+          if (lowerMsg.includes("renta")) prefix = "rentas";
+          else if (lowerMsg.includes("factura")) prefix = "copilot_facturas";
+          else if (lowerMsg.includes("poliza") || lowerMsg.includes("póliza") || lowerMsg.includes("seguro")) prefix = "seguros";
+          else if (lowerMsg.includes("hipoteca")) prefix = "hipotecas";
+          else if (serviceHint === "gestoria") prefix = "copilot_facturas";
+          else if (serviceHint === "seguros") prefix = "seguros";
+          else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
+          const uploaded = await uploadFileToS3(attachmentFile, prefix, internalCopilotStatus);
+          if (uploaded?.key || uploaded?.public_url) {
+            payload.context.attachments = [
+              {
+                key: String(uploaded.key || "").trim(),
+                public_url: String(uploaded.public_url || "").trim(),
+                filename: String(attachmentFile.name || "").trim(),
+                content_type: String(attachmentFile.type || "").trim(),
+                size: Number(attachmentFile.size || 0),
+              },
+            ];
+          }
+        }
         const data = await apiPost("/api/internal_copilot_chat", payload);
         history.push({
           role: "assistant",
@@ -12445,6 +12477,8 @@ const renderWorkspaceCopilotHub = () => {
         state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
         renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
         internalCopilotForm.querySelector('[name="message"]').value = "";
+        const fileInput = internalCopilotForm.querySelector('[name="attachment"]');
+        if (fileInput) fileInput.value = "";
         if (internalCopilotStatus) internalCopilotStatus.textContent = "Listo.";
       } catch (error) {
         if (internalCopilotStatus) internalCopilotStatus.textContent = "Error en la consulta.";
