@@ -650,6 +650,45 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("/api/gestoria_dashboard", result["route"])
 
+    def test_internal_copilot_incident_uses_open_events(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt2', 'ws1', 'e1', 'seguros', 'seguro_update', 'seguro', 's1', '',
+              '', 'incomplete', 'warning', 'Póliza incompleta', 'Falta cliente vinculado', '[]', '[]', '{}',
+              'd2', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "por qué no se creó bien la póliza",
+            empresa_id="e1",
+            service_hint="seguros",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "incident")
+        self.assertIn("Póliza incompleta", reply["answer"])
+
+    def test_internal_copilot_tutorial_uses_process_catalog(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "como cargo una renta",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "tutorial")
+        self.assertTrue(reply["cards"])
+
 
 if __name__ == "__main__":
     unittest.main()

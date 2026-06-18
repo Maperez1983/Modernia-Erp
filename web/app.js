@@ -12225,6 +12225,28 @@ const renderWorkspaceCopilotHub = () => {
     <div class="workspace-home-detail-card" style="margin-top:14px">
       <div class="section-head">
         <div>
+          <h4>Chat interno</h4>
+          <p class="muted">Consulta incidencias, tutoriales y dudas legales del CRM desde un único asistente.</p>
+        </div>
+      </div>
+      <div id="workspaceInternalCopilotFeed"><p class="muted">Haz una pregunta sobre un proceso, un error o una duda legal.</p></div>
+      <form id="workspaceInternalCopilotForm" class="form-grid" style="margin-top:12px">
+        <input type="hidden" name="workspace_id" value="${escapeHtml(String(state.currentWorkspaceId || ""))}" />
+        <input type="hidden" name="empresa_id" value="${escapeHtml(String(activeCompanyId || ""))}" />
+        <label class="span-2">
+          Mensaje
+          <textarea name="message" rows="3" placeholder="Ej. por qué no se creó esta póliza, cómo cargo una renta o qué cambio legal afecta a este proceso"></textarea>
+        </label>
+        <div class="form-actions span-2">
+          <button type="submit">Preguntar</button>
+          <button type="button" id="workspaceInternalCopilotClearBtn" class="secondary ghost">Limpiar</button>
+          <span id="workspaceInternalCopilotStatus" class="muted"></span>
+        </div>
+      </form>
+    </div>
+    <div class="workspace-home-detail-card" style="margin-top:14px">
+      <div class="section-head">
+        <div>
           <h4>Supervisor de procesos</h4>
           <p class="muted">Avisos automáticos cuando una operación no se ha reflejado correctamente en el CRM.</p>
         </div>
@@ -12342,8 +12364,12 @@ const renderWorkspaceCopilotHub = () => {
   const contractBodyText = contractForm?.querySelector('[name="body_text"]');
   const contractClauses = contractForm?.querySelector('[name="clausulas_extra"]');
   const contractNotes = contractForm?.querySelector('[name="notas"]');
+  const internalCopilotForm = document.getElementById("workspaceInternalCopilotForm");
+  const internalCopilotStatus = document.getElementById("workspaceInternalCopilotStatus");
+  const internalCopilotClearBtn = document.getElementById("workspaceInternalCopilotClearBtn");
   void loadWorkspaceProcessSupervisorFeed({ silent: true });
   void loadWorkspaceProcessSupervisorHistory({ silent: true });
+  renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
 
   const fillContractFormDefaults = () => {
     if (!contractForm) return;
@@ -12375,6 +12401,55 @@ const renderWorkspaceCopilotHub = () => {
       contractTemplates.innerHTML = "<option value=\"\">Error cargando</option>";
     }
   };
+
+  if (internalCopilotForm) {
+    internalCopilotForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(internalCopilotForm);
+      const message = String(formData.get("message") || "").trim();
+      if (!message) {
+        if (internalCopilotStatus) internalCopilotStatus.textContent = "Escribe una consulta.";
+        return;
+      }
+      const params = new URLSearchParams(window.location.search || "");
+      const payload = {
+        workspace_id: String(formData.get("workspace_id") || state.currentWorkspaceId || "").trim(),
+        empresa_id: String(formData.get("empresa_id") || state.currentWorkspaceCompanyId || "").trim(),
+        service_hint: String(params.get("crm") || "").trim(),
+        message,
+      };
+      const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? [...state.currentWorkspaceInternalCopilotMessages] : [];
+      history.push({ role: "user", message });
+      state.currentWorkspaceInternalCopilotMessages = history;
+      renderWorkspaceInternalCopilotFeed(history);
+      if (internalCopilotStatus) internalCopilotStatus.textContent = "Consultando...";
+      try {
+        const data = await apiPost("/api/internal_copilot_chat", payload);
+        history.push({
+          role: "assistant",
+          message: String(data?.answer || "").trim(),
+          intent: String(data?.intent || "").trim(),
+          suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
+          cards: Array.isArray(data?.cards) ? data.cards : [],
+          sources: Array.isArray(data?.sources) ? data.sources : [],
+        });
+        state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
+        renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+        internalCopilotForm.querySelector('[name="message"]').value = "";
+        if (internalCopilotStatus) internalCopilotStatus.textContent = "Listo.";
+      } catch (error) {
+        if (internalCopilotStatus) internalCopilotStatus.textContent = "Error en la consulta.";
+        setUiToast("No se pudo consultar el chat interno", String(error?.message || "Error desconocido"));
+      }
+    });
+  }
+  if (internalCopilotClearBtn) {
+    internalCopilotClearBtn.addEventListener("click", () => {
+      state.currentWorkspaceInternalCopilotMessages = [];
+      renderWorkspaceInternalCopilotFeed([]);
+      if (internalCopilotStatus) internalCopilotStatus.textContent = "";
+    });
+  }
 
   const renderContractsList = (rows = []) => {
     if (!contractList) return;
@@ -12939,6 +13014,47 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       }
     });
   });
+};
+
+const renderWorkspaceInternalCopilotFeed = (messages = []) => {
+  const target = document.getElementById("workspaceInternalCopilotFeed");
+  if (!target) return;
+  const rows = Array.isArray(messages) ? messages : [];
+  if (!rows.length) {
+    target.innerHTML = "<p class='muted'>Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p>";
+    return;
+  }
+  target.innerHTML = `
+    <div class="crm-mini-list">
+      ${rows.slice(-10).map((row) => {
+        const role = String(row.role || "assistant").trim();
+        const cards = Array.isArray(row.cards) ? row.cards : [];
+        const suggestions = Array.isArray(row.suggestions) ? row.suggestions : [];
+        const sources = Array.isArray(row.sources) ? row.sources : [];
+        return `
+          <div class="crm-mini-row" style="align-items:flex-start; gap:12px">
+            <div style="flex:1 1 auto">
+              <strong>${role === "user" ? "Tú" : "Copilot interno"}</strong>
+              ${row.intent ? `<div class="muted">${escapeHtml(String(row.intent || ""))}</div>` : ""}
+              <p class="muted" style="margin:6px 0 0">${escapeHtml(String(row.message || ""))}</p>
+              ${cards.length ? `
+                <div class="workspace-summary-list" style="margin-top:8px">
+                  ${cards.slice(0, 3).map((card) => `
+                    <div class="workspace-summary-row">
+                      <div><strong>${escapeHtml(String(card.title || "Detalle"))}</strong><div class="muted">${escapeHtml(String(card.summary || ""))}</div></div>
+                      <div class="workspace-summary-meta"><span>${escapeHtml(String(card.priority || "media"))}</span></div>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : ""}
+              ${suggestions.length ? `<div class="muted" style="margin-top:6px">Sugerencias: ${escapeHtml(suggestions.slice(0, 4).join(" · "))}</div>` : ""}
+              ${sources.length ? `<div class="muted" style="margin-top:4px">Fuentes: ${escapeHtml(sources.join(", "))}</div>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
 };
 
 const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {

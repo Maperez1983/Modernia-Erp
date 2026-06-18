@@ -40102,6 +40102,205 @@ def _workspace_process_memory_excerpt(process_type):
         return {"process": {}, "incidents": []}
 
 
+def _workspace_internal_copilot_memory():
+    try:
+        docs_dir = ROOT.parent / "docs"
+        process_catalog = json.loads((docs_dir / "process_catalog.json").read_text(encoding="utf-8"))
+        business_rules = json.loads((docs_dir / "business_rules.json").read_text(encoding="utf-8"))
+        system_invariants = json.loads((docs_dir / "system_invariants.json").read_text(encoding="utf-8"))
+        return {
+            "processes": process_catalog.get("processes") or [],
+            "business_rules": business_rules.get("rules") or business_rules.get("items") or [],
+            "system_invariants": system_invariants.get("global_invariants") or [],
+        }
+    except Exception:
+        return {"processes": [], "business_rules": [], "system_invariants": []}
+
+
+def _workspace_internal_copilot_intent(message):
+    text = normalize_lookup_text(message or "").lower()
+    legal_tokens = ("ley", "legal", "boe", "dgt", "obligacion", "contrato", "clausula", "normativa", "convenio")
+    tutorial_tokens = ("como", "cómo", "pasos", "usar", "tutorial", "donde", "dónde", "explica")
+    incident_tokens = ("falla", "error", "no se ha", "no se crea", "no se creo", "por que no", "porque no", "duplic", "dashboard", "incidencia", "proceso", "incompleto")
+    if any(token in text for token in legal_tokens):
+        return "legal"
+    if any(token in text for token in incident_tokens):
+        return "incident"
+    if any(token in text for token in tutorial_tokens):
+        return "tutorial"
+    return "general"
+
+
+def _workspace_internal_copilot_area(service_hint):
+    key = normalize_service_key(service_hint or "")
+    mapping = {
+        "inmobiliaria": "inmobiliaria",
+        "gestoria": "gestoria",
+        "seguros": "seguros",
+        "financiaciones": "financiacion",
+        "financiacion": "financiacion",
+        "rrhh": "rrhh",
+        "fincas": "fincas",
+    }
+    return mapping.get(key, "inmobiliaria")
+
+
+def _workspace_internal_copilot_pick_processes(message, processes):
+    haystack = normalize_lookup_text(message or "").lower()
+    matches = []
+    for item in list(processes or []):
+        pid = str(item.get("id") or "").strip()
+        module = str(item.get("module") or "").strip()
+        text = f"{pid} {module} {' '.join(item.get('checks') or [])}".lower()
+        if any(token for token in haystack.split() if len(token) >= 4 and token in text):
+            matches.append(item)
+    return matches[:4]
+
+
+def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None):
+    workspace_text = str(workspace_id or "").strip()
+    company_text = str(empresa_id or "").strip()
+    message_text = str(message or "").strip()
+    if not workspace_text or not message_text:
+        return {"error": "workspace_id y message requeridos"}
+    intent = _workspace_internal_copilot_intent(message_text)
+    memory = _workspace_internal_copilot_memory()
+    open_events = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=12, only_open=True).get("rows") or []
+    history = fetch_workspace_process_supervisor_history(conn, workspace_text, limit=8).get("rows") or []
+    try:
+        health = fetch_workspace_health(conn, workspace_text) or {}
+    except Exception:
+        health = {}
+    response = {
+        "ok": True,
+        "intent": intent,
+        "message": message_text,
+        "workspace_id": workspace_text,
+        "answer": "",
+        "sources": [],
+        "suggestions": [],
+        "cards": [],
+    }
+    if intent == "incident":
+        relevant = []
+        haystack = normalize_lookup_text(message_text).lower()
+        for row in open_events:
+            blob = " ".join(
+                [
+                    str(row.get("title") or ""),
+                    str(row.get("summary") or ""),
+                    str(row.get("process_type") or ""),
+                    str(row.get("servicio") or ""),
+                    " ".join(str(item.get("code") or "") for item in (row.get("anomalies") or [])),
+                ]
+            ).lower()
+            if any(token for token in haystack.split() if len(token) >= 4 and token in blob):
+                relevant.append(row)
+        if not relevant:
+            relevant = open_events[:3]
+        if relevant:
+            top = relevant[0]
+            response["answer"] = (
+                f"He encontrado {len(relevant)} incidencia(s) relacionada(s). "
+                f"La más relevante es: {str(top.get('title') or 'Incidencia de proceso')}. "
+                f"{str(top.get('summary') or '').strip()}"
+            ).strip()
+            response["cards"] = [
+                {
+                    "title": str(row.get("title") or row.get("process_type") or "Incidencia"),
+                    "summary": str(row.get("summary") or "").strip(),
+                    "priority": str(row.get("priority") or "media"),
+                    "impact_area": str(row.get("impact_area") or "operativo"),
+                    "route": str(row.get("target_route") or "").strip(),
+                    "actions": row.get("action_items") or [],
+                }
+                for row in relevant[:3]
+            ]
+            response["suggestions"] = list(dict.fromkeys([str(action.get("label") or "").strip() for action in (top.get("action_items") or []) if str(action.get("label") or "").strip()]))[:4]
+            response["sources"] = ["workspace_process_supervisor", "workspace_process_supervisor_history"]
+            return response
+        response["answer"] = "No veo incidencias abiertas que encajen con esa consulta. El workspace no tiene avisos operativos activos para ese proceso."
+        response["sources"] = ["workspace_process_supervisor"]
+        return response
+    if intent == "tutorial":
+        processes = _workspace_internal_copilot_pick_processes(message_text, memory.get("processes") or [])
+        if processes:
+            top = processes[0]
+            checks = list(top.get("checks") or [])
+            response["answer"] = (
+                f"Para {str(top.get('name') or top.get('id') or 'este proceso')}, "
+                f"el sistema espera estos controles: {', '.join(checks[:4]) or 'sin checks definidos'}. "
+                "Haz la operación desde el módulo correspondiente y comprueba después el supervisor de procesos si algo no cuadra."
+            )
+            response["cards"] = [
+                {
+                    "title": str(item.get("name") or item.get("id") or "Proceso"),
+                    "summary": f"Módulo: {str(item.get('module') or '-')} · checks: {', '.join(item.get('checks') or [])}",
+                    "priority": str(item.get("criticality") or "media"),
+                    "impact_area": str(item.get("module") or "operativo"),
+                    "route": "",
+                    "actions": [],
+                }
+                for item in processes[:3]
+            ]
+            response["suggestions"] = ["Abrir módulo", "Revisar supervisor", "Consultar checklist legal si aplica"]
+            response["sources"] = ["process_catalog", "system_invariants"]
+            return response
+        response["answer"] = "Puedo orientarte mejor si me dices el proceso concreto: renta, póliza, factura, hipoteca, cita, comunidad, ausencia o gasto."
+        response["sources"] = ["process_catalog"]
+        return response
+    if intent == "legal":
+        area = _workspace_internal_copilot_area(service_hint)
+        topic_key, topic_payload = resolve_legal_copilot_topic(area, "", message_text)
+        if not topic_payload:
+            response["answer"] = "No he podido mapear la consulta a un tema legal interno soportado."
+            response["sources"] = ["legal_copilot"]
+            return response
+        try:
+            recent_updates = fetch_legal_radar_recent_updates(conn, area=area, topic_key=topic_key, limit=5)
+        except Exception:
+            recent_updates = []
+        legal_response = {
+            "title": topic_payload.get("title") or topic_key,
+            "summary": topic_payload.get("summary") or "",
+            "mandatory_docs": list(topic_payload.get("mandatory_docs") or []),
+            "workflow_checkpoints": list(get_legal_topic_operations(area, topic_key).get("workflows") or []),
+            "review_recommendations": list(get_legal_topic_operations(area, topic_key).get("clauses") or []),
+            "recent_updates": recent_updates,
+        }
+        ollama_analysis = build_legal_copilot_ollama_analysis(area, topic_key, legal_response, message_text)
+        response["answer"] = str((ollama_analysis or {}).get("crm_impact") or legal_response.get("summary") or "").strip()
+        response["cards"] = [
+            {
+                "title": str(legal_response.get("title") or topic_key),
+                "summary": str(legal_response.get("summary") or "").strip(),
+                "priority": "media",
+                "impact_area": "legal",
+                "route": "",
+                "actions": [],
+            }
+        ]
+        response["suggestions"] = _normalize_text_list(
+            list((ollama_analysis or {}).get("review_points") or []) +
+            list(legal_response.get("mandatory_docs") or []) +
+            list(legal_response.get("workflow_checkpoints") or []),
+            max_items=5,
+            max_chars=180,
+        )
+        response["sources"] = ["legal_copilot", "legal_radar", "legal_library"]
+        return response
+    open_total = len(open_events)
+    readiness = int(health.get("readiness_score") or 0)
+    process_samples = [str(row.get("title") or row.get("process_type") or "").strip() for row in open_events[:3] if str(row.get("title") or row.get("process_type") or "").strip()]
+    response["answer"] = (
+        f"El workspace está al {readiness}% de readiness y tiene {open_total} incidencia(s) operativa(s) abierta(s). "
+        f"Lo más reciente es: {', '.join(process_samples) if process_samples else 'sin incidencias destacadas ahora mismo'}."
+    )
+    response["suggestions"] = ["Pregúntame por un error concreto", "Pídeme cómo hacer un proceso", "Haz una consulta legal"]
+    response["sources"] = ["workspace_health", "workspace_process_supervisor"]
+    return response
+
+
 def _workspace_duplicate_client_signals(conn, empresa_id, cliente_id):
     empresa_text = str(empresa_id or "").strip()
     cliente_text = str(cliente_id or "").strip()
@@ -51619,6 +51818,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in {
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
+            "/api/internal_copilot_chat",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -52597,6 +52797,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/ai_fin_copilot",
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
+            "/api/internal_copilot_chat",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -53561,6 +53762,7 @@ class Handler(BaseHTTPRequestHandler):
             # Legal / Copilot web are scoped by `area` and should not require `empresa_nombre`.
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
+            "/api/internal_copilot_chat",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -68197,6 +68399,32 @@ class Handler(BaseHTTPRequestHandler):
                     max_items=18,
                 )
             json_response(self, response)
+            return
+        elif parsed.path == "/api/internal_copilot_chat":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            message = str(payload.get("message") or payload.get("question") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            service_hint = str(payload.get("service_hint") or payload.get("crm") or "").strip()
+            if not workspace_id or not message:
+                json_response(self, {"error": "workspace_id y message requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            reply = build_workspace_internal_copilot_reply(
+                conn,
+                workspace_id,
+                message,
+                empresa_id=empresa_id,
+                service_hint=service_hint,
+                actor=session,
+            )
+            if reply.get("error"):
+                json_response(self, {"error": reply.get("error")}, status=400)
+                return
+            json_response(self, reply)
             return
         elif parsed.path == "/api/legal_dgt_lookup":
             area = normalize_legal_area(payload.get("area") or "gestoria")

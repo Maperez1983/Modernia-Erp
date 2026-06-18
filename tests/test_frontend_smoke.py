@@ -69,6 +69,11 @@ class FrontendSmokeTests(unittest.TestCase):
 
     def test_workspace_copilot_includes_process_supervisor_feed(self):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Chat interno", app_js)
+        self.assertIn('id="workspaceInternalCopilotFeed"', app_js)
+        self.assertIn('id="workspaceInternalCopilotForm"', app_js)
+        self.assertIn('"/api/internal_copilot_chat"', app_js)
+        self.assertIn("renderWorkspaceInternalCopilotFeed", app_js)
         self.assertIn("Supervisor de procesos", app_js)
         self.assertIn('id="workspaceProcessSupervisorFeed"', app_js)
         self.assertIn('id="workspaceProcessSupervisorHistory"', app_js)
