@@ -4582,6 +4582,99 @@ def ensure_workspace_membership_backfill(conn):
         return
 
 
+def infer_workspace_for_user(conn, user_row) -> tuple[str, str]:
+    usuario = str(row_value(user_row, "usuario") or row_value(user_row, "login") or "").strip()
+    email_value = str(row_value(user_row, "email") or "").strip().lower()
+    servicio = normalize_lookup_text(row_value(user_row, "servicio") or "").lower()
+    domain = email_value.split("@", 1)[1] if "@" in email_value else ""
+    try:
+        rows = conn.execute("SELECT id, nombre, slug FROM workspaces ORDER BY nombre COLLATE NOCASE ASC").fetchall()
+    except Exception:
+        rows = []
+    indexed = []
+    for row in rows or []:
+        ws_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+        nombre = str(row_value(row, "nombre") or row_value(row, 1) or "").strip()
+        slug = str(row_value(row, "slug") or row_value(row, 2) or "").strip()
+        if ws_id:
+            indexed.append({"id": ws_id, "nombre": nombre, "slug": slug})
+    if not indexed:
+        return "", ""
+
+    def _find(predicate):
+        for item in indexed:
+            if predicate(item):
+                return item["id"], item["nombre"] or item["slug"]
+        return "", ""
+
+    if domain == "democasa.es":
+        ws_id, ws_name = _find(lambda item: item["slug"] == "democasa" or normalize_lookup_text(item["nombre"]).lower() == "democasa")
+        if ws_id:
+            return ws_id, ws_name
+    if domain.endswith("grupomodernia.es"):
+        if "fincas" in servicio and "modernia centro" in {normalize_lookup_text(item["nombre"]).lower() for item in indexed}:
+            ws_id, ws_name = _find(lambda item: item["slug"] == "modernia-centro" or normalize_lookup_text(item["nombre"]).lower() == "modernia centro")
+            if ws_id:
+                return ws_id, ws_name
+        ws_id, ws_name = _find(lambda item: item["slug"] == "modernia" or normalize_lookup_text(item["nombre"]).lower() == "modernia")
+        if ws_id:
+            return ws_id, ws_name
+    if usuario.upper() == "SBUGGEA":
+        return _find(lambda item: item["slug"] == "democasa" or normalize_lookup_text(item["nombre"]).lower() == "democasa")
+    if usuario.upper() == "G.BARTHA":
+        return _find(lambda item: item["slug"] == "modernia" or normalize_lookup_text(item["nombre"]).lower() == "modernia")
+    if len(indexed) == 1:
+        item = indexed[0]
+        return item["id"], item["nombre"] or item["slug"]
+    return "", ""
+
+
+def ensure_inferred_workspace_memberships(conn, now=None) -> dict:
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    ensured = []
+    skipped = []
+    try:
+        users = conn.execute(
+            """
+            SELECT u.id, u.usuario, COALESCE(u.email,'') AS email, COALESCE(u.servicio,'') AS servicio,
+                   COALESCE(u.rol,'') AS rol
+            FROM usuarios u
+            WHERE COALESCE(u.activo, 1) = 1
+            ORDER BY u.usuario COLLATE NOCASE ASC
+            """
+        ).fetchall()
+    except Exception:
+        return {"ensured": ensured, "skipped": skipped}
+    for row in users or []:
+        user_id = str(row_value(row, "id") or "").strip()
+        if not user_id:
+            continue
+        try:
+            exists = conn.execute(
+                "SELECT 1 FROM workspace_miembros WHERE usuario_id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        except Exception:
+            exists = True
+        if exists:
+            continue
+        ws_id, ws_name = infer_workspace_for_user(conn, row)
+        if not ws_id:
+            skipped.append(str(row_value(row, "usuario") or "").strip())
+            continue
+        role = "Owner" if workspace_session_is_privileged({"rol": row_value(row, "rol") or "", "servicio": row_value(row, "servicio") or ""}) else "Miembro"
+        ensure_workspace_member(conn, ws_id, user_id, role=role, now=now_ts)
+        ensured.append(
+            {
+                "usuario": str(row_value(row, "usuario") or "").strip(),
+                "workspace_id": ws_id,
+                "workspace": ws_name,
+                "role": role,
+            }
+        )
+    return {"ensured": ensured, "skipped": skipped}
+
+
 def bootstrap_default_workspace(conn):
     now = datetime.now(timezone.utc).isoformat()
     default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
@@ -33736,6 +33829,12 @@ def ensure_tables(db_path):
         if not _migration_done(conn, "workspace_membership_backfill_v2"):
             ensure_workspace_membership_backfill(conn)
             _migration_mark(conn, "workspace_membership_backfill_v2")
+    except Exception:
+        pass
+    try:
+        if not _migration_done(conn, "workspace_membership_inference_v1"):
+            ensure_inferred_workspace_memberships(conn)
+            _migration_mark(conn, "workspace_membership_inference_v1")
     except Exception:
         pass
     # Índices de rendimiento (evita scans completos que saturan Postgres en planes pequeños).

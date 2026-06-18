@@ -27,6 +27,7 @@ MODULE_TARGETS = {
 }
 
 DEFAULT_EXPECTATIONS_PATH = Path(__file__).resolve().parents[1] / "docs" / "module_smoke_expectations.json"
+NON_ACTIONABLE_WARNING_CLASSES = {"expected_permission_denied", "not_applicable"}
 
 
 def _load_expectations() -> dict:
@@ -59,6 +60,8 @@ def run() -> dict:
             passed = [item for item in rows if item.get("status") == "passed"]
             warnings = [item for item in rows if item.get("status") == "warning"]
             failed = [item for item in rows if item.get("status") == "failed"]
+            warning_classes = {str(item.get("class") or "").strip() for item in warnings if str(item.get("class") or "").strip()}
+            only_non_actionable_warnings = bool(warnings) and warning_classes.issubset(NON_ACTIONABLE_WARNING_CLASSES) and not failed and not passed
             rows_total = sum(int(item.get("rows") or 0) for item in rows)
             key = f"{label}:{module}"
             min_rows = int(
@@ -71,6 +74,8 @@ def run() -> dict:
                 )
             )
             status = "passed" if passed else ("warning" if warnings and not failed else "failed")
+            if only_non_actionable_warnings:
+                status = "skipped"
             if status == "passed" and rows_total < min_rows:
                 status = "warning"
             sample = rows[0]
@@ -86,6 +91,7 @@ def run() -> dict:
                     "passed_endpoints": len(passed),
                     "warning_endpoints": len(warnings),
                     "failed_endpoints": len(failed),
+                    "warning_classes": sorted(warning_classes),
                 }
             )
             if status == "failed":

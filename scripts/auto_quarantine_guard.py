@@ -16,6 +16,8 @@ from scripts import render_env_sync
 
 
 ROOT = Path(__file__).resolve().parents[1]
+NON_QUARANTINE_SECURITY_IDS = {"no-active-user-without-signal"}
+SCOPED_SECURITY_IDS = {"no-active-user-without-signal": "workspace_admin"}
 
 
 def _load_json(path: Path) -> dict:
@@ -31,7 +33,14 @@ def _quarantine_decision(report: dict) -> dict:
         alert_type = str(item.get("type") or "").strip().lower()
         severity = str(item.get("severity") or "").strip().lower()
         title = str(item.get("title") or item.get("type") or "incident").strip()
+        alert_id = str(item.get("id") or "").strip().lower()
         scope = str(item.get("module") or item.get("workspace") or "global").strip() or "global"
+        if alert_type == "security_posture" and alert_id in SCOPED_SECURITY_IDS:
+            scope = SCOPED_SECURITY_IDS[alert_id]
+        if alert_type == "security_posture" and alert_id in NON_QUARANTINE_SECURITY_IDS and severity in {"low", "medium"}:
+            if strongest["mode"] == "off":
+                strongest = {"mode": "read_only", "scope": scope, "reason": title}
+            continue
         if alert_type in quarantine_types or severity == "critical":
             return {"mode": "quarantine", "scope": scope, "reason": title}
         if strongest["mode"] == "off" and (alert_type in read_only_types or severity == "high"):

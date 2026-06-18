@@ -426,6 +426,28 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             else:
                 os.environ["RUN_SYSTEM_AUDIT_MODULE_EXPECTATIONS_PATH"] = old_path
 
+    def test_module_smoke_skips_non_actionable_permission_warnings(self):
+        old_run = prod_module_smoke.prod_system_matrix_audit.run
+        try:
+            prod_module_smoke.prod_system_matrix_audit.run = lambda: {
+                "endpoint_matrix": [
+                    {
+                        "user_label": "non_admin",
+                        "module": "fincas",
+                        "endpoint": "fincas_comunidades",
+                        "status": "warning",
+                        "class": "expected_permission_denied",
+                        "rows": 0,
+                        "workspace_nombre": "Modernia",
+                    }
+                ]
+            }
+            report = prod_module_smoke.run()
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["results"][0]["status"], "skipped")
+        finally:
+            prod_module_smoke.prod_system_matrix_audit.run = old_run
+
     def test_auto_quarantine_guard_triggers_on_critical_alert(self):
         with TemporaryDirectory() as tmp:
             report_path = Path(tmp) / "report.json"
@@ -447,6 +469,22 @@ class OllamaAutomationToolsTests(unittest.TestCase):
         )
         self.assertEqual(decision["mode"], "read_only")
         self.assertEqual(decision["scope"], "rrhh")
+
+    def test_auto_quarantine_guard_does_not_global_quarantine_orphan_memberships(self):
+        decision = auto_quarantine_guard._quarantine_decision(
+            {
+                "alerts": [
+                    {
+                        "type": "security_posture",
+                        "id": "no-active-user-without-signal",
+                        "title": "Usuarios activos sin membership",
+                        "severity": "medium",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(decision["mode"], "read_only")
+        self.assertEqual(decision["scope"], "workspace_admin")
 
     def test_frontend_home_access_audit_passes_with_current_invariants(self):
         report = frontend_home_access_audit.run()
