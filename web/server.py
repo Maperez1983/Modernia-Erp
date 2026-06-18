@@ -41752,6 +41752,22 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
     text = normalize_lookup_text(message or "").lower()
     if not text:
         return None
+    if any(token in text for token in ("urgente hoy", "mas urgente", "más urgente", "bandeja unificada", "todo lo urgente")):
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": "Puedo preparar una bandeja unificada con lo más urgente del workspace.",
+            "sources": ["internal_copilot_action"],
+            "suggestions": ["Abrir bandeja unificada"],
+            "cards": [],
+            "actions": [
+                {
+                    "id": "autorreview_global",
+                    "label": "Bandeja unificada",
+                    "payload": {"scope": "today"},
+                }
+            ],
+        }
     if any(token in text for token in ("autorrevisa", "auto revisa", "pendientes", "trabajo pendiente")):
         domain = ""
         if any(token in text for token in ("rrhh", "documento", "nomina", "nómina")):
@@ -42429,6 +42445,38 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
         "sources": ["internal_copilot_action"],
         "suggestions": ["Marcar revisado cuando cierres la revisión"] if remaining else [],
     }
+
+
+def _workspace_internal_copilot_priority_score(priority, impact_area, created_at=""):
+    priority_text = str(priority or "").strip().lower()
+    impact_text = str(impact_area or "").strip().lower()
+    score = {"alta": 100, "media": 60, "baja": 20}.get(priority_text, 30)
+    score += {
+        "economico": 30,
+        "legal": 30,
+        "laboral": 25,
+        "reporting": 18,
+        "comercial": 15,
+        "datos": 15,
+        "operativo": 10,
+    }.get(impact_text, 0)
+    created_text = str(created_at or "").strip()
+    if created_text[:10] == date.today().isoformat():
+        score += 10
+    return score
+
+
+def _workspace_internal_copilot_unified_card(title, summary, *, priority="media", impact_area="operativo", source="", entity=None, created_at=""):
+    item = {
+        "title": str(title or "Pendiente").strip(),
+        "summary": str(summary or "").strip(),
+        "priority": str(priority or "media").strip(),
+        "impact_area": str(impact_area or "operativo").strip(),
+        "entity": dict(entity or {}),
+        "_score": _workspace_internal_copilot_priority_score(priority, impact_area, created_at),
+        "_source": str(source or "").strip(),
+    }
+    return item
 
 
 def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
@@ -43238,6 +43286,83 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "actions": actions[:8],
             "sources": list(dict.fromkeys(sources))[:8],
             "suggestions": ["Lanzar una acción segura", "Abrir revisión guiada"],
+        }
+    if action_text == "autorreview_global":
+        open_events = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=25, only_open=True).get("rows") or []
+        cards = []
+        actions = []
+        sources = []
+        for row in open_events:
+            snapshot = row.get("entity_snapshot") or {}
+            title = str(row.get("title") or snapshot.get("title") or row.get("process_type") or "Incidencia").strip()
+            summary = str(row.get("summary") or snapshot.get("summary") or "").strip()
+            cards.append(
+                _workspace_internal_copilot_unified_card(
+                    title,
+                    summary,
+                    priority=str(row.get("priority") or "media").strip(),
+                    impact_area=str(row.get("impact_area") or "operativo").strip(),
+                    source="workspace_process_supervisor",
+                    entity=snapshot or {"event_id": str(row.get("id") or "").strip()},
+                    created_at=str(row.get("created_at") or "").strip(),
+                )
+            )
+        for domain, queries in {
+            "rrhh": ["revisa documentos rrhh caducados"],
+            "fincas": ["revisa comunidades con cuota incoherente"],
+            "gestoria": ["que facturas siguen sin asiento", "que rentas estan sin documento"],
+            "seguros": ["que polizas estan sin pdf"],
+            "financiaciones": ["que hipotecas estan sin importes base"],
+        }.items():
+            for query in queries:
+                reply = _workspace_internal_copilot_operational_query_reply(
+                    conn,
+                    workspace_text,
+                    query,
+                    empresa_id=empresa_id,
+                    service_hint=domain,
+                    context=payload,
+                )
+                if not reply:
+                    continue
+                for card in list(reply.get("cards") or []):
+                    cards.append(
+                        _workspace_internal_copilot_unified_card(
+                            card.get("title"),
+                            card.get("summary"),
+                            priority=card.get("priority") or "media",
+                            impact_area=card.get("impact_area") or domain,
+                            source=domain,
+                            entity=card.get("entity") or {},
+                        )
+                    )
+                actions.extend(list(reply.get("actions") or []))
+                sources.extend(list(reply.get("sources") or []))
+        deduped_cards = []
+        seen = set()
+        for card in sorted(cards, key=lambda item: int(item.get("_score") or 0), reverse=True):
+            entity = card.get("entity") or {}
+            dedupe_key = "|".join(
+                [
+                    str(card.get("title") or "").strip(),
+                    str(entity.get("factura_id") or entity.get("entry_id") or entity.get("hipoteca_id") or entity.get("seguro_id") or entity.get("documento_id") or entity.get("comunidad_id") or entity.get("event_id") or "").strip(),
+                ]
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            clean_card = dict(card)
+            clean_card.pop("_score", None)
+            clean_card.pop("_source", None)
+            deduped_cards.append(clean_card)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Bandeja unificada preparada. He priorizado {len(deduped_cards[:12])} pendiente(s) relevantes del workspace.",
+            "cards": deduped_cards[:12],
+            "actions": actions[:10],
+            "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
+            "suggestions": ["Abrir revisión guiada", "Lanzar corrección segura", "Ir al módulo afectado"],
         }
     if action_text == "revalidate_current_and_continue":
         queue_type = str(payload.get("queue_type") or "").strip()
