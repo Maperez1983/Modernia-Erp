@@ -1601,6 +1601,115 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("factura", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "gestoria_facturas")
 
+    def test_internal_copilot_operational_query_policies_without_pdf(self):
+        self.conn.execute(
+            """
+            INSERT INTO seguros (
+              id, empresa_id, cliente_id, tomador, compania, poliza_numero, estado, created_at, updated_at
+            ) VALUES (
+              's-no-pdf', 'e1', 'c71', 'Cliente Factura', 'Mapfre', 'P-999', 'Contratada', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que polizas estan sin pdf",
+            empresa_id="e1",
+            service_hint="seguros",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("póliza", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "seguros")
+
+    def test_internal_copilot_operational_query_hipotecas_missing_amounts(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'h-miss', 'e1', 'Cliente Hipoteca', 'c70', 'Bankia', 0, 0, 'Estudio', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que hipotecas estan sin importes base",
+            empresa_id="e1",
+            service_hint="financiaciones",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("hipoteca", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "hipotecas")
+
+    def test_internal_copilot_operational_query_rentas_missing_document(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c74', 'Cliente Renta', '50505050E', 'renta@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
+            ) VALUES (
+              'cg74', 'c74', 'Particular', 0, 0, 0, 1, 0, 0, 0, '{"entries":[{"id":"r1","ejercicio":"2025","estado_presentacion":"Borrador"}]}', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que rentas estan sin documento",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("renta", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "cliente_gestoria")
+
+    def test_internal_copilot_operational_query_dashboard_mismatch(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-dash-op', 'ws1', 'e1', 'seguros', 'seguros_dashboard', 'seguros_dashboard', 'ws1', '',
+              '', 'failed', 'warning', 'Dashboard seguros incoherente', 'Totales no cuadran contra detalle', '[]', '[]', '{}',
+              'ddash-op', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que dashboards no cuadran contra el detalle real",
+            empresa_id="e1",
+            service_hint="seguros",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("dashboard", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "workspace_process_supervisor")
+
 
 if __name__ == "__main__":
     unittest.main()

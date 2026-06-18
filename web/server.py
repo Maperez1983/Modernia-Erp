@@ -41752,6 +41752,200 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
     text = normalize_lookup_text(message or "").lower()
     if not text:
         return None
+    if ("poliza" in text or "póliza" in text or "seguro" in text) and any(token in text for token in ("sin pdf", "sin documento", "sin archivo")):
+        rows = conn.execute(
+            """
+            SELECT id, cliente_id, tomador, compania, poliza_numero, estado
+            FROM seguros
+            WHERE empresa_id = ?
+              AND LOWER(REPLACE(REPLACE(COALESCE(estado, ''), ' ', ''), 'ó', 'o')) IN ('contratada', 'envigor')
+              AND COALESCE(TRIM(poliza_key), '') = ''
+              AND COALESCE(TRIM(poliza_url), '') = ''
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 8
+            """,
+            (empresa_id,),
+        ).fetchall() if str(empresa_id or "").strip() else []
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo pólizas contratadas o en vigor sin PDF asociado en el ámbito actual.",
+                "sources": ["seguros"],
+                "suggestions": ["Abrir seguros"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            cards.append(
+                {
+                    "title": str(row_value(row, "poliza_numero") or row_value(row, "tomador") or "Póliza").strip(),
+                    "summary": f"{str(row_value(row, 'compania') or '').strip()} · {str(row_value(row, 'estado') or '').strip()}",
+                    "priority": "alta",
+                    "impact_area": "seguros",
+                    "entity": {"seguro_id": str(row_value(row, "id") or "").strip(), "cliente_id": str(row_value(row, "cliente_id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} póliza(s) sin PDF asociado.",
+            "sources": ["seguros"],
+            "suggestions": ["Abrir seguros", "Actualizar póliza"],
+            "cards": cards,
+            "actions": [],
+        }
+    if ("hipoteca" in text or "hipotecas" in text or "financiacion" in text or "financiación" in text) and any(token in text for token in ("sin importes", "sin importe", "sin datos base", "sin precio")):
+        rows = conn.execute(
+            """
+            SELECT id, cliente_id, cliente, banco, precio, importe_hipoteca, estado
+            FROM hipotecas
+            WHERE empresa_id = ?
+              AND (
+                COALESCE(precio, 0) <= 0
+                OR COALESCE(importe_hipoteca, 0) <= 0
+              )
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 8
+            """,
+            (empresa_id,),
+        ).fetchall() if str(empresa_id or "").strip() else []
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo hipotecas sin importes base en el ámbito actual.",
+                "sources": ["hipotecas"],
+                "suggestions": ["Abrir financiaciones"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            cards.append(
+                {
+                    "title": str(row_value(row, "cliente") or row_value(row, "banco") or "Hipoteca").strip(),
+                    "summary": f"precio {row_value(row, 'precio') or '-'} · hipoteca {row_value(row, 'importe_hipoteca') or '-'} · {str(row_value(row, 'estado') or '').strip()}",
+                    "priority": "alta",
+                    "impact_area": "financiaciones",
+                    "entity": {"hipoteca_id": str(row_value(row, "id") or "").strip(), "cliente_id": str(row_value(row, "cliente_id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} hipoteca(s) sin importes base completos.",
+            "sources": ["hipotecas"],
+            "suggestions": ["Abrir financiaciones", "Actualizar hipoteca"],
+            "cards": cards,
+            "actions": [],
+        }
+    if ("renta" in text or "rentas" in text) and any(token in text for token in ("sin documento", "sin pdf", "sin archivo")):
+        rows = conn.execute(
+            """
+            SELECT cg.cliente_id, c.nombre, cg.renta_detalles
+            FROM cliente_gestoria cg
+            LEFT JOIN clientes c ON c.id = cg.cliente_id
+            WHERE COALESCE(cg.mod_renta, 0) = 1
+            LIMIT 120
+            """
+        ).fetchall()
+        missing = []
+        for row in rows or []:
+            payload = parse_renta_detalles_payload(row_value(row, "renta_detalles") or "")
+            entries = sanitize_renta_entries(payload.get("entries") or [])
+            for entry in entries:
+                if str(entry.get("doc_presentada_id") or entry.get("doc_borrador_id") or "").strip():
+                    continue
+                missing.append(
+                    {
+                        "cliente_id": str(row_value(row, "cliente_id") or "").strip(),
+                        "cliente_nombre": str(row_value(row, "nombre") or "").strip(),
+                        "entry_id": str(entry.get("id") or "").strip(),
+                        "ejercicio": str(entry.get("ejercicio") or "").strip(),
+                        "estado": str(entry.get("estado_presentacion") or entry.get("doc_status") or "").strip(),
+                    }
+                )
+                if len(missing) >= 8:
+                    break
+            if len(missing) >= 8:
+                break
+        if not missing:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo campañas de renta sin documento asociado.",
+                "sources": ["cliente_gestoria"],
+                "suggestions": ["Abrir gestoría"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for item in missing:
+            cards.append(
+                {
+                    "title": f"Renta {item['ejercicio'] or '-'}",
+                    "summary": f"{item['cliente_nombre'] or 'Cliente'} · estado {item['estado'] or '-'}",
+                    "priority": "alta",
+                    "impact_area": "gestoria",
+                    "entity": {"cliente_id": item["cliente_id"], "entry_id": item["entry_id"]},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(missing)} renta(s) sin documento asociado.",
+            "sources": ["cliente_gestoria"],
+            "suggestions": ["Abrir gestoría", "Actualizar renta"],
+            "cards": cards,
+            "actions": [],
+        }
+    if "dashboard" in text and any(token in text for token in ("no cuadra", "descuadra", "descuadrado", "detalle real", "detalle")):
+        rows = conn.execute(
+            """
+            SELECT id, process_type, title, summary, anomaly_json, created_at
+            FROM workspace_process_supervisor
+            WHERE workspace_id = ?
+              AND COALESCE(acknowledged, 0) = 0
+              AND process_type IN ('gestoria_dashboard', 'seguros_dashboard')
+            ORDER BY created_at DESC
+            LIMIT 8
+            """,
+            (workspace_id,),
+        ).fetchall()
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo dashboards abiertos con descuadre frente al detalle real ahora mismo.",
+                "sources": ["workspace_process_supervisor"],
+                "suggestions": ["Abrir dashboard gestoría", "Abrir dashboard seguros"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            process_type = str(row_value(row, "process_type") or "").strip()
+            impact = "seguros" if process_type == "seguros_dashboard" else "gestoria"
+            cards.append(
+                {
+                    "title": str(row_value(row, "title") or process_type).strip(),
+                    "summary": str(row_value(row, "summary") or "").strip(),
+                    "priority": "alta",
+                    "impact_area": impact,
+                    "entity": {"event_id": str(row_value(row, "id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} incidencia(s) de dashboard que no cuadran contra el detalle real.",
+            "sources": ["workspace_process_supervisor"],
+            "suggestions": ["Recalcular dashboard", "Abrir módulo"],
+            "cards": cards,
+            "actions": [],
+        }
     if ("rrhh" in text or "documento" in text or "nomina" in text or "nómina" in text) and any(token in text for token in ("caducad", "vencid", "expirad")):
         today = date.today().isoformat()
         rows = conn.execute(
