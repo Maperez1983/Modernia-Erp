@@ -1415,6 +1415,81 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["post_actions"])
         self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/renta_entry_ocr_reprocess")
 
+    def test_internal_copilot_action_updates_current_rrhh_document(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url, fecha_emision, fecha_caducidad, permanente, estado, notas, created_at, updated_at
+            ) VALUES (
+              'rd1', 'ws1', 'e1', 'p1', 'Nómina', 'nomina.pdf', 'rrhh/old.pdf', 'https://example.test/old.pdf', '2026-05-01', '', 0, 'Activo', '', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_rrhh_document",
+            {"documento_id": "rd1", "persona_id": "p1", "patch": {"nombre": "nomina-junio.pdf", "doc_key": "rrhh/new.pdf", "estado": "Activo"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["post_actions"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/workspace_rrhh_documento")
+
+    def test_internal_copilot_action_updates_current_community(self):
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, presidente, secretario, cuota_mensual, created_at, updated_at
+            ) VALUES (
+              'fc1', 'ws1', 'e1', 'Comunidad Sol', 'Calle Mayor 1', 'Activa', 'Pedro', 'Ana', 100, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_community",
+            {"comunidad_id": "fc1", "patch": {"cuota_mensual": 125.0, "presidente": "Laura"}} ,
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:35:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["post_actions"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/workspace_fincas_comunidades")
+
+    def test_internal_copilot_action_bulk_safe_repair(self):
+        self.conn.execute("INSERT INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES ('we-safe', 'ws1', 'e1', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c73', 'Cliente Safe', '40404040D', 'safe@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce73', 'c73', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO cliente_gestoria (id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at) VALUES ('cg73', 'c73', 'Particular', 0, 0, 0, 1, 0, 0, 0, '{\"entries\":[]}', 'now', 'now')")
+        server.run_workspace_process_supervision(
+            self.conn,
+            process_type="renta_attach",
+            servicio="gestoria",
+            empresa_id="e1",
+            workspace_id="ws1",
+            entity_type="cliente",
+            entity_id="c73",
+            context={"ejercicio": "2025"},
+            now="2026-06-18T11:00:00Z",
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_safe_repair",
+            {"process_types": ["renta_attach"], "dates": ["2026-06-18"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:40:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["post_actions"])
+        self.assertTrue(result["refresh_supervisor"])
+
 
 if __name__ == "__main__":
     unittest.main()

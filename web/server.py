@@ -40635,6 +40635,15 @@ def _workspace_internal_copilot_review_reply(message, open_events, history):
                     "payload": {"process_types": process_types, "dates": created_dates},
                 }
             )
+        actions.append(
+            {
+                "id": "bulk_safe_repair",
+                "label": "Corrección segura",
+                "requires_confirmation": True,
+                "confirm_text": f"Se ejecutarán correcciones seguras sobre la revisión actual.",
+                "payload": {"process_types": process_types, "dates": created_dates},
+            }
+        )
     if duplicate_rows:
         row, anomaly = duplicate_rows[0]
         related = anomaly.get("related_rows") or []
@@ -40676,6 +40685,10 @@ def _workspace_internal_copilot_action_intent(message):
         return "update_current_hipoteca"
     if any(token in text for token in ("actualiza esta factura", "edita esta factura", "corrige esta factura")):
         return "update_current_factura"
+    if any(token in text for token in ("actualiza este documento", "edita este documento", "corrige este documento")) and any(token in text for token in ("rrhh", "nómina", "nomina", "documento")):
+        return "update_current_rrhh_document"
+    if any(token in text for token in ("actualiza esta comunidad", "edita esta comunidad", "corrige esta comunidad")):
+        return "update_current_community"
     if any(token in text for token in ("actualiza", "actualizar", "cambia", "modifica")) and any(token in text for token in ("email", "correo", "telefono", "teléfono", "movil", "móvil", "nif", "dni", "direccion", "dirección")):
         return "update_client_basic"
     if "renta" in text and any(token in text for token in ("carga", "sube", "mete", "adjunta", "procesa")):
@@ -41132,6 +41145,53 @@ def _workspace_internal_copilot_extract_hipoteca_update_payload(message):
     return payload
 
 
+def _workspace_internal_copilot_extract_rrhh_document_patch(message):
+    text = str(message or "").strip()
+    patch = {}
+    tipo_match = re.search(r"(?:tipo)\s*(?:es|:|=)?\s*([^,;]+)", text, re.I)
+    nombre_match = re.search(r"(?:nombre|titulo|título)\s*(?:es|:|=)?\s*([^,;]+)", text, re.I)
+    emision_match = re.search(r"(?:fecha emision|fecha emisión|fecha)\s*(?:es|:|=)?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", text, re.I)
+    cad_match = re.search(r"(?:fecha caducidad|caducidad|vence|vencimiento)\s*(?:es|:|=)?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", text, re.I)
+    estado_match = re.search(r"(?:estado)\s*(?:es|:|=)?\s*([^,;]+)", text, re.I)
+    notas_match = re.search(r"(?:notas?)\s*(?:es|:|=)?\s*(.+)$", text, re.I)
+    if tipo_match:
+        patch["tipo"] = str(tipo_match.group(1) or "").strip()
+    if nombre_match:
+        patch["nombre"] = str(nombre_match.group(1) or "").strip()
+    if emision_match:
+        raw = str(emision_match.group(1) or "").strip()
+        patch["fecha_emision"] = raw if re.match(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", raw) else (_parse_date_ddmmyyyy_to_iso(raw) or raw)
+    if cad_match:
+        raw = str(cad_match.group(1) or "").strip()
+        patch["fecha_caducidad"] = raw if re.match(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", raw) else (_parse_date_ddmmyyyy_to_iso(raw) or raw)
+    if estado_match:
+        patch["estado"] = str(estado_match.group(1) or "").strip()
+    if notas_match:
+        patch["notas"] = str(notas_match.group(1) or "").strip()
+    return patch
+
+
+def _workspace_internal_copilot_extract_community_patch(message):
+    text = str(message or "").strip()
+    patch = {}
+    patterns = {
+        "nombre": r"(?:nombre)\s*(?:es|:|=)?\s*([^,;]+)",
+        "cif": r"(?:cif)\s*(?:es|:|=)?\s*([A-Za-z0-9\-]{6,16})",
+        "direccion": r"(?:direccion|dirección)\s*(?:es|:|=)?\s*([^,;]+)",
+        "presidente": r"(?:presidente)\s*(?:es|:|=)?\s*([^,;]+)",
+        "secretario": r"(?:secretario)\s*(?:es|:|=)?\s*([^,;]+)",
+        "estado": r"(?:estado)\s*(?:es|:|=)?\s*([^,;]+)",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text, re.I)
+        if match:
+            patch[key] = str(match.group(1) or "").strip()
+    cuota_match = re.search(r"(?:cuota mensual|cuota)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    if cuota_match:
+        patch["cuota_mensual"] = parse_money_value(cuota_match.group(1))
+    return patch
+
+
 def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", context=None):
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
@@ -41214,6 +41274,44 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "suggestions": ["Actualizar factura"],
             "cards": [{"title": "Factura actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "gestoria", "entity": {"factura_id": current_factura_id}}],
             "actions": [{"id": "update_current_factura", "label": "Actualizar factura", "requires_confirmation": True, "confirm_text": "Se actualizará la factura abierta.", "payload": {"factura_id": current_factura_id, "patch": patch}}],
+        }
+    if intent == "update_current_rrhh_document":
+        current_doc_id = str((context or {}).get("current_rrhh_document_id") or "").strip()
+        current_persona_id = str((context or {}).get("current_persona_id") or "").strip()
+        patch = _workspace_internal_copilot_extract_rrhh_document_patch(message)
+        attachment = _workspace_internal_copilot_pick_attachment(context, kind="rrhh")
+        if attachment:
+            patch.setdefault("doc_key", str(attachment.get("key") or "").strip())
+            patch.setdefault("doc_url", str(attachment.get("public_url") or "").strip())
+            patch.setdefault("nombre", str(attachment.get("filename") or "").strip())
+        if not current_doc_id:
+            return {"ok": True, "intent": "action", "answer": "No tengo un documento de RRHH abierto en el contexto actual.", "sources": ["rrhh"], "suggestions": ["Editar documento"], "cards": [], "actions": []}
+        if not patch:
+            return {"ok": True, "intent": "action", "answer": "No veo cambios concretos para aplicar al documento actual.", "sources": ["rrhh"], "suggestions": ["Adjuntar archivo", "Indicar caducidad"], "cards": [], "actions": []}
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo actualizar el documento de RRHH abierto con esos cambios.",
+            "sources": ["rrhh"],
+            "suggestions": ["Actualizar documento"],
+            "cards": [{"title": "Documento RRHH actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "rrhh", "entity": {"documento_id": current_doc_id, "persona_id": current_persona_id}}],
+            "actions": [{"id": "update_current_rrhh_document", "label": "Actualizar documento RRHH", "requires_confirmation": True, "confirm_text": "Se actualizará el documento abierto.", "payload": {"documento_id": current_doc_id, "persona_id": current_persona_id, "patch": patch}}],
+        }
+    if intent == "update_current_community":
+        current_community_id = str((context or {}).get("current_community_id") or "").strip()
+        patch = _workspace_internal_copilot_extract_community_patch(message)
+        if not current_community_id:
+            return {"ok": True, "intent": "action", "answer": "No tengo una comunidad abierta en el contexto actual.", "sources": ["fincas"], "suggestions": ["Abrir comunidad"], "cards": [], "actions": []}
+        if not patch:
+            return {"ok": True, "intent": "action", "answer": "No veo cambios concretos para aplicar a la comunidad actual.", "sources": ["fincas"], "suggestions": ["Indicar cuota", "Indicar dirección"], "cards": [], "actions": []}
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo actualizar la comunidad abierta con esos cambios.",
+            "sources": ["fincas"],
+            "suggestions": ["Actualizar comunidad"],
+            "cards": [{"title": "Comunidad actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "fincas", "entity": {"comunidad_id": current_community_id}}],
+            "actions": [{"id": "update_current_community", "label": "Actualizar comunidad", "requires_confirmation": True, "confirm_text": "Se actualizará la comunidad abierta.", "payload": {"comunidad_id": current_community_id, "patch": patch}}],
         }
     if intent == "update_current_renta":
         current_client_id = str((context or {}).get("current_client_id") or "").strip()
@@ -42412,6 +42510,41 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "post_actions": post_actions,
             "updated": len(post_actions),
         }
+    if action_text == "bulk_safe_repair":
+        process_types = [str(item or "").strip() for item in (payload.get("process_types") or []) if str(item or "").strip()]
+        dates = {str(item or "").strip() for item in (payload.get("dates") or []) if str(item or "").strip()}
+        rows = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=100, only_open=True).get("rows") or []
+        if process_types:
+            rows = [row for row in rows if str(row.get("process_type") or "").strip() in process_types]
+        if dates:
+            rows = [row for row in rows if str(row.get("created_at") or "")[:10] in dates]
+        post_actions = []
+        revalidated = 0
+        resolved = 0
+        for row in rows:
+            process_type = str(row.get("process_type") or "").strip()
+            event_id = str(row.get("id") or "").strip()
+            if not event_id:
+                continue
+            if process_type in {"renta_attach", "gestoria_factura", "rrhh_document"}:
+                rerun = perform_workspace_process_supervisor_action(conn, workspace_text, event_id, "rerun_ocr", actor=actor, now=now)
+                endpoint = str(rerun.get("post_endpoint") or "").strip()
+                if endpoint:
+                    post_actions.append({"post_endpoint": endpoint, "payload": rerun.get("payload") or {}})
+                continue
+            revalidation = perform_workspace_process_supervisor_action(conn, workspace_text, event_id, "revalidate_process", actor=actor, now=now)
+            revalidated += 1
+            if revalidation.get("resolved"):
+                resolved += 1
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Corrección segura lanzada. OCR: {len(post_actions)} · revalidaciones: {revalidated} · resueltas: {resolved}.",
+            "post_actions": post_actions,
+            "updated": len(post_actions) + revalidated,
+            "resolved": resolved,
+            "refresh_supervisor": True,
+        }
     if action_text == "update_client_basic":
         cliente_id = str(payload.get("cliente_id") or "").strip()
         patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
@@ -42569,6 +42702,65 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             now=now,
         )
         return {"ok": True, "action_id": action_text, "message": "Factura actualizada correctamente.", "process_supervision": process_supervision}
+    if action_text == "update_current_rrhh_document":
+        documento_id = str(payload.get("documento_id") or "").strip()
+        persona_id = str(payload.get("persona_id") or "").strip()
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+        if not documento_id or not persona_id:
+            return {"error": "documento_id y persona_id requeridos"}
+        action_payload = {
+            "id": documento_id,
+            "workspace_id": workspace_text,
+            "persona_id": persona_id,
+            "tipo": str(patch.get("tipo") or "Documento").strip(),
+            "nombre": str(patch.get("nombre") or "").strip(),
+            "doc_key": str(patch.get("doc_key") or "").strip(),
+            "doc_url": str(patch.get("doc_url") or "").strip(),
+            "fecha_emision": str(patch.get("fecha_emision") or "").strip(),
+            "fecha_caducidad": str(patch.get("fecha_caducidad") or "").strip(),
+            "estado": str(patch.get("estado") or "").strip() or "Activo",
+            "notas": str(patch.get("notas") or "").strip(),
+        }
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Documento RRHH preparado para actualización.",
+            "post_actions": [{"post_endpoint": "/api/workspace_rrhh_documento", "payload": action_payload}],
+            "refresh_supervisor": True,
+        }
+    if action_text == "update_current_community":
+        comunidad_id = str(payload.get("comunidad_id") or "").strip()
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+        if not comunidad_id:
+            return {"error": "comunidad_id requerido"}
+        row = conn.execute("SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1", (comunidad_id, workspace_text)).fetchone()
+        if not row:
+            return {"error": "Comunidad no encontrada"}
+        row_map = dict(row)
+        action_payload = {
+            "id": comunidad_id,
+            "workspace_id": workspace_text,
+            "empresa_id": str(row_map.get("empresa_id") or "").strip(),
+            "nombre": str(patch.get("nombre") or row_map.get("nombre") or "").strip(),
+            "referencia_catastral": str(row_map.get("referencia_catastral") or "").strip(),
+            "cif": str(patch.get("cif") or row_map.get("cif") or "").strip(),
+            "direccion": str(patch.get("direccion") or row_map.get("direccion") or "").strip(),
+            "presidente": str(patch.get("presidente") or row_map.get("presidente") or "").strip(),
+            "secretario": str(patch.get("secretario") or row_map.get("secretario") or "").strip(),
+            "estado": str(patch.get("estado") or row_map.get("estado") or "Activa").strip(),
+            "num_vecinos": row_map.get("num_vecinos"),
+            "num_locales": row_map.get("num_locales"),
+            "num_trasteros": row_map.get("num_trasteros"),
+            "num_aparcamientos": row_map.get("num_aparcamientos"),
+            "cuota_mensual": patch.get("cuota_mensual", row_map.get("cuota_mensual")),
+        }
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Comunidad preparada para actualización.",
+            "post_actions": [{"post_endpoint": "/api/workspace_fincas_comunidades", "payload": action_payload}],
+            "refresh_supervisor": True,
+        }
     return {"error": "Acción no soportada"}
 
 

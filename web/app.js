@@ -2069,6 +2069,7 @@ const state = {
   currentRentaEntryId: "",
   currentHipotecaId: "",
   currentFacturaId: "",
+  currentRrhhDocumentId: "",
   gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
@@ -12432,6 +12433,7 @@ const renderWorkspaceCopilotHub = () => {
           current_hipoteca_id: String(state.currentHipotecaId || "").trim(),
           current_factura_id: String(state.currentFacturaId || selectedDoc?.factura_id || "").trim(),
           current_factura_document_id: String(selectedDoc?.id || "").trim(),
+          current_rrhh_document_id: String(state.currentRrhhDocumentId || "").trim(),
           current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
           current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
           current_workspace_view: String(state.currentWorkspaceView || "").trim(),
@@ -13330,6 +13332,10 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
             await apiPost(endpoint, postAction?.payload || {});
           }
         }
+        if (result?.refresh_supervisor) {
+          await loadWorkspaceProcessSupervisorFeed({ silent: true });
+          await loadWorkspaceProcessSupervisorHistory({ silent: true });
+        }
         if (result?.navigation) {
           await applyWorkspaceSupervisorNavigation(result);
         }
@@ -13351,6 +13357,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
         if (String(action.id || "").trim() === "bulk_revalidate_processes") {
           setUiToast("Revisión masiva completada", String(result?.message || "Se han revalidado las incidencias seleccionadas."));
+        } else if (String(action.id || "").trim() === "bulk_safe_repair") {
+          setUiToast("Corrección masiva preparada", String(result?.message || "Se han lanzado las correcciones seguras de la revisión actual."));
         } else {
           setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
         }
@@ -18401,6 +18409,7 @@ const renderWorkspaceRrhhHub = () => {
   const docForm = document.getElementById("workspaceRrhhDocForm");
   if (docForm) {
     const reset = () => {
+      state.currentRrhhDocumentId = "";
       docForm.querySelector('[name="id"]').value = "";
       docForm.querySelector('[name="tipo"]').value = "Documento";
       docForm.querySelector('[name="nombre"]').value = "";
@@ -18472,6 +18481,7 @@ const renderWorkspaceRrhhHub = () => {
       const row = (state.workspaceRrhhDocsRows || []).find((r) => String(r.id || "") === String(id));
       const form = document.getElementById("workspaceRrhhDocForm");
       if (!form || !row) return;
+      state.currentRrhhDocumentId = String(row.id || "").trim();
       form.querySelector('[name="id"]').value = row.id || "";
       const personaSelect = form.querySelector('[name="persona_id"]');
       if (personaSelect) personaSelect.value = row.persona_id || selectedPersonaId;
