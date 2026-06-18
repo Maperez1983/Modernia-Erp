@@ -13007,6 +13007,9 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
             operativaTab: "financiaciones",
           };
         }
+        if (navigation.refresh_summary && state.pendingClienteOpen && typeof state.pendingClienteOpen === "object") {
+          state.pendingClienteOpen.refreshSummary = true;
+        }
       } catch (error) {}
       openClienteDetail(String(navigation.cliente_id || "").trim());
       return true;
@@ -13126,11 +13129,15 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
         if (Array.isArray(data?.rows)) {
           renderWorkspaceFincasMeetingList(data.rows || []);
         }
-      } else if (target === "contabilidad") {
-        loadGestoriaContabilidad();
-      } else if (target === "facturas") {
-        loadGestoriaFact();
-      }
+          } else if (target === "contabilidad") {
+            loadGestoriaContabilidad();
+          } else if (target === "facturas") {
+            loadGestoriaFact();
+          }
+    } else if (actionId === "refresh_client_summary") {
+      await applyWorkspaceSupervisorNavigation(result);
+    } else if (actionId === "revalidate_process") {
+      handleProcessSupervisorResponse(result?.process_supervision || {}, "");
     } else if (result?.route && actionId === "reload_dashboard") {
       await safeWorkspaceApi(result.route, {});
     } else if (actionId === "open_module" || actionId === "open_record" || actionId === "open_record_edit") {
@@ -13154,6 +13161,15 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
           setUiToast("Bloque refrescado", "Se ha recargado el bloque afectado del dashboard.");
         } else if (actionId === "reload_records") {
           setUiToast("Listado refrescado", "Se ha recargado el listado relacionado con la incidencia.");
+        } else if (actionId === "refresh_client_summary") {
+          setUiToast("Ficha cliente refrescada", "Se ha recargado la ficha del cliente afectado.");
+        } else if (actionId === "revalidate_process") {
+          const status = String(result?.process_supervision?.status || "").trim();
+          if (status === "ok") {
+            setUiToast("Proceso validado", "La incidencia ha quedado revalidada sin anomalías.");
+          } else {
+            setUiToast("Proceso revalidado", "La incidencia sigue abierta y se ha actualizado su diagnóstico.");
+          }
         } else if (actionId === "rerun_ocr") {
           setUiToast("OCR relanzado", "Se ha reencolado el proceso OCR para este registro.");
         }
@@ -13289,6 +13305,17 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
             loadGestoriaFact();
           }
           setUiToast("Listado refrescado", "Se ha recargado el listado relacionado con la incidencia.");
+        } else if (actionId === "refresh_client_summary") {
+          await applyWorkspaceSupervisorNavigation(result);
+          setUiToast("Ficha cliente refrescada", "Se ha recargado la ficha del cliente afectado.");
+        } else if (actionId === "revalidate_process") {
+          handleProcessSupervisorResponse(result?.process_supervision || {}, "");
+          const status = String(result?.process_supervision?.status || "").trim();
+          if (status === "ok") {
+            setUiToast("Proceso validado", "La incidencia ha quedado revalidada sin anomalías.");
+          } else {
+            setUiToast("Proceso revalidado", "La incidencia sigue abierta y se ha actualizado su diagnóstico.");
+          }
         } else if (result?.route && actionId === "reload_dashboard") {
           await safeWorkspaceApi(result.route, {});
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");

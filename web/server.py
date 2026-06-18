@@ -40392,6 +40392,24 @@ def _workspace_process_records_refresh(row, workspace_id):
     }
 
 
+def _workspace_process_revalidation_context(row):
+    item = dict(row or {})
+    process_type = str(item.get("process_type") or "").strip()
+    context = {"operation": "revalidate"}
+    if process_type == "renta_attach":
+        try:
+            anomalies = _workspace_process_parse_json(item.get("anomaly_json"), [])
+            for anomaly in anomalies:
+                text = str(anomaly.get("message") or "").strip()
+                match = re.search(r"renta\s+([0-9]{4})", text, flags=re.IGNORECASE)
+                if match:
+                    context["ejercicio"] = str(match.group(1) or "").strip()
+                    break
+        except Exception:
+            pass
+    return context
+
+
 def _workspace_process_action_items(row, workspace_id):
     process_type = str((row or {}).get("process_type") or "").strip()
     acknowledged = int((row or {}).get("acknowledged") or 0) == 1
@@ -40413,6 +40431,15 @@ def _workspace_process_action_items(row, workspace_id):
         items.append({"id": "open_record_edit", "label": "Editar registro", "kind": "navigate", "route": target_route})
     if process_type in {"renta_attach", "rrhh_document"}:
         items.append({"id": "rerun_ocr", "label": "Relanzar OCR", "kind": "repair"})
+    snapshot_cliente_id = ""
+    try:
+        snapshot_cliente_id = str((row.get("entity_snapshot") or {}).get("cliente_id") or "").strip() if isinstance(row, dict) else ""
+    except Exception:
+        snapshot_cliente_id = ""
+    if snapshot_cliente_id:
+        items.append({"id": "refresh_client_summary", "label": "Refrescar ficha cliente", "kind": "refresh"})
+    if "dashboard" not in process_type:
+        items.append({"id": "revalidate_process", "label": "Revalidar proceso", "kind": "refresh"})
     if not acknowledged:
         items.append({"id": "acknowledge", "label": "Marcar revisado", "kind": "ack"})
     return items[:4]
@@ -41113,6 +41140,47 @@ def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, ac
             "applied": True,
             "route": str(refresh.get("endpoint") or "").strip(),
             "refresh_target": str(refresh.get("target") or "").strip(),
+        }
+    if action_text == "refresh_client_summary":
+        snapshot = _workspace_process_entity_snapshot(conn, item)
+        cliente_id = str(snapshot.get("cliente_id") or "").strip()
+        if not cliente_id:
+            return {"ok": False, "error": "La incidencia no está vinculada a un cliente."}
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "applied": False,
+            "navigation": {
+                "kind": "cliente",
+                "cliente_id": cliente_id,
+                "entity_type": str(snapshot.get("entity_type") or "").strip(),
+                "entity_id": str(snapshot.get("entity_id") or "").strip(),
+                "refresh_summary": True,
+            },
+            "entity_snapshot": snapshot,
+        }
+    if action_text == "revalidate_process":
+        process_type = str(item.get("process_type") or "").strip()
+        if "dashboard" in process_type:
+            return {"ok": False, "error": "La revalidación directa no está soportada para dashboards agregados."}
+        result = run_workspace_process_supervision(
+            conn,
+            process_type=process_type,
+            servicio=str(item.get("servicio") or "").strip(),
+            empresa_id=str(item.get("empresa_id") or "").strip(),
+            workspace_id=workspace_text,
+            entity_type=str(item.get("entity_type") or "").strip(),
+            entity_id=str(item.get("entity_id") or "").strip(),
+            actor=actor,
+            context=_workspace_process_revalidation_context(item),
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "applied": True,
+            "process_supervision": result,
+            "resolved": str(result.get("status") or "").strip() == "ok",
         }
     if action_text == "rerun_ocr":
         process_type = str(item.get("process_type") or "").strip()

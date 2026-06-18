@@ -867,6 +867,83 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["navigation"]["kind"], "cliente")
         self.assertEqual(result["navigation"]["cliente_id"], "c1")
 
+    def test_refresh_client_summary_returns_cliente_navigation(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, descripcion, total, estado_ocr, doc_key, created_at, updated_at
+            ) VALUES (
+              'gf2', 'e1', 'c1', 'emitida', 'F-2026-003', 'Factura refresh', 80.0, 'ok', 'docs/f3.pdf', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt8', 'ws1', 'e1', 'gestoria', 'gestoria_factura', 'gestoria_factura', 'gf2', '',
+              '', 'warning', 'warning', 'Factura a revisar', 'Falta asiento', '[]', '[]', '{}',
+              'd8', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt8",
+            "refresh_client_summary",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "cliente")
+        self.assertEqual(result["navigation"]["cliente_id"], "c1")
+
+    def test_revalidate_process_resolves_rrhh_document_after_data_fix(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url, nomina_ocr_status, created_at, updated_at
+            ) VALUES (
+              'doc2', 'ws1', 'e1', 'p1', 'Contrato', 'Contrato.pdf', '', '', 'ok', 'now', 'now'
+            )
+            """
+        )
+        first = server.run_workspace_process_supervision(
+            self.conn,
+            process_type="rrhh_document",
+            servicio="rrhh",
+            empresa_id="e1",
+            workspace_id="ws1",
+            entity_type="rrhh_documento",
+            entity_id="doc2",
+            actor={"user_id": "u1", "usuario": "QA"},
+            context={"operation": "create"},
+            now="2026-06-18T12:12:00Z",
+        )
+        self.assertNotEqual(first["status"], "ok")
+        self.conn.execute(
+            """
+            UPDATE workspace_rrhh_documentos
+            SET doc_key = 'rrhh/ok.pdf', updated_at = 'later'
+            WHERE id = 'doc2'
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            str(first.get("event_id") or ""),
+            "revalidate_process",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:13:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["process_supervision"]["status"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()
