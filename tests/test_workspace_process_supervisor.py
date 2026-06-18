@@ -1490,6 +1490,117 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["post_actions"])
         self.assertTrue(result["refresh_supervisor"])
 
+    def test_internal_copilot_action_updates_current_factura_validate(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, total, created_at, updated_at
+            ) VALUES (
+              'f72', 'e1', 'c71', 'compra', 'F-72', '2026-06-03', 800, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_factura_validate",
+            {"factura_id": "f72", "patch": {"numero": "F-72X", "total": 900}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:45:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "update_current_factura_validate")
+
+    def test_internal_copilot_action_updates_current_community_refresh(self):
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, presidente, secretario, cuota_mensual, created_at, updated_at
+            ) VALUES (
+              'fc2', 'ws1', 'e1', 'Comunidad Luna', 'Calle Sol 2', 'Activa', 'Maria', 'Luis', 90, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_community_refresh",
+            {"comunidad_id": "fc2", "patch": {"cuota_mensual": 95}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:50:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "update_current_community_refresh")
+        self.assertEqual(result["navigation"]["tab"], "comunidad_ficha")
+
+    def test_internal_copilot_operational_query_rrhh_docs_expired(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, fecha_caducidad, permanente, estado, created_at, updated_at
+            ) VALUES (
+              'rd-exp', 'ws1', 'e1', 'p1', 'Documento', 'dni.pdf', 'rrhh/dni.pdf', '2025-01-01', 0, 'Activo', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa documentos rrhh caducados",
+            empresa_id="e1",
+            service_hint="rrhh",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("documento", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "workspace_rrhh_documentos")
+
+    def test_internal_copilot_operational_query_communities_quota_mismatch(self):
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, cuota_mensual, cuota_sugerida, created_at, updated_at
+            ) VALUES (
+              'fc-mis', 'ws1', 'e1', 'Comunidad Delta', 'Calle Real 9', 'Activa', 90, 120, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa comunidades con cuota incoherente",
+            empresa_id="e1",
+            service_hint="fincas",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("comunidad", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "workspace_fincas_comunidades")
+
+    def test_internal_copilot_operational_query_invoices_without_asiento(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, total, created_at, updated_at
+            ) VALUES (
+              'f73', 'e1', 'c71', 'compra', 'F-73', '2026-06-04', 300, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que facturas siguen sin asiento",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("factura", reply["answer"].lower())
+        self.assertEqual(reply["sources"][0], "gestoria_facturas")
+
 
 if __name__ == "__main__":
     unittest.main()

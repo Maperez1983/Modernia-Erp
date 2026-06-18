@@ -40684,10 +40684,14 @@ def _workspace_internal_copilot_action_intent(message):
     if any(token in text for token in ("actualiza esta hipoteca", "edita esta hipoteca", "corrige esta hipoteca")):
         return "update_current_hipoteca"
     if any(token in text for token in ("actualiza esta factura", "edita esta factura", "corrige esta factura")):
+        if any(token in text for token in ("revalida", "valida", "comprueba", "verifica")):
+            return "update_current_factura_validate"
         return "update_current_factura"
     if any(token in text for token in ("actualiza este documento", "edita este documento", "corrige este documento")) and any(token in text for token in ("rrhh", "nómina", "nomina", "documento")):
         return "update_current_rrhh_document"
     if any(token in text for token in ("actualiza esta comunidad", "edita esta comunidad", "corrige esta comunidad")):
+        if any(token in text for token in ("refresca", "abre la ficha", "abre ficha", "ficha")):
+            return "update_current_community_refresh"
         return "update_current_community"
     if any(token in text for token in ("actualiza", "actualizar", "cambia", "modifica")) and any(token in text for token in ("email", "correo", "telefono", "teléfono", "movil", "móvil", "nif", "dni", "direccion", "dirección")):
         return "update_client_basic"
@@ -41243,7 +41247,7 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "cards": [{"title": "Hipoteca actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "financiaciones", "entity": {"hipoteca_id": current_hipoteca_id}}],
             "actions": [{"id": "update_current_hipoteca", "label": "Actualizar hipoteca", "requires_confirmation": True, "confirm_text": "Se actualizará la hipoteca abierta.", "payload": {"hipoteca_id": current_hipoteca_id, "patch": patch}}],
         }
-    if intent == "update_current_factura":
+    if intent in {"update_current_factura", "update_current_factura_validate"}:
         current_factura_id = str((context or {}).get("current_factura_id") or "").strip()
         current_factura_document_id = str((context or {}).get("current_factura_document_id") or "").strip()
         patch = _workspace_internal_copilot_extract_factura_update_payload(message)
@@ -41269,11 +41273,11 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         return {
             "ok": True,
             "intent": "action",
-            "answer": "Puedo actualizar la factura abierta con esos cambios.",
+            "answer": "Puedo actualizar la factura abierta con esos cambios." if intent == "update_current_factura" else "Puedo actualizar la factura abierta y revalidar el proceso al terminar.",
             "sources": ["gestoria"],
-            "suggestions": ["Actualizar factura"],
+            "suggestions": ["Actualizar factura"] if intent == "update_current_factura" else ["Actualizar y revalidar factura"],
             "cards": [{"title": "Factura actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "gestoria", "entity": {"factura_id": current_factura_id}}],
-            "actions": [{"id": "update_current_factura", "label": "Actualizar factura", "requires_confirmation": True, "confirm_text": "Se actualizará la factura abierta.", "payload": {"factura_id": current_factura_id, "patch": patch}}],
+            "actions": [{"id": "update_current_factura_validate" if intent == "update_current_factura_validate" else "update_current_factura", "label": "Actualizar y revalidar factura" if intent == "update_current_factura_validate" else "Actualizar factura", "requires_confirmation": True, "confirm_text": "Se actualizará la factura abierta." if intent == "update_current_factura" else "Se actualizará la factura abierta y se revalidará el proceso.", "payload": {"factura_id": current_factura_id, "patch": patch}}],
         }
     if intent == "update_current_rrhh_document":
         current_doc_id = str((context or {}).get("current_rrhh_document_id") or "").strip()
@@ -41297,7 +41301,7 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "cards": [{"title": "Documento RRHH actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "rrhh", "entity": {"documento_id": current_doc_id, "persona_id": current_persona_id}}],
             "actions": [{"id": "update_current_rrhh_document", "label": "Actualizar documento RRHH", "requires_confirmation": True, "confirm_text": "Se actualizará el documento abierto.", "payload": {"documento_id": current_doc_id, "persona_id": current_persona_id, "patch": patch}}],
         }
-    if intent == "update_current_community":
+    if intent in {"update_current_community", "update_current_community_refresh"}:
         current_community_id = str((context or {}).get("current_community_id") or "").strip()
         patch = _workspace_internal_copilot_extract_community_patch(message)
         if not current_community_id:
@@ -41307,11 +41311,11 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         return {
             "ok": True,
             "intent": "action",
-            "answer": "Puedo actualizar la comunidad abierta con esos cambios.",
+            "answer": "Puedo actualizar la comunidad abierta con esos cambios." if intent == "update_current_community" else "Puedo actualizar la comunidad abierta y volver a abrir su ficha al terminar.",
             "sources": ["fincas"],
-            "suggestions": ["Actualizar comunidad"],
+            "suggestions": ["Actualizar comunidad"] if intent == "update_current_community" else ["Actualizar y refrescar comunidad"],
             "cards": [{"title": "Comunidad actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "fincas", "entity": {"comunidad_id": current_community_id}}],
-            "actions": [{"id": "update_current_community", "label": "Actualizar comunidad", "requires_confirmation": True, "confirm_text": "Se actualizará la comunidad abierta.", "payload": {"comunidad_id": current_community_id, "patch": patch}}],
+            "actions": [{"id": "update_current_community_refresh" if intent == "update_current_community_refresh" else "update_current_community", "label": "Actualizar y refrescar comunidad" if intent == "update_current_community_refresh" else "Actualizar comunidad", "requires_confirmation": True, "confirm_text": "Se actualizará la comunidad abierta." if intent == "update_current_community" else "Se actualizará la comunidad abierta y se refrescará su ficha.", "payload": {"comunidad_id": current_community_id, "patch": patch}}],
         }
     if intent == "update_current_renta":
         current_client_id = str((context or {}).get("current_client_id") or "").strip()
@@ -41744,6 +41748,145 @@ def _workspace_internal_copilot_context_reply(conn, workspace_id, context, messa
     return None
 
 
+def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not text:
+        return None
+    if ("rrhh" in text or "documento" in text or "nomina" in text or "nómina" in text) and any(token in text for token in ("caducad", "vencid", "expirad")):
+        today = date.today().isoformat()
+        rows = conn.execute(
+            """
+            SELECT id, persona_id, tipo, nombre, fecha_caducidad, estado
+            FROM workspace_rrhh_documentos
+            WHERE workspace_id = ?
+              AND COALESCE(permanente, 0) = 0
+              AND COALESCE(fecha_caducidad, '') <> ''
+              AND fecha_caducidad < ?
+            ORDER BY fecha_caducidad ASC, nombre COLLATE NOCASE ASC
+            LIMIT 8
+            """,
+            (workspace_id, today),
+        ).fetchall()
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo documentos RRHH caducados en el workspace actual.",
+                "sources": ["workspace_rrhh_documentos"],
+                "suggestions": ["Abrir módulo RRHH"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            cards.append(
+                {
+                    "title": str(row_value(row, "nombre") or row_value(row, "tipo") or "Documento").strip(),
+                    "summary": f"{str(row_value(row, 'tipo') or '').strip()} · caduca {str(row_value(row, 'fecha_caducidad') or '').strip()}",
+                    "priority": "alta",
+                    "impact_area": "rrhh",
+                    "entity": {"documento_id": str(row_value(row, "id") or "").strip(), "persona_id": str(row_value(row, "persona_id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} documento(s) RRHH caducado(s) o vencido(s).",
+            "sources": ["workspace_rrhh_documentos"],
+            "suggestions": ["Abrir módulo RRHH", "Actualizar documento"],
+            "cards": cards,
+            "actions": [],
+        }
+    if ("comunidad" in text or "comunidades" in text or "fincas" in text) and any(token in text for token in ("cuota incoherente", "cuota desajustada", "cuota", "incoherente")):
+        rows = conn.execute(
+            """
+            SELECT id, nombre, cuota_mensual, cuota_sugerida, estado
+            FROM workspace_fincas_comunidades
+            WHERE workspace_id = ?
+              AND COALESCE(cuota_mensual, 0) > 0
+              AND COALESCE(cuota_sugerida, 0) > 0
+              AND ABS(COALESCE(cuota_mensual, 0) - COALESCE(cuota_sugerida, 0)) >= 1
+            ORDER BY ABS(COALESCE(cuota_mensual, 0) - COALESCE(cuota_sugerida, 0)) DESC, nombre COLLATE NOCASE ASC
+            LIMIT 8
+            """,
+            (workspace_id,),
+        ).fetchall()
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo comunidades con cuota incoherente frente a la cuota sugerida.",
+                "sources": ["workspace_fincas_comunidades"],
+                "suggestions": ["Abrir módulo Fincas"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            cards.append(
+                {
+                    "title": str(row_value(row, "nombre") or "Comunidad").strip(),
+                    "summary": f"cuota {row_value(row, 'cuota_mensual') or '-'} · sugerida {row_value(row, 'cuota_sugerida') or '-'} · estado {str(row_value(row, 'estado') or '').strip()}",
+                    "priority": "alta",
+                    "impact_area": "fincas",
+                    "entity": {"comunidad_id": str(row_value(row, "id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} comunidad(es) con cuota incoherente respecto a la sugerida.",
+            "sources": ["workspace_fincas_comunidades"],
+            "suggestions": ["Abrir módulo Fincas", "Actualizar comunidad"],
+            "cards": cards,
+            "actions": [],
+        }
+    if ("factura" in text or "facturas" in text) and any(token in text for token in ("sin asiento", "sin asientos", "no generaron asiento", "sin contabilizar")):
+        rows = conn.execute(
+            """
+            SELECT f.id, f.numero, f.fecha_emision, f.total, f.cliente_id
+            FROM gestoria_facturas f
+            LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+            WHERE f.empresa_id = ?
+              AND a.id IS NULL
+            ORDER BY COALESCE(f.fecha_emision, '') DESC, COALESCE(f.updated_at, f.created_at) DESC
+            LIMIT 8
+            """,
+            (empresa_id,),
+        ).fetchall() if str(empresa_id or "").strip() else []
+        if not rows:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": "No veo facturas pendientes de asiento en el ámbito actual.",
+                "sources": ["gestoria_facturas", "gestoria_asientos"],
+                "suggestions": ["Abrir gestoría"],
+                "cards": [],
+                "actions": [],
+            }
+        cards = []
+        for row in rows:
+            cards.append(
+                {
+                    "title": str(row_value(row, "numero") or row_value(row, "id") or "Factura").strip(),
+                    "summary": f"{str(row_value(row, 'fecha_emision') or '').strip()} · total {row_value(row, 'total') or '-'}",
+                    "priority": "alta",
+                    "impact_area": "gestoria",
+                    "entity": {"factura_id": str(row_value(row, "id") or "").strip(), "cliente_id": str(row_value(row, "cliente_id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "intent": "incident",
+            "answer": f"He encontrado {len(rows)} factura(s) sin asiento contable generado.",
+            "sources": ["gestoria_facturas", "gestoria_asientos"],
+            "suggestions": ["Abrir gestoría", "Actualizar factura"],
+            "cards": cards,
+            "actions": [],
+        }
+    return None
+
+
 def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     workspace_text = str(workspace_id or "").strip()
     company_text = str(empresa_id or "").strip()
@@ -41785,6 +41928,19 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     context_reply = _workspace_internal_copilot_context_reply(conn, workspace_text, context or {}, message_text, empresa_id=company_text)
     if context_reply:
         response.update(context_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    operational_reply = _workspace_internal_copilot_operational_query_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        context=context or {},
+    )
+    if operational_reply:
+        response.update(operational_reply)
         response["message"] = message_text
         response["workspace_id"] = workspace_text
         return response
@@ -42702,6 +42858,20 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             now=now,
         )
         return {"ok": True, "action_id": action_text, "message": "Factura actualizada correctamente.", "process_supervision": process_supervision}
+    if action_text == "update_current_factura_validate":
+        result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "update_current_factura",
+            payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        )
+        if result.get("ok"):
+            result["action_id"] = action_text
+            result["message"] = "Factura actualizada y revalidada correctamente."
+        return result
     if action_text == "update_current_rrhh_document":
         documento_id = str(payload.get("documento_id") or "").strip()
         persona_id = str(payload.get("persona_id") or "").strip()
@@ -42761,6 +42931,28 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "post_actions": [{"post_endpoint": "/api/workspace_fincas_comunidades", "payload": action_payload}],
             "refresh_supervisor": True,
         }
+    if action_text == "update_current_community_refresh":
+        result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "update_current_community",
+            payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        )
+        comunidad_id = str(payload.get("comunidad_id") or "").strip()
+        if result.get("ok") and comunidad_id:
+            result["action_id"] = action_text
+            result["message"] = "Comunidad preparada para actualización y refresco de ficha."
+            result["navigation"] = {
+                "view": "fincas",
+                "tab": "comunidad_ficha",
+                "entity_type": "fincas_community",
+                "entity_id": comunidad_id,
+                "comunidad_id": comunidad_id,
+            }
+        return result
     return {"error": "Acción no soportada"}
 
 

@@ -94,6 +94,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("bulk_revalidate_processes", app_js)
         self.assertIn("bulk_safe_repair", app_js)
         self.assertIn("post_actions", app_js)
+        self.assertIn("refresh_supervisor", app_js)
         self.assertIn('"/api/workspace_process_supervisor_ack"', app_js)
         self.assertIn('"/api/workspace_process_supervisor_action"', app_js)
         self.assertIn("reload_dashboard_block", app_js)
