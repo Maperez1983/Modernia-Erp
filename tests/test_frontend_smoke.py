@@ -77,8 +77,10 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("Supervisor de procesos", app_js)
         self.assertIn('id="workspaceProcessSupervisorFeed"', app_js)
         self.assertIn('id="workspaceProcessSupervisorHistory"', app_js)
+        self.assertIn('data-copilot-process-action', app_js)
         self.assertIn('"/api/workspace_process_supervisor_ack"', app_js)
         self.assertIn('"/api/workspace_process_supervisor_action"', app_js)
+        self.assertIn("OCR relanzado", app_js)
         self.assertIn("handleProcessSupervisorResponse", app_js)
         self.assertIn("loadWorkspaceProcessSupervisorHistory", app_js)
 

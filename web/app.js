@@ -12981,32 +12981,52 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       }
     });
   });
+  const applyWorkspaceSupervisorNavigation = async (result = {}) => {
+    const navigation = result?.navigation && typeof result.navigation === "object" ? result.navigation : null;
+    if (navigation?.kind === "cliente" && navigation?.cliente_id) {
+      openClienteDetail(String(navigation.cliente_id || "").trim());
+      return true;
+    }
+    if (navigation?.kind === "workspace_view" && navigation?.view) {
+      focusWorkspaceView(String(navigation.view || "").trim(), null, { scroll: true, forceTenantView: true });
+      return true;
+    }
+    if (result?.route) {
+      window.location.href = String(result.route || "").trim();
+      return true;
+    }
+    return false;
+  };
+  const runWorkspaceSupervisorAction = async (eventId, actionId) => {
+    if (!eventId || !actionId || !state.currentWorkspaceId) return null;
+    const result = await apiPost("/api/workspace_process_supervisor_action", {
+      workspace_id: state.currentWorkspaceId,
+      id: eventId,
+      action_id: actionId,
+    });
+    if (result?.post_endpoint) {
+      await apiPost(String(result.post_endpoint || "").trim(), result.payload || {});
+    } else if (result?.route && actionId === "reload_dashboard") {
+      await safeWorkspaceApi(result.route, {});
+    } else if (actionId === "open_module" || actionId === "open_record") {
+      await applyWorkspaceSupervisorNavigation(result);
+    }
+    return result;
+  };
   target.querySelectorAll("[data-workspace-process-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const eventId = String(button.dataset.workspaceProcessId || "").trim();
       const actionId = String(button.dataset.workspaceProcessAction || "").trim();
-      const route = String(button.dataset.workspaceProcessRoute || "").trim();
       if (!eventId || !actionId || !state.currentWorkspaceId) return;
-      if (actionId === "open_module" || actionId === "open_record") {
-        if (route) {
-          window.location.href = route;
-        }
-        return;
-      }
       button.disabled = true;
       try {
-        const result = await apiPost("/api/workspace_process_supervisor_action", {
-          workspace_id: state.currentWorkspaceId,
-          id: eventId,
-          action_id: actionId,
-        });
-        if (result?.route && actionId === "reload_dashboard") {
-          await safeWorkspaceApi(result.route, {});
-        }
+        await runWorkspaceSupervisorAction(eventId, actionId);
         await loadWorkspaceProcessSupervisorFeed({ silent: true });
         await loadWorkspaceProcessSupervisorHistory({ silent: true });
         if (actionId === "reload_dashboard") {
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
+        } else if (actionId === "rerun_ocr") {
+          setUiToast("OCR relanzado", "Se ha reencolado el proceso OCR para este registro.");
         }
       } catch (error) {
         button.disabled = false;
@@ -13041,7 +13061,23 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
                 <div class="workspace-summary-list" style="margin-top:8px">
                   ${cards.slice(0, 3).map((card) => `
                     <div class="workspace-summary-row">
-                      <div><strong>${escapeHtml(String(card.title || "Detalle"))}</strong><div class="muted">${escapeHtml(String(card.summary || ""))}</div></div>
+                      <div>
+                        <strong>${escapeHtml(String(card.title || "Detalle"))}</strong>
+                        <div class="muted">${escapeHtml(String(card.summary || ""))}</div>
+                        ${card?.entity?.title ? `<div class="muted">Registro: ${escapeHtml(String(card.entity.title || ""))}${card?.entity?.summary ? ` · ${escapeHtml(String(card.entity.summary || ""))}` : ""}</div>` : ""}
+                        ${Array.isArray(card.actions) && card.actions.length && card.event_id ? `
+                          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+                            ${card.actions.slice(0, 4).map((action) => `
+                              <button
+                                type="button"
+                                class="secondary ghost"
+                                data-copilot-process-action="${escapeHtml(String(action.id || ""))}"
+                                data-copilot-process-id="${escapeHtml(String(card.event_id || ""))}"
+                              >${escapeHtml(String(action.label || action.id || "Acción"))}</button>
+                            `).join("")}
+                          </div>
+                        ` : ""}
+                      </div>
                       <div class="workspace-summary-meta"><span>${escapeHtml(String(card.priority || "media"))}</span></div>
                     </div>
                   `).join("")}
@@ -13055,6 +13091,39 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
       }).join("")}
     </div>
   `;
+  target.querySelectorAll("[data-copilot-process-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const eventId = String(button.dataset.copilotProcessId || "").trim();
+      const actionId = String(button.dataset.copilotProcessAction || "").trim();
+      if (!eventId || !actionId || !state.currentWorkspaceId) return;
+      button.disabled = true;
+      try {
+        const result = await apiPost("/api/workspace_process_supervisor_action", {
+          workspace_id: state.currentWorkspaceId,
+          id: eventId,
+          action_id: actionId,
+        });
+        if (result?.post_endpoint) {
+          await apiPost(String(result.post_endpoint || "").trim(), result.payload || {});
+          setUiToast("Acción ejecutada", "Se ha lanzado la corrección solicitada.");
+        } else if (result?.route && actionId === "reload_dashboard") {
+          await safeWorkspaceApi(result.route, {});
+          setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
+        } else if (result?.navigation?.kind === "cliente" && result?.navigation?.cliente_id) {
+          openClienteDetail(String(result.navigation.cliente_id || "").trim());
+        } else if (result?.navigation?.kind === "workspace_view" && result?.navigation?.view) {
+          focusWorkspaceView(String(result.navigation.view || "").trim(), null, { scroll: true, forceTenantView: true });
+        } else if (result?.route) {
+          window.location.href = String(result.route || "").trim();
+        }
+        await loadWorkspaceProcessSupervisorFeed({ silent: true });
+        await loadWorkspaceProcessSupervisorHistory({ silent: true });
+      } catch (error) {
+        button.disabled = false;
+        setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));
+      }
+    });
+  });
 };
 
 const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {

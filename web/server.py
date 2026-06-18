@@ -40063,6 +40063,229 @@ def _workspace_process_target_route(workspace_id, row):
     return f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(ws)}&crm={urllib.parse.quote(crm)}"
 
 
+def _workspace_process_entity_snapshot(conn, row):
+    item = dict(row or {})
+    entity_type = str(item.get("entity_type") or "").strip()
+    entity_id = str(item.get("entity_id") or "").strip()
+    workspace_id = str(item.get("workspace_id") or "").strip()
+    empresa_id = str(item.get("empresa_id") or "").strip()
+    if not entity_type or not entity_id:
+        return {}
+    try:
+        if entity_type == "gestoria_factura":
+            data = conn.execute(
+                """
+                SELECT id, cliente_id, numero, descripcion, total, estado_ocr, doc_key
+                FROM gestoria_facturas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "cliente_id") or "").strip(),
+                    "title": str(row_value(data, "numero") or row_value(data, "descripcion") or "Factura OCR").strip(),
+                    "summary": f"Total {row_value(data, 'total') or '-'} · OCR {row_value(data, 'estado_ocr') or '-'}",
+                    "doc_key": str(row_value(data, "doc_key") or "").strip(),
+                }
+        if entity_type in {"gestoria_contabilidad", "fincas_contabilidad"}:
+            table = "gestoria_contabilidad" if entity_type == "gestoria_contabilidad" else "workspace_fincas_contabilidad"
+            data = conn.execute(
+                f"""
+                SELECT id, cliente_id, comunidad_id, concepto, importe, fecha, estado
+                FROM {table}
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "cliente_id") or "").strip(),
+                    "comunidad_id": str(row_value(data, "comunidad_id") or "").strip(),
+                    "title": str(row_value(data, "concepto") or "Movimiento").strip(),
+                    "summary": f"{row_value(data, 'importe') or '-'} · {row_value(data, 'fecha') or '-'} · {row_value(data, 'estado') or '-'}",
+                }
+        if entity_type == "rrhh_documento":
+            data = conn.execute(
+                """
+                SELECT id, persona_id, tipo, nombre, nomina_ocr_status, doc_key
+                FROM workspace_rrhh_documentos
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (entity_id, workspace_id),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "persona_id": str(row_value(data, "persona_id") or "").strip(),
+                    "title": str(row_value(data, "nombre") or row_value(data, "tipo") or "Documento RRHH").strip(),
+                    "summary": f"{row_value(data, 'tipo') or '-'} · OCR {row_value(data, 'nomina_ocr_status') or '-'}",
+                    "doc_key": str(row_value(data, "doc_key") or "").strip(),
+                }
+        if entity_type == "agenda_action":
+            data = conn.execute(
+                """
+                SELECT id, cliente_id, titulo, tipo, fecha, hora
+                FROM acciones
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "cliente_id") or "").strip(),
+                    "title": str(row_value(data, "titulo") or row_value(data, "tipo") or "Acción de agenda").strip(),
+                    "summary": f"{row_value(data, 'fecha') or '-'} {row_value(data, 'hora') or ''}".strip(),
+                }
+        if entity_type == "rrhh_ausencia":
+            data = conn.execute(
+                """
+                SELECT id, persona_id, tipo, fecha_inicio, fecha_fin, estado
+                FROM workspace_rrhh_ausencias
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (entity_id, workspace_id),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "persona_id": str(row_value(data, "persona_id") or "").strip(),
+                    "title": str(row_value(data, "tipo") or "Ausencia RRHH").strip(),
+                    "summary": f"{row_value(data, 'fecha_inicio') or '-'} · {row_value(data, 'estado') or '-'}",
+                }
+        if entity_type == "rrhh_gasto":
+            data = conn.execute(
+                """
+                SELECT id, persona_id, categoria, concepto, importe, estado, doc_key
+                FROM workspace_rrhh_gastos
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (entity_id, workspace_id),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "persona_id": str(row_value(data, "persona_id") or "").strip(),
+                    "title": str(row_value(data, "concepto") or row_value(data, "categoria") or "Gasto RRHH").strip(),
+                    "summary": f"{row_value(data, 'importe') or '-'} · {row_value(data, 'estado') or '-'}",
+                    "doc_key": str(row_value(data, "doc_key") or "").strip(),
+                }
+        if entity_type == "fincas_community":
+            data = conn.execute(
+                """
+                SELECT id, nombre, estado, cuota_mensual
+                FROM workspace_fincas_comunidades
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (entity_id, workspace_id),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "title": str(row_value(data, "nombre") or "Comunidad").strip(),
+                    "summary": f"{row_value(data, 'estado') or '-'} · cuota {row_value(data, 'cuota_mensual') or '-'}",
+                }
+        if entity_type in {"fincas_incidencia", "fincas_provider", "fincas_junta"}:
+            table_map = {
+                "fincas_incidencia": ("workspace_fincas_incidencias", "titulo", "estado"),
+                "fincas_provider": ("workspace_fincas_proveedores", "nombre", "estado"),
+                "fincas_junta": ("workspace_fincas_juntas", "tipo", "estado"),
+            }
+            table, label_field, state_field = table_map[entity_type]
+            data = conn.execute(
+                f"""
+                SELECT id, comunidad_id, {label_field} AS label_value, {state_field} AS state_value
+                FROM {table}
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (entity_id, workspace_id),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "comunidad_id": str(row_value(data, "comunidad_id") or "").strip(),
+                    "title": str(row_value(data, "label_value") or entity_type).strip(),
+                    "summary": str(row_value(data, "state_value") or "").strip(),
+                }
+        if entity_type == "renta_attach":
+            data = conn.execute(
+                """
+                SELECT c.id, c.nombre, c.nif
+                FROM clientes c
+                WHERE c.id = ?
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+            if data:
+                return {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "cliente_id": str(row_value(data, "id") or "").strip(),
+                    "title": str(row_value(data, "nombre") or "Cliente renta").strip(),
+                    "summary": str(row_value(data, "nif") or "").strip(),
+                }
+    except Exception:
+        return {}
+    return {}
+
+
+def _workspace_process_navigation_target(conn, workspace_id, row):
+    route = _workspace_process_target_route(workspace_id, row)
+    snapshot = _workspace_process_entity_snapshot(conn, row)
+    process_type = str((row or {}).get("process_type") or "").strip()
+    if snapshot.get("cliente_id"):
+        return {
+            "kind": "cliente",
+            "cliente_id": str(snapshot.get("cliente_id") or "").strip(),
+            "route": route,
+            "entity_type": str(snapshot.get("entity_type") or "").strip(),
+            "entity_id": str(snapshot.get("entity_id") or "").strip(),
+        }
+    if snapshot.get("persona_id"):
+        return {
+            "kind": "workspace_view",
+            "view": "rrhh",
+            "route": route,
+            "entity_type": str(snapshot.get("entity_type") or "").strip(),
+            "entity_id": str(snapshot.get("entity_id") or "").strip(),
+        }
+    if snapshot.get("comunidad_id"):
+        return {
+            "kind": "workspace_view",
+            "view": "fincas",
+            "route": route,
+            "entity_type": str(snapshot.get("entity_type") or "").strip(),
+            "entity_id": str(snapshot.get("entity_id") or "").strip(),
+        }
+    if process_type == "gestoria_dashboard":
+        return {"kind": "workspace_view", "view": "operations", "route": route}
+    if process_type == "seguros_dashboard":
+        return {"kind": "workspace_view", "view": "operations", "route": route}
+    if route:
+        return {"kind": "route", "route": route}
+    return {}
+
+
 def _workspace_process_action_items(row, workspace_id):
     process_type = str((row or {}).get("process_type") or "").strip()
     acknowledged = int((row or {}).get("acknowledged") or 0) == 1
@@ -40072,8 +40295,10 @@ def _workspace_process_action_items(row, workspace_id):
         items.append({"id": "open_module", "label": "Abrir módulo", "kind": "navigate", "route": target_route})
     if process_type in {"gestoria_dashboard", "seguros_dashboard"}:
         items.append({"id": "reload_dashboard", "label": "Recalcular dashboard", "kind": "refresh"})
-    if process_type in {"gestoria_factura", "rrhh_document"}:
+    if process_type in {"gestoria_factura", "rrhh_document", "gestoria_accounting", "renta_attach", "agenda_action", "fincas_community", "fincas_incidencia", "fincas_provider", "fincas_junta", "fincas_contabilidad", "rrhh_ausencia", "rrhh_gasto"}:
         items.append({"id": "open_record", "label": "Ir al registro", "kind": "navigate", "route": target_route})
+    if process_type in {"renta_attach", "rrhh_document"}:
+        items.append({"id": "rerun_ocr", "label": "Relanzar OCR", "kind": "repair"})
     if not acknowledged:
         items.append({"id": "acknowledge", "label": "Marcar revisado", "kind": "ack"})
     return items[:4]
@@ -40200,19 +40425,25 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             relevant = open_events[:3]
         if relevant:
             top = relevant[0]
+            top_entity = top.get("entity_snapshot") or {}
+            top_entity_title = str(top_entity.get("title") or "").strip()
             response["answer"] = (
                 f"He encontrado {len(relevant)} incidencia(s) relacionada(s). "
                 f"La más relevante es: {str(top.get('title') or 'Incidencia de proceso')}. "
                 f"{str(top.get('summary') or '').strip()}"
             ).strip()
+            if top_entity_title:
+                response["answer"] = f"{response['answer']} Registro afectado: {top_entity_title}."
             response["cards"] = [
                 {
+                    "event_id": str(row.get("id") or "").strip(),
                     "title": str(row.get("title") or row.get("process_type") or "Incidencia"),
                     "summary": str(row.get("summary") or "").strip(),
                     "priority": str(row.get("priority") or "media"),
                     "impact_area": str(row.get("impact_area") or "operativo"),
                     "route": str(row.get("target_route") or "").strip(),
                     "actions": row.get("action_items") or [],
+                    "entity": row.get("entity_snapshot") or {},
                 }
                 for row in relevant[:3]
             ]
@@ -40641,6 +40872,7 @@ def fetch_workspace_process_supervisor_events(conn, workspace_id, limit=25, only
         item["priority"] = _workspace_process_priority(item.get("status"), item.get("severity"), item.get("process_type"))
         item["impact_area"] = _workspace_process_impact_area(item.get("process_type"), item.get("servicio"))
         item["target_route"] = _workspace_process_target_route(workspace_id, item)
+        item["entity_snapshot"] = _workspace_process_entity_snapshot(conn, item)
         item["action_items"] = _workspace_process_action_items(item, workspace_id)
         payload_rows.append(item)
     return {"rows": payload_rows}
@@ -40665,6 +40897,7 @@ def fetch_workspace_process_supervisor_history(conn, workspace_id, limit=40):
         item["llm_payload"] = _workspace_process_parse_json(item.get("llm_payload"), {})
         item["priority"] = _workspace_process_priority(item.get("status"), item.get("severity"), item.get("process_type"))
         item["impact_area"] = _workspace_process_impact_area(item.get("process_type"), item.get("servicio"))
+        item["entity_snapshot"] = _workspace_process_entity_snapshot(conn, item)
         payload_rows.append(item)
     return {"rows": payload_rows}
 
@@ -40724,13 +40957,64 @@ def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, ac
         acknowledge_workspace_process_supervisor_event(conn, workspace_text, event_text, actor=actor, now=now)
         return {"ok": True, "action_id": action_text, "applied": True}
     if action_text in {"open_module", "open_record"}:
-        return {"ok": True, "action_id": action_text, "applied": False, "route": target_route}
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "applied": False,
+            "route": target_route,
+            "navigation": _workspace_process_navigation_target(conn, workspace_text, item),
+            "entity_snapshot": _workspace_process_entity_snapshot(conn, item),
+        }
     if action_text == "reload_dashboard":
         process_type = str(item.get("process_type") or "").strip()
         if process_type == "gestoria_dashboard":
-            return {"ok": True, "action_id": action_text, "applied": True, "route": f"/api/gestoria_dashboard?workspace_id={urllib.parse.quote(workspace_text)}"}
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "applied": True,
+                "route": f"/api/gestoria_dashboard?workspace_id={urllib.parse.quote(workspace_text)}",
+            }
         if process_type == "seguros_dashboard":
-            return {"ok": True, "action_id": action_text, "applied": True, "route": f"/api/fincas_seguros_dashboard?workspace_id={urllib.parse.quote(workspace_text)}"}
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "applied": True,
+                "route": f"/api/fincas_seguros_dashboard?workspace_id={urllib.parse.quote(workspace_text)}",
+            }
+        return {"ok": True, "action_id": action_text, "applied": False}
+    if action_text == "rerun_ocr":
+        process_type = str(item.get("process_type") or "").strip()
+        snapshot = _workspace_process_entity_snapshot(conn, item)
+        if process_type == "renta_attach":
+            cliente_id = str(snapshot.get("cliente_id") or item.get("entity_id") or "").strip()
+            ejercicio = ""
+            try:
+                anomalies = _workspace_process_parse_json(item.get("anomaly_json"), [])
+                for anomaly in anomalies:
+                    text = str(anomaly.get("message") or "").strip()
+                    match = re.search(r"renta\s+([0-9]{4})", text, flags=re.IGNORECASE)
+                    if match:
+                        ejercicio = str(match.group(1) or "").strip()
+                        break
+            except Exception:
+                ejercicio = ""
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "applied": False,
+                "post_endpoint": "/api/renta_entry_ocr_reprocess",
+                "payload": {"workspace_id": workspace_text, "cliente_id": cliente_id, "ejercicio": ejercicio},
+                "entity_snapshot": snapshot,
+            }
+        if process_type == "rrhh_document":
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "applied": False,
+                "post_endpoint": "/api/workspace_rrhh_nomina_ocr",
+                "payload": {"workspace_id": workspace_text, "id": str(item.get("entity_id") or "").strip()},
+                "entity_snapshot": snapshot,
+            }
         return {"ok": True, "action_id": action_text, "applied": False}
     return {"ok": False, "error": "action_id no soportada"}
 

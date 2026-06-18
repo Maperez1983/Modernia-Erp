@@ -653,13 +653,22 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
     def test_internal_copilot_incident_uses_open_events(self):
         self.conn.execute(
             """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, descripcion, total, estado_ocr, doc_key, created_at, updated_at
+            ) VALUES (
+              's1', 'e1', 'c1', 'emitida', 'F-2026-001', 'Factura duplicada', 121.5, 'warning', 'docs/f1.pdf', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
             INSERT INTO workspace_process_supervisor (
               id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
               actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
               dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
             ) VALUES (
-              'evt2', 'ws1', 'e1', 'seguros', 'seguro_update', 'seguro', 's1', '',
-              '', 'incomplete', 'warning', 'Póliza incompleta', 'Falta cliente vinculado', '[]', '[]', '{}',
+              'evt2', 'ws1', 'e1', 'gestoria', 'gestoria_factura', 'gestoria_factura', 's1', '',
+              '', 'incomplete', 'warning', 'Factura incompleta', 'Falta asiento contable', '[]', '[]', '{}',
               'd2', 0, NULL, 'now', 'now'
             )
             """
@@ -667,14 +676,17 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         reply = server.build_workspace_internal_copilot_reply(
             self.conn,
             "ws1",
-            "por qué no se creó bien la póliza",
+            "por qué no se creó bien la factura",
             empresa_id="e1",
-            service_hint="seguros",
+            service_hint="gestoria",
             actor={"user_id": "u1", "usuario": "QA"},
         )
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["intent"], "incident")
-        self.assertIn("Póliza incompleta", reply["answer"])
+        self.assertIn("Factura incompleta", reply["answer"])
+        self.assertTrue(reply["cards"])
+        self.assertEqual(reply["cards"][0]["entity"]["cliente_id"], "c1")
+        self.assertEqual(reply["cards"][0]["event_id"], "evt2")
 
     def test_internal_copilot_tutorial_uses_process_catalog(self):
         reply = server.build_workspace_internal_copilot_reply(
@@ -688,6 +700,76 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["intent"], "tutorial")
         self.assertTrue(reply["cards"])
+
+    def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, nomina_ocr_status, created_at, updated_at
+            ) VALUES (
+              'doc1', 'ws1', 'e1', 'p1', 'Nómina', 'Nomina mayo.pdf', 'rrhh/doc1.pdf', 'error', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt3', 'ws1', 'e1', 'rrhh', 'rrhh_document', 'rrhh_documento', 'doc1', '',
+              '', 'incomplete', 'warning', 'Nómina OCR pendiente', 'El OCR de la nómina falló', '[]', '[]', '{}',
+              'd3', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt3",
+            "rerun_ocr",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T11:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["post_endpoint"], "/api/workspace_rrhh_nomina_ocr")
+        self.assertEqual(result["payload"]["id"], "doc1")
+
+    def test_supervisor_open_record_returns_cliente_navigation_when_available(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, descripcion, total, estado_ocr, doc_key, created_at, updated_at
+            ) VALUES (
+              'gf1', 'e1', 'c1', 'emitida', 'F-2026-002', 'Factura test', 99.95, 'ok', 'docs/f2.pdf', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt4', 'ws1', 'e1', 'gestoria', 'gestoria_factura', 'gestoria_factura', 'gf1', '',
+              '', 'incomplete', 'warning', 'Factura sin asiento', 'Falta asiento contable', '[]', '[]', '{}',
+              'd4', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt4",
+            "open_record",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T11:40:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "cliente")
+        self.assertEqual(result["navigation"]["cliente_id"], "c1")
 
 
 if __name__ == "__main__":
