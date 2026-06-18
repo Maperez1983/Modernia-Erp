@@ -40265,14 +40265,25 @@ def _workspace_process_navigation_target(conn, workspace_id, row):
         return {
             "kind": "workspace_view",
             "view": "rrhh",
+            "tab": "docs" if snapshot.get("entity_type") == "rrhh_documento" else ("ausencias" if snapshot.get("entity_type") == "rrhh_ausencia" else "gastos"),
+            "persona_id": str(snapshot.get("persona_id") or "").strip(),
             "route": route,
             "entity_type": str(snapshot.get("entity_type") or "").strip(),
             "entity_id": str(snapshot.get("entity_id") or "").strip(),
         }
     if snapshot.get("comunidad_id"):
+        tab_map = {
+            "fincas_community": "comunidades",
+            "fincas_incidencia": "incidencias",
+            "fincas_provider": "proveedores",
+            "fincas_junta": "juntas",
+            "fincas_contabilidad": "contabilidad",
+        }
         return {
             "kind": "workspace_view",
             "view": "fincas",
+            "tab": tab_map.get(str(snapshot.get("entity_type") or "").strip(), "comunidades"),
+            "comunidad_id": str(snapshot.get("comunidad_id") or "").strip(),
             "route": route,
             "entity_type": str(snapshot.get("entity_type") or "").strip(),
             "entity_id": str(snapshot.get("entity_id") or "").strip(),
@@ -40286,6 +40297,27 @@ def _workspace_process_navigation_target(conn, workspace_id, row):
     return {}
 
 
+def _workspace_process_dashboard_block(row):
+    process_type = str((row or {}).get("process_type") or "").strip()
+    anomalies = _workspace_process_parse_json((row or {}).get("anomaly_json"), [])
+    codes = {str(item.get("code") or "").strip() for item in anomalies if isinstance(item, dict)}
+    if process_type == "gestoria_dashboard":
+        if "gestoria_dashboard_docs_mismatch" in codes:
+            return {"dashboard": "gestoria", "block": "documentos", "label": "Refrescar documentos"}
+        if "gestoria_dashboard_segmentation_mismatch" in codes:
+            return {"dashboard": "gestoria", "block": "gestiones", "label": "Refrescar gestiones"}
+        return {"dashboard": "gestoria", "block": "servicios", "label": "Refrescar dashboard"}
+    if process_type == "gestoria_factura":
+        return {"dashboard": "gestoria", "block": "documentos", "label": "Revisar documentos"}
+    if process_type == "gestoria_accounting":
+        return {"dashboard": "gestoria", "block": "contabilidad", "label": "Revisar contabilidad"}
+    if process_type == "renta_attach":
+        return {"dashboard": "gestoria", "block": "rentas", "label": "Revisar rentas"}
+    if process_type == "seguros_dashboard":
+        return {"dashboard": "seguros", "block": "dashboard", "label": "Refrescar dashboard"}
+    return {}
+
+
 def _workspace_process_action_items(row, workspace_id):
     process_type = str((row or {}).get("process_type") or "").strip()
     acknowledged = int((row or {}).get("acknowledged") or 0) == 1
@@ -40293,6 +40325,9 @@ def _workspace_process_action_items(row, workspace_id):
     items = []
     if target_route:
         items.append({"id": "open_module", "label": "Abrir módulo", "kind": "navigate", "route": target_route})
+    dashboard_block = _workspace_process_dashboard_block(row)
+    if dashboard_block:
+        items.append({"id": "reload_dashboard_block", "label": str(dashboard_block.get("label") or "Refrescar bloque"), "kind": "refresh"})
     if process_type in {"gestoria_dashboard", "seguros_dashboard"}:
         items.append({"id": "reload_dashboard", "label": "Recalcular dashboard", "kind": "refresh"})
     if process_type in {"gestoria_factura", "rrhh_document", "gestoria_accounting", "renta_attach", "agenda_action", "fincas_community", "fincas_incidencia", "fincas_provider", "fincas_junta", "fincas_contabilidad", "rrhh_ausencia", "rrhh_gasto"}:
@@ -40982,6 +41017,15 @@ def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, ac
                 "route": f"/api/fincas_seguros_dashboard?workspace_id={urllib.parse.quote(workspace_text)}",
             }
         return {"ok": True, "action_id": action_text, "applied": False}
+    if action_text == "reload_dashboard_block":
+        block = _workspace_process_dashboard_block(item)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "applied": True,
+            "dashboard": str(block.get("dashboard") or "").strip(),
+            "dashboard_block": str(block.get("block") or "").strip(),
+        }
     if action_text == "rerun_ocr":
         process_type = str(item.get("process_type") or "").strip()
         snapshot = _workspace_process_entity_snapshot(conn, item)

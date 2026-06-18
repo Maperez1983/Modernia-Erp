@@ -12988,7 +12988,44 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       return true;
     }
     if (navigation?.kind === "workspace_view" && navigation?.view) {
-      focusWorkspaceView(String(navigation.view || "").trim(), null, { scroll: true, forceTenantView: true });
+      const view = String(navigation.view || "").trim();
+      if (view === "rrhh") {
+        openHolding({
+          mode: "tenant",
+          workspace: state.currentWorkspaceId || "",
+          view: "rrhh",
+          rrhh_tab: String(navigation.tab || "").trim(),
+          persona: String(navigation.persona_id || "").trim(),
+        });
+        return true;
+      }
+      focusWorkspaceView(view, null, { scroll: true, forceTenantView: true });
+      if (view === "fincas") {
+        try {
+          if (navigation.tab) setWorkspaceFincasTab(String(navigation.tab || "").trim());
+        } catch (error) {}
+        const entityId = String(navigation.entity_id || "").trim();
+        const entityType = String(navigation.entity_type || "").trim();
+        if (entityId) {
+          window.setTimeout(() => {
+            const selectorMap = {
+              fincas_community: [`[data-community-open="${entityId}"]`, `[data-community-card-open="${entityId}"]`],
+              fincas_incidencia: [`[data-incident-edit="${entityId}"]`],
+              fincas_provider: [`[data-provider-edit="${entityId}"]`],
+              fincas_junta: [`[data-meeting-edit="${entityId}"]`],
+              fincas_contabilidad: [`[data-ledger-edit="${entityId}"]`],
+            };
+            const selectors = selectorMap[entityType] || [];
+            for (const selector of selectors) {
+              const node = document.querySelector(selector);
+              if (node && typeof node.click === "function") {
+                node.click();
+                break;
+              }
+            }
+          }, 250);
+        }
+      }
       return true;
     }
     if (result?.route) {
@@ -13006,6 +13043,31 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
     });
     if (result?.post_endpoint) {
       await apiPost(String(result.post_endpoint || "").trim(), result.payload || {});
+    } else if (actionId === "reload_dashboard_block") {
+      const dashboard = String(result?.dashboard || "").trim();
+      const block = String(result?.dashboard_block || "").trim();
+      if (dashboard === "gestoria") {
+        openGestoriaCrm();
+        if (block === "documentos") {
+          setGestoriaDashboardView("documentos");
+          await loadGestoriaDashboardDocumentos({ force: true });
+        } else if (block === "contabilidad") {
+          setGestoriaDashboardView("contabilidad");
+          await loadGestoriaDashboardContabilidad({ force: true });
+        } else if (block === "gestiones") {
+          setGestoriaDashboardView("gestiones");
+          await loadGestoriaDashboardGestiones({ force: true });
+        } else if (block === "rentas") {
+          setGestoriaDashboardView("rentas");
+          await loadGestoriaRentaDashboard({ force: true });
+        } else {
+          setGestoriaDashboardView("servicios");
+          await loadGestoriaDashboardServicios({ force: true, key: "servicios" });
+        }
+      } else if (dashboard === "seguros") {
+        openSegurosCrm();
+        await safeWorkspaceApi(`/api/fincas_seguros_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, {});
+      }
     } else if (result?.route && actionId === "reload_dashboard") {
       await safeWorkspaceApi(result.route, {});
     } else if (actionId === "open_module" || actionId === "open_record") {
@@ -13025,6 +13087,8 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
         await loadWorkspaceProcessSupervisorHistory({ silent: true });
         if (actionId === "reload_dashboard") {
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
+        } else if (actionId === "reload_dashboard_block") {
+          setUiToast("Bloque refrescado", "Se ha recargado el bloque afectado del dashboard.");
         } else if (actionId === "rerun_ocr") {
           setUiToast("OCR relanzado", "Se ha reencolado el proceso OCR para este registro.");
         }
@@ -13106,6 +13170,32 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         if (result?.post_endpoint) {
           await apiPost(String(result.post_endpoint || "").trim(), result.payload || {});
           setUiToast("Acción ejecutada", "Se ha lanzado la corrección solicitada.");
+        } else if (actionId === "reload_dashboard_block") {
+          const dashboard = String(result?.dashboard || "").trim();
+          const block = String(result?.dashboard_block || "").trim();
+          if (dashboard === "gestoria") {
+            openGestoriaCrm();
+            if (block === "documentos") {
+              setGestoriaDashboardView("documentos");
+              await loadGestoriaDashboardDocumentos({ force: true });
+            } else if (block === "contabilidad") {
+              setGestoriaDashboardView("contabilidad");
+              await loadGestoriaDashboardContabilidad({ force: true });
+            } else if (block === "gestiones") {
+              setGestoriaDashboardView("gestiones");
+              await loadGestoriaDashboardGestiones({ force: true });
+            } else if (block === "rentas") {
+              setGestoriaDashboardView("rentas");
+              await loadGestoriaRentaDashboard({ force: true });
+            } else {
+              setGestoriaDashboardView("servicios");
+              await loadGestoriaDashboardServicios({ force: true, key: "servicios" });
+            }
+          } else if (dashboard === "seguros") {
+            openSegurosCrm();
+            await safeWorkspaceApi(`/api/fincas_seguros_dashboard?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, {});
+          }
+          setUiToast("Bloque refrescado", "Se ha recargado el bloque afectado del dashboard.");
         } else if (result?.route && actionId === "reload_dashboard") {
           await safeWorkspaceApi(result.route, {});
           setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");

@@ -771,6 +771,32 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["navigation"]["kind"], "cliente")
         self.assertEqual(result["navigation"]["cliente_id"], "c1")
 
+    def test_supervisor_reload_dashboard_block_maps_gestoria_documents(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt5', 'ws1', 'e1', 'gestoria', 'gestoria_dashboard', 'gestoria_dashboard', 'ws1', '',
+              '', 'failed', 'warning', 'Dashboard gestoría incoherente', 'Docs descuadrados', '[{\"code\":\"gestoria_dashboard_docs_mismatch\"}]', '[]', '{}',
+              'd5', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt5",
+            "reload_dashboard_block",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T11:50:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["dashboard"], "gestoria")
+        self.assertEqual(result["dashboard_block"], "documentos")
+
 
 if __name__ == "__main__":
     unittest.main()
