@@ -7,6 +7,7 @@ from web.server import (
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
     collect_gestoria_renta_card_items,
+    compute_gestoria_dashboard_segmentacion_trabajos,
     collect_hipotecas_firmadas_export_rows,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
@@ -561,6 +562,32 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertTrue(is_gestoria_dashboard_active_state("Alta"))
         self.assertFalse(is_gestoria_dashboard_active_state("Pendiente"))
         self.assertFalse(is_gestoria_dashboard_active_state("Baja"))
+
+    def test_compute_gestoria_dashboard_segmentacion_trabajos_counts_categories(self):
+        self.conn.executescript(
+            """
+            CREATE TABLE gestoria_trabajos (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              tipo_categoria TEXT,
+              tipo_trabajo TEXT,
+              estado TEXT
+            );
+            INSERT INTO gestoria_trabajos (id, empresa_id, tipo_categoria, tipo_trabajo, estado) VALUES
+              ('t1', 'emp-1', 'Herencias', '', 'Pendiente'),
+              ('t2', 'emp-1', '', 'Transferencia de vehículo', 'Pendiente'),
+              ('t3', 'emp-1', '', 'Expediente administrativo', 'Cerrado'),
+              ('t4', 'emp-1', 'Tasaciones', '', 'Hecho'),
+              ('t5', 'emp-1', '', 'Renta 2025', 'Pendiente');
+            """
+        )
+        summary = compute_gestoria_dashboard_segmentacion_trabajos(self.conn, ["emp-1"])
+        self.assertEqual(summary["herencias_total"], 1)
+        self.assertEqual(summary["trafico_total"], 1)
+        self.assertEqual(summary["expedientes_total"], 1)
+        self.assertEqual(summary["tasaciones_total"], 1)
+        self.assertEqual(summary["rentas_total"], 1)
+        self.assertEqual(summary["abiertos_total"], 3)
 
 
 if __name__ == "__main__":

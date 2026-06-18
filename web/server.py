@@ -4831,6 +4831,68 @@ def is_gestoria_dashboard_active_state(value):
     return state in {"ALTA", "ACTIVO", "ACTIVA"}
 
 
+def compute_gestoria_dashboard_segmentacion_trabajos(conn, empresa_ids):
+    ids = [str(item or "").strip() for item in (empresa_ids or []) if str(item or "").strip()]
+    if not ids:
+        return {}
+    placeholders = ",".join(["?"] * len(ids))
+    sql = f"""
+        SELECT
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = ? THEN 1
+              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ? THEN 1
+              ELSE 0
+            END
+          ) AS herencias_total,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = ? THEN 1
+              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ? OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ?
+              ) THEN 1
+              ELSE 0
+            END
+          ) AS trafico_total,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = ? THEN 1
+              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ? OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ?
+              ) THEN 1
+              ELSE 0
+            END
+          ) AS expedientes_total,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = ? THEN 1
+              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ? THEN 1
+              ELSE 0
+            END
+          ) AS tasaciones_total,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = ? THEN 1
+              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE ? THEN 1
+              ELSE 0
+            END
+          ) AS rentas_total,
+          SUM(CASE WHEN LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado') THEN 0 ELSE 1 END) AS abiertos_total
+        FROM gestoria_trabajos gt
+        WHERE gt.empresa_id IN ({placeholders})
+    """
+    params = [
+        "herencias", "%herenc%",
+        "trafico", "%trafic%", "%transfer%",
+        "expedientes", "%expedient%", "%administrat%",
+        "tasaciones", "%tasaci%",
+        "rentas", "%renta%",
+        *ids,
+    ]
+    row = conn.execute(sql, tuple(params)).fetchone()
+    return dict(row) if row else {}
+
+
 GESTORIA_TRABAJO_CATEGORY_KEYS = {
     "laboral",
     "fiscal",
@@ -80026,55 +80088,7 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 # Segmentación de trabajos (totales y abiertos).
-                seg = conn.execute(
-                    f"""
-                        SELECT
-                          SUM(
-                            CASE
-                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
-                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
-                              ELSE 0
-                            END
-                          ) AS herencias_total,
-                          SUM(
-                            CASE
-                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
-                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
-                              ) THEN 1
-                              ELSE 0
-                            END
-                          ) AS trafico_total,
-                          SUM(
-                            CASE
-                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
-                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
-                                LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
-                              ) THEN 1
-                              ELSE 0
-                            END
-                          ) AS expedientes_total,
-                          SUM(
-                            CASE
-                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
-                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
-                              ELSE 0
-                            END
-                          ) AS tasaciones_total,
-                          SUM(
-                            CASE
-                              WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
-                              WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
-                              ELSE 0
-                            END
-                          ) AS rentas_total,
-                          SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
-                    FROM gestoria_trabajos gt
-                    WHERE gt.empresa_id IN ({placeholders_emp})
-                    """,
-                    tuple(empresa_ids),
-                ).fetchone()
-                seg_out = dict(seg) if seg else {}
+                seg_out = compute_gestoria_dashboard_segmentacion_trabajos(conn, empresa_ids)
                 # Rentas no siempre existen como `gestoria_trabajos`; se registran en `cliente_gestoria.renta_detalles`.
                 try:
                     renta_total = compute_gestoria_renta_campaigns_total(conn, empresa_ids, ejercicio="").get("count", 0)
