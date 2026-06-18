@@ -2067,6 +2067,8 @@ const state = {
   currentClienteRamoSelected: "",
   currentSeguroId: "",
   currentRentaEntryId: "",
+  currentHipotecaId: "",
+  currentFacturaId: "",
   gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
@@ -12417,6 +12419,7 @@ const renderWorkspaceCopilotHub = () => {
         return;
       }
       const params = new URLSearchParams(window.location.search || "");
+      const selectedDoc = getGestoriaImportSelectedDoc();
       const payload = {
         workspace_id: String(formData.get("workspace_id") || state.currentWorkspaceId || "").trim(),
         empresa_id: String(formData.get("empresa_id") || state.currentWorkspaceCompanyId || "").trim(),
@@ -12426,6 +12429,9 @@ const renderWorkspaceCopilotHub = () => {
           current_client_id: String(state.currentClienteId || "").trim(),
           current_seguro_id: String(state.currentSeguroId || "").trim(),
           current_renta_entry_id: String(state.currentRentaEntryId || "").trim(),
+          current_hipoteca_id: String(state.currentHipotecaId || "").trim(),
+          current_factura_id: String(state.currentFacturaId || selectedDoc?.factura_id || "").trim(),
+          current_factura_document_id: String(selectedDoc?.id || "").trim(),
           current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
           current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
           current_workspace_view: String(state.currentWorkspaceView || "").trim(),
@@ -13317,6 +13323,13 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           action_id: String(action.id || "").trim(),
           action_payload: action.payload || {},
         });
+        if (Array.isArray(result?.post_actions)) {
+          for (const postAction of result.post_actions) {
+            const endpoint = String(postAction?.post_endpoint || "").trim();
+            if (!endpoint) continue;
+            await apiPost(endpoint, postAction?.payload || {});
+          }
+        }
         if (result?.navigation) {
           await applyWorkspaceSupervisorNavigation(result);
         }
@@ -40705,6 +40718,7 @@ const hipotecaRowToObject = (row, columns) => {
 };
 
 const closeHipotecaFichaPanel = () => {
+  state.currentHipotecaId = "";
   const panel = document.getElementById("hipotecaBdtFichaPanel");
   if (!panel) return;
   panel.classList.add("hidden");
@@ -42859,6 +42873,7 @@ const setupHipotecaFichaComputedInputs = (panel) => {
 const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
   const panel = ensureHipotecaFichaPanel();
   if (!panel) return;
+  state.currentHipotecaId = "";
   panel.dataset.recordId = HIPOTECA_FICHA_DRAFT_ID;
   delete panel.dataset.pdfReviewBlocked;
   delete panel.dataset.pdfReviewBlockedReason;
@@ -42961,6 +42976,7 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
     });
   } catch (e) {}
   panel.dataset.recordId = target;
+  state.currentHipotecaId = target;
   const meta = panel.querySelector("#hipotecaFichaMeta");
   if (meta) meta.textContent = "Cargando ficha...";
   panel.classList.remove("hidden");
@@ -68006,9 +68022,11 @@ const fillGestoriaImportReviewForm = (row) => {
   };
   if (!doc) {
     gestoriaImportReviewForm.reset();
+    state.currentFacturaId = "";
     if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Selecciona un documento.";
     return;
   }
+  state.currentFacturaId = String(doc.factura_id || "").trim();
   setValue("estado_revision", doc.estado_revision || "REVISAR");
   setValue("tipo_detectado", doc.tipo_detectado || "compra");
   setValue("categoria_detectada", doc.categoria_detectada || "");

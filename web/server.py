@@ -40624,6 +40624,17 @@ def _workspace_internal_copilot_review_reply(message, open_events, history):
                 "payload": {"process_types": process_types, "dates": created_dates},
             }
         )
+        ocr_capable = {"renta_attach", "gestoria_factura", "rrhh_document"}
+        if any(item in ocr_capable for item in process_types):
+            actions.append(
+                {
+                    "id": "bulk_rerun_ocr",
+                    "label": "Relanzar OCR",
+                    "requires_confirmation": True,
+                    "confirm_text": f"Se relanzará OCR para las incidencia(s) compatibles de la revisión actual.",
+                    "payload": {"process_types": process_types, "dates": created_dates},
+                }
+            )
     if duplicate_rows:
         row, anomaly = duplicate_rows[0]
         related = anomaly.get("related_rows") or []
@@ -40661,6 +40672,10 @@ def _workspace_internal_copilot_action_intent(message):
         return "update_current_seguro"
     if any(token in text for token in ("actualiza esta renta", "edita esta renta", "corrige esta renta")):
         return "update_current_renta"
+    if any(token in text for token in ("actualiza esta hipoteca", "edita esta hipoteca", "corrige esta hipoteca")):
+        return "update_current_hipoteca"
+    if any(token in text for token in ("actualiza esta factura", "edita esta factura", "corrige esta factura")):
+        return "update_current_factura"
     if any(token in text for token in ("actualiza", "actualizar", "cambia", "modifica")) and any(token in text for token in ("email", "correo", "telefono", "teléfono", "movil", "móvil", "nif", "dni", "direccion", "dirección")):
         return "update_client_basic"
     if "renta" in text and any(token in text for token in ("carga", "sube", "mete", "adjunta", "procesa")):
@@ -40810,6 +40825,60 @@ def _workspace_internal_copilot_preview_factura(conn, attachment, *, actor=None)
                     pass
     except Exception:
         return {}
+
+
+def _workspace_internal_copilot_preview_renta(conn, attachment, *, actor=None):
+    item = dict(attachment or {})
+    if not item.get("key") and not item.get("public_url"):
+        return {}
+    try:
+        result = process_renta_ocr_job(
+            {
+                "s3_key": str(item.get("key") or "").strip(),
+                "filename": str(item.get("filename") or "renta.pdf").strip(),
+            },
+            conn,
+        ) or {}
+    except Exception:
+        return {}
+    fields = result.get("fields") if isinstance(result.get("fields"), dict) else {}
+    return {
+        "ejercicio": str(fields.get("ejercicio") or "").strip(),
+        "nif": normalize_nif(fields.get("nif_detectado") or ""),
+        "nombre": str(fields.get("nombre_completo") or fields.get("cliente_nombre") or "").strip(),
+        "ocr_method": str(result.get("ocr_method") or fields.get("ocr_method") or "").strip(),
+        "ocr_score": result.get("ocr_score"),
+    }
+
+
+def _workspace_internal_copilot_preview_seguro(conn, attachment, *, actor=None):
+    item = dict(attachment or {})
+    if not item.get("key") and not item.get("public_url"):
+        return {}
+    try:
+        result = process_seguros_ocr(
+            {
+                "s3_key": str(item.get("key") or "").strip(),
+                "filename": str(item.get("filename") or "poliza.pdf").strip(),
+                "fast_mode": True,
+            },
+            conn,
+            session=actor,
+        ) or {}
+    except Exception:
+        return {}
+    fields = result.get("fields") if isinstance(result.get("fields"), dict) else {}
+    return {
+        "tomador": str(fields.get("tomador") or "").strip(),
+        "nif": normalize_nif(fields.get("nif") or fields.get("dni") or ""),
+        "compania": str(fields.get("compania") or "").strip(),
+        "poliza_numero": str(fields.get("poliza_numero") or "").strip(),
+        "fecha_efecto": str(fields.get("fecha_efecto") or "").strip(),
+        "fecha_vencimiento": str(fields.get("fecha_vencimiento") or "").strip(),
+        "ramo": str(fields.get("ramo") or "").strip(),
+        "ocr_method": str(result.get("method") or "").strip(),
+        "cliente_match": bool(result.get("cliente_match")),
+    }
 
 
 def _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, query_data, limit=5):
@@ -41034,6 +41103,35 @@ def _workspace_internal_copilot_extract_seguro_update_payload(message):
     return payload
 
 
+def _workspace_internal_copilot_extract_factura_update_payload(message):
+    text = str(message or "").strip()
+    payload = {}
+    numero_match = re.search(r"(?:factura|numero|n[uú]mero)\s*(?:es|:|=)?\s*([A-Za-z0-9\\-/]{3,})", text, re.I)
+    fecha_match = re.search(r"(?:fecha|emision|emisión)\s*(?:es|:|=)?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", text, re.I)
+    total_match = re.search(r"(?:total|importe)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    base_match = re.search(r"(?:base|base imponible)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    tipo = "venta" if re.search(r"\bventa\b", text, re.I) else ("compra" if re.search(r"\bcompra\b", text, re.I) else "")
+    if numero_match:
+        payload["numero"] = str(numero_match.group(1) or "").strip()
+    if fecha_match:
+        raw = str(fecha_match.group(1) or "").strip()
+        payload["fecha_emision"] = raw if re.match(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", raw) else (_parse_date_ddmmyyyy_to_iso(raw) or raw)
+    if total_match:
+        payload["total"] = parse_money_value(total_match.group(1))
+    if base_match:
+        payload["base_imponible"] = parse_money_value(base_match.group(1))
+    if tipo:
+        payload["tipo"] = tipo
+    return payload
+
+
+def _workspace_internal_copilot_extract_hipoteca_update_payload(message):
+    payload = _workspace_internal_copilot_extract_hipoteca_payload(message, {}) or {}
+    payload.pop("cliente_id", None)
+    payload.pop("cliente", None)
+    return payload
+
+
 def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", context=None):
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
@@ -41054,6 +41152,10 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         if attachment:
             patch.setdefault("poliza_key", str(attachment.get("key") or "").strip())
             patch.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
+            preview = _workspace_internal_copilot_preview_seguro(conn, attachment, actor=None)
+            for key in ("compania", "fecha_efecto", "fecha_vencimiento"):
+                if preview.get(key) not in (None, ""):
+                    patch.setdefault(key, preview.get(key))
         if not patch:
             return {"ok": True, "intent": "action", "answer": "No veo cambios concretos para aplicar a la póliza actual.", "sources": ["seguros"], "suggestions": ["Indicar compañía", "Indicar prima"], "cards": [], "actions": []}
         return {
@@ -41065,11 +41167,61 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "cards": [{"title": "Póliza actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "seguros", "entity": {"seguro_id": current_seguro_id}}],
             "actions": [{"id": "update_current_seguro", "label": "Actualizar póliza", "requires_confirmation": True, "confirm_text": "Se actualizará la póliza abierta.", "payload": {"seguro_id": current_seguro_id, "patch": patch}}],
         }
+    if intent == "update_current_hipoteca":
+        current_hipoteca_id = str((context or {}).get("current_hipoteca_id") or "").strip()
+        if not current_hipoteca_id:
+            return {"ok": True, "intent": "action", "answer": "No tengo una hipoteca abierta en el contexto actual.", "sources": ["financiaciones"], "suggestions": ["Abrir hipoteca"], "cards": [], "actions": []}
+        patch = _workspace_internal_copilot_extract_hipoteca_update_payload(message)
+        if not patch:
+            return {"ok": True, "intent": "action", "answer": "No veo cambios concretos para aplicar a la hipoteca actual.", "sources": ["financiaciones"], "suggestions": ["Indicar banco", "Indicar importe"], "cards": [], "actions": []}
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo actualizar la hipoteca abierta con esos cambios.",
+            "sources": ["financiaciones"],
+            "suggestions": ["Actualizar hipoteca"],
+            "cards": [{"title": "Hipoteca actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "financiaciones", "entity": {"hipoteca_id": current_hipoteca_id}}],
+            "actions": [{"id": "update_current_hipoteca", "label": "Actualizar hipoteca", "requires_confirmation": True, "confirm_text": "Se actualizará la hipoteca abierta.", "payload": {"hipoteca_id": current_hipoteca_id, "patch": patch}}],
+        }
+    if intent == "update_current_factura":
+        current_factura_id = str((context or {}).get("current_factura_id") or "").strip()
+        current_factura_document_id = str((context or {}).get("current_factura_document_id") or "").strip()
+        patch = _workspace_internal_copilot_extract_factura_update_payload(message)
+        attachment = _workspace_internal_copilot_pick_attachment(context, kind="factura")
+        if attachment:
+            patch.setdefault("doc_key", str(attachment.get("key") or "").strip())
+            preview = _workspace_internal_copilot_preview_factura(conn, attachment, actor=None)
+            if preview.get("numero"):
+                patch.setdefault("numero", preview.get("numero"))
+            if preview.get("fecha"):
+                patch.setdefault("fecha_emision", preview.get("fecha"))
+            if preview.get("base_imponible") not in (None, ""):
+                patch.setdefault("base_imponible", preview.get("base_imponible"))
+            if preview.get("total") not in (None, ""):
+                patch.setdefault("total", preview.get("total"))
+        if not current_factura_id:
+            answer = "No tengo una factura abierta vinculada en el contexto actual."
+            if current_factura_document_id:
+                answer = "El documento abierto todavía no tiene una factura vinculada. Primero hay que procesarlo o vincularlo."
+            return {"ok": True, "intent": "action", "answer": answer, "sources": ["gestoria"], "suggestions": ["Procesar factura", "Abrir factura"], "cards": [], "actions": []}
+        if not patch:
+            return {"ok": True, "intent": "action", "answer": "No veo cambios concretos para aplicar a la factura actual.", "sources": ["gestoria"], "suggestions": ["Indicar número", "Adjuntar factura"], "cards": [], "actions": []}
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo actualizar la factura abierta con esos cambios.",
+            "sources": ["gestoria"],
+            "suggestions": ["Actualizar factura"],
+            "cards": [{"title": "Factura actual", "summary": ", ".join(f"{k}: {v}" for k, v in patch.items()), "priority": "alta", "impact_area": "gestoria", "entity": {"factura_id": current_factura_id}}],
+            "actions": [{"id": "update_current_factura", "label": "Actualizar factura", "requires_confirmation": True, "confirm_text": "Se actualizará la factura abierta.", "payload": {"factura_id": current_factura_id, "patch": patch}}],
+        }
     if intent == "update_current_renta":
         current_client_id = str((context or {}).get("current_client_id") or "").strip()
         current_entry_id = str((context or {}).get("current_renta_entry_id") or "").strip()
         attachment = _workspace_internal_copilot_pick_attachment(context, kind="renta")
         year = _workspace_internal_copilot_extract_year(message)
+        preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=None) if attachment else {}
+        year = year or str(preview.get("ejercicio") or "").strip()
         if not current_client_id or not current_entry_id:
             return {"ok": True, "intent": "action", "answer": "No tengo una renta abierta en el contexto actual.", "sources": ["gestoria"], "suggestions": ["Abrir renta"], "cards": [], "actions": []}
         payload = {"cliente_id": current_client_id, "entry_id": current_entry_id, "ejercicio": year, "estado_presentacion": "Presentada" if "presentad" in low_text else "Borrador"}
@@ -41147,6 +41299,8 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
                     if not (doc_ref.get("doc_key") or doc_ref.get("doc_url")):
                         attachment = _workspace_internal_copilot_pick_attachment(context, kind="renta")
                         doc_ref = {"doc_key": str(attachment.get("key") or "").strip(), "doc_url": str(attachment.get("public_url") or "").strip()}
+                        preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=None) if attachment else {}
+                        year = year or str(preview.get("ejercicio") or "").strip()
                     actions.append({"id": "attach_renta", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se cargará la renta para {candidate_name}.", "payload": {"cliente_id": candidate_id, "ejercicio": year, "estado_presentacion": "Presentada" if "presentad" in low_text else "Borrador", "doc_key": doc_ref.get("doc_key") or "", "doc_url": doc_ref.get("doc_url") or ""}})
                 elif intent == "create_seguro":
                     seguro_payload = _workspace_internal_copilot_extract_seguro_payload(message, candidate)
@@ -41154,6 +41308,10 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
                     if attachment:
                         seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
                         seguro_payload.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
+                        preview = _workspace_internal_copilot_preview_seguro(conn, attachment, actor=None)
+                        for key in ("compania", "poliza_numero", "fecha_efecto", "fecha_vencimiento", "ramo"):
+                            if preview.get(key) not in (None, ""):
+                                seguro_payload.setdefault(key, preview.get(key))
                     actions.append({"id": "create_seguro", "label": f"Usar {candidate_name}", "requires_confirmation": True, "confirm_text": f"Se creará la póliza para {candidate_name}.", "payload": seguro_payload})
                 elif intent == "create_hipoteca":
                     hip_payload = _workspace_internal_copilot_extract_hipoteca_payload(message, candidate)
@@ -41217,6 +41375,8 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         if not (doc_ref.get("doc_key") or doc_ref.get("doc_url")):
             attachment = _workspace_internal_copilot_pick_attachment(context, kind="renta")
             doc_ref = {"doc_key": str(attachment.get("key") or "").strip(), "doc_url": str(attachment.get("public_url") or "").strip()}
+            preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=None) if attachment else {}
+            year = year or str(preview.get("ejercicio") or "").strip()
         status = "Presentada" if "presentad" in normalize_lookup_text(message).lower() else "Borrador"
         missing = []
         if not year:
@@ -41325,6 +41485,10 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
         if attachment:
             seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
             seguro_payload.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
+            preview = _workspace_internal_copilot_preview_seguro(conn, attachment, actor=None)
+            for key in ("compania", "poliza_numero", "fecha_efecto", "fecha_vencimiento", "ramo"):
+                if preview.get(key) not in (None, ""):
+                    seguro_payload.setdefault(key, preview.get(key))
         missing = []
         if not str(seguro_payload.get("compania") or "").strip():
             missing.append("compañía")
@@ -42224,6 +42388,30 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "updated": updated,
             "resolved": resolved,
         }
+    if action_text == "bulk_rerun_ocr":
+        process_types = [str(item or "").strip() for item in (payload.get("process_types") or []) if str(item or "").strip()]
+        dates = {str(item or "").strip() for item in (payload.get("dates") or []) if str(item or "").strip()}
+        rows = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=100, only_open=True).get("rows") or []
+        if process_types:
+            rows = [row for row in rows if str(row.get("process_type") or "").strip() in process_types]
+        if dates:
+            rows = [row for row in rows if str(row.get("created_at") or "")[:10] in dates]
+        post_actions = []
+        for row in rows:
+            event_id = str(row.get("id") or "").strip()
+            if not event_id:
+                continue
+            result = perform_workspace_process_supervisor_action(conn, workspace_text, event_id, "rerun_ocr", actor=actor, now=now)
+            endpoint = str(result.get("post_endpoint") or "").strip()
+            if endpoint:
+                post_actions.append({"post_endpoint": endpoint, "payload": result.get("payload") or {}})
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han preparado {len(post_actions)} relanzamiento(s) OCR de la revisión actual.",
+            "post_actions": post_actions,
+            "updated": len(post_actions),
+        }
     if action_text == "update_client_basic":
         cliente_id = str(payload.get("cliente_id") or "").strip()
         patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
@@ -42292,7 +42480,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         if not current_row:
             return {"error": "Póliza no encontrada"}
         updates = {}
-        for key in ("compania", "prima_total", "prima_neta", "fecha_efecto", "fecha_vencimiento", "estado", "poliza_key", "poliza_url"):
+        for key in ("compania", "prima_total", "prima_neta", "fecha_efecto", "fecha_vencimiento", "estado", "poliza_key", "poliza_url", "poliza_numero", "ramo"):
             value = patch.get(key)
             if value not in (None, ""):
                 updates[key] = normalize_seguro_estado_value(value) if key == "estado" else value
@@ -42317,6 +42505,70 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             now=now,
         )
         return {"ok": True, "action_id": action_text, "message": "Póliza actualizada correctamente.", "process_supervision": process_supervision}
+    if action_text == "update_current_hipoteca":
+        hipoteca_id = str(payload.get("hipoteca_id") or "").strip()
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+        if not hipoteca_id or not patch:
+            return {"error": "hipoteca_id y patch requeridos"}
+        current_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (hipoteca_id,)).fetchone()
+        if not current_row:
+            return {"error": "Hipoteca no encontrada"}
+        updates = {}
+        for key in ("banco", "precio", "importe_hipoteca", "porcentaje", "entrada", "comision", "fecha_encargo", "estado", "oficina"):
+            value = patch.get(key)
+            if value not in (None, ""):
+                updates[key] = value
+        if not updates:
+            return {"error": "No hay cambios válidos para la hipoteca"}
+        set_clause = ", ".join([f"{key} = ?" for key in updates])
+        values = list(updates.values()) + [now, hipoteca_id]
+        conn.execute(f"UPDATE hipotecas SET {set_clause}, updated_at = datetime(?) WHERE id = ?", values)
+        row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (hipoteca_id,)).fetchone()
+        process_supervision = run_workspace_process_supervision(
+            conn,
+            process_type="hipoteca_update",
+            servicio="financiaciones",
+            empresa_id=str(row_value(row, "empresa_id") or "").strip(),
+            workspace_id=workspace_text,
+            entity_type="hipoteca",
+            entity_id=hipoteca_id,
+            actor=actor,
+            context={"operation": "update", "cliente_id": str(row_value(row, "cliente_id") or "").strip()},
+            now=now,
+        )
+        return {"ok": True, "action_id": action_text, "message": "Hipoteca actualizada correctamente.", "process_supervision": process_supervision}
+    if action_text == "update_current_factura":
+        factura_id = str(payload.get("factura_id") or "").strip()
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+        if not factura_id or not patch:
+            return {"error": "factura_id y patch requeridos"}
+        current_row = conn.execute("SELECT * FROM gestoria_facturas WHERE id = ?", (factura_id,)).fetchone()
+        if not current_row:
+            return {"error": "Factura no encontrada"}
+        updates = {}
+        for key in ("numero", "fecha_emision", "descripcion", "base_imponible", "cuota_iva", "total", "tipo", "doc_key"):
+            value = patch.get(key)
+            if value not in (None, ""):
+                updates[key] = value
+        if not updates:
+            return {"error": "No hay cambios válidos para la factura"}
+        set_clause = ", ".join([f"{key} = ?" for key in updates])
+        values = list(updates.values()) + [now, factura_id]
+        conn.execute(f"UPDATE gestoria_facturas SET {set_clause}, updated_at = datetime(?) WHERE id = ?", values)
+        row = conn.execute("SELECT * FROM gestoria_facturas WHERE id = ?", (factura_id,)).fetchone()
+        process_supervision = run_workspace_process_supervision(
+            conn,
+            process_type="gestoria_factura",
+            servicio="gestoria",
+            empresa_id=str(row_value(row, "empresa_id") or "").strip(),
+            workspace_id=workspace_text,
+            entity_type="gestoria_factura",
+            entity_id=factura_id,
+            actor=actor,
+            context={"operation": "update", "cliente_id": str(row_value(row, "cliente_id") or "").strip()},
+            now=now,
+        )
+        return {"ok": True, "action_id": action_text, "message": "Factura actualizada correctamente.", "process_supervision": process_supervision}
     return {"error": "Acción no soportada"}
 
 

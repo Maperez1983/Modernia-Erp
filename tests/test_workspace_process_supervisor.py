@@ -1316,6 +1316,105 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertGreaterEqual(int(result["updated"] or 0), 1)
 
+    def test_internal_copilot_action_updates_current_hipoteca(self):
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c70', 'Cliente Hipoteca', '10101010A', 'hip@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'h70', 'e1', 'Cliente Hipoteca', 'c70', 'Sabadell', 250000, 180000, 'Estudio', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_hipoteca",
+            {"hipoteca_id": "h70", "patch": {"banco": "CaixaBank", "importe_hipoteca": 190000, "estado": "Encargo"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:10:00Z",
+        )
+        row = self.conn.execute("SELECT banco, importe_hipoteca, estado FROM hipotecas WHERE id = 'h70'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertEqual(row["banco"], "CaixaBank")
+        self.assertEqual(row["importe_hipoteca"], 190000)
+        self.assertEqual(row["estado"], "Encargo")
+
+    def test_internal_copilot_action_updates_current_factura(self):
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c71', 'Cliente Factura', '20202020B', 'fact@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, total, created_at, updated_at
+            ) VALUES (
+              'f71', 'e1', 'c71', 'compra', 'F-71', '2026-06-01', 1200, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_factura",
+            {"factura_id": "f71", "patch": {"numero": "F-71B", "total": 1500, "fecha_emision": "2026-06-02"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:15:00Z",
+        )
+        row = self.conn.execute("SELECT numero, total, fecha_emision FROM gestoria_facturas WHERE id = 'f71'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertEqual(row["numero"], "F-71B")
+        self.assertEqual(row["total"], 1500)
+        self.assertEqual(row["fecha_emision"], "2026-06-02")
+
+    def test_internal_copilot_action_bulk_rerun_ocr(self):
+        self.conn.execute("INSERT INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES ('we-rerun', 'ws1', 'e1', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c72', 'Cliente OCR', '30303030C', 'ocr@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce72', 'c72', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO cliente_gestoria (id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at) VALUES ('cg72', 'c72', 'Particular', 0, 0, 0, 1, 0, 0, 0, '{\"entries\":[]}', 'now', 'now')")
+        server.run_workspace_process_supervision(
+            self.conn,
+            process_type="renta_attach",
+            servicio="gestoria",
+            empresa_id="e1",
+            workspace_id="ws1",
+            entity_type="cliente",
+            entity_id="c72",
+            context={"ejercicio": "2025"},
+            now="2026-06-18T10:30:00Z",
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_rerun_ocr",
+            {"process_types": ["renta_attach"], "dates": ["2026-06-18"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:20:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["post_actions"])
+        self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/renta_entry_ocr_reprocess")
+
 
 if __name__ == "__main__":
     unittest.main()
