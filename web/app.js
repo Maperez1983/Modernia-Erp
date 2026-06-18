@@ -12417,6 +12417,14 @@ const renderWorkspaceCopilotHub = () => {
         empresa_id: String(formData.get("empresa_id") || state.currentWorkspaceCompanyId || "").trim(),
         service_hint: String(params.get("crm") || "").trim(),
         message,
+        context: {
+          current_client_id: String(state.currentClienteId || "").trim(),
+          current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
+          current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
+          current_workspace_view: String(state.currentWorkspaceView || "").trim(),
+          current_fincas_tab: String(state.workspaceFincasTab || "").trim(),
+          current_rrhh_tab: String(state.workspaceRrhhTab || "").trim(),
+        },
       };
       const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? [...state.currentWorkspaceInternalCopilotMessages] : [];
       history.push({ role: "user", message });

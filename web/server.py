@@ -40639,7 +40639,135 @@ def _workspace_internal_copilot_review_reply(message, open_events, history):
     }
 
 
-def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None):
+def _workspace_internal_copilot_context_reply(conn, workspace_id, context, message, *, empresa_id=""):
+    ctx = dict(context or {})
+    text = normalize_lookup_text(message or "").lower()
+    wants_current = any(token in text for token in ("este ", "esta ", "actual", "seleccionado", "seleccionada"))
+    if not wants_current:
+        return None
+    cliente_id = str(ctx.get("current_client_id") or "").strip()
+    if cliente_id and any(token in text for token in ("cliente", "factura", "poliza", "póliza", "hipoteca", "renta", "documento")):
+        try:
+            client_row = conn.execute(
+                "SELECT id, nombre, nif, email FROM clientes WHERE id = ? LIMIT 1",
+                (cliente_id,),
+            ).fetchone()
+        except Exception:
+            client_row = None
+        if client_row:
+            duplicates = _workspace_duplicate_client_signals(conn, empresa_id, cliente_id) if empresa_id else []
+            cards = [
+                {
+                    "title": str(row_value(client_row, "nombre") or "Cliente").strip(),
+                    "summary": " · ".join(
+                        [
+                            str(row_value(client_row, "nif") or "").strip(),
+                            str(row_value(client_row, "email") or "").strip(),
+                        ]
+                    ).strip(" ·"),
+                    "priority": "media",
+                    "impact_area": "cliente",
+                    "route": "",
+                    "actions": [],
+                    "entity": {"cliente_id": cliente_id, "title": str(row_value(client_row, "nombre") or "").strip()},
+                }
+            ]
+            suggestions = ["Refrescar ficha cliente"]
+            answer = f"El cliente actual es {str(row_value(client_row, 'nombre') or 'Cliente').strip()}."
+            if duplicates:
+                answer += f" He detectado {len(duplicates)} señal(es) de posible duplicado asociadas a esta ficha."
+                suggestions = ["Refrescar ficha cliente", "Revalidar proceso"]
+                for signal in duplicates[:2]:
+                    cards.append(
+                        {
+                            "title": "Posible duplicado de cliente",
+                            "summary": str(signal.get("message") or "").strip(),
+                            "priority": "alta",
+                            "impact_area": "datos",
+                            "route": "",
+                            "actions": [],
+                            "entity": {"cliente_id": cliente_id, "title": str(row_value(client_row, "nombre") or "").strip()},
+                        }
+                    )
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": answer,
+                "sources": ["current_client_context", "clientes"],
+                "suggestions": suggestions,
+                "cards": cards[:4],
+            }
+    comunidad_id = str(ctx.get("current_community_id") or "").strip()
+    if comunidad_id and any(token in text for token in ("comunidad", "finca", "finca", "presupuesto", "proveedor", "incidencia", "junta")):
+        try:
+            row = conn.execute(
+                "SELECT id, nombre, direccion, estado, cuota_mensual FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": f"La comunidad actual es {str(row_value(row, 'nombre') or 'Comunidad').strip()}. Revisa cuota, estado e incidencias abiertas si estás validando su operativa.",
+                "sources": ["current_community_context", "workspace_fincas_comunidades"],
+                "suggestions": ["Editar registro", "Refrescar listado", "Abrir módulo"],
+                "cards": [
+                    {
+                        "title": str(row_value(row, "nombre") or "Comunidad").strip(),
+                        "summary": " · ".join(
+                            [
+                                str(row_value(row, "direccion") or "").strip(),
+                                str(row_value(row, "estado") or "").strip(),
+                                f"cuota {row_value(row, 'cuota_mensual') or '-'}",
+                            ]
+                        ).strip(" ·"),
+                        "priority": "media",
+                        "impact_area": "fincas",
+                        "route": "",
+                        "actions": [],
+                        "entity": {"comunidad_id": comunidad_id, "title": str(row_value(row, "nombre") or "").strip()},
+                    }
+                ],
+            }
+    persona_id = str(ctx.get("current_persona_id") or "").strip()
+    if persona_id and any(token in text for token in ("trabajador", "empleado", "persona", "nomina", "nómina", "rrhh", "ausencia", "gasto")):
+        try:
+            row = conn.execute(
+                "SELECT id, nombre, email, empresa_nombre FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (persona_id, workspace_id),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": f"El trabajador actual es {str(row_value(row, 'nombre') or 'Empleado').strip()}. Puedo ayudarte a revisar sus ausencias, gastos o documentos RRHH.",
+                "sources": ["current_person_context", "workspace_registro_personal"],
+                "suggestions": ["Refrescar listado", "Revalidar proceso", "Abrir módulo"],
+                "cards": [
+                    {
+                        "title": str(row_value(row, "nombre") or "Empleado").strip(),
+                        "summary": " · ".join(
+                            [
+                                str(row_value(row, "empresa_nombre") or "").strip(),
+                                str(row_value(row, "email") or "").strip(),
+                            ]
+                        ).strip(" ·"),
+                        "priority": "media",
+                        "impact_area": "rrhh",
+                        "route": "",
+                        "actions": [],
+                        "entity": {"persona_id": persona_id, "title": str(row_value(row, "nombre") or "").strip()},
+                    }
+                ],
+            }
+    return None
+
+
+def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     workspace_text = str(workspace_id or "").strip()
     company_text = str(empresa_id or "").strip()
     message_text = str(message or "").strip()
@@ -40663,6 +40791,12 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         "suggestions": [],
         "cards": [],
     }
+    context_reply = _workspace_internal_copilot_context_reply(conn, workspace_text, context or {}, message_text, empresa_id=company_text)
+    if context_reply:
+        response.update(context_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
     if intent == "incident":
         review_reply = _workspace_internal_copilot_review_reply(message_text, open_events, history)
         review_tokens = ("revisa", "hoy", "todas", "listar", "que le falta", "qué le falta", "incoherente", "incoherentes", "duplicado", "duplicados", "duplicada", "duplicadas")
@@ -69019,6 +69153,7 @@ class Handler(BaseHTTPRequestHandler):
             message = str(payload.get("message") or payload.get("question") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             service_hint = str(payload.get("service_hint") or payload.get("crm") or "").strip()
+            context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
             if not workspace_id or not message:
                 json_response(self, {"error": "workspace_id y message requeridos"}, status=400)
                 return
@@ -69033,6 +69168,7 @@ class Handler(BaseHTTPRequestHandler):
                 empresa_id=empresa_id,
                 service_hint=service_hint,
                 actor=session,
+                context=context,
             )
             if reply.get("error"):
                 json_response(self, {"error": reply.get("error")}, status=400)

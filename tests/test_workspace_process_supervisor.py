@@ -204,6 +204,17 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.conn.execute(
             """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              nombre TEXT,
+              email TEXT,
+              empresa_nombre TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
             CREATE TABLE workspace_fincas_contabilidad (
               id TEXT PRIMARY KEY,
               workspace_id TEXT,
@@ -1003,6 +1014,44 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertTrue(reply["cards"])
         self.assertEqual(reply["cards"][0]["title"], "Posible corrección de duplicado")
+
+    def test_internal_copilot_uses_current_client_context(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email) VALUES ('c20', 'Cliente Contexto', '11111111A', 'ctx@test.local')")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué le falta a este cliente",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+            context={"current_client_id": "c20"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("Cliente Contexto", reply["answer"])
+        self.assertTrue(reply["cards"])
+
+    def test_internal_copilot_uses_current_community_context(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, cuota_mensual, created_at, updated_at
+            ) VALUES (
+              'com1', 'ws1', 'e1', 'Comunidad Centro', 'Calle Mayor 1', 'Activa', 120.0, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué pasa con esta comunidad",
+            empresa_id="e1",
+            service_hint="fincas",
+            actor={"user_id": "u1", "usuario": "QA"},
+            context={"current_community_id": "com1"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertIn("Comunidad Centro", reply["answer"])
+        self.assertTrue(reply["cards"])
 
 
 if __name__ == "__main__":
