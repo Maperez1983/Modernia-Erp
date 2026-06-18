@@ -1556,6 +1556,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("documento", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "workspace_rrhh_documentos")
+        self.assertEqual(reply["actions"][0]["id"], "open_module")
+        self.assertEqual(reply["actions"][1]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_communities_quota_mismatch(self):
         self.conn.execute(
@@ -1578,6 +1580,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("comunidad", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "workspace_fincas_comunidades")
+        self.assertEqual(reply["actions"][0]["id"], "open_module")
+        self.assertEqual(reply["actions"][1]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_invoices_without_asiento(self):
         self.conn.execute(
@@ -2028,6 +2032,86 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["refresh_supervisor"])
         self.assertIn("revalidado", result["message"].lower())
         self.assertEqual(result["navigation"]["cliente_id"], "c74b")
+
+    def test_internal_copilot_action_review_queue_rrhh_navigation(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "start_review_queue",
+            {
+                "queue_type": "rrhh_docs_expired",
+                "items": [{"documento_id": "rd-exp", "persona_id": "p1", "title": "dni.pdf", "summary": "Documento · caduca 2025-01-01"}],
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:38:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "workspace_view")
+        self.assertEqual(result["navigation"]["view"], "rrhh")
+
+    def test_internal_copilot_action_review_queue_fincas_navigation(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "start_review_queue",
+            {
+                "queue_type": "fincas_communities_quota",
+                "items": [{"comunidad_id": "fc-mis", "title": "Comunidad Delta", "summary": "cuota 90 · sugerida 120"}],
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:39:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["navigation"]["kind"], "workspace_view")
+        self.assertEqual(result["navigation"]["view"], "fincas")
+
+    def test_internal_copilot_action_autorreview_domain_rrhh(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, fecha_caducidad, permanente, estado, created_at, updated_at
+            ) VALUES (
+              'rd-exp-2', 'ws1', 'e1', 'p1', 'Documento', 'pasaporte.pdf', 'rrhh/pass.pdf', '2025-01-01', 0, 'Activo', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "autorreview_domain",
+            {"domain": "rrhh"},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:40:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["cards"])
+        self.assertTrue(result["actions"])
+
+    def test_internal_copilot_action_autorreview_domain_fincas(self):
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, cuota_mensual, cuota_sugerida, created_at, updated_at
+            ) VALUES (
+              'fc-mis-2', 'ws1', 'e1', 'Comunidad Sigma', 'Calle Nueva 3', 'Activa', 80, 120, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "autorreview_domain",
+            {"domain": "fincas"},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:41:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["cards"])
+        self.assertTrue(result["actions"])
 
 
 if __name__ == "__main__":

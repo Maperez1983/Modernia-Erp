@@ -41752,6 +41752,34 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
     text = normalize_lookup_text(message or "").lower()
     if not text:
         return None
+    if any(token in text for token in ("autorrevisa", "auto revisa", "pendientes", "trabajo pendiente")):
+        domain = ""
+        if any(token in text for token in ("rrhh", "documento", "nomina", "nómina")):
+            domain = "rrhh"
+        elif any(token in text for token in ("fincas", "comunidad", "comunidades")):
+            domain = "fincas"
+        elif any(token in text for token in ("gestoria", "gestoría", "factura", "renta")):
+            domain = "gestoria"
+        elif any(token in text for token in ("seguro", "poliza", "póliza")):
+            domain = "seguros"
+        elif any(token in text for token in ("hipoteca", "financiacion", "financiación")):
+            domain = "financiaciones"
+        if domain:
+            return {
+                "ok": True,
+                "intent": "incident",
+                "answer": f"Puedo revisar automáticamente el trabajo pendiente de {domain}.",
+                "sources": ["internal_copilot_action"],
+                "suggestions": ["Lanzar autorrevisión"],
+                "cards": [],
+                "actions": [
+                    {
+                        "id": "autorreview_domain",
+                        "label": "Autorrevisar dominio",
+                        "payload": {"domain": domain},
+                    }
+                ],
+            }
     if ("poliza" in text or "póliza" in text or "seguro" in text) and any(token in text for token in ("sin pdf", "sin documento", "sin archivo")):
         rows = conn.execute(
             """
@@ -42108,7 +42136,30 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["workspace_rrhh_documentos"],
             "suggestions": ["Abrir módulo RRHH", "Actualizar documento"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "open_module",
+                    "label": "Abrir RRHH",
+                    "payload": {"route": f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(str(workspace_id or '').strip())}&crm=rrhh"},
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "rrhh_docs_expired",
+                        "items": [
+                            {
+                                "documento_id": str(row_value(row, "id") or "").strip(),
+                                "persona_id": str(row_value(row, "persona_id") or "").strip(),
+                                "title": str(row_value(row, "nombre") or row_value(row, "tipo") or "Documento").strip(),
+                                "summary": f"{str(row_value(row, 'tipo') or '').strip()} · caduca {str(row_value(row, 'fecha_caducidad') or '').strip()}",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
+                },
+            ],
         }
     if ("comunidad" in text or "comunidades" in text or "fincas" in text) and any(token in text for token in ("cuota incoherente", "cuota desajustada", "cuota", "incoherente")):
         rows = conn.execute(
@@ -42152,7 +42203,29 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["workspace_fincas_comunidades"],
             "suggestions": ["Abrir módulo Fincas", "Actualizar comunidad"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "open_module",
+                    "label": "Abrir Fincas",
+                    "payload": {"route": f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(str(workspace_id or '').strip())}&crm=fincas"},
+                },
+                {
+                    "id": "start_review_queue",
+                    "label": "Revisión guiada",
+                    "payload": {
+                        "queue_type": "fincas_communities_quota",
+                        "items": [
+                            {
+                                "comunidad_id": str(row_value(row, "id") or "").strip(),
+                                "title": str(row_value(row, "nombre") or "Comunidad").strip(),
+                                "summary": f"cuota {row_value(row, 'cuota_mensual') or '-'} · sugerida {row_value(row, 'cuota_sugerida') or '-'} · estado {str(row_value(row, 'estado') or '').strip()}",
+                            }
+                            for row in rows
+                            if str(row_value(row, "id") or "").strip()
+                        ],
+                    },
+                },
+            ],
         }
     if ("factura" in text or "facturas" in text) and any(token in text for token in ("sin asiento", "sin asientos", "no generaron asiento", "sin contabilizar")):
         rows = conn.execute(
@@ -42281,6 +42354,8 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
         "hipotecas_missing_base": "hipoteca",
         "gestoria_rentas_missing_document": "renta",
         "gestoria_facturas_without_asiento": "factura",
+        "rrhh_docs_expired": "documento",
+        "fincas_communities_quota": "comunidad",
     }
     item_label = label_map.get(queue_text, "registro")
     if not current:
@@ -42298,6 +42373,24 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
     if cliente_id:
         entity_type = "seguro" if queue_text == "seguros_missing_pdf" else ("hipoteca" if queue_text == "hipotecas_missing_base" else ("gestoria_factura" if queue_text == "gestoria_facturas_without_asiento" else ("renta_attach" if queue_text == "gestoria_rentas_missing_document" else "")))
         navigation = {"kind": "cliente", "cliente_id": cliente_id, "entity_type": entity_type}
+    elif queue_text == "rrhh_docs_expired" and str(current.get("persona_id") or "").strip():
+        navigation = {
+            "kind": "workspace_view",
+            "view": "rrhh",
+            "tab": "docs",
+            "persona_id": str(current.get("persona_id") or "").strip(),
+            "entity_type": "rrhh_documento",
+            "entity_id": str(current.get("documento_id") or "").strip(),
+        }
+    elif queue_text == "fincas_communities_quota" and str(current.get("comunidad_id") or "").strip():
+        navigation = {
+            "kind": "workspace_view",
+            "view": "fincas",
+            "tab": "comunidades",
+            "comunidad_id": str(current.get("comunidad_id") or "").strip(),
+            "entity_type": "fincas_community",
+            "entity_id": str(current.get("comunidad_id") or "").strip(),
+        }
     message = (
         f"Abriendo {item_label} para revisión. Quedan {len(remaining)} pendiente(s)."
         if not start
@@ -43088,12 +43181,64 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=fin"
             elif queue_type in {"gestoria_rentas_missing_document", "gestoria_facturas_without_asiento"}:
                 route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=gestoria"
+            elif queue_type == "rrhh_docs_expired":
+                route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=rrhh"
+            elif queue_type == "fincas_communities_quota":
+                route = f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(workspace_text)}&crm=fincas"
         return _workspace_internal_copilot_review_queue_result(
             queue_type,
             payload.get("items") or [],
             route=route,
             start=action_text == "start_review_queue",
         )
+    if action_text == "autorreview_domain":
+        domain = str(payload.get("domain") or "").strip()
+        query_map = {
+            "rrhh": ["revisa documentos rrhh caducados"],
+            "fincas": ["revisa comunidades con cuota incoherente"],
+            "gestoria": ["que facturas siguen sin asiento", "que rentas estan sin documento"],
+            "seguros": ["que polizas estan sin pdf", "que dashboards no cuadran contra el detalle real"],
+            "financiaciones": ["que hipotecas estan sin importes base"],
+        }
+        queries = query_map.get(domain, [])
+        replies = []
+        for query in queries:
+            reply = _workspace_internal_copilot_operational_query_reply(
+                conn,
+                workspace_text,
+                query,
+                empresa_id=empresa_id,
+                service_hint=domain,
+                context=payload,
+            )
+            if reply and (reply.get("cards") or reply.get("actions")):
+                replies.append(reply)
+        if not replies:
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"No veo trabajo pendiente abierto para {domain} ahora mismo.",
+                "cards": [],
+                "actions": [],
+                "sources": ["internal_copilot_action"],
+                "suggestions": [],
+            }
+        cards = []
+        actions = []
+        sources = []
+        for reply in replies:
+            cards.extend(list(reply.get("cards") or []))
+            actions.extend(list(reply.get("actions") or []))
+            sources.extend(list(reply.get("sources") or []))
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Autorrevisión de {domain} completada. He encontrado {len(cards)} elemento(s) para revisar.",
+            "cards": cards[:12],
+            "actions": actions[:8],
+            "sources": list(dict.fromkeys(sources))[:8],
+            "suggestions": ["Lanzar una acción segura", "Abrir revisión guiada"],
+        }
     if action_text == "revalidate_current_and_continue":
         queue_type = str(payload.get("queue_type") or "").strip()
         current_item = payload.get("current_item") if isinstance(payload.get("current_item"), dict) else {}
@@ -43156,6 +43301,34 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 workspace_id=workspace_text,
                 entity_type="seguro",
                 entity_id=seguro_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+        elif queue_type == "rrhh_docs_expired":
+            documento_id = str(current_item.get("documento_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="rrhh_document",
+                servicio="rrhh",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="rrhh_documento",
+                entity_id=documento_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+        elif queue_type == "fincas_communities_quota":
+            comunidad_id = str(current_item.get("comunidad_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_community",
+                servicio="fincas",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="fincas_community",
+                entity_id=comunidad_id,
                 actor=actor,
                 context={"operation": "revalidate"},
                 now=now,

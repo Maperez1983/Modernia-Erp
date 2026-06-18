@@ -13365,6 +13365,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           setUiToast("Dashboards revalidados", String(result?.message || "Se han recalculado y revalidado los dashboards afectados."));
         } else if (String(action.id || "").trim() === "resolve_domain_safe") {
           setUiToast("Corrección segura preparada", String(result?.message || "Se han lanzado las acciones seguras del dominio seleccionado."));
+        } else if (String(action.id || "").trim() === "autorreview_domain") {
+          setUiToast("Autorrevisión completada", String(result?.message || "Se ha revisado el trabajo pendiente del dominio."));
         } else if (String(action.id || "").trim() === "revalidate_current_and_continue") {
           setUiToast("Revisión guiada actualizada", String(result?.message || "Se ha revalidado el registro actual y se ha abierto el siguiente."));
         } else if (String(action.id || "").trim() === "start_review_queue" || String(action.id || "").trim() === "continue_review_queue") {
