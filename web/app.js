@@ -12439,6 +12439,7 @@ const renderWorkspaceCopilotHub = () => {
           intent: String(data?.intent || "").trim(),
           suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
           cards: Array.isArray(data?.cards) ? data.cards : [],
+          actions: Array.isArray(data?.actions) ? data.actions : [],
           sources: Array.isArray(data?.sources) ? data.sources : [],
         });
         state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
@@ -13199,9 +13200,10 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
   }
   target.innerHTML = `
     <div class="crm-mini-list">
-      ${rows.slice(-10).map((row) => {
+      ${rows.slice(-10).map((row, index) => {
         const role = String(row.role || "assistant").trim();
         const cards = Array.isArray(row.cards) ? row.cards : [];
+        const actions = Array.isArray(row.actions) ? row.actions : [];
         const suggestions = Array.isArray(row.suggestions) ? row.suggestions : [];
         const sources = Array.isArray(row.sources) ? row.sources : [];
         return `
@@ -13236,6 +13238,18 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
                   `).join("")}
                 </div>
               ` : ""}
+              ${actions.length ? `
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+                  ${actions.slice(0, 5).map((action, actionIndex) => `
+                    <button
+                      type="button"
+                      class="secondary ghost"
+                      data-copilot-assistant-action="${escapeHtml(String(actionIndex))}"
+                      data-copilot-message-index="${escapeHtml(String(index))}"
+                    >${escapeHtml(String(action.label || action.id || "Acción"))}</button>
+                  `).join("")}
+                </div>
+              ` : ""}
               ${suggestions.length ? `<div class="muted" style="margin-top:6px">Sugerencias: ${escapeHtml(suggestions.slice(0, 4).join(" · "))}</div>` : ""}
               ${sources.length ? `<div class="muted" style="margin-top:4px">Fuentes: ${escapeHtml(sources.join(", "))}</div>` : ""}
             </div>
@@ -13244,6 +13258,54 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
       }).join("")}
     </div>
   `;
+  target.querySelectorAll("[data-copilot-assistant-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const messageIndex = Number(button.dataset.copilotMessageIndex || "-1");
+      const actionIndex = Number(button.dataset.copilotAssistantAction || "-1");
+      const messages = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? state.currentWorkspaceInternalCopilotMessages : [];
+      const row = messages[messageIndex];
+      const action = row && Array.isArray(row.actions) ? row.actions[actionIndex] : null;
+      if (!row || !action || !state.currentWorkspaceId) return;
+      if (action.requires_confirmation) {
+        const ok = window.confirm(String(action.confirm_text || "Confirma la acción."));
+        if (!ok) return;
+      }
+      button.disabled = true;
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        const result = await apiPost("/api/internal_copilot_action", {
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+          service_hint: String(params.get("crm") || "").trim(),
+          action_id: String(action.id || "").trim(),
+          action_payload: action.payload || {},
+        });
+        if (result?.navigation) {
+          await applyWorkspaceSupervisorNavigation(result);
+        }
+        if (result?.process_supervision) {
+          handleProcessSupervisorResponse(result.process_supervision, "");
+          await loadWorkspaceProcessSupervisorFeed({ silent: true });
+          await loadWorkspaceProcessSupervisorHistory({ silent: true });
+        }
+        const nextMessages = [...messages, {
+          role: "assistant",
+          message: String(result?.message || "Acción ejecutada.").trim(),
+          intent: "action_result",
+          suggestions: [],
+          cards: [],
+          actions: [],
+          sources: ["internal_copilot_action"],
+        }];
+        state.currentWorkspaceInternalCopilotMessages = nextMessages.slice(-20);
+        renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+        setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
+      } catch (error) {
+        button.disabled = false;
+        setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));
+      }
+    });
+  });
   target.querySelectorAll("[data-copilot-process-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const eventId = String(button.dataset.copilotProcessId || "").trim();

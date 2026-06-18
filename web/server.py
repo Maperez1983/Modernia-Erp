@@ -40639,6 +40639,415 @@ def _workspace_internal_copilot_review_reply(message, open_events, history):
     }
 
 
+def _workspace_internal_copilot_action_intent(message):
+    text = normalize_lookup_text(message or "").lower()
+    if any(token in text for token in ("abre", "abreme", "ábreme", "abrirme", "ficha", "busca", "localiza")) and "cliente" in text:
+        return "open_client"
+    if any(token in text for token in ("actualiza", "actualizar", "cambia", "modifica")) and any(token in text for token in ("email", "correo", "telefono", "teléfono", "movil", "móvil", "nif", "dni", "direccion", "dirección")):
+        return "update_client_basic"
+    if "renta" in text and any(token in text for token in ("carga", "sube", "mete", "adjunta", "procesa")):
+        return "attach_renta"
+    if any(token in text for token in ("poliza", "póliza", "seguro")) and any(token in text for token in ("carga", "sube", "mete", "crea", "alta", "dar de alta")):
+        return "create_seguro"
+    return ""
+
+
+def _workspace_internal_copilot_extract_email(message):
+    match = re.search(r"\b([A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,})\b", str(message or ""), re.I)
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _workspace_internal_copilot_extract_phone(message):
+    match = re.search(r"(?:telefono|tel[eé]fono|movil|m[oó]vil)\s*(?:es|:|=)?\s*([+0-9][0-9\s\-]{5,})", str(message or ""), re.I)
+    if not match:
+        return ""
+    return re.sub(r"[^\d+]", "", str(match.group(1) or "").strip())
+
+
+def _workspace_internal_copilot_extract_nif(message):
+    match = re.search(r"(?:nif|dni|cif)\s*(?:es|:|=)?\s*([0-9A-Za-z\-]{6,16})", str(message or ""), re.I)
+    return normalize_nif(match.group(1)) if match else ""
+
+
+def _workspace_internal_copilot_extract_year(message):
+    match = re.search(r"\b(20[0-9]{2})\b", str(message or ""))
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _workspace_internal_copilot_extract_doc_ref(message):
+    text = str(message or "").strip()
+    key_match = re.search(r"(?:doc_key|s3_key)\s*(?:=|:)?\s*([^\s,;]+)", text, re.I)
+    url_match = re.search(r"(https?://[^\s,;]+)", text, re.I)
+    return {
+        "doc_key": str(key_match.group(1) or "").strip() if key_match else "",
+        "doc_url": str(url_match.group(1) or "").strip() if url_match else "",
+    }
+
+
+def _workspace_internal_copilot_extract_after_marker(message, markers):
+    text = str(message or "").strip()
+    for marker in markers:
+        pattern = re.compile(rf"(?:^|\b){re.escape(str(marker or '').strip())}\b\s+(.+)$", re.I)
+        match = pattern.search(text)
+        if not match:
+            continue
+        raw = str(match.group(1) or "").strip(" :,-")
+        if raw:
+            raw = re.split(r"\b(?:con|telefono|tel[eé]fono|movil|m[oó]vil|email|correo|nif|dni|doc_key|s3_key|estado|ejercicio|año|ano|compania|compañia|numero|n[uú]mero|prima)\b", raw, maxsplit=1, flags=re.I)[0]
+            raw = raw.strip(" .,;:-")
+            if raw:
+                return raw
+    return ""
+
+
+def _workspace_internal_copilot_extract_client_query(message, context=None):
+    ctx = dict(context or {})
+    text = str(message or "").strip()
+    low = normalize_lookup_text(text).lower()
+    if any(token in low for token in ("este cliente", "esta ficha", "cliente actual")) and str(ctx.get("current_client_id") or "").strip():
+        return {"mode": "current", "cliente_id": str(ctx.get("current_client_id") or "").strip(), "query": ""}
+    nif = _workspace_internal_copilot_extract_nif(text)
+    email = _workspace_internal_copilot_extract_email(text)
+    phone = _workspace_internal_copilot_extract_phone(text)
+    named = (
+        _workspace_internal_copilot_extract_after_marker(text, ("ficha de", "cliente", "para", "de"))
+        or ""
+    )
+    query = named or email or phone or nif
+    return {
+        "mode": "lookup" if query else "",
+        "cliente_id": "",
+        "query": str(query or "").strip(),
+        "nif": nif,
+        "email": email,
+        "phone": phone,
+    }
+
+
+def _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, query_data, limit=5):
+    data = dict(query_data or {})
+    current_id = str(data.get("cliente_id") or "").strip()
+    if current_id:
+        row = conn.execute(
+            "SELECT id, nombre, nif, email, telefono, direccion FROM clientes WHERE id = ? LIMIT 1",
+            (current_id,),
+        ).fetchone()
+        return [dict(row)] if row else []
+    empresa_text = str(empresa_id or "").strip()
+    query = str(data.get("query") or "").strip()
+    nif = normalize_nif(data.get("nif") or "")
+    email = normalize_email(data.get("email") or "")
+    phone = normalize_phone(data.get("phone") or "")
+    if not any((query, nif, email, phone)):
+        return []
+    try:
+        limit_i = max(1, min(int(limit or 5), 12))
+    except Exception:
+        limit_i = 5
+    rows = []
+    try:
+        if empresa_text:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.nombre, c.nif, c.email, c.telefono, c.direccion
+                FROM clientes c
+                JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                WHERE ce.empresa_id = ?
+                GROUP BY c.id, c.nombre, c.nif, c.email, c.telefono, c.direccion
+                ORDER BY COALESCE(c.updated_at, c.created_at) DESC, c.nombre COLLATE NOCASE ASC
+                LIMIT 120
+                """,
+                (empresa_text,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, nombre, nif, email, telefono, direccion
+                FROM clientes
+                ORDER BY COALESCE(updated_at, created_at) DESC, nombre COLLATE NOCASE ASC
+                LIMIT 120
+                """
+            ).fetchall()
+    except Exception:
+        rows = []
+    scored = []
+    query_norm = normalize_lookup_text(query).lower()
+    query_tokens = [token for token in query_norm.split() if len(token) >= 2]
+    for row in rows or []:
+        row_d = dict(row)
+        score = 0
+        row_name = normalize_lookup_text(row_value(row, "nombre") or "").lower()
+        row_nif = normalize_nif(row_value(row, "nif") or "")
+        row_email = normalize_email(row_value(row, "email") or "")
+        row_phone = normalize_phone(row_value(row, "telefono") or "")
+        if nif and row_nif == nif:
+            score += 100
+        if email and row_email == email:
+            score += 90
+        if phone and row_phone and row_phone.endswith(phone[-9:]):
+            score += 70
+        if query_norm and query_norm == row_name:
+            score += 85
+        elif query_tokens and all(token in row_name for token in query_tokens):
+            score += 55 + min(len(query_tokens), 4) * 5
+        elif query_norm and query_norm in row_name:
+            score += 45
+        if score > 0:
+            row_d["_score"] = score
+            scored.append(row_d)
+    if not scored and query_norm:
+        like_value = f"%{query.strip()}%"
+        try:
+            fallback_rows = conn.execute(
+                """
+                SELECT c.id, c.nombre, c.nif, c.email, c.telefono, c.direccion
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                WHERE (? = '' OR ce.empresa_id = ?)
+                  AND (
+                    COALESCE(c.nombre, '') LIKE ?
+                    OR COALESCE(c.email, '') LIKE ?
+                  )
+                GROUP BY c.id, c.nombre, c.nif, c.email, c.telefono, c.direccion
+                ORDER BY c.nombre COLLATE NOCASE ASC
+                LIMIT ?
+                """,
+                (empresa_text, empresa_text, like_value, like_value, limit_i),
+            ).fetchall()
+            for row in fallback_rows or []:
+                row_d = dict(row)
+                row_d["_score"] = 40
+                scored.append(row_d)
+        except Exception:
+            pass
+    scored.sort(key=lambda item: (-int(item.get("_score") or 0), str(item.get("nombre") or "").lower()))
+    return scored[:limit_i]
+
+
+def _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=None):
+    query_data = _workspace_internal_copilot_extract_client_query(message, context=context)
+    candidates = _workspace_internal_copilot_search_clients(conn, workspace_id, empresa_id, query_data, limit=5)
+    exact = candidates[0] if len(candidates) == 1 else None
+    return {"query": query_data, "candidates": candidates, "exact": exact}
+
+
+def _workspace_internal_copilot_extract_contact_patch(message):
+    patch = {}
+    email = _workspace_internal_copilot_extract_email(message)
+    phone = _workspace_internal_copilot_extract_phone(message)
+    nif = _workspace_internal_copilot_extract_nif(message)
+    if email:
+        patch["email"] = email
+    if phone:
+        patch["telefono"] = phone
+    if nif:
+        patch["nif"] = nif
+    match = re.search(r"(?:direccion|direcci[oó]n)\s*(?:es|:|=)?\s*([^,;]+)", str(message or ""), re.I)
+    if match:
+        patch["direccion"] = str(match.group(1) or "").strip()
+    return patch
+
+
+def _workspace_internal_copilot_extract_seguro_payload(message, resolved_client):
+    text = str(message or "").strip()
+    payload = {}
+    payload["cliente_id"] = str(((resolved_client or {}).get("id")) or "").strip()
+    payload["tomador"] = str(((resolved_client or {}).get("nombre")) or "").strip()
+    payload["nif"] = normalize_nif(((resolved_client or {}).get("nif")) or "") or _workspace_internal_copilot_extract_nif(text)
+    payload["email"] = normalize_email(((resolved_client or {}).get("email")) or "") or _workspace_internal_copilot_extract_email(text)
+    payload["telefono"] = normalize_phone(((resolved_client or {}).get("telefono")) or "") or _workspace_internal_copilot_extract_phone(text)
+    compania_match = re.search(r"(?:compa[nñ][ií]a|aseguradora|de)\s+([A-Za-z0-9ÁÉÍÓÚÜÑ .\-]{3,})", text, re.I)
+    poliza_match = re.search(r"(?:poliza|p[oó]liza|numero|n[uú]mero)\s*(?:es|:|=)?\s*([A-Za-z0-9\-\/]{3,})", text, re.I)
+    prima_match = re.search(r"(?:prima(?: total)?|importe)\s*(?:es|:|=)?\s*([0-9][0-9.,]*)", text, re.I)
+    estado = "Presupuesto"
+    if re.search(r"\bcontratad", text, re.I):
+        estado = "Contratada"
+    if re.search(r"\ben vigor\b", text, re.I):
+        estado = "En vigor"
+    if compania_match:
+        payload["compania"] = str(compania_match.group(1) or "").strip(" .")
+    if poliza_match:
+        payload["poliza_numero"] = str(poliza_match.group(1) or "").strip()
+    if prima_match:
+        payload["prima_total"] = parse_money_value(prima_match.group(1))
+    payload["estado"] = estado
+    return payload
+
+
+def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", context=None):
+    intent = _workspace_internal_copilot_action_intent(message)
+    if not intent:
+        return None
+    client_resolution = _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=context)
+    candidates = list(client_resolution.get("candidates") or [])
+    exact = client_resolution.get("exact") or {}
+    actions = []
+    cards = []
+    if intent == "open_client":
+        if exact:
+            entity = {
+                "cliente_id": str(exact.get("id") or "").strip(),
+                "title": str(exact.get("nombre") or "Cliente").strip(),
+                "summary": " · ".join([str(exact.get("nif") or "").strip(), str(exact.get("email") or "").strip()]).strip(" ·"),
+            }
+            cards.append({"title": entity["title"], "summary": entity["summary"], "priority": "media", "impact_area": "cliente", "entity": entity})
+            actions.append({"id": "open_client", "label": "Abrir ficha", "payload": {"cliente_id": entity["cliente_id"]}})
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"He encontrado al cliente {entity['title']}. Puedo abrir su ficha ahora mismo.",
+                "sources": ["clientes"],
+                "suggestions": ["Abrir ficha", "Refrescar ficha cliente"],
+                "cards": cards,
+                "actions": actions,
+            }
+        if candidates:
+            for candidate in candidates[:4]:
+                entity = {
+                    "cliente_id": str(candidate.get("id") or "").strip(),
+                    "title": str(candidate.get("nombre") or "Cliente").strip(),
+                    "summary": " · ".join([str(candidate.get("nif") or "").strip(), str(candidate.get("email") or "").strip()]).strip(" ·"),
+                }
+                cards.append({"title": entity["title"], "summary": entity["summary"], "priority": "media", "impact_area": "cliente", "entity": entity})
+                actions.append({"id": "open_client", "label": f"Abrir {entity['title']}", "payload": {"cliente_id": entity["cliente_id"]}})
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"He encontrado varios clientes posibles para esa petición. Elige la ficha correcta.",
+                "sources": ["clientes"],
+                "suggestions": ["Abrir ficha", "Ajustar búsqueda"],
+                "cards": cards,
+                "actions": actions[:4],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "No he encontrado un cliente claro para abrir la ficha. Dime NIF, email o el nombre completo.",
+            "sources": ["clientes"],
+            "suggestions": ["Buscar por NIF", "Buscar por email"],
+            "cards": [],
+            "actions": [],
+        }
+    if not exact:
+        if candidates:
+            answer = "Antes de ejecutar la acción necesito que elijas el cliente correcto."
+            for candidate in candidates[:4]:
+                actions.append({"id": "open_client", "label": f"Abrir {str(candidate.get('nombre') or 'cliente').strip()}", "payload": {"cliente_id": str(candidate.get("id") or "").strip()}})
+                cards.append({
+                    "title": str(candidate.get("nombre") or "Cliente").strip(),
+                    "summary": " · ".join([str(candidate.get("nif") or "").strip(), str(candidate.get("email") or "").strip()]).strip(" ·"),
+                    "priority": "alta",
+                    "impact_area": "cliente",
+                    "entity": {"cliente_id": str(candidate.get("id") or "").strip(), "title": str(candidate.get("nombre") or "").strip()},
+                })
+            return {"ok": True, "intent": "action", "answer": answer, "sources": ["clientes"], "suggestions": ["Elegir cliente"], "cards": cards, "actions": actions[:4]}
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "No puedo ejecutar la acción sin identificar primero al cliente correcto.",
+            "sources": ["clientes"],
+            "suggestions": ["Indicar NIF", "Indicar email", "Abrir ficha actual"],
+            "cards": [],
+            "actions": [],
+        }
+    if intent == "update_client_basic":
+        patch = _workspace_internal_copilot_extract_contact_patch(message)
+        if not patch:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "No veo campos claros para actualizar. Indica al menos email, teléfono, NIF o dirección.",
+                "sources": ["clientes"],
+                "suggestions": ["Indicar teléfono", "Indicar email"],
+                "cards": [],
+                "actions": [],
+            }
+        actions.append(
+            {
+                "id": "update_client_basic",
+                "label": "Actualizar cliente",
+                "requires_confirmation": True,
+                "confirm_text": f"Se actualizarán datos básicos de {str(exact.get('nombre') or 'este cliente').strip()}.",
+                "payload": {"cliente_id": str(exact.get("id") or "").strip(), "patch": patch},
+            }
+        )
+        cards.append(
+            {
+                "title": str(exact.get("nombre") or "Cliente").strip(),
+                "summary": ", ".join(f"{key}: {value}" for key, value in patch.items()),
+                "priority": "media",
+                "impact_area": "cliente",
+                "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()},
+            }
+        )
+        return {"ok": True, "intent": "action", "answer": f"Puedo actualizar la ficha de {str(exact.get('nombre') or 'este cliente').strip()} con esos datos.", "sources": ["clientes"], "suggestions": ["Actualizar cliente"], "cards": cards, "actions": actions}
+    if intent == "attach_renta":
+        year = _workspace_internal_copilot_extract_year(message)
+        doc_ref = _workspace_internal_copilot_extract_doc_ref(message)
+        status = "Presentada" if "presentad" in normalize_lookup_text(message).lower() else "Borrador"
+        missing = []
+        if not year:
+            missing.append("ejercicio")
+        if not (doc_ref.get("doc_key") or doc_ref.get("doc_url")):
+            missing.append("doc_key o doc_url")
+        if missing:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Ya tengo el cliente resuelto, pero me faltan datos para cargar la renta: {', '.join(missing)}.",
+                "sources": ["clientes", "gestoria"],
+                "suggestions": ["Indicar ejercicio", "Indicar doc_key", "Indicar doc_url"],
+                "cards": [],
+                "actions": [],
+            }
+        actions.append(
+            {
+                "id": "attach_renta",
+                "label": "Cargar renta",
+                "requires_confirmation": True,
+                "confirm_text": f"Se cargará la renta {year} para {str(exact.get('nombre') or 'este cliente').strip()}.",
+                "payload": {
+                    "cliente_id": str(exact.get("id") or "").strip(),
+                    "ejercicio": year,
+                    "estado_presentacion": status,
+                    "doc_key": doc_ref.get("doc_key") or "",
+                    "doc_url": doc_ref.get("doc_url") or "",
+                },
+            }
+        )
+        cards.append({"title": f"Renta {year}", "summary": f"Cliente: {str(exact.get('nombre') or '').strip()} · estado {status}", "priority": "alta", "impact_area": "gestoria", "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()}})
+        return {"ok": True, "intent": "action", "answer": f"Puedo cargar la renta {year} en la ficha de {str(exact.get('nombre') or '').strip()}.", "sources": ["gestoria", "clientes"], "suggestions": ["Cargar renta"], "cards": cards, "actions": actions}
+    if intent == "create_seguro":
+        seguro_payload = _workspace_internal_copilot_extract_seguro_payload(message, exact)
+        missing = []
+        if not str(seguro_payload.get("compania") or "").strip():
+            missing.append("compañía")
+        if not str(seguro_payload.get("poliza_numero") or "").strip():
+            missing.append("número de póliza")
+        if missing:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Puedo preparar la póliza para {str(exact.get('nombre') or '').strip()}, pero faltan: {', '.join(missing)}.",
+                "sources": ["seguros", "clientes"],
+                "suggestions": ["Indicar compañía", "Indicar número de póliza"],
+                "cards": [],
+                "actions": [],
+            }
+        actions.append(
+            {
+                "id": "create_seguro",
+                "label": "Crear póliza",
+                "requires_confirmation": True,
+                "confirm_text": f"Se creará o actualizará la póliza {str(seguro_payload.get('poliza_numero') or '').strip()} para {str(exact.get('nombre') or '').strip()}.",
+                "payload": seguro_payload,
+            }
+        )
+        cards.append({"title": f"Póliza {str(seguro_payload.get('poliza_numero') or '').strip()}", "summary": f"{str(seguro_payload.get('compania') or '').strip()} · {str(exact.get('nombre') or '').strip()}", "priority": "alta", "impact_area": "seguros", "entity": {"cliente_id": str(exact.get("id") or "").strip(), "title": str(exact.get("nombre") or "").strip()}})
+        return {"ok": True, "intent": "action", "answer": f"Puedo dar de alta la póliza para {str(exact.get('nombre') or '').strip()}.", "sources": ["seguros", "clientes"], "suggestions": ["Crear póliza"], "cards": cards, "actions": actions}
+    return None
+
+
 def _workspace_internal_copilot_context_reply(conn, workspace_id, context, message, *, empresa_id=""):
     ctx = dict(context or {})
     text = normalize_lookup_text(message or "").lower()
@@ -40790,7 +41199,21 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         "sources": [],
         "suggestions": [],
         "cards": [],
+        "actions": [],
     }
+    action_reply = _workspace_internal_copilot_build_action_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        context=context or {},
+    )
+    if action_reply:
+        response.update(action_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
     context_reply = _workspace_internal_copilot_context_reply(conn, workspace_text, context or {}, message_text, empresa_id=company_text)
     if context_reply:
         response.update(context_reply)
@@ -40934,6 +41357,401 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     response["suggestions"] = ["Pregúntame por un error concreto", "Pídeme cómo hacer un proceso", "Haz una consulta legal"]
     response["sources"] = ["workspace_health", "workspace_process_supervisor"]
     return response
+
+
+def _workspace_internal_copilot_resolve_empresa_row(conn, workspace_id, empresa_id, actor=None):
+    company_text = str(empresa_id or "").strip()
+    if not company_text and str(workspace_id or "").strip():
+        company_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+        if company_ids:
+            company_text = str(company_ids[0] or "").strip()
+    if not company_text:
+        company_text = str(get_platform_empresa_id(conn) or "").strip()
+    if not company_text:
+        return None
+    try:
+        return conn.execute("SELECT id, nombre FROM empresas WHERE id = ? LIMIT 1", (company_text,)).fetchone()
+    except Exception:
+        return None
+
+
+def _workspace_internal_copilot_attach_renta(conn, workspace_id, empresa_id, payload, *, actor=None, now=""):
+    now = now or datetime.now(timezone.utc).isoformat()
+    cliente_id = str(payload.get("cliente_id") or "").strip()
+    ejercicio = str(payload.get("ejercicio") or "").strip()
+    estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
+    doc_key = str(payload.get("doc_key") or "").strip()
+    doc_url = str(payload.get("doc_url") or "").strip()
+    archivo_hash = str(payload.get("archivo_hash") or payload.get("file_hash") or "").strip()
+    if not cliente_id or not ejercicio:
+        raise ValueError("cliente_id y ejercicio requeridos")
+    if not doc_key and not doc_url:
+        raise ValueError("doc_key/doc_url requerido")
+    empresa_text = str(empresa_id or "").strip()
+    if not empresa_text:
+        empresa_text = str(get_platform_empresa_id(conn) or "").strip()
+    if not empresa_text:
+        raise ValueError("No se pudo resolver empresa_id")
+    cg_row = conn.execute("SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?", (cliente_id,)).fetchone()
+    renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+    entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+    current_entry = next((item for item in entries if str(item.get("ejercicio") or "").strip() == ejercicio), None)
+    if not current_entry:
+        cliente_cols = table_columns(conn, "clientes") or set()
+        selected = [col for col in ("nombre", "nif", "telefono", "email", "fecha_nacimiento", "poblacion", "provincia", "codigo_postal", "direccion") if col in cliente_cols]
+        cliente_row = conn.execute(
+            f"SELECT {', '.join(selected) if selected else 'id'} FROM clientes WHERE id = ? LIMIT 1",
+            (cliente_id,),
+        ).fetchone()
+        entry_id = uuid.uuid4().hex
+        actor_label = str((actor or {}).get("usuario") or "").strip()
+        seed = {
+            "id": entry_id,
+            "ejercicio": ejercicio,
+            "cliente_nombre": row_value(cliente_row, "nombre") or "",
+            "cliente_nif": row_value(cliente_row, "nif") or "",
+            "cliente_telefono": row_value(cliente_row, "telefono") or "",
+            "cliente_email": row_value(cliente_row, "email") or "",
+            "cliente_fecha_nacimiento": row_value(cliente_row, "fecha_nacimiento") or "",
+            "poblacion": row_value(cliente_row, "poblacion") or "",
+            "provincia": row_value(cliente_row, "provincia") or "",
+            "codigo_postal": row_value(cliente_row, "codigo_postal") or "",
+            "direccion": row_value(cliente_row, "direccion") or "",
+            "estado_presentacion": "Borrador",
+            "doc_status": "Borrador",
+            "responsable": actor_label,
+        }
+        upsert_cliente_renta_entry(conn, cliente_id, seed, now)
+        cg_row = conn.execute("SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?", (cliente_id,)).fetchone()
+        renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+        entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+        current_entry = next((item for item in entries if str(item.get("ejercicio") or "").strip() == ejercicio), None)
+    if not current_entry:
+        raise RuntimeError("No se pudo crear la campaña")
+    entry_id = str(current_entry.get("id") or "").strip()
+    doc_id = str(payload.get("doc_id") or current_entry.get("doc_presentada_id") or current_entry.get("doc_borrador_id") or "").strip()
+    presentacion_fecha = str(payload.get("presentacion_fecha") or current_entry.get("presentacion_fecha") or "").strip()
+    doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
+    doc_tipo = str(payload.get("tipo") or "Modelo 100").strip()
+    doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
+    doc_meta = classify_gestoria_renta_document(
+        conn,
+        cliente_id=cliente_id,
+        ejercicio=ejercicio,
+        nombre=doc_nombre,
+        tipo=doc_tipo,
+        notas=doc_notas,
+        referencia_id=f"renta-{ejercicio}-{entry_id}",
+        estado=estado_presentacion,
+        archivo_hash=archivo_hash,
+        doc_key=doc_key,
+        exclude_doc_id=doc_id,
+    )
+    if doc_id:
+        cur = conn.execute(
+            """
+            UPDATE gestoria_docs
+            SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
+                nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?,
+                archivo_hash = COALESCE(NULLIF(?, ''), archivo_hash),
+                ejercicio_fiscal = ?, tipo_documento = ?, estado_revision = ?, duplicate_of = ?,
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                empresa_text,
+                cliente_id,
+                f"renta-{ejercicio}-{entry_id}",
+                doc_nombre,
+                doc_tipo,
+                presentacion_fecha,
+                estado_presentacion,
+                doc_notas,
+                doc_key or None,
+                doc_url or None,
+                archivo_hash,
+                doc_meta["ejercicio_fiscal"],
+                doc_meta["tipo_documento"],
+                doc_meta["estado_revision"],
+                doc_meta["duplicate_of"],
+                now,
+                doc_id,
+            ),
+        )
+        if getattr(cur, "rowcount", 0) == 0:
+            doc_id = uuid.uuid4().hex
+    if not doc_id or not conn.execute("SELECT id FROM gestoria_docs WHERE id = ? LIMIT 1", (doc_id,)).fetchone():
+        doc_id = doc_id or uuid.uuid4().hex
+        conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+              nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+              archivo_hash, ejercicio_fiscal, tipo_documento, estado_revision, duplicate_of,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                doc_id,
+                empresa_text,
+                cliente_id,
+                f"renta-{ejercicio}-{entry_id}",
+                doc_nombre,
+                doc_tipo,
+                presentacion_fecha,
+                estado_presentacion,
+                doc_notas,
+                doc_key or None,
+                doc_url or None,
+                archivo_hash or None,
+                doc_meta["ejercicio_fiscal"],
+                doc_meta["tipo_documento"],
+                doc_meta["estado_revision"],
+                doc_meta["duplicate_of"],
+                now,
+                now,
+            ),
+        )
+    updated_entry = dict(current_entry)
+    responsable_fallback = str((actor or {}).get("usuario") or "").strip()
+    updated_entry.update(
+        {
+            "id": entry_id,
+            "ejercicio": ejercicio,
+            "estado_presentacion": estado_presentacion,
+            "doc_status": estado_presentacion,
+            "presentacion_fecha": presentacion_fecha,
+            "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
+            "responsable": str(payload.get("responsable") or current_entry.get("responsable") or responsable_fallback or "").strip(),
+            "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
+            "forma_cobro": str(payload.get("forma_cobro") or current_entry.get("forma_cobro") or "").strip(),
+            "remesada": 1 if str(payload.get("remesada", current_entry.get("remesada")) or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0,
+            "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+            "doc_key": doc_key or current_entry.get("doc_key") or "",
+            "doc_url": doc_url or current_entry.get("doc_url") or "",
+            "doc_nombre": doc_nombre or current_entry.get("doc_nombre") or "",
+            "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+            "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+        }
+    )
+    upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
+    try:
+        audit("internal_copilot_renta_attach", cliente_id, "actualizar", json.dumps(payload, ensure_ascii=False), str((actor or {}).get("usuario") or "").strip())
+    except Exception:
+        pass
+    process_supervision = run_workspace_process_supervision(
+        conn,
+        process_type="renta_attach",
+        servicio="gestoria",
+        empresa_id=empresa_text,
+        workspace_id=str(workspace_id or "").strip(),
+        entity_type="cliente",
+        entity_id=cliente_id,
+        actor=actor,
+        context={"entry_id": entry_id, "doc_id": doc_id, "ejercicio": ejercicio, "estado_presentacion": estado_presentacion},
+        now=now,
+    )
+    return {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "process_supervision": process_supervision}
+
+
+def _workspace_internal_copilot_create_seguro(conn, workspace_id, empresa_id, payload, *, actor=None, now=""):
+    now = now or datetime.now(timezone.utc).isoformat()
+    empresa_row = _workspace_internal_copilot_resolve_empresa_row(conn, workspace_id, empresa_id, actor=actor)
+    if not empresa_row:
+        raise ValueError("No se pudo resolver la empresa para seguros")
+    estado_incoming = normalize_seguro_estado_value(payload.get("estado") or "Presupuesto")
+    if estado_incoming == "En vigor":
+        estado_incoming = "Contratada"
+    cliente_id = str(payload.get("cliente_id") or "").strip()
+    if cliente_id:
+        exists = conn.execute("SELECT id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+        if not exists:
+            cliente_id = ""
+    if not cliente_id:
+        cliente_id = ensure_cliente_for_seguro(
+            conn,
+            row_value(empresa_row, "id"),
+            payload.get("tomador"),
+            payload.get("nif") or payload.get("dni"),
+            now,
+            {
+                "telefono": payload.get("telefono"),
+                "email": payload.get("email"),
+                "fecha_nacimiento": payload.get("fecha_nacimiento"),
+                "direccion": payload.get("direccion"),
+            },
+        )
+    else:
+        ensure_cliente_servicio_link(conn, cliente_id, row_value(empresa_row, "id"), "seguros", now)
+    poliza_key = payload.get("poliza_key") or ""
+    poliza_url = payload.get("poliza_url") or ""
+    if seguro_estado_requires_pdf(estado_incoming) and (not str(poliza_key or "").strip()) and (not str(poliza_url or "").strip()):
+        raise ValueError("Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor.")
+    dup_id = find_existing_seguro_id(conn, row_value(empresa_row, "id"), payload.get("poliza_numero"), payload.get("compania"))
+    incoming_smart = extract_seguro_smart_payload(payload)
+    poliza_id = os.urandom(16).hex()
+    if dup_id:
+        row = conn.execute("SELECT * FROM seguros WHERE id = ?", (dup_id,)).fetchone()
+        updates = {}
+        for key in (
+            "cliente_id", "estado", "fecha_efecto", "fecha_vencimiento", "estado_renovacion", "renovacion_fecha",
+            "nueva_poliza_ref", "poliza_numero", "poliza_key", "poliza_url", "tomador", "compania", "ramo",
+            "tipo_vigencia", "prima_neta", "prima_total", "comision", "produccion", "colaborador",
+        ):
+            incoming = payload.get(key)
+            if key == "ramo":
+                incoming = canonicalize_ramo(incoming)
+            if key == "tipo_vigencia":
+                incoming = infer_tipo_vigencia(payload.get("ramo"), incoming)
+            if key == "cliente_id" and not str(incoming or "").strip():
+                incoming = cliente_id
+            if incoming in (None, ""):
+                continue
+            current = row[key] if row and key in row.keys() else None
+            if key == "cliente_id":
+                if str(incoming).strip() and str(current or "").strip() != str(incoming).strip():
+                    updates[key] = incoming
+                continue
+            if current is None or str(current).strip() == "":
+                updates[key] = incoming
+        if updates:
+            if "estado" in updates:
+                updates["estado"] = normalize_seguro_estado_value(updates.get("estado"))
+                if not can_transition_seguro_estado(row["estado"], updates["estado"]):
+                    raise ValueError(f"Transición de estado no permitida: {row['estado'] or '-'} -> {updates['estado']}")
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, dup_id]
+            conn.execute(f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?", values)
+        poliza_id = dup_id
+        if incoming_smart:
+            merge_seguro_smart_data(conn, poliza_id, incoming_smart, now)
+        row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+        if row and row["cliente_id"]:
+            ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
+    else:
+        conn.execute(
+            """
+            INSERT INTO seguros (
+              id, empresa_id, cliente_id, mes_creacion, fecha_efecto, fecha_vencimiento,
+              tomador, compania, ramo, poliza_numero, prima_neta,
+              prima_total, comision, produccion, colaborador, estado,
+              estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+              poliza_key, poliza_url, estado_poliza, version_grupo, tipo_vigencia,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                poliza_id,
+                row_value(empresa_row, "id"),
+                cliente_id,
+                payload.get("mes_creacion"),
+                payload.get("fecha_efecto"),
+                payload.get("fecha_vencimiento"),
+                payload.get("tomador"),
+                payload.get("compania"),
+                canonicalize_ramo(payload.get("ramo")),
+                payload.get("poliza_numero"),
+                payload.get("prima_neta"),
+                payload.get("prima_total"),
+                payload.get("comision"),
+                payload.get("produccion"),
+                payload.get("colaborador"),
+                estado_incoming,
+                payload.get("estado_renovacion"),
+                payload.get("renovacion_fecha"),
+                payload.get("nueva_poliza_ref"),
+                payload.get("poliza_key"),
+                payload.get("poliza_url"),
+                "activa",
+                poliza_id,
+                infer_tipo_vigencia(payload.get("ramo"), payload.get("tipo_vigencia")),
+                now,
+                now,
+            ),
+        )
+        if incoming_smart:
+            merge_seguro_smart_data(conn, poliza_id, incoming_smart, now)
+    poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+    doc_id = ensure_seguro_doc_link(conn, poliza_row, now) if poliza_row else None
+    contabilidad_id = upsert_seguro_comision_contabilidad(conn, poliza_row, now, movimiento="emision") if poliza_row else None
+    if poliza_row:
+        log_seguro_event(conn, poliza_row, "alta", now, payload={"origen": "api/internal_copilot_action"})
+        seguros_sync_activation_action(conn, poliza_row, now)
+    process_supervision = run_workspace_process_supervision(
+        conn,
+        process_type="seguro_update",
+        servicio="seguros",
+        empresa_id=str(row_value(empresa_row, "id") or "").strip(),
+        workspace_id=str(workspace_id or "").strip(),
+        entity_type="seguro",
+        entity_id=str(poliza_id or "").strip(),
+        actor=actor,
+        context={"operation": "create", "cliente_id": cliente_id, "duplicate_of": dup_id, "estado": row_value(poliza_row, "estado") or ""},
+        now=now,
+    )
+    return {"ok": True, "id": poliza_id, "cliente_id": cliente_id, "doc_id": doc_id, "contabilidad_id": contabilidad_id, "duplicate_of": dup_id, "process_supervision": process_supervision}
+
+
+def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, action_payload=None, *, empresa_id="", actor=None, now=None):
+    workspace_text = str(workspace_id or "").strip()
+    action_text = str(action_id or "").strip()
+    payload = dict(action_payload or {})
+    now = now or datetime.now(timezone.utc).isoformat()
+    if not workspace_text or not action_text:
+        return {"error": "workspace_id y action_id requeridos"}
+    if action_text == "open_client":
+        cliente_id = str(payload.get("cliente_id") or "").strip()
+        if not cliente_id:
+            return {"error": "cliente_id requerido"}
+        row = conn.execute("SELECT id, nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+        if not row:
+            return {"error": "Cliente no encontrado"}
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Abriendo la ficha de {str(row_value(row, 'nombre') or 'Cliente').strip()}.",
+            "navigation": {"kind": "cliente", "cliente_id": cliente_id, "entity_type": "cliente"},
+        }
+    if action_text == "update_client_basic":
+        cliente_id = str(payload.get("cliente_id") or "").strip()
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+        if not cliente_id or not patch:
+            return {"error": "cliente_id y patch requeridos"}
+        allowed_fields = {"email", "telefono", "nif", "direccion", "fecha_nacimiento"}
+        updates = {key: value for key, value in patch.items() if key in allowed_fields and str(value or "").strip()}
+        if not updates:
+            return {"error": "No hay campos válidos para actualizar"}
+        set_clause = ", ".join([f"{key} = ?" for key in updates])
+        values = list(updates.values()) + [now, cliente_id]
+        conn.execute(f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?", values)
+        row = conn.execute("SELECT id, nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Datos básicos actualizados para {str(row_value(row, 'nombre') or 'el cliente').strip()}.",
+            "navigation": {"kind": "cliente", "cliente_id": cliente_id, "entity_type": "cliente", "refresh_summary": True},
+        }
+    if action_text == "attach_renta":
+        result = _workspace_internal_copilot_attach_renta(conn, workspace_text, empresa_id, payload, actor=actor, now=now)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Renta {str(payload.get('ejercicio') or '').strip()} cargada correctamente en la ficha del cliente.",
+            **result,
+        }
+    if action_text == "create_seguro":
+        result = _workspace_internal_copilot_create_seguro(conn, workspace_text, empresa_id, payload, actor=actor, now=now)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Póliza {str(payload.get('poliza_numero') or '').strip()} registrada correctamente.",
+            **result,
+        }
+    return {"error": "Acción no soportada"}
 
 
 def _workspace_duplicate_client_signals(conn, empresa_id, cliente_id):
@@ -52566,6 +53384,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
             "/api/internal_copilot_chat",
+            "/api/internal_copilot_action",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -53545,6 +54364,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
             "/api/internal_copilot_chat",
+            "/api/internal_copilot_action",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -54510,6 +55330,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
             "/api/internal_copilot_chat",
+            "/api/internal_copilot_action",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -69174,6 +69995,38 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": reply.get("error")}, status=400)
                 return
             json_response(self, reply)
+            return
+        elif parsed.path == "/api/internal_copilot_action":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            action_id = str(payload.get("action_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            action_payload = payload.get("action_payload") if isinstance(payload.get("action_payload"), dict) else {}
+            if not workspace_id or not action_id:
+                json_response(self, {"error": "workspace_id y action_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_id,
+                action_id,
+                action_payload,
+                empresa_id=empresa_id,
+                actor=session,
+                now=now,
+            )
+            if result.get("error"):
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": result.get("error")}, status=400)
+                return
+            conn.commit()
+            json_response(self, result)
             return
         elif parsed.path == "/api/legal_dgt_lookup":
             area = normalize_legal_area(payload.get("area") or "gestoria")

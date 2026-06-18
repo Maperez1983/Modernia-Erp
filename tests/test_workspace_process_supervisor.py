@@ -89,7 +89,12 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
               id TEXT PRIMARY KEY,
               nombre TEXT,
               nif TEXT,
-              email TEXT
+              email TEXT,
+              telefono TEXT,
+              direccion TEXT,
+              fecha_nacimiento TEXT,
+              created_at TEXT,
+              updated_at TEXT
             )
             """
         )
@@ -105,10 +110,109 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.conn.execute(
             """
+            CREATE TABLE empresas (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
             CREATE TABLE cliente_gestoria (
+              id TEXT,
               cliente_id TEXT PRIMARY KEY,
+              tipo_cliente TEXT,
+              mod_fiscal INTEGER,
+              mod_laboral INTEGER,
+              mod_contable INTEGER,
               mod_renta INTEGER,
+              mod_registro INTEGER,
+              mod_trafico INTEGER,
+              mod_puntuales INTEGER,
               renta_detalles TEXT
+              ,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE gestoria_docs (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              referencia_tipo TEXT,
+              referencia_id TEXT,
+              nombre TEXT,
+              tipo TEXT,
+              fecha TEXT,
+              estado TEXT,
+              notas TEXT,
+              doc_key TEXT,
+              doc_url TEXT,
+              archivo_hash TEXT,
+              ejercicio_fiscal TEXT,
+              tipo_documento TEXT,
+              estado_revision TEXT,
+              duplicate_of TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE seguros (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              mes_creacion TEXT,
+              fecha_efecto TEXT,
+              fecha_vencimiento TEXT,
+              tomador TEXT,
+              compania TEXT,
+              ramo TEXT,
+              poliza_numero TEXT,
+              prima_neta REAL,
+              prima_total REAL,
+              comision REAL,
+              produccion REAL,
+              colaborador TEXT,
+              estado TEXT,
+              estado_renovacion TEXT,
+              renovacion_fecha TEXT,
+              nueva_poliza_ref TEXT,
+              poliza_key TEXT,
+              poliza_url TEXT,
+              estado_poliza TEXT,
+              version_grupo TEXT,
+              tipo_vigencia TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE acciones (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              servicio TEXT,
+              cliente_id TEXT,
+              inmueble_id TEXT,
+              cliente_nombre TEXT,
+              fecha TEXT,
+              hora TEXT,
+              tipo TEXT,
+              responsable TEXT,
+              estado TEXT,
+              notas TEXT,
+              recordatorio_min INTEGER,
+              created_at TEXT,
+              updated_at TEXT
             )
             """
         )
@@ -1052,6 +1156,57 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("Comunidad Centro", reply["answer"])
         self.assertTrue(reply["cards"])
+
+    def test_internal_copilot_builds_open_client_action(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c30', 'Juan Perez', '22222222B', 'juan@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce30', 'c30', 'e1', 'gestoria')")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "ábreme la ficha del cliente Juan Perez",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertTrue(reply["actions"])
+        self.assertEqual(reply["actions"][0]["id"], "open_client")
+
+    def test_internal_copilot_action_updates_client_basic_fields(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, telefono, created_at, updated_at) VALUES ('c31', 'Maria Lopez', '33333333C', '', '', 'now', 'now')")
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_client_basic",
+            {"cliente_id": "c31", "patch": {"email": "maria@test.local", "telefono": "+34600111222"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:00:00Z",
+        )
+        row = self.conn.execute("SELECT email, telefono FROM clientes WHERE id = 'c31'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertEqual(row["email"], "maria@test.local")
+        self.assertEqual(row["telefono"], "+34600111222")
+
+    def test_internal_copilot_action_attaches_renta(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, telefono, created_at, updated_at) VALUES ('c32', 'Cliente Renta', '44444444D', 'renta@test.local', '+34600111333', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce32', 'c32', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "attach_renta",
+            {"cliente_id": "c32", "ejercicio": "2025", "doc_key": "rentas/doc1.pdf", "estado_presentacion": "Presentada"},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T12:05:00Z",
+        )
+        cg = self.conn.execute("SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = 'c32'").fetchone()
+        docs = self.conn.execute("SELECT COUNT(*) AS total FROM gestoria_docs WHERE cliente_id = 'c32'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertIsNotNone(cg)
+        self.assertGreaterEqual(int(docs["total"] or 0), 1)
 
 
 if __name__ == "__main__":
