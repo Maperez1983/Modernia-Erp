@@ -71,8 +71,11 @@ class FrontendSmokeTests(unittest.TestCase):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         self.assertIn("Supervisor de procesos", app_js)
         self.assertIn('id="workspaceProcessSupervisorFeed"', app_js)
+        self.assertIn('id="workspaceProcessSupervisorHistory"', app_js)
         self.assertIn('"/api/workspace_process_supervisor_ack"', app_js)
+        self.assertIn('"/api/workspace_process_supervisor_action"', app_js)
         self.assertIn("handleProcessSupervisorResponse", app_js)
+        self.assertIn("loadWorkspaceProcessSupervisorHistory", app_js)
 
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")

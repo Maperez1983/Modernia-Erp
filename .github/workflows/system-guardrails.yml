@@ -26,6 +26,9 @@ jobs:
       - name: Run automation unit tests
         run: python3 -m unittest tests.test_ollama_automation_tools
 
+      - name: Run process supervisor unit tests
+        run: python3 -m unittest tests.test_workspace_process_supervisor tests.test_frontend_smoke
+
       - name: Review diff with heuristics
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -33,6 +36,12 @@ jobs:
           else
             python3 scripts/ollama_diff_review.py --rev-range "HEAD~1...HEAD" --no-ollama --fail-on-review --json
           fi
+
+      - name: Run business reconciliation locally
+        run: python3 scripts/system_business_reconciliation.py --json
+
+      - name: Run process smoke locally
+        run: python3 scripts/prod_process_smoke.py --json
 
       - name: Render latest dashboard locally
         run: python3 scripts/run_system_audit.py --skip-local --report-dir /tmp/system_audit_ci

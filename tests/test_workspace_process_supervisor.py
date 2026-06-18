@@ -61,6 +61,30 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.conn.execute(
             """
+            CREATE TABLE workspace_process_supervisor_history (
+              id TEXT PRIMARY KEY,
+              event_id TEXT,
+              workspace_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              process_type TEXT,
+              entity_type TEXT,
+              entity_id TEXT,
+              actor_user_id TEXT,
+              actor_label TEXT,
+              status TEXT,
+              severity TEXT,
+              title TEXT,
+              summary TEXT,
+              anomaly_json TEXT,
+              actions_json TEXT,
+              llm_payload TEXT,
+              created_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
             CREATE TABLE clientes (
               id TEXT PRIMARY KEY,
               nombre TEXT,
@@ -419,6 +443,10 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(item["code"] == "duplicate_client_nif" for item in result["anomalies"]))
         feed = server.fetch_workspace_process_supervisor_events(self.conn, "ws1", limit=10, only_open=True)
         self.assertEqual(len(feed["rows"]), 1)
+        self.assertIn("priority", feed["rows"][0])
+        self.assertIn("action_items", feed["rows"][0])
+        history = server.fetch_workspace_process_supervisor_history(self.conn, "ws1", limit=10)
+        self.assertEqual(len(history["rows"]), 1)
         self.assertTrue(server.acknowledge_workspace_process_supervisor_event(self.conn, "ws1", feed["rows"][0]["id"], actor="QA"))
         feed_after = server.fetch_workspace_process_supervisor_events(self.conn, "ws1", limit=10, only_open=True)
         self.assertEqual(feed_after["rows"], [])
@@ -596,6 +624,31 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "incomplete")
         self.assertTrue(any(item["code"] == "fincas_accounting_community_missing" for item in result["anomalies"]))
+
+    def test_process_action_returns_dashboard_route(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt1', 'ws1', 'e1', 'gestoria', 'gestoria_dashboard', 'gestoria_dashboard', 'ws1', '',
+              '', 'ok_with_warnings', 'warning', 'Dashboard', 'Resumen', '[]', '[]', '{}',
+              'd1', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_process_supervisor_action(
+            self.conn,
+            "ws1",
+            "evt1",
+            "reload_dashboard",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T11:20:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("/api/gestoria_dashboard", result["route"])
 
 
 if __name__ == "__main__":

@@ -36219,6 +36219,30 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_process_supervisor_history (
+          id TEXT PRIMARY KEY,
+          event_id TEXT,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          servicio TEXT NOT NULL,
+          process_type TEXT NOT NULL,
+          entity_type TEXT,
+          entity_id TEXT,
+          actor_user_id TEXT,
+          actor_label TEXT,
+          status TEXT NOT NULL,
+          severity TEXT NOT NULL DEFAULT 'warning',
+          title TEXT NOT NULL,
+          summary TEXT,
+          anomaly_json TEXT,
+          actions_json TEXT,
+          llm_payload TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_ws_created ON workspace_process_supervisor (workspace_id, created_at DESC)"
@@ -36228,6 +36252,9 @@ def ensure_workspace_product_tables(conn):
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_entity ON workspace_process_supervisor (workspace_id, process_type, entity_type, entity_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_history_ws_created ON workspace_process_supervisor_history (workspace_id, created_at DESC)"
         )
     except Exception:
         pass
@@ -39975,6 +40002,106 @@ def _workspace_process_parse_json(raw, fallback):
     return parsed if isinstance(parsed, type(fallback)) else fallback
 
 
+def _workspace_process_priority(status, severity, process_type):
+    status_text = _workspace_process_status(status)
+    severity_text = _workspace_process_severity(severity)
+    process_text = str(process_type or "").strip()
+    high_risk = {"gestoria_factura", "gestoria_accounting", "seguro_update", "seguro_recibo", "seguro_siniestro", "hipoteca_update"}
+    if status_text in {"failed", "inconsistent"} or severity_text == "error":
+        return "alta"
+    if status_text == "incomplete" and process_text in high_risk:
+        return "alta"
+    if status_text in {"incomplete", "ok_with_warnings"}:
+        return "media"
+    return "baja"
+
+
+def _workspace_process_impact_area(process_type, servicio):
+    service_text = normalize_service_key(servicio or "") or str(servicio or "").strip().lower()
+    process_text = str(process_type or "").strip()
+    if process_text in {"gestoria_factura", "gestoria_accounting", "fincas_contabilidad"}:
+        return "economico"
+    if process_text in {"rrhh_document", "rrhh_ausencia", "rrhh_gasto"}:
+        return "laboral"
+    if process_text in {"seguro_update", "seguro_recibo", "seguro_siniestro"}:
+        return "comercial"
+    if "dashboard" in process_text:
+        return "reporting"
+    if service_text == "fincas":
+        return "operativo"
+    return "operativo"
+
+
+def _workspace_process_target_route(workspace_id, row):
+    ws = str(workspace_id or "").strip()
+    if not ws:
+        return ""
+    process_type = str((row or {}).get("process_type") or "").strip()
+    route_map = {
+        "renta_attach": "gestoria",
+        "gestoria_factura": "gestoria",
+        "gestoria_accounting": "gestoria",
+        "gestoria_dashboard": "gestoria",
+        "seguro_update": "seguros",
+        "seguro_recibo": "seguros",
+        "seguro_siniestro": "seguros",
+        "seguros_dashboard": "seguros",
+        "hipoteca_update": "fin",
+        "agenda_action": "inmo",
+        "fincas_community": "fincas",
+        "fincas_incidencia": "fincas",
+        "fincas_provider": "fincas",
+        "fincas_junta": "fincas",
+        "fincas_contabilidad": "fincas",
+        "rrhh_document": "rrhh",
+        "rrhh_ausencia": "rrhh",
+        "rrhh_gasto": "rrhh",
+    }
+    crm = route_map.get(process_type, "")
+    if not crm:
+        return ""
+    return f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(ws)}&crm={urllib.parse.quote(crm)}"
+
+
+def _workspace_process_action_items(row, workspace_id):
+    process_type = str((row or {}).get("process_type") or "").strip()
+    acknowledged = int((row or {}).get("acknowledged") or 0) == 1
+    target_route = _workspace_process_target_route(workspace_id, row)
+    items = []
+    if target_route:
+        items.append({"id": "open_module", "label": "Abrir módulo", "kind": "navigate", "route": target_route})
+    if process_type in {"gestoria_dashboard", "seguros_dashboard"}:
+        items.append({"id": "reload_dashboard", "label": "Recalcular dashboard", "kind": "refresh"})
+    if process_type in {"gestoria_factura", "rrhh_document"}:
+        items.append({"id": "open_record", "label": "Ir al registro", "kind": "navigate", "route": target_route})
+    if not acknowledged:
+        items.append({"id": "acknowledge", "label": "Marcar revisado", "kind": "ack"})
+    return items[:4]
+
+
+def _workspace_process_memory_excerpt(process_type):
+    try:
+        docs_dir = ROOT.parent / "docs"
+        process_catalog = json.loads((docs_dir / "process_catalog.json").read_text(encoding="utf-8"))
+        incidents = []
+        incidents_path = docs_dir / "incidents.jsonl"
+        if incidents_path.exists():
+            for line in incidents_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    incidents.append(json.loads(line))
+                except Exception:
+                    continue
+        processes = process_catalog.get("processes") or []
+        meta = next((item for item in processes if str(item.get("id") or "").strip() == str(process_type or "").strip()), {})
+        related = [item for item in incidents if str(item.get("process") or item.get("module") or "").strip() == str(process_type or "").strip()][:3]
+        return {"process": meta, "incidents": related}
+    except Exception:
+        return {"process": {}, "incidents": []}
+
+
 def _workspace_duplicate_client_signals(conn, empresa_id, cliente_id):
     empresa_text = str(empresa_id or "").strip()
     cliente_text = str(cliente_id or "").strip()
@@ -40076,6 +40203,7 @@ def _workspace_process_fallback_message(process_type, status, anomalies):
 def _build_workspace_process_ollama_message(process_type, status, servicio, anomalies, context):
     if not ollama_available():
         return {}
+    memory = _workspace_process_memory_excerpt(process_type)
     prompt = (
         "Actúa como supervisor operativo de un CRM multiempresa. "
         "Debes explicar incidencias de procesos a un usuario final en castellano claro. "
@@ -40088,6 +40216,7 @@ def _build_workspace_process_ollama_message(process_type, status, servicio, anom
                 "servicio": servicio,
                 "anomalies": anomalies,
                 "context": context,
+                "memory": memory,
             },
             ensure_ascii=False,
         )
@@ -40176,6 +40305,35 @@ def _store_workspace_process_event(
                 record_id,
             ),
         )
+        conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor_history (
+              id, event_id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id,
+              actor_user_id, actor_label, status, severity, title, summary,
+              anomaly_json, actions_json, llm_payload, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                os.urandom(16).hex(),
+                record_id,
+                workspace_id,
+                empresa_id or None,
+                servicio,
+                process_type,
+                entity_type or None,
+                entity_id or None,
+                actor_user_id or None,
+                actor_label or None,
+                status,
+                severity,
+                title,
+                summary,
+                anomaly_json,
+                actions_json,
+                llm_json,
+                now_ts,
+            ),
+        )
         return record_id
     record_id = os.urandom(16).hex()
     conn.execute(
@@ -40206,6 +40364,35 @@ def _store_workspace_process_event(
             llm_json,
             dedupe_key,
             now_ts,
+            now_ts,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO workspace_process_supervisor_history (
+          id, event_id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id,
+          actor_user_id, actor_label, status, severity, title, summary,
+          anomaly_json, actions_json, llm_payload, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            os.urandom(16).hex(),
+            record_id,
+            workspace_id,
+            empresa_id or None,
+            servicio,
+            process_type,
+            entity_type or None,
+            entity_id or None,
+            actor_user_id or None,
+            actor_label or None,
+            status,
+            severity,
+            title,
+            summary,
+            anomaly_json,
+            actions_json,
+            llm_json,
             now_ts,
         ),
     )
@@ -40252,6 +40439,33 @@ def fetch_workspace_process_supervisor_events(conn, workspace_id, limit=25, only
         item["anomalies"] = _workspace_process_parse_json(item.get("anomaly_json"), [])
         item["actions"] = _workspace_process_parse_json(item.get("actions_json"), [])
         item["llm_payload"] = _workspace_process_parse_json(item.get("llm_payload"), {})
+        item["priority"] = _workspace_process_priority(item.get("status"), item.get("severity"), item.get("process_type"))
+        item["impact_area"] = _workspace_process_impact_area(item.get("process_type"), item.get("servicio"))
+        item["target_route"] = _workspace_process_target_route(workspace_id, item)
+        item["action_items"] = _workspace_process_action_items(item, workspace_id)
+        payload_rows.append(item)
+    return {"rows": payload_rows}
+
+
+def fetch_workspace_process_supervisor_history(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM workspace_process_supervisor_history
+        WHERE workspace_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (str(workspace_id or "").strip(), max(1, min(int(limit or 40), 200))),
+    ).fetchall()
+    payload_rows = []
+    for row in rows or []:
+        item = dict(row)
+        item["anomalies"] = _workspace_process_parse_json(item.get("anomaly_json"), [])
+        item["actions"] = _workspace_process_parse_json(item.get("actions_json"), [])
+        item["llm_payload"] = _workspace_process_parse_json(item.get("llm_payload"), {})
+        item["priority"] = _workspace_process_priority(item.get("status"), item.get("severity"), item.get("process_type"))
+        item["impact_area"] = _workspace_process_impact_area(item.get("process_type"), item.get("servicio"))
         payload_rows.append(item)
     return {"rows": payload_rows}
 
@@ -40286,6 +40500,40 @@ def acknowledge_workspace_process_supervisor_event(conn, workspace_id, event_id,
         (now_ts, now_ts, summary or None, event_text, workspace_text),
     )
     return True
+
+
+def perform_workspace_process_supervisor_action(conn, workspace_id, event_id, action_id, actor=None, now=None):
+    workspace_text = str(workspace_id or "").strip()
+    event_text = str(event_id or "").strip()
+    action_text = str(action_id or "").strip()
+    if not workspace_text or not event_text or not action_text:
+        return {"ok": False, "error": "workspace_id, id y action_id requeridos"}
+    row = conn.execute(
+        """
+        SELECT *
+        FROM workspace_process_supervisor
+        WHERE id = ? AND workspace_id = ?
+        LIMIT 1
+        """,
+        (event_text, workspace_text),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "error": "Incidencia no encontrada"}
+    item = dict(row)
+    target_route = _workspace_process_target_route(workspace_text, item)
+    if action_text == "acknowledge":
+        acknowledge_workspace_process_supervisor_event(conn, workspace_text, event_text, actor=actor, now=now)
+        return {"ok": True, "action_id": action_text, "applied": True}
+    if action_text in {"open_module", "open_record"}:
+        return {"ok": True, "action_id": action_text, "applied": False, "route": target_route}
+    if action_text == "reload_dashboard":
+        process_type = str(item.get("process_type") or "").strip()
+        if process_type == "gestoria_dashboard":
+            return {"ok": True, "action_id": action_text, "applied": True, "route": f"/api/gestoria_dashboard?workspace_id={urllib.parse.quote(workspace_text)}"}
+        if process_type == "seguros_dashboard":
+            return {"ok": True, "action_id": action_text, "applied": True, "route": f"/api/fincas_seguros_dashboard?workspace_id={urllib.parse.quote(workspace_text)}"}
+        return {"ok": True, "action_id": action_text, "applied": False}
+    return {"ok": False, "error": "action_id no soportada"}
 
 
 def _check_workspace_renta_process(conn, empresa_id, entity_id, context):
@@ -45253,6 +45501,19 @@ def fetch_workspace_health(conn, workspace_id):
     fincas_incidents = (_safe(lambda: fetch_workspace_fincas_incidencias(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
     fincas_providers = (_safe(lambda: fetch_workspace_fincas_proveedores(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
     fincas_meetings = (_safe(lambda: fetch_workspace_fincas_juntas(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    process_open_row = _safe(
+        lambda: conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM workspace_process_supervisor
+            WHERE workspace_id = ?
+              AND acknowledged = 0
+            """,
+            (workspace_id,),
+        ).fetchone(),
+        None,
+    )
+    process_open_total = int(row_value(process_open_row, "total", 0) or 0)
     series_rows = (_safe(lambda: fetch_workspace_series(conn, workspace_id), {"rows": []}).get("rows") or [])
     facturas_total_row = _safe(
         lambda: conn.execute(
@@ -45404,6 +45665,7 @@ def fetch_workspace_health(conn, workspace_id):
         "portal_cliente": (len(portal_rows) + len(portal_requests), "clientes y requerimientos de portal", "Invitar clientes clave y crear requerimientos."),
         "registro_horario": (len(time_rows), "fichajes registrados", "Activar fichajes y política laboral."),
         "automatizaciones": (len(automation_rows), "automatizaciones configuradas", "Definir reglas por evento."),
+        "process_supervisor": (process_open_total, "incidencias operativas abiertas", "Resolver o revisar las incidencias críticas del supervisor."),
     }
     module_health = []
     for module in modules:
@@ -45442,6 +45704,7 @@ def fetch_workspace_health(conn, workspace_id):
             "fichajes": len(time_rows),
             "comunidades": len(fincas_communities),
             "remesas": len(remittance_rows),
+            "processes_open": process_open_total,
         },
     }
 
@@ -52445,6 +52708,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_automatizaciones",
                 "/api/workspace_registro_notifications",
                 "/api/workspace_process_supervisor_ack",
+                "/api/workspace_process_supervisor_action",
                 "/api/workspace_document_assign",
                 "/api/workspace_portal_upload",
                 "/api/workspace_portal_public_request",
@@ -52752,6 +53016,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_usuario_toggle",
             "/api/workspace_registro_notifications",
             "/api/workspace_process_supervisor_ack",
+            "/api/workspace_process_supervisor_action",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_periodo_lock",
             "/api/workspace_kiosk_toggle",
@@ -61995,6 +62260,32 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.commit()
             json_response(self, {"ok": True, "id": event_id})
+            return
+        elif parsed.path == "/api/workspace_process_supervisor_action":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            event_id = str(payload.get("id") or "").strip()
+            action_id = str(payload.get("action_id") or "").strip()
+            if not workspace_id or not event_id or not action_id:
+                json_response(self, {"error": "workspace_id, id y action_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            result = perform_workspace_process_supervisor_action(
+                conn,
+                workspace_id,
+                event_id,
+                action_id,
+                actor=session,
+                now=now,
+            )
+            if not result.get("ok"):
+                json_response(self, {"error": result.get("error") or "No se pudo ejecutar la acción"}, status=400)
+                return
+            conn.commit()
+            json_response(self, result)
             return
         elif parsed.path == "/api/workspace_registro_horario_xml":
             workspace_id = params.get("workspace_id", [""])[0]
@@ -75827,6 +76118,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_process_supervisor_events(conn, workspace_id, limit=limit, only_open=only_open))
+            return
+        if path == "/api/workspace_process_supervisor_history":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_process_supervisor_history(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/workspace_kiosk_status":

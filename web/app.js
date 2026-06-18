@@ -9343,6 +9343,13 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
     const summary = data.summary || {};
+    const processRows = Array.isArray(state.currentWorkspaceData?.processSupervisorRows) ? state.currentWorkspaceData.processSupervisorRows : [];
+    const processHistory = Array.isArray(state.currentWorkspaceData?.processSupervisorHistory) ? state.currentWorkspaceData.processSupervisorHistory : [];
+    const processCounts = processRows.reduce((acc, row) => {
+      const key = String(row?.priority || "media").trim().toLowerCase();
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
     const audit = systemAudit && typeof systemAudit === "object" ? systemAudit : null;
     const auditStatus = String(audit?.status || "").trim().toLowerCase();
     const auditBadge =
@@ -9375,6 +9382,10 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
               <div class="workspace-summary-row">
                 <div><strong>Pasos fallidos</strong><div class="muted">${escapeHtml((Array.isArray(audit.failed_steps) ? audit.failed_steps.join(", ") : "") || "Ninguno")}</div></div>
                 <div class="workspace-summary-meta"><span>${escapeHtml(String(audit.source || "render_cron"))}</span></div>
+              </div>
+              <div class="workspace-summary-row">
+                <div><strong>Procesos abiertos</strong><div class="muted">${numberFormatter.format(processRows.length)} incidencias vivas en el workspace</div></div>
+                <div class="workspace-summary-meta"><span>${numberFormatter.format(Number(processCounts.alta || 0))} alta · ${numberFormatter.format(Number(processCounts.media || 0))} media</span></div>
               </div>
               ${
                 audit?.quarantine?.quarantined
@@ -9423,6 +9434,25 @@ const renderWorkspaceHealth = (data = {}, systemAudit = null) => {
                             <div class="workspace-summary-row">
                               <div><strong>${escapeHtml(String(row.name || row.kind || "-"))}</strong><div class="muted">${escapeHtml(String(row.status || "-"))}</div></div>
                               <div class="workspace-summary-meta"><span>${escapeHtml(String((row.failed_checks || []).slice(0, 3).join(", ") || "ok"))}</span></div>
+                            </div>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                : ""
+            }
+            ${
+              processHistory.length
+                ? `
+                    <div class="workspace-summary-list" style="margin-top:12px;">
+                      ${processHistory
+                        .slice(0, 4)
+                        .map(
+                          (row) => `
+                            <div class="workspace-summary-row">
+                              <div><strong>${escapeHtml(String(row.title || row.process_type || "-"))}</strong><div class="muted">${escapeHtml(String(row.created_at || ""))}</div></div>
+                              <div class="workspace-summary-meta"><span>${escapeHtml(String(row.priority || "media"))} · ${escapeHtml(String(row.status || "-"))}</span></div>
                             </div>
                           `
                         )
@@ -12200,6 +12230,10 @@ const renderWorkspaceCopilotHub = () => {
         </div>
       </div>
       <div id="workspaceProcessSupervisorFeed"><p class="muted">Cargando incidencias recientes...</p></div>
+      <div style="margin-top:12px">
+        <strong>Histórico reciente</strong>
+        <div id="workspaceProcessSupervisorHistory"><p class="muted">Cargando histórico...</p></div>
+      </div>
     </div>
     <div class="workspace-home-detail-card" style="margin-top:14px">
       <div class="section-head">
@@ -12309,6 +12343,7 @@ const renderWorkspaceCopilotHub = () => {
   const contractClauses = contractForm?.querySelector('[name="clausulas_extra"]');
   const contractNotes = contractForm?.querySelector('[name="notas"]');
   void loadWorkspaceProcessSupervisorFeed({ silent: true });
+  void loadWorkspaceProcessSupervisorHistory({ silent: true });
 
   const fillContractFormDefaults = () => {
     if (!contractForm) return;
@@ -12823,12 +12858,15 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       ${items.slice(0, 12).map((row) => {
         const anomalies = Array.isArray(row.anomalies) ? row.anomalies : [];
         const actions = Array.isArray(row.actions) ? row.actions : [];
+        const actionItems = Array.isArray(row.action_items) ? row.action_items : [];
         const severity = String(row.severity || "warning").trim();
+        const priority = String(row.priority || "media").trim();
+        const impact = String(row.impact_area || "operativo").trim();
         return `
           <div class="crm-mini-row" style="align-items:flex-start; gap:12px">
             <div style="flex:1 1 auto">
               <strong>${escapeHtml(String(row.title || "Incidencia de proceso"))}</strong>
-              <div class="muted">${escapeHtml(String(row.created_at || ""))} · ${escapeHtml(String(row.servicio || row.process_type || ""))}</div>
+              <div class="muted">${escapeHtml(String(row.created_at || ""))} · ${escapeHtml(String(row.servicio || row.process_type || ""))} · ${escapeHtml(priority)} · ${escapeHtml(impact)}</div>
               <p class="muted" style="margin:6px 0 0">${escapeHtml(String(row.summary || ""))}</p>
               ${anomalies.length ? `
                 <ul class="workspace-notification-list" style="margin-top:8px">
@@ -12836,6 +12874,11 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
                 </ul>
               ` : ""}
               ${actions.length ? `<div class="muted" style="margin-top:6px">Siguiente paso: ${escapeHtml(actions.slice(0, 3).join(" · "))}</div>` : ""}
+              ${actionItems.length ? `
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+                  ${actionItems.map((action) => `<button type="button" class="secondary ghost" data-workspace-process-action="${escapeHtml(String(action.id || ""))}" data-workspace-process-id="${escapeHtml(String(row.id || ""))}" data-workspace-process-route="${escapeHtml(String(action.route || ""))}">${escapeHtml(String(action.label || action.id || "Acción"))}</button>`).join("")}
+                </div>
+              ` : ""}
             </div>
             <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end">
               <span class="muted">${escapeHtml(severity)}</span>
@@ -12863,6 +12906,39 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       }
     });
   });
+  target.querySelectorAll("[data-workspace-process-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const eventId = String(button.dataset.workspaceProcessId || "").trim();
+      const actionId = String(button.dataset.workspaceProcessAction || "").trim();
+      const route = String(button.dataset.workspaceProcessRoute || "").trim();
+      if (!eventId || !actionId || !state.currentWorkspaceId) return;
+      if (actionId === "open_module" || actionId === "open_record") {
+        if (route) {
+          window.location.href = route;
+        }
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await apiPost("/api/workspace_process_supervisor_action", {
+          workspace_id: state.currentWorkspaceId,
+          id: eventId,
+          action_id: actionId,
+        });
+        if (result?.route && actionId === "reload_dashboard") {
+          await safeWorkspaceApi(result.route, {});
+        }
+        await loadWorkspaceProcessSupervisorFeed({ silent: true });
+        await loadWorkspaceProcessSupervisorHistory({ silent: true });
+        if (actionId === "reload_dashboard") {
+          setUiToast("Dashboard recalculado", "Se ha relanzado la comprobación y refrescado el resumen.");
+        }
+      } catch (error) {
+        button.disabled = false;
+        setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));
+      }
+    });
+  });
 };
 
 const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {
@@ -12883,6 +12959,47 @@ const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {
       setUiToast("No se pudo cargar el supervisor de procesos", String(error?.message || "Error desconocido"));
     }
     renderWorkspaceProcessSupervisorFeed([]);
+  }
+};
+
+const renderWorkspaceProcessSupervisorHistory = (rows = []) => {
+  const target = document.getElementById("workspaceProcessSupervisorHistory");
+  if (!target) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    target.innerHTML = "<p class='muted'>Sin histórico reciente.</p>";
+    return;
+  }
+  target.innerHTML = `
+    <div class="workspace-summary-list">
+      ${items.slice(0, 6).map((row) => `
+        <div class="workspace-summary-row">
+          <div><strong>${escapeHtml(String(row.title || row.process_type || "Proceso"))}</strong><div class="muted">${escapeHtml(String(row.created_at || ""))}</div></div>
+          <div class="workspace-summary-meta"><span>${escapeHtml(String(row.priority || "media"))} · ${escapeHtml(String(row.status || "-"))}</span></div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+};
+
+const loadWorkspaceProcessSupervisorHistory = async ({ silent = false } = {}) => {
+  const target = document.getElementById("workspaceProcessSupervisorHistory");
+  if (!target || !state.currentWorkspaceId) return;
+  try {
+    const data = await safeWorkspaceApi(
+      `/api/workspace_process_supervisor_history?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=12`,
+      { rows: [] }
+    );
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    if (state.currentWorkspaceData) {
+      state.currentWorkspaceData.processSupervisorHistory = rows;
+    }
+    renderWorkspaceProcessSupervisorHistory(rows);
+  } catch (error) {
+    if (!silent) {
+      setUiToast("No se pudo cargar el histórico del supervisor", String(error?.message || "Error desconocido"));
+    }
+    renderWorkspaceProcessSupervisorHistory([]);
   }
 };
 
