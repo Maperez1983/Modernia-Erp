@@ -41794,7 +41794,13 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["seguros"],
             "suggestions": ["Abrir seguros", "Actualizar póliza"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "open_module",
+                    "label": "Abrir seguros",
+                    "payload": {"route": f"/?holding=1&mode=tenant&workspace={urllib.parse.quote(str(workspace_id or '').strip())}&crm=seguros"},
+                }
+            ],
         }
     if ("hipoteca" in text or "hipotecas" in text or "financiacion" in text or "financiación" in text) and any(token in text for token in ("sin importes", "sin importe", "sin datos base", "sin precio")):
         rows = conn.execute(
@@ -41839,7 +41845,13 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["hipotecas"],
             "suggestions": ["Abrir financiaciones", "Actualizar hipoteca"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "bulk_revalidate_missing_hipotecas",
+                    "label": "Revalidar hipotecas",
+                    "payload": {"hipoteca_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                }
+            ],
         }
     if ("renta" in text or "rentas" in text) and any(token in text for token in ("sin documento", "sin pdf", "sin archivo")):
         rows = conn.execute(
@@ -41899,7 +41911,23 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["cliente_gestoria"],
             "suggestions": ["Abrir gestoría", "Actualizar renta"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "bulk_revalidate_rentas_missing_document",
+                    "label": "Revalidar rentas",
+                    "payload": {
+                        "items": [
+                            {
+                                "cliente_id": item["cliente_id"],
+                                "entry_id": item["entry_id"],
+                                "ejercicio": item["ejercicio"],
+                            }
+                            for item in missing
+                            if item.get("cliente_id")
+                        ]
+                    },
+                }
+            ],
         }
     if "dashboard" in text and any(token in text for token in ("no cuadra", "descuadra", "descuadrado", "detalle real", "detalle")):
         rows = conn.execute(
@@ -41944,7 +41972,13 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["workspace_process_supervisor"],
             "suggestions": ["Recalcular dashboard", "Abrir módulo"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "bulk_refresh_mismatched_dashboards",
+                    "label": "Recalcular dashboards",
+                    "payload": {"event_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                }
+            ],
         }
     if ("rrhh" in text or "documento" in text or "nomina" in text or "nómina" in text) and any(token in text for token in ("caducad", "vencid", "expirad")):
         today = date.today().isoformat()
@@ -42076,7 +42110,13 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             "sources": ["gestoria_facturas", "gestoria_asientos"],
             "suggestions": ["Abrir gestoría", "Actualizar factura"],
             "cards": cards,
-            "actions": [],
+            "actions": [
+                {
+                    "id": "bulk_revalidate_facturas_without_asiento",
+                    "label": "Revalidar facturas",
+                    "payload": {"factura_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                }
+            ],
         }
     return None
 
@@ -42811,6 +42851,16 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": f"Abriendo la ficha de {str(row_value(row, 'nombre') or 'Cliente').strip()}.",
             "navigation": {"kind": "cliente", "cliente_id": cliente_id, "entity_type": "cliente"},
         }
+    if action_text == "open_module":
+        route = str(payload.get("route") or "").strip()
+        if not route:
+            return {"error": "route requerida"}
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Abriendo el módulo solicitado.",
+            "route": route,
+        }
     if action_text == "bulk_revalidate_processes":
         process_types = [str(item or "").strip() for item in (payload.get("process_types") or []) if str(item or "").strip()]
         dates = {str(item or "").strip() for item in (payload.get("dates") or []) if str(item or "").strip()}
@@ -42892,6 +42942,114 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": f"Corrección segura lanzada. OCR: {len(post_actions)} · revalidaciones: {revalidated} · resueltas: {resolved}.",
             "post_actions": post_actions,
             "updated": len(post_actions) + revalidated,
+            "resolved": resolved,
+            "refresh_supervisor": True,
+        }
+    if action_text == "bulk_revalidate_missing_hipotecas":
+        hipoteca_ids = [str(item or "").strip() for item in (payload.get("hipoteca_ids") or []) if str(item or "").strip()]
+        updated = 0
+        resolved = 0
+        for hipoteca_id in hipoteca_ids:
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="hipoteca_update",
+                servicio="financiaciones",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="hipoteca",
+                entity_id=hipoteca_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+            updated += 1
+            if str(result.get("status") or "").strip() == "ok":
+                resolved += 1
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han revalidado {updated} hipoteca(s). Resueltas: {resolved}.",
+            "updated": updated,
+            "resolved": resolved,
+            "refresh_supervisor": True,
+        }
+    if action_text == "bulk_revalidate_rentas_missing_document":
+        items = [item for item in (payload.get("items") or []) if isinstance(item, dict) and str(item.get("cliente_id") or "").strip()]
+        updated = 0
+        resolved = 0
+        for item in items:
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="renta_attach",
+                servicio="gestoria",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="cliente",
+                entity_id=str(item.get("cliente_id") or "").strip(),
+                actor=actor,
+                context={
+                    "operation": "revalidate",
+                    "entry_id": str(item.get("entry_id") or "").strip(),
+                    "ejercicio": str(item.get("ejercicio") or "").strip(),
+                },
+                now=now,
+            )
+            updated += 1
+            if str(result.get("status") or "").strip() == "ok":
+                resolved += 1
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han revalidado {updated} renta(s). Resueltas: {resolved}.",
+            "updated": updated,
+            "resolved": resolved,
+            "refresh_supervisor": True,
+        }
+    if action_text == "bulk_refresh_mismatched_dashboards":
+        event_ids = [str(item or "").strip() for item in (payload.get("event_ids") or []) if str(item or "").strip()]
+        updated = 0
+        for event_id in event_ids:
+            perform_workspace_process_supervisor_action(
+                conn,
+                workspace_text,
+                event_id,
+                "reload_dashboard",
+                actor=actor,
+                now=now,
+            )
+            updated += 1
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han recalculado {updated} dashboard(s) con descuadre.",
+            "updated": updated,
+            "refresh_supervisor": True,
+        }
+    if action_text == "bulk_revalidate_facturas_without_asiento":
+        factura_ids = [str(item or "").strip() for item in (payload.get("factura_ids") or []) if str(item or "").strip()]
+        updated = 0
+        resolved = 0
+        for factura_id in factura_ids:
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="gestoria_factura",
+                servicio="gestoria",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="gestoria_factura",
+                entity_id=factura_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+            updated += 1
+            if str(result.get("status") or "").strip() == "ok":
+                resolved += 1
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Se han revalidado {updated} factura(s). Resueltas: {resolved}.",
+            "updated": updated,
             "resolved": resolved,
             "refresh_supervisor": True,
         }

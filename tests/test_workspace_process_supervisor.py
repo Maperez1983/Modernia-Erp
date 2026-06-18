@@ -1622,6 +1622,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("póliza", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "seguros")
+        self.assertEqual(reply["actions"][0]["id"], "open_module")
 
     def test_internal_copilot_operational_query_hipotecas_missing_amounts(self):
         self.conn.execute(
@@ -1660,6 +1661,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("hipoteca", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "hipotecas")
+        self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_missing_hipotecas")
 
     def test_internal_copilot_operational_query_rentas_missing_document(self):
         self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c74', 'Cliente Renta', '50505050E', 'renta@test.local', 'now', 'now')")
@@ -1683,6 +1685,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("renta", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "cliente_gestoria")
+        self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_rentas_missing_document")
 
     def test_internal_copilot_operational_query_dashboard_mismatch(self):
         self.conn.execute(
@@ -1709,6 +1712,141 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertIn("dashboard", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "workspace_process_supervisor")
+        self.assertEqual(reply["actions"][0]["id"], "bulk_refresh_mismatched_dashboards")
+
+    def test_internal_copilot_operational_query_facturas_without_asiento_includes_action(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, total, created_at, updated_at
+            ) VALUES (
+              'f-op1', 'e1', 'c1', 'compra', 'F-OP1', '2026-06-10', 450, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "que facturas siguen sin asiento",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_facturas_without_asiento")
+
+    def test_internal_copilot_action_bulk_revalidate_missing_hipotecas(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'h-op1', 'e1', 'Cliente Hipoteca', 'c70', 'Openbank', 0, 0, 'Estudio', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_missing_hipotecas",
+            {"hipoteca_ids": ["h-op1"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_bulk_revalidate_rentas_missing_document(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c74b', 'Cliente Renta 2', '60606060F', 'renta2@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
+            ) VALUES (
+              'cg74b', 'c74b', 'Particular', 0, 0, 0, 1, 0, 0, 0, '{"entries":[{"id":"r2","ejercicio":"2025","estado_presentacion":"Borrador"}]}', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_rentas_missing_document",
+            {"items": [{"cliente_id": "c74b", "entry_id": "r2", "ejercicio": "2025"}]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:15:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_bulk_refresh_mismatched_dashboards(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-dash-refresh', 'ws1', 'e1', 'gestoria', 'gestoria_dashboard', 'gestoria_dashboard', 'ws1', '',
+              '', 'failed', 'warning', 'Dashboard gestoría incoherente', 'Totales no cuadran contra detalle', '[{"code":"gestoria_dashboard_docs_mismatch"}]', '[]', '{}',
+              'ddash-refresh', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_refresh_mismatched_dashboards",
+            {"event_ids": ["evt-dash-refresh"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:20:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_bulk_revalidate_facturas_without_asiento(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, total, created_at, updated_at
+            ) VALUES (
+              'f-op2', 'e1', 'c1', 'compra', 'F-OP2', '2026-06-11', 700, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_facturas_without_asiento",
+            {"factura_ids": ["f-op2"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:25:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
 
 
 if __name__ == "__main__":
