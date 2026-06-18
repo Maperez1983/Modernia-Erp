@@ -83,6 +83,22 @@ const hideUiToast = () => {
   toast.innerHTML = "";
 };
 
+const handleProcessSupervisorResponse = (data, fallbackWorkspaceId = "") => {
+  const supervisor = data && typeof data === "object" ? data.process_supervision : null;
+  if (!supervisor || typeof supervisor !== "object") return;
+  const workspaceId = String(supervisor.workspace_id || fallbackWorkspaceId || "").trim();
+  const status = String(supervisor.status || "").trim().toLowerCase();
+  if (workspaceId && workspaceId === String(state.currentWorkspaceId || "").trim()) {
+    window.setTimeout(() => {
+      loadWorkspaceProcessSupervisorFeed({ silent: true }).catch(() => {});
+    }, 40);
+  }
+  if (!status || status === "ok") return;
+  const title = String(supervisor.title || "Proceso con incidencias").trim();
+  const summary = String(supervisor.summary || "").trim();
+  setUiToast(title, summary || "Se han detectado incidencias en el proceso y conviene revisarlo.");
+};
+
 const probeDbHealth = async () => {
   try {
     const res = await fetchWithTimeout(
@@ -212,6 +228,7 @@ const api = async (path) => {
       lastError = error;
       throw error;
     }
+    handleProcessSupervisorResponse(data, "");
     return data;
   }
   if (lastError) throw lastError;
@@ -311,6 +328,7 @@ const apiPost = async (url, payload = {}) => {
     throw error;
   }
 
+  handleProcessSupervisorResponse(data, enrichedPayload.workspace_id || "");
   return data;
 };
 
@@ -1506,6 +1524,7 @@ const postJsonWithDbRetry = async (url, payload, options = {}) => {
         }
         throw new Error(apiError && apiDetail ? `${apiError}: ${apiDetail}` : apiError || apiDetail || `HTTP ${res.status}`);
       }
+      handleProcessSupervisorResponse(data, enrichedPayload.workspace_id || "");
       return data;
     } catch (err) {
       lastError = err;
@@ -12176,6 +12195,15 @@ const renderWorkspaceCopilotHub = () => {
     <div class="workspace-home-detail-card" style="margin-top:14px">
       <div class="section-head">
         <div>
+          <h4>Supervisor de procesos</h4>
+          <p class="muted">Avisos automáticos cuando una operación no se ha reflejado correctamente en el CRM.</p>
+        </div>
+      </div>
+      <div id="workspaceProcessSupervisorFeed"><p class="muted">Cargando incidencias recientes...</p></div>
+    </div>
+    <div class="workspace-home-detail-card" style="margin-top:14px">
+      <div class="section-head">
+        <div>
           <h4>Mandatos y contratos</h4>
           <p class="muted">Genera documentos por servicio con los datos y logo de la empresa (borrador operativo).</p>
         </div>
@@ -12271,15 +12299,16 @@ const renderWorkspaceCopilotHub = () => {
   const contractTemplates = contractForm?.querySelector('[name="template_key"]');
   const contractEmpresa = contractForm?.querySelector('[name="empresa_id"]');
   const contractIdField = contractForm?.querySelector('[name="id"]');
-	  const contractPdfBtn = document.getElementById("workspaceContractPdfBtn");
-	  const contractStoreBtn = document.getElementById("workspaceContractStoreBtn");
-	  const contractNewBtn = document.getElementById("workspaceContractNewBtn");
-	  const contractCopilotBtn = document.getElementById("workspaceContractCopilotBtn");
-	  const contractList = document.getElementById("workspaceContractsList");
-	  const contractLookup = document.getElementById("workspaceContractClienteLookup");
-	  const contractBodyText = contractForm?.querySelector('[name="body_text"]');
-	  const contractClauses = contractForm?.querySelector('[name="clausulas_extra"]');
-	  const contractNotes = contractForm?.querySelector('[name="notas"]');
+  const contractPdfBtn = document.getElementById("workspaceContractPdfBtn");
+  const contractStoreBtn = document.getElementById("workspaceContractStoreBtn");
+  const contractNewBtn = document.getElementById("workspaceContractNewBtn");
+  const contractCopilotBtn = document.getElementById("workspaceContractCopilotBtn");
+  const contractList = document.getElementById("workspaceContractsList");
+  const contractLookup = document.getElementById("workspaceContractClienteLookup");
+  const contractBodyText = contractForm?.querySelector('[name="body_text"]');
+  const contractClauses = contractForm?.querySelector('[name="clausulas_extra"]');
+  const contractNotes = contractForm?.querySelector('[name="notas"]');
+  void loadWorkspaceProcessSupervisorFeed({ silent: true });
 
   const fillContractFormDefaults = () => {
     if (!contractForm) return;
@@ -12779,6 +12808,82 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 
   // Render after data arrives.
   renderWorkspaceRrhhHub();
+};
+
+const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
+  const target = document.getElementById("workspaceProcessSupervisorFeed");
+  if (!target) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    target.innerHTML = "<p class='muted'>Sin incidencias abiertas en los procesos críticos.</p>";
+    return;
+  }
+  target.innerHTML = `
+    <div class="crm-mini-list">
+      ${items.slice(0, 12).map((row) => {
+        const anomalies = Array.isArray(row.anomalies) ? row.anomalies : [];
+        const actions = Array.isArray(row.actions) ? row.actions : [];
+        const severity = String(row.severity || "warning").trim();
+        return `
+          <div class="crm-mini-row" style="align-items:flex-start; gap:12px">
+            <div style="flex:1 1 auto">
+              <strong>${escapeHtml(String(row.title || "Incidencia de proceso"))}</strong>
+              <div class="muted">${escapeHtml(String(row.created_at || ""))} · ${escapeHtml(String(row.servicio || row.process_type || ""))}</div>
+              <p class="muted" style="margin:6px 0 0">${escapeHtml(String(row.summary || ""))}</p>
+              ${anomalies.length ? `
+                <ul class="workspace-notification-list" style="margin-top:8px">
+                  ${anomalies.slice(0, 3).map((item) => `<li><strong>${escapeHtml(String(item.code || severity || "incidencia"))}</strong><p class="muted">${escapeHtml(String(item.message || ""))}</p></li>`).join("")}
+                </ul>
+              ` : ""}
+              ${actions.length ? `<div class="muted" style="margin-top:6px">Siguiente paso: ${escapeHtml(actions.slice(0, 3).join(" · "))}</div>` : ""}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end">
+              <span class="muted">${escapeHtml(severity)}</span>
+              ${row.acknowledged ? "<span class='muted'>Revisada</span>" : `<button type="button" class="secondary ghost" data-workspace-process-ack="${escapeHtml(String(row.id || ""))}">Marcar revisado</button>`}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+  target.querySelectorAll("[data-workspace-process-ack]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = String(button.dataset.workspaceProcessAck || "").trim();
+      if (!id || !state.currentWorkspaceId) return;
+      button.disabled = true;
+      try {
+        await apiPost("/api/workspace_process_supervisor_ack", {
+          workspace_id: state.currentWorkspaceId,
+          id,
+        });
+        await loadWorkspaceProcessSupervisorFeed({ silent: true });
+      } catch (error) {
+        button.disabled = false;
+        setUiToast("No se pudo cerrar la incidencia", String(error?.message || "Error desconocido"));
+      }
+    });
+  });
+};
+
+const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {
+  const target = document.getElementById("workspaceProcessSupervisorFeed");
+  if (!target || !state.currentWorkspaceId) return;
+  try {
+    const data = await safeWorkspaceApi(
+      `/api/workspace_process_supervisor?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&only_open=1&limit=20`,
+      { rows: [] }
+    );
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    if (state.currentWorkspaceData) {
+      state.currentWorkspaceData.processSupervisorRows = rows;
+    }
+    renderWorkspaceProcessSupervisorFeed(rows);
+  } catch (error) {
+    if (!silent) {
+      setUiToast("No se pudo cargar el supervisor de procesos", String(error?.message || "Error desconocido"));
+    }
+    renderWorkspaceProcessSupervisorFeed([]);
+  }
 };
 
 const renderWorkspaceRrhhHub = () => {

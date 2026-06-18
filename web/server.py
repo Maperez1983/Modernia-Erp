@@ -36194,6 +36194,45 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_process_supervisor (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          servicio TEXT NOT NULL,
+          process_type TEXT NOT NULL,
+          entity_type TEXT,
+          entity_id TEXT,
+          actor_user_id TEXT,
+          actor_label TEXT,
+          status TEXT NOT NULL,
+          severity TEXT NOT NULL DEFAULT 'warning',
+          title TEXT NOT NULL,
+          summary TEXT,
+          anomaly_json TEXT,
+          actions_json TEXT,
+          llm_payload TEXT,
+          dedupe_key TEXT,
+          acknowledged INTEGER NOT NULL DEFAULT 0,
+          acknowledged_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_ws_created ON workspace_process_supervisor (workspace_id, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_ws_ack ON workspace_process_supervisor (workspace_id, acknowledged, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_process_supervisor_entity ON workspace_process_supervisor (workspace_id, process_type, entity_type, entity_id)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_registro_periodos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -39829,6 +39868,1255 @@ def log_workspace_notification(conn, workspace_id, persona_id, channel, payload,
         maybe_send_workspace_notification_email(conn, workspace_id, persona_id, notification_id, channel, payload, now=now_ts)
     except Exception:
         pass
+
+
+def infer_workspace_id_from_empresa(conn, empresa_id):
+    empresa_text = str(empresa_id or "").strip()
+    if not empresa_text:
+        return ""
+    try:
+        ensure_workspace_core_tables(conn)
+        row = conn.execute(
+            """
+            SELECT workspace_id
+            FROM workspace_companies
+            WHERE legacy_empresa_id = ?
+              AND COALESCE(activo, 1) = 1
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (empresa_text,),
+        ).fetchone()
+        if row:
+            return str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip()
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            """
+            SELECT workspace_id
+            FROM workspace_empresas
+            WHERE empresa_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (empresa_text,),
+        ).fetchone()
+        if row:
+            return str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _workspace_process_status(value):
+    raw = normalize_lookup_text(value or "")
+    if raw in {"OK", "SUCCESS", "CORRECTO"}:
+        return "ok"
+    if raw in {"OKWITHWARNINGS", "OKCONAVISOS", "WARNING", "WARN"}:
+        return "ok_with_warnings"
+    if raw in {"INCOMPLETO", "PARTIAL"}:
+        return "incomplete"
+    if raw in {"INCONSISTENTE", "INCONSISTENCY"}:
+        return "inconsistent"
+    if raw in {"FAILED", "ERROR", "FALLIDO"}:
+        return "failed"
+    return "ok"
+
+
+def _workspace_process_severity(value):
+    raw = normalize_lookup_text(value or "")
+    if raw in {"INFO", "LOW", "BAJA", "BAJO"}:
+        return "info"
+    if raw in {"HIGH", "ALTA", "ALTO", "ERROR", "CRITICAL", "CRITICO"}:
+        return "error"
+    return "warning"
+
+
+def _workspace_process_status_from_anomalies(anomalies):
+    levels = [normalize_lookup_text((row or {}).get("level") or "") for row in list(anomalies or [])]
+    if any(level in {"ERROR", "FAILED", "CRITICAL"} for level in levels):
+        return "failed"
+    if any(level in {"INCONSISTENT", "INCONSISTENCY"} for level in levels):
+        return "inconsistent"
+    if any(level in {"INCOMPLETE", "PARTIAL"} for level in levels):
+        return "incomplete"
+    if levels:
+        return "ok_with_warnings"
+    return "ok"
+
+
+def _workspace_process_severity_from_status(status):
+    status_text = _workspace_process_status(status)
+    if status_text in {"failed", "inconsistent"}:
+        return "error"
+    if status_text == "incomplete":
+        return "warning"
+    if status_text == "ok_with_warnings":
+        return "warning"
+    return "info"
+
+
+def _workspace_process_serialize_json(value):
+    try:
+        return json.dumps(value or [], ensure_ascii=False)
+    except Exception:
+        return "[]"
+
+
+def _workspace_process_parse_json(raw, fallback):
+    text = str(raw or "").strip()
+    if not text:
+        return fallback
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return fallback
+    return parsed if isinstance(parsed, type(fallback)) else fallback
+
+
+def _workspace_duplicate_client_signals(conn, empresa_id, cliente_id):
+    empresa_text = str(empresa_id or "").strip()
+    cliente_text = str(cliente_id or "").strip()
+    if not empresa_text or not cliente_text:
+        return []
+    client_row = conn.execute(
+        """
+        SELECT id, nombre, nif, email
+        FROM clientes
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (cliente_text,),
+    ).fetchone()
+    if not client_row:
+        return []
+    nif_value = str(row_value(client_row, "nif") or "").strip()
+    email_value = str(row_value(client_row, "email") or "").strip().lower()
+    signals = []
+    if nif_value:
+        nif_rows = conn.execute(
+            """
+            SELECT c.id, c.nombre, c.nif
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE ce.empresa_id = ?
+              AND c.id <> ?
+              AND TRIM(COALESCE(c.nif, '')) = ?
+            ORDER BY c.nombre COLLATE NOCASE ASC
+            LIMIT 5
+            """,
+            (empresa_text, cliente_text, nif_value),
+        ).fetchall()
+        if nif_rows:
+            signals.append(
+                {
+                    "code": "duplicate_client_nif",
+                    "level": "warning",
+                    "message": f"Se han encontrado {len(nif_rows)} cliente(s) con el mismo NIF en esta empresa.",
+                    "related_rows": [dict(row) for row in nif_rows],
+                }
+            )
+    if email_value:
+        email_rows = conn.execute(
+            """
+            SELECT c.id, c.nombre, c.email
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE ce.empresa_id = ?
+              AND c.id <> ?
+              AND LOWER(TRIM(COALESCE(c.email, ''))) = ?
+            ORDER BY c.nombre COLLATE NOCASE ASC
+            LIMIT 5
+            """,
+            (empresa_text, cliente_text, email_value),
+        ).fetchall()
+        if email_rows:
+            signals.append(
+                {
+                    "code": "duplicate_client_email",
+                    "level": "warning",
+                    "message": f"Se han encontrado {len(email_rows)} cliente(s) con el mismo email en esta empresa.",
+                    "related_rows": [dict(row) for row in email_rows],
+                }
+            )
+    return signals
+
+
+def _workspace_process_fallback_message(process_type, status, anomalies):
+    status_text = _workspace_process_status(status)
+    process_label = {
+        "renta_attach": "Renta",
+        "seguro_update": "Póliza",
+        "hipoteca_update": "Hipoteca",
+        "agenda_action": "Agenda",
+    }.get(str(process_type or "").strip(), "Proceso")
+    if status_text == "ok":
+        return {
+            "title": f"{process_label} validada correctamente",
+            "summary": "El proceso se ha completado y las comprobaciones automáticas no han detectado incidencias.",
+            "actions": [],
+        }
+    lead = anomalies[0]["message"] if anomalies else "Se han detectado inconsistencias en el proceso."
+    actions = []
+    for row in list(anomalies or []):
+        for item in list(row.get("actions") or []):
+            text = str(item or "").strip()
+            if text and text not in actions:
+                actions.append(text)
+    if not actions:
+        actions = ["Revisar el registro afectado y volver a cargar los datos si falta información."]
+    return {
+        "title": f"{process_label} con incidencias",
+        "summary": lead,
+        "actions": actions[:6],
+    }
+
+
+def _build_workspace_process_ollama_message(process_type, status, servicio, anomalies, context):
+    if not ollama_available():
+        return {}
+    prompt = (
+        "Actúa como supervisor operativo de un CRM multiempresa. "
+        "Debes explicar incidencias de procesos a un usuario final en castellano claro. "
+        "Responde SOLO con un objeto JSON válido con estas claves: title, summary, actions, review_needed. "
+        "No inventes datos; apóyate solo en las anomalías detectadas.\n\n"
+        + json.dumps(
+            {
+                "process_type": process_type,
+                "status": status,
+                "servicio": servicio,
+                "anomalies": anomalies,
+                "context": context,
+            },
+            ensure_ascii=False,
+        )
+    )
+    parsed, err = call_ollama_json(
+        prompt,
+        required_keys={"title", "summary", "actions", "review_needed"},
+        timeout=45,
+        retries=1,
+        system_text="Eres un supervisor operativo del CRM. Responde en JSON válido y en castellano.",
+    )
+    if err or not parsed:
+        return {}
+    return {
+        "title": str(parsed.get("title") or "").strip(),
+        "summary": str(parsed.get("summary") or "").strip(),
+        "actions": _normalize_text_list(parsed.get("actions") or [], max_items=6, max_chars=180),
+        "review_needed": str(parsed.get("review_needed") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"},
+        "raw_response_tail": str(parsed.get("raw_response_tail") or "").strip(),
+    }
+
+
+def _store_workspace_process_event(
+    conn,
+    *,
+    workspace_id,
+    empresa_id,
+    servicio,
+    process_type,
+    entity_type,
+    entity_id,
+    actor_user_id,
+    actor_label,
+    status,
+    severity,
+    title,
+    summary,
+    anomalies,
+    actions,
+    llm_payload,
+    dedupe_key,
+    now=None,
+):
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM workspace_process_supervisor
+        WHERE workspace_id = ?
+          AND COALESCE(dedupe_key, '') = ?
+          AND acknowledged = 0
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (workspace_id, dedupe_key),
+    ).fetchone()
+    anomaly_json = _workspace_process_serialize_json(anomalies)
+    actions_json = _workspace_process_serialize_json(actions)
+    llm_json = _workspace_process_serialize_json(llm_payload if isinstance(llm_payload, list) else llm_payload or {})
+    if existing:
+        record_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip()
+        conn.execute(
+            """
+            UPDATE workspace_process_supervisor
+            SET empresa_id = ?, servicio = ?, process_type = ?, entity_type = ?, entity_id = ?,
+                actor_user_id = ?, actor_label = ?, status = ?, severity = ?, title = ?, summary = ?,
+                anomaly_json = ?, actions_json = ?, llm_payload = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                empresa_id or None,
+                servicio,
+                process_type,
+                entity_type or None,
+                entity_id or None,
+                actor_user_id or None,
+                actor_label or None,
+                status,
+                severity,
+                title,
+                summary,
+                anomaly_json,
+                actions_json,
+                llm_json,
+                now_ts,
+                record_id,
+            ),
+        )
+        return record_id
+    record_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_process_supervisor (
+          id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id,
+          actor_user_id, actor_label, status, severity, title, summary,
+          anomaly_json, actions_json, llm_payload, dedupe_key,
+          acknowledged, acknowledged_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+        """,
+        (
+            record_id,
+            workspace_id,
+            empresa_id or None,
+            servicio,
+            process_type,
+            entity_type or None,
+            entity_id or None,
+            actor_user_id or None,
+            actor_label or None,
+            status,
+            severity,
+            title,
+            summary,
+            anomaly_json,
+            actions_json,
+            llm_json,
+            dedupe_key,
+            now_ts,
+            now_ts,
+        ),
+    )
+    return record_id
+
+
+def _resolve_workspace_process_events(conn, workspace_id, process_type, entity_type, entity_id, now=None):
+    workspace_text = str(workspace_id or "").strip()
+    if not workspace_text:
+        return
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        UPDATE workspace_process_supervisor
+        SET acknowledged = 1, acknowledged_at = ?, updated_at = ?
+        WHERE workspace_id = ?
+          AND process_type = ?
+          AND COALESCE(entity_type, '') = COALESCE(?, '')
+          AND COALESCE(entity_id, '') = COALESCE(?, '')
+          AND acknowledged = 0
+        """,
+        (now_ts, now_ts, workspace_text, process_type, entity_type or "", entity_id or ""),
+    )
+
+
+def fetch_workspace_process_supervisor_events(conn, workspace_id, limit=25, only_open=False):
+    where = ["workspace_id = ?"]
+    params = [str(workspace_id or "").strip()]
+    if only_open:
+        where.append("acknowledged = 0")
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM workspace_process_supervisor
+        WHERE {' AND '.join(where)}
+        ORDER BY acknowledged ASC, created_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 25), 100))),
+    ).fetchall()
+    payload_rows = []
+    for row in rows or []:
+        item = dict(row)
+        item["anomalies"] = _workspace_process_parse_json(item.get("anomaly_json"), [])
+        item["actions"] = _workspace_process_parse_json(item.get("actions_json"), [])
+        item["llm_payload"] = _workspace_process_parse_json(item.get("llm_payload"), {})
+        payload_rows.append(item)
+    return {"rows": payload_rows}
+
+
+def acknowledge_workspace_process_supervisor_event(conn, workspace_id, event_id, actor=None, now=None):
+    workspace_text = str(workspace_id or "").strip()
+    event_text = str(event_id or "").strip()
+    if not workspace_text or not event_text:
+        return False
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    actor_label = _session_user_label(actor or {}) if isinstance(actor, dict) else str(actor or "").strip()
+    row = conn.execute(
+        """
+        SELECT id, summary
+        FROM workspace_process_supervisor
+        WHERE id = ? AND workspace_id = ?
+        LIMIT 1
+        """,
+        (event_text, workspace_text),
+    ).fetchone()
+    if not row:
+        return False
+    summary = str(row_value(row, "summary") or "").strip()
+    if actor_label:
+        summary = f"{summary}\n\nRevisado por {actor_label} · {now_ts}" if summary else f"Revisado por {actor_label} · {now_ts}"
+    conn.execute(
+        """
+        UPDATE workspace_process_supervisor
+        SET acknowledged = 1, acknowledged_at = ?, updated_at = ?, summary = ?
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (now_ts, now_ts, summary or None, event_text, workspace_text),
+    )
+    return True
+
+
+def _check_workspace_renta_process(conn, empresa_id, entity_id, context):
+    cliente_id = str(entity_id or "").strip()
+    ejercicio = str((context or {}).get("ejercicio") or "").strip()
+    anomalies = []
+    if not cliente_id:
+        return [{"code": "missing_cliente_id", "level": "error", "message": "No se pudo identificar el cliente de la renta.", "actions": ["Volver a cargar la renta asociando un cliente válido."]}]
+    cg_row = conn.execute(
+        "SELECT renta_detalles, mod_renta FROM cliente_gestoria WHERE cliente_id = ? LIMIT 1",
+        (cliente_id,),
+    ).fetchone()
+    payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+    entries = sanitize_renta_entries(payload.get("entries") or [])
+    matching = [row for row in entries if str(row.get("ejercicio") or "").strip() == ejercicio]
+    if not matching:
+        anomalies.append(
+            {
+                "code": "renta_entry_missing",
+                "level": "error",
+                "message": f"La campaña de renta {ejercicio or '-'} no ha quedado registrada en la ficha del cliente.",
+                "actions": ["Revisar la carga del documento y volver a guardar la campaña de renta."],
+            }
+        )
+        return anomalies
+    entry = matching[-1]
+    if len(matching) > 1:
+        anomalies.append(
+            {
+                "code": "renta_entry_duplicated",
+                "level": "warning",
+                "message": f"El cliente tiene varias campañas de renta para el ejercicio {ejercicio}.",
+                "actions": ["Revisar duplicados de renta y dejar una única campaña activa por ejercicio."],
+            }
+        )
+    doc_ref = str(entry.get("doc_presentada_id") or entry.get("doc_borrador_id") or "").strip()
+    if not doc_ref:
+        anomalies.append(
+            {
+                "code": "renta_document_missing",
+                "level": "incomplete",
+                "message": "La renta se ha guardado sin documento asociado, por lo que puede no reflejarse correctamente en el dashboard.",
+                "actions": ["Adjuntar el PDF o justificante de la renta para completar la campaña."],
+            }
+        )
+    if not int(row_value(cg_row, "mod_renta") or 0):
+        anomalies.append(
+            {
+                "code": "renta_module_flag_missing",
+                "level": "warning",
+                "message": "El cliente no tiene activado el módulo de renta en gestoría y puede quedar fuera de algunos resúmenes.",
+                "actions": ["Activar el módulo de renta en la ficha de gestoría del cliente."],
+            }
+        )
+    for signal in _workspace_duplicate_client_signals(conn, empresa_id, cliente_id):
+        anomalies.append(signal)
+    return anomalies
+
+
+def _check_workspace_seguro_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM seguros WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "seguro_missing", "level": "error", "message": "La póliza no se ha encontrado tras guardar el proceso.", "actions": ["Volver a crear la póliza o revisar si el guardado falló antes de terminar."]}]
+    row_map = dict(row)
+    anomalies = []
+    cliente_id = str(row_map.get("cliente_id") or "").strip()
+    if not cliente_id:
+        anomalies.append(
+            {
+                "code": "seguro_without_cliente",
+                "level": "incomplete",
+                "message": "La póliza se ha guardado sin cliente vinculado.",
+                "actions": ["Vincular la póliza a un cliente antes de continuar el expediente."],
+            }
+        )
+    else:
+        anomalies.extend(_workspace_duplicate_client_signals(conn, empresa_id, cliente_id))
+    estado = normalize_lookup_text(row_map.get("estado") or row_map.get("estado_poliza") or "")
+    if estado in {"CONTRATADA", "ENVIGOR"} and not (
+        str(row_map.get("poliza_key") or "").strip() or str(row_map.get("poliza_url") or "").strip()
+    ):
+        anomalies.append(
+            {
+                "code": "seguro_pdf_missing",
+                "level": "incomplete",
+                "message": "La póliza está marcada como contratada/en vigor pero no tiene PDF asociado.",
+                "actions": ["Adjuntar el PDF de póliza para cerrar correctamente la contratación."],
+            }
+        )
+    poliza_numero = str(row_map.get("poliza_numero") or "").strip()
+    compania = str(row_map.get("compania") or "").strip()
+    if poliza_numero and compania:
+        dup = conn.execute(
+            """
+            SELECT id, tomador
+            FROM seguros
+            WHERE id <> ?
+              AND COALESCE(TRIM(compania), '') = ?
+              AND COALESCE(TRIM(poliza_numero), '') = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 3
+            """,
+            (record_id, compania, poliza_numero),
+        ).fetchall()
+        if dup:
+            anomalies.append(
+                {
+                    "code": "seguro_policy_duplicate",
+                    "level": "warning",
+                    "message": "Existe otra póliza con la misma compañía y número de póliza.",
+                    "actions": ["Revisar duplicados antes de continuar la gestión del seguro."],
+                    "related_rows": [dict(item) for item in dup],
+                }
+            )
+    return anomalies
+
+
+def _check_workspace_hipoteca_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM hipotecas WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "hipoteca_missing", "level": "error", "message": "La hipoteca no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar la hipoteca y revisar si el expediente llegó a persistirse."]}]
+    row_map = dict(row)
+    anomalies = []
+    cliente_id = str(row_map.get("cliente_id") or "").strip()
+    if not cliente_id:
+        anomalies.append(
+            {
+                "code": "hipoteca_without_cliente",
+                "level": "incomplete",
+                "message": "La hipoteca se ha guardado sin cliente vinculado.",
+                "actions": ["Vincular la hipoteca al cliente correcto antes de continuar el expediente."],
+            }
+        )
+    else:
+        anomalies.extend(_workspace_duplicate_client_signals(conn, empresa_id, cliente_id))
+    if row_map.get("precio") in (None, "", 0, 0.0) or row_map.get("importe_hipoteca") in (None, "", 0, 0.0):
+        anomalies.append(
+            {
+                "code": "hipoteca_financial_fields_missing",
+                "level": "warning",
+                "message": "Faltan importes básicos de la hipoteca y el dashboard financiero puede quedar incompleto.",
+                "actions": ["Completar precio de compra e importe de hipoteca en la ficha."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_action_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM acciones WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "action_missing", "level": "error", "message": "La cita o acción no se ha encontrado tras guardar el proceso.", "actions": ["Volver a crear la cita y revisar si la agenda terminó de persistirla."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("workspace_id") or "").strip():
+        anomalies.append(
+            {
+                "code": "agenda_workspace_missing",
+                "level": "warning",
+                "message": "La acción se ha guardado sin workspace asociado y puede no verse igual para todos los usuarios del CRM.",
+                "actions": ["Revisar el scoping de workspace de la cita guardada."],
+            }
+        )
+    if not str(row_map.get("tipo") or "").strip():
+        anomalies.append(
+            {
+                "code": "agenda_type_missing",
+                "level": "incomplete",
+                "message": "La acción se ha guardado sin tipo de cita definido.",
+                "actions": ["Editar la cita y fijar un tipo válido."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_accounting_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM gestoria_contabilidad WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "accounting_entry_missing", "level": "error", "message": "El asiento o apunte contable no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el apunte y revisar si quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    cliente_id = str(row_map.get("cliente_id") or "").strip()
+    cliente_ids = parse_cliente_ids_payload(row_map.get("cliente_ids_json"))
+    if not cliente_id and not cliente_ids:
+        anomalies.append(
+            {
+                "code": "accounting_without_cliente",
+                "level": "incomplete",
+                "message": "El apunte contable se ha guardado sin cliente asociado.",
+                "actions": ["Vincular el apunte con el cliente correcto para que el dashboard y la ficha cuadren."],
+            }
+        )
+    if row_map.get("importe") in (None, "", 0, 0.0):
+        anomalies.append(
+            {
+                "code": "accounting_amount_missing",
+                "level": "warning",
+                "message": "El apunte contable no tiene importe y puede no reflejarse correctamente en los resúmenes.",
+                "actions": ["Completar el importe del apunte antes de cerrar la gestión."],
+            }
+        )
+    if not str(row_map.get("tipo") or "").strip():
+        anomalies.append(
+            {
+                "code": "accounting_type_missing",
+                "level": "warning",
+                "message": "El apunte contable no tiene tipo definido.",
+                "actions": ["Revisar el tipo del apunte para que la segmentación del dashboard sea correcta."],
+            }
+        )
+    if cliente_id:
+        anomalies.extend(_workspace_duplicate_client_signals(conn, empresa_id, cliente_id))
+    dup = conn.execute(
+        """
+        SELECT id
+        FROM gestoria_contabilidad
+        WHERE id <> ?
+          AND empresa_id = ?
+          AND COALESCE(TRIM(fecha), '') = COALESCE(TRIM(?), '')
+          AND COALESCE(TRIM(concepto), '') = COALESCE(TRIM(?), '')
+          AND COALESCE(importe, 0) = COALESCE(?, 0)
+          AND COALESCE(TRIM(cliente_id), '') = COALESCE(TRIM(?), '')
+        LIMIT 3
+        """,
+        (
+            record_id,
+            empresa_id,
+            str(row_map.get("fecha") or "").strip(),
+            str(row_map.get("concepto") or "").strip(),
+            row_map.get("importe"),
+            cliente_id,
+        ),
+    ).fetchall()
+    if dup:
+        anomalies.append(
+            {
+                "code": "accounting_possible_duplicate",
+                "level": "warning",
+                "message": "Existe otro apunte contable con la misma fecha, concepto, importe y cliente.",
+                "actions": ["Revisar si se ha duplicado el asiento antes de continuar."],
+                "related_rows": [dict(item) for item in dup],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_fincas_community_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_fincas_comunidades WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "fincas_community_missing", "level": "error", "message": "La comunidad no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar la comunidad y revisar si el alta quedó persistida."]}]
+    row_map = dict(row)
+    anomalies = []
+    expected_fee = compute_fincas_cuota_sugerida(
+        parse_non_negative_int(row_map.get("num_vecinos")),
+        parse_non_negative_int(row_map.get("num_locales")),
+        parse_non_negative_int(row_map.get("num_trasteros")),
+        parse_non_negative_int(row_map.get("num_aparcamientos")),
+    )
+    current_suggested = round(parse_money_value(row_map.get("cuota_sugerida")), 2)
+    if round(expected_fee, 2) != current_suggested:
+        anomalies.append(
+            {
+                "code": "fincas_fee_mismatch",
+                "level": "warning",
+                "message": "La cuota sugerida no coincide con el cálculo de la comunidad y el presupuesto puede salir desajustado.",
+                "actions": ["Revisar vecinos/locales/trasteros/aparcamientos y recalcular la cuota."],
+            }
+        )
+    if round(parse_money_value(row_map.get("cuota_mensual")), 2) <= 0:
+        anomalies.append(
+            {
+                "code": "fincas_monthly_fee_missing",
+                "level": "incomplete",
+                "message": "La comunidad no tiene cuota mensual definida.",
+                "actions": ["Completar la cuota mensual antes de usar la comunidad en presupuestos o paneles."],
+            }
+        )
+    if not str(row_map.get("direccion") or "").strip() or not str(row_map.get("cif") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_core_fields_missing",
+                "level": "warning",
+                "message": "Faltan datos básicos de la comunidad (dirección o CIF).",
+                "actions": ["Completar los datos básicos de la comunidad para evitar errores en contratos y presupuestos."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_rrhh_document_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_rrhh_documentos WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "rrhh_document_missing", "level": "error", "message": "El documento de RRHH no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el documento y revisar si el adjunto quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("doc_key") or "").strip() and not str(row_map.get("doc_url") or "").strip():
+        anomalies.append(
+            {
+                "code": "rrhh_document_file_missing",
+                "level": "incomplete",
+                "message": "El documento se ha creado sin archivo adjunto.",
+                "actions": ["Adjuntar el fichero del documento para completar el expediente de RRHH."],
+            }
+        )
+    tipo_key = normalize_lookup_text(row_map.get("tipo") or "")
+    ocr_status = normalize_lookup_text(row_map.get("nomina_ocr_status") or "")
+    if tipo_key in {"NOMINA", "NÓMINA"} and ocr_status in {"ERROR", "PENDING", "PENDIENTE"}:
+        anomalies.append(
+            {
+                "code": "rrhh_nomina_ocr_incomplete",
+                "level": "warning",
+                "message": "La nómina no ha quedado procesada correctamente por OCR.",
+                "actions": ["Revisar la nómina o relanzar el OCR si el documento debe alimentar resúmenes de RRHH."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_rrhh_ausencia_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_rrhh_ausencias WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "rrhh_ausencia_missing", "level": "error", "message": "La ausencia no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar la ausencia y revisar si quedó registrada."]}]
+    row_map = dict(row)
+    anomalies = []
+    fecha_inicio = str(row_map.get("fecha_inicio") or "").strip()
+    fecha_fin = str(row_map.get("fecha_fin") or "").strip()
+    if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+        anomalies.append(
+            {
+                "code": "rrhh_ausencia_invalid_range",
+                "level": "error",
+                "message": "La ausencia tiene la fecha fin anterior a la fecha inicio.",
+                "actions": ["Corregir el rango de fechas de la ausencia."],
+            }
+        )
+    if not str(row_map.get("tipo") or "").strip():
+        anomalies.append(
+            {
+                "code": "rrhh_ausencia_type_missing",
+                "level": "warning",
+                "message": "La ausencia no tiene tipo definido.",
+                "actions": ["Seleccionar el tipo de ausencia para que RRHH la compute correctamente."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_rrhh_gasto_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_rrhh_gastos WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "rrhh_gasto_missing", "level": "error", "message": "El gasto no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el gasto y revisar si quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    if round(parse_money_value(row_map.get("importe")), 2) <= 0:
+        anomalies.append(
+            {
+                "code": "rrhh_gasto_amount_missing",
+                "level": "warning",
+                "message": "El gasto se ha guardado sin importe válido.",
+                "actions": ["Completar el importe del gasto antes de tramitarlo."],
+            }
+        )
+    if not str(row_map.get("concepto") or "").strip():
+        anomalies.append(
+            {
+                "code": "rrhh_gasto_concept_missing",
+                "level": "warning",
+                "message": "El gasto no tiene concepto definido.",
+                "actions": ["Añadir un concepto para que el gasto se refleje correctamente en RRHH."],
+            }
+        )
+    if not str(row_map.get("doc_key") or "").strip() and not str(row_map.get("doc_url") or "").strip():
+        anomalies.append(
+            {
+                "code": "rrhh_gasto_attachment_missing",
+                "level": "incomplete",
+                "message": "El gasto no tiene justificante adjunto.",
+                "actions": ["Adjuntar el justificante del gasto antes de aprobarlo o pagarlo."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_fincas_incidencia_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_fincas_incidencias WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "fincas_incident_missing", "level": "error", "message": "La incidencia no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar la incidencia y revisar si quedó registrada."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("comunidad_id") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_incident_without_community",
+                "level": "error",
+                "message": "La incidencia se ha guardado sin comunidad asociada.",
+                "actions": ["Vincular la incidencia a una comunidad válida."],
+            }
+        )
+    if normalize_lookup_text(row_map.get("estado") or "") in {"CERRADA", "RESUELTA"} and not str(row_map.get("fecha_cierre") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_incident_closed_without_date",
+                "level": "warning",
+                "message": "La incidencia está cerrada pero no tiene fecha de cierre.",
+                "actions": ["Completar la fecha de cierre para mantener la trazabilidad."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_fincas_provider_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_fincas_proveedores WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "fincas_provider_missing", "level": "error", "message": "El proveedor no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el proveedor y revisar si quedó registrado."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("telefono") or "").strip() and not str(row_map.get("email") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_provider_contact_missing",
+                "level": "warning",
+                "message": "El proveedor no tiene datos de contacto.",
+                "actions": ["Añadir teléfono o email para poder usar el proveedor en incidencias y juntas."],
+            }
+        )
+    if round(parse_money_value(row_map.get("tarifa_mensual")), 2) < 0:
+        anomalies.append(
+            {
+                "code": "fincas_provider_negative_fee",
+                "level": "warning",
+                "message": "La tarifa mensual del proveedor es inconsistente.",
+                "actions": ["Revisar la tarifa mensual del proveedor."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_fincas_junta_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_fincas_juntas WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "fincas_meeting_missing", "level": "error", "message": "La junta no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar la junta y revisar si quedó registrada."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("orden_dia") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_meeting_agenda_missing",
+                "level": "warning",
+                "message": "La junta se ha guardado sin orden del día.",
+                "actions": ["Completar el orden del día antes de convocar o cerrar la junta."],
+            }
+        )
+    if normalize_lookup_text(row_map.get("estado") or "") in {"CERRADA", "CELEBRADA"} and not str(row_map.get("acuerdos") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_meeting_minutes_missing",
+                "level": "warning",
+                "message": "La junta está cerrada pero no tiene acuerdos registrados.",
+                "actions": ["Añadir los acuerdos de la junta para cerrar correctamente el proceso."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_seguro_recibo_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM seguros_recibos WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "seguro_receipt_missing", "level": "error", "message": "El recibo no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el recibo y revisar si quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("cliente_id") or "").strip():
+        anomalies.append(
+            {
+                "code": "seguro_receipt_without_cliente",
+                "level": "incomplete",
+                "message": "El recibo se ha guardado sin cliente vinculado.",
+                "actions": ["Vincular el recibo a un cliente para que aparezca correctamente en la ficha y el dashboard."],
+            }
+        )
+    prima_total = parse_money_value(row_map.get("prima_total"))
+    comision = parse_money_value(row_map.get("comision"))
+    if prima_total <= 0:
+        anomalies.append(
+            {
+                "code": "seguro_receipt_amount_missing",
+                "level": "warning",
+                "message": "El recibo no tiene prima total válida.",
+                "actions": ["Completar el importe del recibo."],
+            }
+        )
+    if comision > prima_total > 0:
+        anomalies.append(
+            {
+                "code": "seguro_receipt_commission_mismatch",
+                "level": "warning",
+                "message": "La comisión del recibo es superior a la prima total.",
+                "actions": ["Revisar los importes del recibo antes de darlo por bueno."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_seguro_siniestro_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM seguros_siniestros WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "seguro_claim_missing", "level": "error", "message": "El siniestro no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el siniestro y revisar si quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("cliente_id") or "").strip():
+        anomalies.append(
+            {
+                "code": "seguro_claim_without_cliente",
+                "level": "incomplete",
+                "message": "El siniestro se ha guardado sin cliente vinculado.",
+                "actions": ["Vincular el siniestro al cliente correcto."],
+            }
+        )
+    if normalize_lookup_text(row_map.get("estado") or "") in {"CERRADO", "RECHAZADO"} and not str(row_map.get("fecha_cierre") or "").strip():
+        anomalies.append(
+            {
+                "code": "seguro_claim_closed_without_date",
+                "level": "warning",
+                "message": "El siniestro está cerrado pero no tiene fecha de cierre.",
+                "actions": ["Completar la fecha de cierre del siniestro."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_gestoria_factura_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM gestoria_facturas WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "gestoria_invoice_missing", "level": "error", "message": "La factura importada no se ha encontrado tras procesar el OCR.", "actions": ["Volver a procesar la factura y revisar si quedó registrada."]}]
+    row_map = dict(row)
+    anomalies = []
+    duplicate_of = str((context or {}).get("duplicate_of") or "").strip()
+    if duplicate_of:
+        anomalies.append(
+            {
+                "code": "gestoria_invoice_duplicate_detected",
+                "level": "warning",
+                "message": "La factura ya existía y se ha reutilizado el registro previo.",
+                "actions": ["Revisar si el documento duplicado debe fusionarse o archivarse para no duplicar información del proveedor."],
+            }
+        )
+    if not str(row_map.get("doc_key") or "").strip():
+        anomalies.append(
+            {
+                "code": "gestoria_invoice_document_missing",
+                "level": "incomplete",
+                "message": "La factura se ha creado sin documento vinculado.",
+                "actions": ["Adjuntar el documento original para mantener trazabilidad y poder revisarlo desde gestoría."],
+            }
+        )
+    asiento = conn.execute("SELECT id FROM gestoria_asientos WHERE factura_id = ? LIMIT 1", (record_id,)).fetchone()
+    if not asiento:
+        anomalies.append(
+            {
+                "code": "gestoria_invoice_entry_missing",
+                "level": "incomplete",
+                "message": "La factura no ha generado asiento contable.",
+                "actions": ["Revisar el OCR o relanzar la contabilización de la factura para que cuadre en dashboard y contabilidad."],
+            }
+        )
+    total = round(parse_money_value(row_map.get("total")), 2)
+    if total <= 0:
+        anomalies.append(
+            {
+                "code": "gestoria_invoice_total_missing",
+                "level": "warning",
+                "message": "La factura se ha guardado sin importe total válido.",
+                "actions": ["Completar o corregir el importe total de la factura."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_fincas_contabilidad_process(conn, empresa_id, entity_id, context):
+    record_id = str(entity_id or "").strip()
+    row = conn.execute("SELECT * FROM workspace_fincas_contabilidad WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+    if not row:
+        return [{"code": "fincas_accounting_missing", "level": "error", "message": "El movimiento de fincas no se ha encontrado tras guardar el proceso.", "actions": ["Volver a guardar el movimiento y revisar si quedó persistido."]}]
+    row_map = dict(row)
+    anomalies = []
+    if not str(row_map.get("comunidad_id") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_accounting_community_missing",
+                "level": "incomplete",
+                "message": "El movimiento se ha guardado sin comunidad asociada.",
+                "actions": ["Vincular el movimiento a la comunidad correcta para que el resumen de fincas cuadre."],
+            }
+        )
+    if round(parse_money_value(row_map.get("importe")), 2) <= 0:
+        anomalies.append(
+            {
+                "code": "fincas_accounting_amount_missing",
+                "level": "warning",
+                "message": "El movimiento de fincas no tiene importe válido.",
+                "actions": ["Corregir el importe del movimiento antes de usarlo en presupuestos o reporting."],
+            }
+        )
+    if not str(row_map.get("concepto") or "").strip():
+        anomalies.append(
+            {
+                "code": "fincas_accounting_concept_missing",
+                "level": "warning",
+                "message": "El movimiento se ha guardado sin concepto.",
+                "actions": ["Añadir un concepto para mantener el detalle contable de la comunidad."],
+            }
+        )
+    return anomalies
+
+
+def _check_workspace_gestoria_dashboard_process(conn, empresa_id, entity_id, context):
+    payload = dict((context or {}).get("payload") or {})
+    empresa_ids = [str(item or "").strip() for item in list((context or {}).get("empresa_ids") or []) if str(item or "").strip()]
+    anomalies = []
+    if not payload or not empresa_ids:
+        return anomalies
+    counts = dict(payload.get("counts") or {})
+    seg = dict(payload.get("segmentacion_trabajos") or {})
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    actual_docs = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM gestoria_docs d
+        WHERE d.empresa_id IN ({placeholders})
+          AND COALESCE(TRIM(d.doc_key), '') = ''
+          AND COALESCE(TRIM(d.doc_url), '') = ''
+        """,
+        tuple(empresa_ids),
+    ).fetchone()
+    actual_docs_total = int(row_value(actual_docs, "total", 0) or 0)
+    if int(counts.get("docs_sin_archivo") or 0) != actual_docs_total:
+        anomalies.append(
+            {
+                "code": "gestoria_dashboard_docs_mismatch",
+                "level": "warning",
+                "message": "El dashboard de gestoría no cuadra con los documentos sin archivo reales.",
+                "actions": ["Recalcular el dashboard de gestoría y revisar la agregación de documentos sin archivo."],
+            }
+        )
+    actual_seg = compute_gestoria_dashboard_segmentacion_trabajos(conn, empresa_ids)
+    for key in ("herencias_total", "trafico_total", "expedientes_total", "tasaciones_total", "rentas_total", "abiertos_total"):
+        if int(seg.get(key) or 0) != int(actual_seg.get(key) or 0):
+            anomalies.append(
+                {
+                    "code": "gestoria_dashboard_segmentation_mismatch",
+                    "level": "warning",
+                    "message": "La segmentación de trabajos del dashboard de gestoría no coincide con el detalle real.",
+                    "actions": ["Revisar la construcción del dashboard y la clasificación de trabajos de gestoría."],
+                }
+            )
+            break
+    return anomalies
+
+
+def _check_workspace_seguros_dashboard_process(conn, empresa_id, entity_id, context):
+    payload = dict((context or {}).get("payload") or {})
+    empresa_ids = [str(item or "").strip() for item in list((context or {}).get("empresa_ids") or []) if str(item or "").strip()]
+    uploaded_only = bool((context or {}).get("uploaded_only"))
+    anomalies = []
+    current = dict(payload.get("current") or {})
+    if not current or not empresa_ids:
+        return anomalies
+    total_en_vigor = 0
+    total_presupuesto = 0
+    total_rechazada = 0
+    total_contratada = 0
+    year = str(current.get("year") or "").strip()
+    for eid in empresa_ids:
+        check_payload = compute_fincas_seguros_dashboard_payload(conn, eid, year, uploaded_only)
+        check_current = dict(check_payload.get("current") or {})
+        total_en_vigor += int(check_current.get("en_vigor") or 0)
+        total_presupuesto += int(check_current.get("presupuesto") or 0)
+        total_rechazada += int(check_current.get("rechazada") or 0)
+        total_contratada += int(check_current.get("contratada") or 0)
+    if int(current.get("en_vigor") or 0) != total_en_vigor or int(current.get("presupuesto") or 0) != total_presupuesto or int(current.get("rechazada") or 0) != total_rechazada or int(current.get("contratada") or 0) != total_contratada:
+        anomalies.append(
+            {
+                "code": "seguros_dashboard_totals_mismatch",
+                "level": "warning",
+                "message": "El dashboard de seguros no coincide con el detalle real de pólizas por estado.",
+                "actions": ["Recalcular el dashboard de seguros y revisar la agregación por estado de pólizas."],
+            }
+        )
+    return anomalies
+
+
+def run_workspace_process_supervision(
+    conn,
+    *,
+    process_type,
+    servicio,
+    empresa_id="",
+    workspace_id="",
+    entity_type="",
+    entity_id="",
+    actor=None,
+    context=None,
+    now=None,
+):
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    workspace_text = str(workspace_id or "").strip() or infer_workspace_id_from_empresa(conn, empresa_id)
+    empresa_text = str(empresa_id or "").strip()
+    entity_text = str(entity_id or "").strip()
+    process_text = str(process_type or "").strip()
+    service_text = normalize_service_key(servicio or "") or str(servicio or "").strip() or "core"
+    if not workspace_text or not process_text:
+        return {"status": "ok", "anomalies": [], "actions": []}
+    actor_session = actor if isinstance(actor, dict) else {}
+    actor_user_id = str(actor_session.get("user_id") or actor_session.get("id") or "").strip()
+    actor_label = _session_user_label(actor_session) if actor_session else str(actor or "").strip()
+    checkers = {
+        "renta_attach": _check_workspace_renta_process,
+        "seguro_update": _check_workspace_seguro_process,
+        "seguro_recibo": _check_workspace_seguro_recibo_process,
+        "seguro_siniestro": _check_workspace_seguro_siniestro_process,
+        "hipoteca_update": _check_workspace_hipoteca_process,
+        "agenda_action": _check_workspace_action_process,
+        "gestoria_accounting": _check_workspace_accounting_process,
+        "gestoria_factura": _check_workspace_gestoria_factura_process,
+        "gestoria_dashboard": _check_workspace_gestoria_dashboard_process,
+        "fincas_community": _check_workspace_fincas_community_process,
+        "fincas_incidencia": _check_workspace_fincas_incidencia_process,
+        "fincas_provider": _check_workspace_fincas_provider_process,
+        "fincas_junta": _check_workspace_fincas_junta_process,
+        "fincas_contabilidad": _check_workspace_fincas_contabilidad_process,
+        "rrhh_document": _check_workspace_rrhh_document_process,
+        "rrhh_ausencia": _check_workspace_rrhh_ausencia_process,
+        "rrhh_gasto": _check_workspace_rrhh_gasto_process,
+        "seguros_dashboard": _check_workspace_seguros_dashboard_process,
+    }
+    checker = checkers.get(process_text)
+    if not checker:
+        return {"status": "ok", "anomalies": [], "actions": []}
+    anomalies = checker(conn, empresa_text, entity_text, context or {}) or []
+    status = _workspace_process_status_from_anomalies(anomalies)
+    severity = _workspace_process_severity_from_status(status)
+    llm_payload = {}
+    fallback = _workspace_process_fallback_message(process_text, status, anomalies)
+    title = fallback["title"]
+    summary = fallback["summary"]
+    actions = list(fallback["actions"] or [])
+    if anomalies:
+        llm_payload = _build_workspace_process_ollama_message(
+            process_text,
+            status,
+            service_text,
+            anomalies,
+            context or {},
+        )
+        if llm_payload:
+            title = str(llm_payload.get("title") or title).strip() or title
+            summary = str(llm_payload.get("summary") or summary).strip() or summary
+            llm_actions = list(llm_payload.get("actions") or [])
+            if llm_actions:
+                actions = llm_actions
+        dedupe_base = "|".join(
+            [
+                workspace_text,
+                process_text,
+                str(entity_type or "").strip(),
+                entity_text,
+                ",".join(sorted(str((row or {}).get("code") or "").strip() for row in anomalies if str((row or {}).get("code") or "").strip())),
+            ]
+        )
+        dedupe_key = hashlib.sha256(dedupe_base.encode("utf-8")).hexdigest()
+        event_id = _store_workspace_process_event(
+            conn,
+            workspace_id=workspace_text,
+            empresa_id=empresa_text,
+            servicio=service_text,
+            process_type=process_text,
+            entity_type=str(entity_type or "").strip(),
+            entity_id=entity_text,
+            actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            status=status,
+            severity=severity,
+            title=title,
+            summary=summary,
+            anomalies=anomalies,
+            actions=actions,
+            llm_payload=llm_payload,
+            dedupe_key=dedupe_key,
+            now=now_ts,
+        )
+        return {
+            "status": status,
+            "severity": severity,
+            "title": title,
+            "summary": summary,
+            "anomalies": anomalies,
+            "actions": actions,
+            "event_id": event_id,
+            "workspace_id": workspace_text,
+            "servicio": service_text,
+        }
+    _resolve_workspace_process_events(
+        conn,
+        workspace_text,
+        process_text,
+        str(entity_type or "").strip(),
+        entity_text,
+        now=now_ts,
+    )
+    return {
+        "status": "ok",
+        "severity": "info",
+        "title": title,
+        "summary": summary,
+        "anomalies": [],
+        "actions": [],
+        "workspace_id": workspace_text,
+        "servicio": service_text,
+    }
 
 
 def _mask_email(value):
@@ -51156,6 +52444,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_portal",
             "/api/workspace_automatizaciones",
                 "/api/workspace_registro_notifications",
+                "/api/workspace_process_supervisor_ack",
                 "/api/workspace_document_assign",
                 "/api/workspace_portal_upload",
                 "/api/workspace_portal_public_request",
@@ -51462,6 +52751,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_personal_delete",
             "/api/workspace_registro_usuario_toggle",
             "/api/workspace_registro_notifications",
+            "/api/workspace_process_supervisor_ack",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_periodo_lock",
             "/api/workspace_kiosk_toggle",
@@ -59797,8 +61087,24 @@ class Handler(BaseHTTPRequestHandler):
                 after=dict(after) if after else None,
                 now=now,
             )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="rrhh_ausencia",
+                servicio="rrhh",
+                empresa_id=empresa_id or "",
+                workspace_id=workspace_id,
+                entity_type="rrhh_ausencia",
+                entity_id=record_id,
+                actor=session,
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "tipo": tipo,
+                    "persona_id": persona_id,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_rrhh_ausencia_estado":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -59916,8 +61222,20 @@ class Handler(BaseHTTPRequestHandler):
                         log_workspace_notification(conn, workspace_id, persona_id, "admin_rrhh_ausencia_cancelada", notif_payload, now=now)
             except Exception:
                 pass
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="rrhh_ausencia",
+                servicio="rrhh",
+                empresa_id=empresa_id or "",
+                workspace_id=workspace_id,
+                entity_type="rrhh_ausencia",
+                entity_id=record_id,
+                actor=session,
+                context={"operation": "state", "estado": next_estado, "persona_id": persona_id},
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "estado": next_estado})
+            json_response(self, {"ok": True, "id": record_id, "estado": next_estado, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_rrhh_gasto":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -60022,8 +61340,23 @@ class Handler(BaseHTTPRequestHandler):
                 after=dict(after) if after else None,
                 now=now,
             )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="rrhh_gasto",
+                servicio="rrhh",
+                empresa_id=empresa_id or "",
+                workspace_id=workspace_id,
+                entity_type="rrhh_gasto",
+                entity_id=record_id,
+                actor=session,
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "persona_id": persona_id,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_rrhh_gasto_estado":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -60109,8 +61442,20 @@ class Handler(BaseHTTPRequestHandler):
                 after=dict(after) if after else None,
                 now=now,
             )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="rrhh_gasto",
+                servicio="rrhh",
+                empresa_id=empresa_id or "",
+                workspace_id=workspace_id,
+                entity_type="rrhh_gasto",
+                entity_id=record_id,
+                actor=session,
+                context={"operation": "state", "estado": next_estado, "persona_id": persona_id},
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "estado": next_estado})
+            json_response(self, {"ok": True, "id": record_id, "estado": next_estado, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_rrhh_documento":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -60627,6 +61972,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
             return
+        elif parsed.path == "/api/workspace_process_supervisor_ack":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            event_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not event_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            ack = acknowledge_workspace_process_supervisor_event(
+                conn,
+                workspace_id,
+                event_id,
+                actor=session,
+                now=now,
+            )
+            if not ack:
+                json_response(self, {"error": "Incidencia no encontrada"}, status=404)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, "id": event_id})
+            return
         elif parsed.path == "/api/workspace_registro_horario_xml":
             workspace_id = params.get("workspace_id", [""])[0]
             month = params.get("month", [""])[0]
@@ -61021,8 +62390,23 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_community",
+                servicio="fincas",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="fincas_comunidad",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "nombre": nombre,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
 
         elif parsed.path == "/api/workspace_fincas_comunidad_delete":
@@ -61166,8 +62550,29 @@ class Handler(BaseHTTPRequestHandler):
                 {"incident_id": record_id, "comunidad_id": comunidad_id, "servicio": "fincas", "cliente_nombre": None, "estado": (payload.get("estado") or "").strip() or "Abierta"},
                 now,
             )
+            empresa_row = conn.execute(
+                "SELECT empresa_id FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            empresa_id = str(empresa_row["empresa_id"] or "").strip() if empresa_row else ""
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_incidencia",
+                servicio="fincas",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="fincas_incidencia",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "comunidad_id": comunidad_id,
+                    "titulo": titulo,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_contratos":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -61445,8 +62850,23 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_provider",
+                servicio="fincas",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="fincas_proveedor",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "nombre": nombre,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_fincas_juntas":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -61486,8 +62906,29 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+            empresa_row = conn.execute(
+                "SELECT empresa_id FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            empresa_id = str(empresa_row["empresa_id"] or "").strip() if empresa_row else ""
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_junta",
+                servicio="fincas",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="fincas_junta",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update" if payload.get("id") else "create",
+                    "comunidad_id": comunidad_id,
+                    "fecha": fecha,
+                },
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_fincas_contabilidad":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -61551,8 +62992,27 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+            empresa_row = None
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            if comunidad_id:
+                empresa_row = conn.execute(
+                    "SELECT empresa_id FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (comunidad_id, workspace_id),
+                ).fetchone()
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="fincas_contabilidad",
+                servicio="fincas",
+                empresa_id=str(row_value(empresa_row, "empresa_id", "") or "").strip(),
+                workspace_id=workspace_id,
+                entity_type="fincas_contabilidad",
+                entity_id=record_id,
+                actor=session,
+                context={"operation": "update" if payload.get("id") else "create", "comunidad_id": comunidad_id, "tipo": tipo},
+                now=now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
             return
         elif parsed.path == "/api/workspace_fincas_contabilidad_import_preview":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -61664,27 +63124,26 @@ class Handler(BaseHTTPRequestHandler):
                 if exists:
                     skipped += 1
                     continue
-
-                    conn.execute(
-                        """
-                        INSERT INTO workspace_fincas_contabilidad (
-                          id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                        """,
-                        (
-                            os.urandom(16).hex(),
-                            workspace_id,
-                            comunidad_id,
-                            fecha,
-                            "Pendiente de casar",
-                            tipo,
-                            concepto,
-                            float(importe),
-                            notas,
-                            now,
-                            now,
-                        ),
-                    )
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_contabilidad (
+                      id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        workspace_id,
+                        comunidad_id,
+                        fecha,
+                        "Pendiente de casar",
+                        tipo,
+                        concepto,
+                        float(importe),
+                        notas,
+                        now,
+                        now,
+                    ),
+                )
                 inserted += 1
             conn.commit()
             json_response(self, {"ok": True, "inserted": inserted, "skipped": skipped, "total": len(movements)})
@@ -62010,6 +63469,7 @@ class Handler(BaseHTTPRequestHandler):
                     cliente_ids = [hipoteca_link["cliente_id"]]
                     cliente_id = hipoteca_link["cliente_id"]
             cliente_ids_json = json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None
+            record_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
@@ -62020,7 +63480,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    os.urandom(16).hex(),
+                    record_id,
                     empresa["id"],
                     cliente_id,
                     cliente_ids_json,
@@ -62037,6 +63497,25 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="gestoria_accounting",
+                servicio="gestoria",
+                empresa_id=str(empresa["id"] or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="gestoria_contabilidad",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create",
+                    "seguro_id": seguro_id,
+                    "hipoteca_id": hipoteca_id,
+                },
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
+            return
         elif parsed.path == "/api/gestoria_contabilidad_update":
             record_id = payload.get("id")
             if not record_id:
@@ -62112,6 +63591,24 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (*values, now, record_id),
             )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="gestoria_accounting",
+                servicio="gestoria",
+                empresa_id=str(empresa["id"] or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="gestoria_contabilidad",
+                entity_id=str(record_id or "").strip(),
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update",
+                    "changed_fields": [field for field in allowed if field in payload],
+                },
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "process_supervision": process_supervision})
+            return
         elif parsed.path == "/api/gestoria_factura_ocr":
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
@@ -62119,6 +63616,24 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
+            factura_id = str(result.get("factura_id") or result.get("duplicate_of") or "").strip()
+            result["process_supervision"] = run_workspace_process_supervision(
+                conn,
+                process_type="gestoria_factura",
+                servicio="gestoria",
+                empresa_id=str(empresa["id"] or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="gestoria_factura",
+                entity_id=factura_id,
+                actor=session,
+                context={
+                    "operation": "ocr",
+                    "duplicate_of": str(result.get("duplicate_of") or "").strip(),
+                    "cliente_id": str(payload.get("cliente_id") or "").strip() or None,
+                },
+                now=now,
+            )
+            conn.commit()
             json_response(self, result)
             return
         elif parsed.path == "/api/gestoria_contabilidad_delete":
@@ -62935,6 +64450,23 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                         ),
                     )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_update",
+                servicio="seguros",
+                empresa_id=str(empresa["id"] or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="seguro",
+                entity_id=str(poliza_id or "").strip(),
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create",
+                    "cliente_id": cliente_id,
+                    "duplicate_of": dup_id,
+                    "estado": poliza_row["estado"] if poliza_row else "",
+                },
+                now=now,
+            )
             conn.commit()
             json_response(
                 self,
@@ -62946,6 +64478,7 @@ class Handler(BaseHTTPRequestHandler):
                     "contabilidad_id": contabilidad_id,
                     "ocr_quality": ocr_quality,
                     "duplicate_of": dup_id,
+                    "process_supervision": process_supervision,
                 },
             )
             return
@@ -63842,6 +65375,21 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, f"%{record_id}%"),
                     )
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_update",
+                servicio="seguros",
+                empresa_id=str((row["empresa_id"] if row else current_row["empresa_id"]) or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="seguro",
+                entity_id=str(record_id or "").strip(),
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update",
+                    "changed_fields": sorted(list(updates.keys())),
+                },
+                now=now,
+            )
             conn.commit()
             json_response(
                 self,
@@ -63850,6 +65398,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": record_id,
                     "ramo": row["ramo"] if row else "",
                     "estado": row["estado"] if row else "",
+                    "process_supervision": process_supervision,
                 },
             )
             return
@@ -64575,7 +66124,25 @@ class Handler(BaseHTTPRequestHandler):
                     )
             except Exception:
                 pass
-            json_response(self, {"ok": True, "id": rec_id})
+            workspace_id = infer_workspace_id_from_empresa(conn, empresa_id)
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_recibo",
+                servicio="seguros",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="seguros_recibo",
+                entity_id=rec_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create",
+                    "cliente_id": cliente_id,
+                    "seguro_id": seguro_id,
+                    "estado": estado,
+                },
+                now=now,
+            )
+            json_response(self, {"ok": True, "id": rec_id, "process_supervision": process_supervision})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_recibos_update":
@@ -64697,7 +66264,26 @@ class Handler(BaseHTTPRequestHandler):
                     )
             except Exception:
                 pass
-            json_response(self, {"ok": True, "id": rec_id})
+            empresa_id = str(row["empresa_id"] or "").strip()
+            workspace_id = infer_workspace_id_from_empresa(conn, empresa_id)
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_recibo",
+                servicio="seguros",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="seguros_recibo",
+                entity_id=rec_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update",
+                    "cliente_id": str(updates.get("cliente_id", row["cliente_id"]) or "").strip() or None,
+                    "seguro_id": str(updates.get("seguro_id", row["seguro_id"]) or "").strip() or None,
+                    "estado": str(updates.get("estado", row["estado"]) or "").strip(),
+                },
+                now=now,
+            )
+            json_response(self, {"ok": True, "id": rec_id, "process_supervision": process_supervision})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_recibos_delete":
@@ -64796,7 +66382,25 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            json_response(self, {"ok": True, "id": sin_id})
+            workspace_id = infer_workspace_id_from_empresa(conn, empresa_id)
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_siniestro",
+                servicio="seguros",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="seguros_siniestro",
+                entity_id=sin_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create",
+                    "cliente_id": cliente_id,
+                    "seguro_id": seguro_id,
+                    "estado": estado,
+                },
+                now=now,
+            )
+            json_response(self, {"ok": True, "id": sin_id, "process_supervision": process_supervision})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_siniestros_update":
@@ -64850,7 +66454,26 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_siniestros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
-            json_response(self, {"ok": True, "id": sin_id})
+            empresa_id = str(row["empresa_id"] or "").strip()
+            workspace_id = infer_workspace_id_from_empresa(conn, empresa_id)
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_siniestro",
+                servicio="seguros",
+                empresa_id=empresa_id,
+                workspace_id=workspace_id,
+                entity_type="seguros_siniestro",
+                entity_id=sin_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update",
+                    "cliente_id": str(updates.get("cliente_id", row["cliente_id"]) or "").strip() or None,
+                    "seguro_id": str(updates.get("seguro_id", row["seguro_id"]) or "").strip() or None,
+                    "estado": str(updates.get("estado", row["estado"]) or "").strip(),
+                },
+                now=now,
+            )
+            json_response(self, {"ok": True, "id": sin_id, "process_supervision": process_supervision})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_siniestros_delete":
@@ -71419,6 +73042,23 @@ class Handler(BaseHTTPRequestHandler):
                     ocr_job_id = ""
             # Auditoría: usa `cliente_id` para que el dashboard muestre el cliente y podamos filtrar por usuario.
             audit("renta_quick_attach", cliente_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="renta_attach",
+                servicio="gestoria",
+                empresa_id=empresa_id,
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="cliente",
+                entity_id=cliente_id,
+                actor=session,
+                context={
+                    "entry_id": entry_id,
+                    "doc_id": doc_id,
+                    "ejercicio": ejercicio,
+                    "estado_presentacion": estado_presentacion,
+                },
+                now=now,
+            )
             try:
                 conn.commit()
             except Exception:
@@ -71426,7 +73066,16 @@ class Handler(BaseHTTPRequestHandler):
                     conn.rollback()
                 except Exception:
                     pass
-            json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "ocr_job_id": ocr_job_id})
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "entry_id": entry_id,
+                    "doc_id": doc_id,
+                    "ocr_job_id": ocr_job_id,
+                    "process_supervision": process_supervision,
+                },
+            )
             return
         elif parsed.path == "/api/renta_quick_note":
             doc_id = str(payload.get("doc_id") or "").strip()
@@ -71884,6 +73533,23 @@ class Handler(BaseHTTPRequestHandler):
                         response_payload["captacion_etapa"] = row_cap["etapa"]
                 except Exception:
                     pass
+            response_payload["process_supervision"] = run_workspace_process_supervision(
+                conn,
+                process_type="agenda_action",
+                servicio=servicio_store,
+                empresa_id=empresa_id_fk,
+                workspace_id=workspace_id_fk or "",
+                entity_type="accion",
+                entity_id=action_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create",
+                    "tipo": tipo,
+                    "estado": estado,
+                    "resultado_cierre": resultado_cierre,
+                },
+                now=now,
+            )
             conn.commit()
             json_response(self, response_payload)
             return
@@ -72339,6 +74005,24 @@ class Handler(BaseHTTPRequestHandler):
                         response_payload["captacion_etapa"] = row_cap["etapa"]
                 except Exception:
                     pass
+            response_payload["process_supervision"] = run_workspace_process_supervision(
+                conn,
+                process_type="agenda_action",
+                servicio=servicio_final,
+                empresa_id=empresa_id_ctx or "",
+                workspace_id=str(current["workspace_id"] or payload.get("workspace_id") or "").strip(),
+                entity_type="accion",
+                entity_id=record_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "update",
+                    "tipo": tipo_final,
+                    "estado": estado_final,
+                    "resultado_cierre": resultado_final,
+                    "changed_fields": sorted(list(updates.keys())),
+                },
+                now=now,
+            )
             conn.commit()
             json_response(self, response_payload)
             return
@@ -72703,11 +74387,33 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (estado, fecha_firma, payload.get("anio"), now, hipoteca_id),
             )
+        process_entity_id = str(out_id if parsed.path == "/api/hipotecas" else payload.get("id") or "").strip()
+        process_supervision = {"status": "ok", "anomalies": [], "actions": []}
+        if process_entity_id:
+            hipoteca_scope_row = conn.execute(
+                "SELECT id, empresa_id FROM hipotecas WHERE id = ? LIMIT 1",
+                (process_entity_id,),
+            ).fetchone()
+            process_supervision = run_workspace_process_supervision(
+                conn,
+                process_type="hipoteca_update",
+                servicio="financiaciones",
+                empresa_id=str(row_value(hipoteca_scope_row, "empresa_id") or "").strip(),
+                workspace_id=str(payload.get("workspace_id") or "").strip(),
+                entity_type="hipoteca",
+                entity_id=process_entity_id,
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={
+                    "operation": "create" if parsed.path == "/api/hipotecas" else "update",
+                    "payload_keys": sorted(list(payload.keys())),
+                },
+                now=now,
+            )
         conn.commit()
         if parsed.path == "/api/hipotecas":
-            json_response(self, {"ok": True, "id": out_id, "created": created_flag})
+            json_response(self, {"ok": True, "id": out_id, "created": created_flag, "process_supervision": process_supervision})
         else:
-            json_response(self, {"ok": True})
+            json_response(self, {"ok": True, "process_supervision": process_supervision})
     def handle_api(self, parsed):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
@@ -74107,6 +75813,20 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"rows": []})
                     return
             json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit, persona_id=persona_id or None))
+            return
+        if path == "/api/workspace_process_supervisor":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["25"])[0]
+            only_open = str(params.get("only_open", ["1"])[0] or "").strip().lower() not in {"0", "false", "no", "off"}
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_process_supervisor_events(conn, workspace_id, limit=limit, only_open=only_open))
             return
 
         if path == "/api/workspace_kiosk_status":
@@ -80101,6 +81821,18 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._record_api_error("/api/gestoria_dashboard:segmentacion_trabajos", exc)
                 except Exception:
                     pass
+                payload["process_supervision"] = run_workspace_process_supervision(
+                    conn,
+                    process_type="gestoria_dashboard",
+                    servicio="gestoria",
+                    empresa_id=empresa_ids[0] if len(empresa_ids) == 1 else "",
+                    workspace_id=workspace_id,
+                    entity_type="gestoria_dashboard",
+                    entity_id=workspace_id or ",".join(empresa_ids),
+                    actor=session,
+                    context={"empresa_ids": empresa_ids, "payload": payload},
+                    now=now,
+                )
 
             try:
                 # Productividad por responsable + usuarios con servicio gestoría.
@@ -83508,6 +85240,18 @@ class Handler(BaseHTTPRequestHandler):
                                 Handler._fincas_seguros_dash_cache.pop(k, None)
             except Exception:
                 pass
+            payload["process_supervision"] = run_workspace_process_supervision(
+                conn,
+                process_type="seguros_dashboard",
+                servicio="seguros",
+                empresa_id=empresa_ids[0] if len(empresa_ids) == 1 else "",
+                workspace_id=workspace_id,
+                entity_type="seguros_dashboard",
+                entity_id=workspace_id or ",".join(empresa_ids),
+                actor=getattr(self, "auth_session", None) or self._current_session(),
+                context={"empresa_ids": empresa_ids, "payload": payload, "uploaded_only": uploaded_only},
+                now=now,
+            )
             json_response(self, payload)
             return
 
