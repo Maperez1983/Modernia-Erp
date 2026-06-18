@@ -12240,7 +12240,7 @@ const renderWorkspaceCopilotHub = () => {
         </label>
         <label class="span-2">
           Adjunto
-          <input type="file" name="attachment" accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
+          <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
         </label>
         <div class="form-actions span-2">
           <button type="submit">Preguntar</button>
@@ -12439,30 +12439,33 @@ const renderWorkspaceCopilotHub = () => {
       renderWorkspaceInternalCopilotFeed(history);
       if (internalCopilotStatus) internalCopilotStatus.textContent = "Consultando...";
       try {
-        const attachmentFile = formData.get("attachment");
-        if (attachmentFile instanceof File && attachmentFile.size > 0) {
+        const attachmentFiles = Array.from(internalCopilotForm.querySelector('[name="attachment"]')?.files || []).filter((file) => file instanceof File && file.size > 0);
+        if (attachmentFiles.length) {
           const lowerMsg = normalizeSimple(message).toLowerCase();
           const serviceHint = String(params.get("crm") || "").trim().toLowerCase();
-          let prefix = "copilot";
-          if (lowerMsg.includes("renta")) prefix = "rentas";
-          else if (lowerMsg.includes("factura")) prefix = "copilot_facturas";
-          else if (lowerMsg.includes("poliza") || lowerMsg.includes("póliza") || lowerMsg.includes("seguro")) prefix = "seguros";
-          else if (lowerMsg.includes("hipoteca")) prefix = "hipotecas";
-          else if (serviceHint === "gestoria") prefix = "copilot_facturas";
-          else if (serviceHint === "seguros") prefix = "seguros";
-          else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
-          const uploaded = await uploadFileToS3(attachmentFile, prefix, internalCopilotStatus);
-          if (uploaded?.key || uploaded?.public_url) {
-            payload.context.attachments = [
-              {
+          const uploadedItems = [];
+          for (const attachmentFile of attachmentFiles) {
+            let prefix = "copilot";
+            const fileName = normalizeSimple(String(attachmentFile.name || "")).toLowerCase();
+            if (lowerMsg.includes("renta") || fileName.includes("renta")) prefix = "rentas";
+            else if (lowerMsg.includes("factura") || fileName.includes("factura")) prefix = "copilot_facturas";
+            else if (lowerMsg.includes("poliza") || lowerMsg.includes("póliza") || lowerMsg.includes("seguro") || fileName.includes("poliza")) prefix = "seguros";
+            else if (lowerMsg.includes("hipoteca") || fileName.includes("hipoteca")) prefix = "hipotecas";
+            else if (serviceHint === "gestoria") prefix = "copilot_facturas";
+            else if (serviceHint === "seguros") prefix = "seguros";
+            else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
+            const uploaded = await uploadFileToS3(attachmentFile, prefix, internalCopilotStatus);
+            if (uploaded?.key || uploaded?.public_url) {
+              uploadedItems.push({
                 key: String(uploaded.key || "").trim(),
                 public_url: String(uploaded.public_url || "").trim(),
                 filename: String(attachmentFile.name || "").trim(),
                 content_type: String(attachmentFile.type || "").trim(),
                 size: Number(attachmentFile.size || 0),
-              },
-            ];
+              });
+            }
           }
+          if (uploadedItems.length) payload.context.attachments = uploadedItems;
         }
         const data = await apiPost("/api/internal_copilot_chat", payload);
         history.push({
@@ -13333,7 +13336,11 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         }];
         state.currentWorkspaceInternalCopilotMessages = nextMessages.slice(-20);
         renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
-        setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
+        if (String(action.id || "").trim() === "bulk_revalidate_processes") {
+          setUiToast("Revisión masiva completada", String(result?.message || "Se han revalidado las incidencias seleccionadas."));
+        } else {
+          setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
+        }
       } catch (error) {
         button.disabled = false;
         setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));

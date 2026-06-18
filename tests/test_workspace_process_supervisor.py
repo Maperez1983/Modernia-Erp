@@ -1243,6 +1243,79 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["actions"])
         self.assertEqual(reply["actions"][0]["id"], "create_seguro")
 
+    def test_internal_copilot_review_reply_includes_bulk_revalidate_action(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-bulk', 'ws1', 'e1', 'gestoria', 'renta_attach', 'cliente', 'c40', '',
+              '', 'warning', 'warning', 'Renta incompleta', 'Falta documento',
+              '[{\"code\":\"renta_document_missing\"}]', '[]', '{}',
+              'dbulk', 0, NULL, '2026-06-18T09:00:00Z', '2026-06-18T09:00:00Z'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa todas las rentas de hoy",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertTrue(reply["actions"])
+        self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_processes")
+
+    def test_internal_copilot_action_updates_current_seguro(self):
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c60', 'Cliente Seguro', '88888888H', 'seg@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO seguros (id, empresa_id, cliente_id, tomador, compania, poliza_numero, estado, created_at, updated_at) VALUES ('s60', 'e1', 'c60', 'Cliente Seguro', 'Mapfre', 'P-60', 'Presupuesto', 'now', 'now')")
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "update_current_seguro",
+            {"seguro_id": "s60", "patch": {"compania": "Allianz", "estado": "Contratada"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:00:00Z",
+        )
+        row = self.conn.execute("SELECT compania, estado FROM seguros WHERE id = 's60'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertEqual(row["compania"], "Allianz")
+        self.assertEqual(row["estado"], "Contratada")
+
+    def test_internal_copilot_action_bulk_revalidates(self):
+        self.conn.execute("INSERT INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES ('we-bulk', 'ws1', 'e1', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c61', 'Cliente Bulk', '99999999J', 'bulk@test.local', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ce61', 'c61', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO cliente_gestoria (id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at) VALUES ('cg61', 'c61', 'Particular', 0, 0, 0, 1, 0, 0, 0, '{\"entries\":[]}', 'now', 'now')")
+        server.run_workspace_process_supervision(
+            self.conn,
+            process_type="renta_attach",
+            servicio="gestoria",
+            empresa_id="e1",
+            workspace_id="ws1",
+            entity_type="cliente",
+            entity_id="c61",
+            context={"ejercicio": "2025"},
+            now="2026-06-18T10:00:00Z",
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_processes",
+            {"process_types": ["renta_attach"], "dates": ["2026-06-18"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T13:05:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(int(result["updated"] or 0), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
