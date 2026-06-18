@@ -1663,7 +1663,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("hipoteca", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "hipotecas")
         self.assertEqual(reply["actions"][0]["id"], "bulk_revalidate_missing_hipotecas")
-        self.assertEqual(reply["actions"][1]["id"], "start_review_queue")
+        self.assertEqual(reply["actions"][1]["id"], "resolve_domain_safe")
+        self.assertEqual(reply["actions"][2]["id"], "start_review_queue")
 
     def test_internal_copilot_operational_query_rentas_missing_document(self):
         self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c74', 'Cliente Renta', '50505050E', 'renta@test.local', 'now', 'now')")
@@ -1717,6 +1718,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("dashboard", reply["answer"].lower())
         self.assertEqual(reply["sources"][0], "workspace_process_supervisor")
         self.assertEqual(reply["actions"][0]["id"], "bulk_refresh_mismatched_dashboards")
+        self.assertEqual(reply["actions"][1]["id"], "resolve_domain_safe")
 
     def test_internal_copilot_operational_query_facturas_without_asiento_includes_action(self):
         self.conn.execute(
@@ -1898,6 +1900,72 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["post_actions"][0]["post_endpoint"], "/api/gestoria_factura_ocr")
         self.assertTrue(result["refresh_supervisor"])
 
+    def test_internal_copilot_action_resolve_domain_safe_hipotecas(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'h-op1', 'e1', 'Cliente Hipoteca', 'c70', 'Openbank', 0, 0, 'Estudio', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "hipotecas_missing_base", "hipoteca_ids": ["h-op1"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:34:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
+
+    def test_internal_copilot_action_resolve_domain_safe_dashboards(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-dash-safe', 'ws1', 'e1', 'seguros', 'seguros_dashboard', 'seguros_dashboard', 'ws1', '',
+              '', 'failed', 'warning', 'Dashboard seguros incoherente', 'Totales no cuadran contra detalle', '[]', '[]', '{}',
+              'ddash-safe', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "dashboard_mismatch", "event_ids": ["evt-dash-safe"]},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:35:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["updated"] or 0), 1)
+        self.assertTrue(result["refresh_supervisor"])
+
     def test_internal_copilot_action_review_queue_returns_next_action(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -1918,7 +1986,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["navigation"]["kind"], "cliente")
         self.assertEqual(result["navigation"]["cliente_id"], "c1")
         self.assertTrue(result["cards"])
-        self.assertEqual(result["actions"][0]["id"], "continue_review_queue")
+        self.assertEqual(result["actions"][0]["id"], "revalidate_current_and_continue")
+        self.assertEqual(result["actions"][1]["id"], "continue_review_queue")
 
     def test_internal_copilot_action_review_queue_rentas_uses_cliente_navigation(self):
         result = server.perform_workspace_internal_copilot_action(
@@ -1938,6 +2007,27 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["navigation"]["kind"], "cliente")
         self.assertEqual(result["navigation"]["cliente_id"], "c74")
+
+    def test_internal_copilot_action_revalidate_current_and_continue(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "revalidate_current_and_continue",
+            {
+                "queue_type": "gestoria_rentas_missing_document",
+                "current_item": {"cliente_id": "c74", "entry_id": "r1", "ejercicio": "2025", "title": "Renta 2025"},
+                "items": [{"cliente_id": "c74b", "entry_id": "r2", "ejercicio": "2025", "title": "Renta 2025 B", "summary": "Cliente 2"}],
+                "route": "/?holding=1&mode=tenant&workspace=ws1&crm=gestoria",
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-18T14:37:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "revalidate_current_and_continue")
+        self.assertTrue(result["refresh_supervisor"])
+        self.assertIn("revalidado", result["message"].lower())
+        self.assertEqual(result["navigation"]["cliente_id"], "c74b")
 
 
 if __name__ == "__main__":

@@ -41869,6 +41869,14 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                     "payload": {"hipoteca_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
                 },
                 {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "hipotecas_missing_base",
+                        "hipoteca_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()],
+                    },
+                },
+                {
                     "id": "start_review_queue",
                     "label": "Revisión guiada",
                     "payload": {
@@ -42046,6 +42054,14 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                     "id": "bulk_refresh_mismatched_dashboards",
                     "label": "Recalcular y revalidar",
                     "payload": {"event_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()]},
+                },
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "dashboard_mismatch",
+                        "event_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()],
+                    },
                 }
             ],
         }
@@ -42289,6 +42305,18 @@ def _workspace_internal_copilot_review_queue_result(queue_type, items, *, route=
     )
     actions = []
     if remaining:
+        actions.append(
+            {
+                "id": "revalidate_current_and_continue",
+                "label": f"Revalidar y seguir",
+                "payload": {
+                    "queue_type": queue_text,
+                    "current_item": dict(current),
+                    "items": remaining,
+                    "route": route,
+                },
+            }
+        )
         actions.append(
             {
                 "id": "continue_review_queue",
@@ -43066,6 +43094,83 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             route=route,
             start=action_text == "start_review_queue",
         )
+    if action_text == "revalidate_current_and_continue":
+        queue_type = str(payload.get("queue_type") or "").strip()
+        current_item = payload.get("current_item") if isinstance(payload.get("current_item"), dict) else {}
+        remaining = payload.get("items") or []
+        route = str(payload.get("route") or "").strip()
+        result = None
+        if queue_type == "gestoria_rentas_missing_document":
+            cliente_id = str(current_item.get("cliente_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="renta_attach",
+                servicio="gestoria",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="cliente",
+                entity_id=cliente_id,
+                actor=actor,
+                context={
+                    "operation": "revalidate",
+                    "entry_id": str(current_item.get("entry_id") or "").strip(),
+                    "ejercicio": str(current_item.get("ejercicio") or "").strip(),
+                },
+                now=now,
+            )
+        elif queue_type == "gestoria_facturas_without_asiento":
+            factura_id = str(current_item.get("factura_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="gestoria_factura",
+                servicio="gestoria",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="gestoria_factura",
+                entity_id=factura_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+        elif queue_type == "hipotecas_missing_base":
+            hipoteca_id = str(current_item.get("hipoteca_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="hipoteca_update",
+                servicio="financiaciones",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="hipoteca",
+                entity_id=hipoteca_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+        elif queue_type == "seguros_missing_pdf":
+            seguro_id = str(current_item.get("seguro_id") or "").strip()
+            result = run_workspace_process_supervision(
+                conn,
+                process_type="seguro_update",
+                servicio="seguros",
+                empresa_id=empresa_id,
+                workspace_id=workspace_text,
+                entity_type="seguro",
+                entity_id=seguro_id,
+                actor=actor,
+                context={"operation": "revalidate"},
+                now=now,
+            )
+        next_result = _workspace_internal_copilot_review_queue_result(queue_type, remaining, route=route, start=False)
+        current_title = str((current_item or {}).get("title") or "registro").strip()
+        status_text = str((result or {}).get("status") or "").strip()
+        prefix = f"{current_title} revalidado"
+        if status_text:
+            prefix = f"{current_title} revalidado ({status_text})"
+        next_result["action_id"] = action_text
+        next_result["message"] = f"{prefix}. {str(next_result.get('message') or '').strip()}".strip()
+        next_result["refresh_supervisor"] = True
+        next_result["process_supervision"] = result or {}
+        return next_result
     if action_text == "resolve_domain_safe":
         domain = str(payload.get("domain") or "").strip()
         if domain == "rentas_missing_document":
@@ -43132,6 +43237,66 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "message": f"Corrección segura preparada. OCR: {len(post_actions)} · revalidaciones: {revalidated} · resueltas: {resolved}.",
                 "post_actions": post_actions,
                 "updated": len(post_actions) + revalidated,
+                "resolved": resolved,
+                "refresh_supervisor": True,
+            }
+        if domain == "hipotecas_missing_base":
+            hipoteca_ids = [str(item or "").strip() for item in (payload.get("hipoteca_ids") or []) if str(item or "").strip()]
+            updated = 0
+            resolved = 0
+            for hipoteca_id in hipoteca_ids:
+                result = run_workspace_process_supervision(
+                    conn,
+                    process_type="hipoteca_update",
+                    servicio="financiaciones",
+                    empresa_id=empresa_id,
+                    workspace_id=workspace_text,
+                    entity_type="hipoteca",
+                    entity_id=hipoteca_id,
+                    actor=actor,
+                    context={"operation": "revalidate"},
+                    now=now,
+                )
+                updated += 1
+                if str(result.get("status") or "").strip() == "ok":
+                    resolved += 1
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Corrección segura aplicada sobre {updated} hipoteca(s). Resueltas: {resolved}.",
+                "updated": updated,
+                "resolved": resolved,
+                "refresh_supervisor": True,
+            }
+        if domain == "dashboard_mismatch":
+            event_ids = [str(item or "").strip() for item in (payload.get("event_ids") or []) if str(item or "").strip()]
+            updated = 0
+            resolved = 0
+            for event_id in event_ids:
+                perform_workspace_process_supervisor_action(
+                    conn,
+                    workspace_text,
+                    event_id,
+                    "reload_dashboard",
+                    actor=actor,
+                    now=now,
+                )
+                revalidation = perform_workspace_process_supervisor_action(
+                    conn,
+                    workspace_text,
+                    event_id,
+                    "revalidate_process",
+                    actor=actor,
+                    now=now,
+                )
+                updated += 1
+                if revalidation.get("resolved"):
+                    resolved += 1
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Corrección segura aplicada sobre {updated} dashboard(s). Resueltos: {resolved}.",
+                "updated": updated,
                 "resolved": resolved,
                 "refresh_supervisor": True,
             }

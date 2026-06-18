@@ -97,6 +97,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("resolve_domain_safe", app_js)
         self.assertIn("start_review_queue", app_js)
         self.assertIn("continue_review_queue", app_js)
+        self.assertIn("revalidate_current_and_continue", app_js)
         self.assertIn("post_actions", app_js)
         self.assertIn("refresh_supervisor", app_js)
         self.assertIn("Array.isArray(result?.actions)", app_js)
