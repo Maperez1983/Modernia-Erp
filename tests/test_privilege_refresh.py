@@ -4,15 +4,18 @@ import sys
 import types
 import unittest
 
-if "PIL" not in sys.modules:
-    pil_stub = types.ModuleType("PIL")
-    pil_stub.Image = object()
-    pil_stub.ImageDraw = object()
-    pil_stub.ImageEnhance = object()
-    pil_stub.ImageFilter = object()
-    pil_stub.ImageFont = object()
-    pil_stub.ImageOps = object()
-    sys.modules["PIL"] = pil_stub
+try:
+    import PIL  # noqa: F401
+except Exception:
+    if "PIL" not in sys.modules:
+        pil_stub = types.ModuleType("PIL")
+        pil_stub.Image = object()
+        pil_stub.ImageDraw = object()
+        pil_stub.ImageEnhance = object()
+        pil_stub.ImageFilter = object()
+        pil_stub.ImageFont = object()
+        pil_stub.ImageOps = object()
+        sys.modules["PIL"] = pil_stub
 
 from web.server import is_superadmin_actor
 from web.server import workspace_actor_is_privileged

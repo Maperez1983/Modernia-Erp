@@ -3,14 +3,17 @@ import sys
 import types
 import unittest
 
-pil_stub = types.ModuleType("PIL")
-pil_stub.Image = object()
-pil_stub.ImageDraw = object()
-pil_stub.ImageEnhance = object()
-pil_stub.ImageFilter = object()
-pil_stub.ImageFont = object()
-pil_stub.ImageOps = object()
-sys.modules.setdefault("PIL", pil_stub)
+try:
+    import PIL  # noqa: F401
+except Exception:
+    pil_stub = types.ModuleType("PIL")
+    pil_stub.Image = object()
+    pil_stub.ImageDraw = object()
+    pil_stub.ImageEnhance = object()
+    pil_stub.ImageFilter = object()
+    pil_stub.ImageFont = object()
+    pil_stub.ImageOps = object()
+    sys.modules.setdefault("PIL", pil_stub)
 
 from web.auth_security import hash_password
 from web.server import admin_lookup_users_by_login, ensure_usuarios_schema
