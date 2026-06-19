@@ -2031,9 +2031,9 @@ const state = {
   })(),
   persistentInternalCopilotOpen: (() => {
     try {
-      return (localStorage.getItem("crm.persistentInternalCopilotVisible.v2") || "1") === "1";
+      return (localStorage.getItem("crm.persistentInternalCopilotVisible.v4") || "0") === "1";
     } catch {
-      return true;
+      return false;
     }
   })(),
   workspaceCompanySearchQuery: "",
@@ -13668,7 +13668,7 @@ const syncPersistentInternalCopilotWidget = () => {
   if (!panel || !toggle) return;
   const isOpen = Boolean(state.persistentInternalCopilotOpen);
   panel.classList.toggle("hidden", !isOpen);
-  toggle.textContent = isOpen ? "Ocultar" : "Mostrar asistente";
+  toggle.textContent = isOpen ? "Cerrar asistente" : "Abrir asistente";
   toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   if (status) {
     const workspaceName = String(state.currentWorkspaceName || "").trim();
@@ -13686,7 +13686,7 @@ const ensurePersistentInternalCopilotWidget = () => {
   const root = document.createElement("div");
   root.id = "globalInternalCopilotWidget";
   root.innerHTML = `
-    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Ocultar</button>
+    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Abrir asistente</button>
     <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(448px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:hidden;z-index:2147482999;background:linear-gradient(180deg,#f6f9f3 0%,#ffffff 14%);border:1px solid #dbe4d8;border-radius:16px;box-shadow:0 22px 52px rgba(15,23,42,.18);display:flex;flex-direction:column">
       <div style="padding:14px 14px 10px;border-bottom:1px solid #e5ece2;background:linear-gradient(135deg,#173b30 0%,#65744c 56%,#b4943b 100%);color:#fff">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -13754,7 +13754,7 @@ const ensurePersistentInternalCopilotWidget = () => {
     toggle.addEventListener("click", () => {
       state.persistentInternalCopilotOpen = !state.persistentInternalCopilotOpen;
       try {
-        localStorage.setItem("crm.persistentInternalCopilotVisible.v2", state.persistentInternalCopilotOpen ? "1" : "0");
+        localStorage.setItem("crm.persistentInternalCopilotVisible.v4", state.persistentInternalCopilotOpen ? "1" : "0");
       } catch (e) {}
       syncPersistentInternalCopilotWidget();
     });

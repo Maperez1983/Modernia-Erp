@@ -108,7 +108,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("submitInternalCopilotQuery", app_js)
         self.assertIn("collectInternalCopilotContext", app_js)
         self.assertIn("persistentInternalCopilotOpen", app_js)
-        self.assertIn("crm.persistentInternalCopilotVisible.v2", app_js)
+        self.assertIn("crm.persistentInternalCopilotVisible.v4", app_js)
         self.assertIn("currentWorkspaceCopilotAgendaKey", app_js)
         self.assertIn("currentWorkspaceCopilotAgendaLoading", app_js)
         self.assertIn('meta: {\n        auto_daily_agenda: true,', app_js)
