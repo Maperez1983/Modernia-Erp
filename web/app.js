@@ -2022,6 +2022,13 @@ const state = {
   currentWorkspaceTenantSection: "",
   currentWorkspaceCopilotAgendaKey: "",
   currentWorkspaceCopilotAgendaLoading: false,
+  persistentInternalCopilotOpen: (() => {
+    try {
+      return (localStorage.getItem("crm.persistentInternalCopilotOpen") || "0") === "1";
+    } catch {
+      return false;
+    }
+  })(),
   workspaceCompanySearchQuery: "",
   workspaceCompanyShowInactive: false,
   workspaceFincasTab: "dashboard",
@@ -12416,88 +12423,17 @@ const renderWorkspaceCopilotHub = () => {
   if (internalCopilotForm) {
     internalCopilotForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const formData = new FormData(internalCopilotForm);
-      const message = String(formData.get("message") || "").trim();
-      if (!message) {
-        if (internalCopilotStatus) internalCopilotStatus.textContent = "Escribe una consulta.";
-        return;
-      }
-      const params = new URLSearchParams(window.location.search || "");
-      const selectedDoc = getGestoriaImportSelectedDoc();
-      const payload = {
-        workspace_id: String(formData.get("workspace_id") || state.currentWorkspaceId || "").trim(),
-        empresa_id: String(formData.get("empresa_id") || state.currentWorkspaceCompanyId || "").trim(),
-        service_hint: String(params.get("crm") || "").trim(),
-        message,
-        context: {
-          current_client_id: String(state.currentClienteId || "").trim(),
-          current_seguro_id: String(state.currentSeguroId || "").trim(),
-          current_renta_entry_id: String(state.currentRentaEntryId || "").trim(),
-          current_hipoteca_id: String(state.currentHipotecaId || "").trim(),
-          current_factura_id: String(state.currentFacturaId || selectedDoc?.factura_id || "").trim(),
-          current_factura_document_id: String(selectedDoc?.id || "").trim(),
-          current_rrhh_document_id: String(state.currentRrhhDocumentId || "").trim(),
-          current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
-          current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
-          current_workspace_view: String(state.currentWorkspaceView || "").trim(),
-          current_fincas_tab: String(state.workspaceFincasTab || "").trim(),
-          current_rrhh_tab: String(state.workspaceRrhhTab || "").trim(),
+      const messageInput = internalCopilotForm.querySelector('[name="message"]');
+      const fileInput = internalCopilotForm.querySelector('[name="attachment"]');
+      await submitInternalCopilotQuery({
+        message: messageInput?.value || "",
+        attachments: fileInput?.files || [],
+        statusEl: internalCopilotStatus,
+        clear: () => {
+          if (messageInput) messageInput.value = "";
+          if (fileInput) fileInput.value = "";
         },
-      };
-      const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? [...state.currentWorkspaceInternalCopilotMessages] : [];
-      history.push({ role: "user", message });
-      state.currentWorkspaceInternalCopilotMessages = history;
-      renderWorkspaceInternalCopilotFeed(history);
-      if (internalCopilotStatus) internalCopilotStatus.textContent = "Consultando...";
-      try {
-        const attachmentFiles = Array.from(internalCopilotForm.querySelector('[name="attachment"]')?.files || []).filter((file) => file instanceof File && file.size > 0);
-        if (attachmentFiles.length) {
-          const lowerMsg = normalizeSimple(message).toLowerCase();
-          const serviceHint = String(params.get("crm") || "").trim().toLowerCase();
-          const uploadedItems = [];
-          for (const attachmentFile of attachmentFiles) {
-            let prefix = "copilot";
-            const fileName = normalizeSimple(String(attachmentFile.name || "")).toLowerCase();
-            if (lowerMsg.includes("renta") || fileName.includes("renta")) prefix = "rentas";
-            else if (lowerMsg.includes("factura") || fileName.includes("factura")) prefix = "copilot_facturas";
-            else if (lowerMsg.includes("poliza") || lowerMsg.includes("póliza") || lowerMsg.includes("seguro") || fileName.includes("poliza")) prefix = "seguros";
-            else if (lowerMsg.includes("hipoteca") || fileName.includes("hipoteca")) prefix = "hipotecas";
-            else if (serviceHint === "gestoria") prefix = "copilot_facturas";
-            else if (serviceHint === "seguros") prefix = "seguros";
-            else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
-            const uploaded = await uploadFileToS3(attachmentFile, prefix, internalCopilotStatus);
-            if (uploaded?.key || uploaded?.public_url) {
-              uploadedItems.push({
-                key: String(uploaded.key || "").trim(),
-                public_url: String(uploaded.public_url || "").trim(),
-                filename: String(attachmentFile.name || "").trim(),
-                content_type: String(attachmentFile.type || "").trim(),
-                size: Number(attachmentFile.size || 0),
-              });
-            }
-          }
-          if (uploadedItems.length) payload.context.attachments = uploadedItems;
-        }
-        const data = await apiPost("/api/internal_copilot_chat", payload);
-        history.push({
-          role: "assistant",
-          message: String(data?.answer || "").trim(),
-          intent: String(data?.intent || "").trim(),
-          suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
-          cards: Array.isArray(data?.cards) ? data.cards : [],
-          actions: Array.isArray(data?.actions) ? data.actions : [],
-          sources: Array.isArray(data?.sources) ? data.sources : [],
-        });
-        state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
-        renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
-        internalCopilotForm.querySelector('[name="message"]').value = "";
-        const fileInput = internalCopilotForm.querySelector('[name="attachment"]');
-        if (fileInput) fileInput.value = "";
-        if (internalCopilotStatus) internalCopilotStatus.textContent = "Listo.";
-      } catch (error) {
-        if (internalCopilotStatus) internalCopilotStatus.textContent = "Error en la consulta.";
-        setUiToast("No se pudo consultar el chat interno", String(error?.message || "Error desconocido"));
-      }
+      });
     });
   }
   if (internalCopilotClearBtn) {
@@ -13240,14 +13176,15 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
 };
 
 const renderWorkspaceInternalCopilotFeed = (messages = []) => {
-  const target = document.getElementById("workspaceInternalCopilotFeed");
-  if (!target) return;
+  const targets = [
+    document.getElementById("workspaceInternalCopilotFeed"),
+    document.getElementById("globalInternalCopilotFeed"),
+  ].filter(Boolean);
+  if (!targets.length) return;
   const rows = Array.isArray(messages) ? messages : [];
-  if (!rows.length) {
-    target.innerHTML = "<p class='muted'>Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p>";
-    return;
-  }
-  target.innerHTML = `
+  const markup = !rows.length
+    ? "<p class='muted'>Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p>"
+    : `
     <div class="crm-mini-list">
       ${rows.slice(-10).map((row, index) => {
         const role = String(row.role || "assistant").trim();
@@ -13307,7 +13244,10 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
       }).join("")}
     </div>
   `;
-  target.querySelectorAll("[data-copilot-assistant-action]").forEach((button) => {
+  targets.forEach((target) => {
+    target.innerHTML = markup;
+  });
+  targets.forEach((target) => target.querySelectorAll("[data-copilot-assistant-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const messageIndex = Number(button.dataset.copilotMessageIndex || "-1");
       const actionIndex = Number(button.dataset.copilotAssistantAction || "-1");
@@ -13387,8 +13327,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));
       }
     });
-  });
-  target.querySelectorAll("[data-copilot-process-action]").forEach((button) => {
+  }));
+  targets.forEach((target) => target.querySelectorAll("[data-copilot-process-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const eventId = String(button.dataset.copilotProcessId || "").trim();
       const actionId = String(button.dataset.copilotProcessAction || "").trim();
@@ -13485,7 +13425,194 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         setUiToast("No se pudo ejecutar la acción", String(error?.message || "Error desconocido"));
       }
     });
-  });
+  }));
+};
+
+const collectInternalCopilotContext = () => {
+  const selectedDoc = getGestoriaImportSelectedDoc();
+  return {
+    current_client_id: String(state.currentClienteId || "").trim(),
+    current_seguro_id: String(state.currentSeguroId || "").trim(),
+    current_renta_entry_id: String(state.currentRentaEntryId || "").trim(),
+    current_hipoteca_id: String(state.currentHipotecaId || "").trim(),
+    current_factura_id: String(state.currentFacturaId || selectedDoc?.factura_id || "").trim(),
+    current_factura_document_id: String(selectedDoc?.id || "").trim(),
+    current_rrhh_document_id: String(state.currentRrhhDocumentId || "").trim(),
+    current_persona_id: String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim(),
+    current_community_id: String(state.workspaceFincasSelectedCommunityId || "").trim(),
+    current_workspace_view: String(state.currentWorkspaceView || "").trim(),
+    current_fincas_tab: String(state.workspaceFincasTab || "").trim(),
+    current_rrhh_tab: String(state.workspaceRrhhTab || "").trim(),
+  };
+};
+
+const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl = null, clear = null } = {}) => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (!workspaceId) {
+    if (statusEl) statusEl.textContent = "Abre primero un workspace.";
+    setUiToast("Workspace requerido", "El asistente necesita un workspace activo para trabajar sobre el CRM.");
+    return false;
+  }
+  const trimmedMessage = String(message || "").trim();
+  if (!trimmedMessage) {
+    if (statusEl) statusEl.textContent = "Escribe una consulta.";
+    return false;
+  }
+  const params = new URLSearchParams(window.location.search || "");
+  const payload = {
+    workspace_id: workspaceId,
+    empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+    service_hint: String(params.get("crm") || "").trim(),
+    message: trimmedMessage,
+    context: collectInternalCopilotContext(),
+  };
+  const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? [...state.currentWorkspaceInternalCopilotMessages] : [];
+  history.push({ role: "user", message: trimmedMessage });
+  state.currentWorkspaceInternalCopilotMessages = history;
+  renderWorkspaceInternalCopilotFeed(history);
+  if (statusEl) statusEl.textContent = "Consultando...";
+  try {
+    const uploadedItems = [];
+    for (const attachmentFile of Array.from(attachments || []).filter((file) => file instanceof File && file.size > 0)) {
+      let prefix = "copilot";
+      const lowerMsg = normalizeSimple(trimmedMessage).toLowerCase();
+      const serviceHint = String(params.get("crm") || "").trim().toLowerCase();
+      const fileName = normalizeSimple(String(attachmentFile.name || "")).toLowerCase();
+      if (lowerMsg.includes("renta") || fileName.includes("renta")) prefix = "rentas";
+      else if (lowerMsg.includes("factura") || fileName.includes("factura")) prefix = "copilot_facturas";
+      else if (lowerMsg.includes("poliza") || lowerMsg.includes("póliza") || lowerMsg.includes("seguro") || fileName.includes("poliza")) prefix = "seguros";
+      else if (lowerMsg.includes("hipoteca") || fileName.includes("hipoteca")) prefix = "hipotecas";
+      else if (serviceHint === "gestoria") prefix = "copilot_facturas";
+      else if (serviceHint === "seguros") prefix = "seguros";
+      else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
+      const uploaded = await uploadFileToS3(attachmentFile, prefix, statusEl);
+      if (uploaded?.key || uploaded?.public_url) {
+        uploadedItems.push({
+          key: String(uploaded.key || "").trim(),
+          public_url: String(uploaded.public_url || "").trim(),
+          filename: String(attachmentFile.name || "").trim(),
+          content_type: String(attachmentFile.type || "").trim(),
+          size: Number(attachmentFile.size || 0),
+        });
+      }
+    }
+    if (uploadedItems.length) payload.context.attachments = uploadedItems;
+    const data = await apiPost("/api/internal_copilot_chat", payload);
+    history.push({
+      role: "assistant",
+      message: String(data?.answer || "").trim(),
+      intent: String(data?.intent || "").trim(),
+      suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
+      cards: Array.isArray(data?.cards) ? data.cards : [],
+      actions: Array.isArray(data?.actions) ? data.actions : [],
+      sources: Array.isArray(data?.sources) ? data.sources : [],
+    });
+    state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
+    renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+    if (typeof clear === "function") clear();
+    if (statusEl) statusEl.textContent = "Listo.";
+    return true;
+  } catch (error) {
+    if (statusEl) statusEl.textContent = "Error en la consulta.";
+    setUiToast("No se pudo consultar el chat interno", String(error?.message || "Error desconocido"));
+    return false;
+  }
+};
+
+const syncPersistentInternalCopilotWidget = () => {
+  const panel = document.getElementById("globalInternalCopilotPanel");
+  const toggle = document.getElementById("globalInternalCopilotToggle");
+  const status = document.getElementById("globalInternalCopilotScope");
+  if (!panel || !toggle) return;
+  const isOpen = Boolean(state.persistentInternalCopilotOpen);
+  panel.classList.toggle("hidden", !isOpen);
+  toggle.textContent = isOpen ? "Ocultar asistente" : "Asistente";
+  toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  if (status) {
+    const workspaceName = String(state.currentWorkspaceName || "").trim();
+    status.textContent = workspaceName ? `Workspace activo: ${workspaceName}` : "Sin workspace activo";
+  }
+};
+
+const ensurePersistentInternalCopilotWidget = () => {
+  if (document.getElementById("globalInternalCopilotWidget")) {
+    syncPersistentInternalCopilotWidget();
+    renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
+    return;
+  }
+  const root = document.createElement("div");
+  root.id = "globalInternalCopilotWidget";
+  root.innerHTML = `
+    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;bottom:18px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Asistente</button>
+    <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;bottom:68px;width:min(420px,calc(100vw - 24px));max-height:min(72vh,760px);overflow:auto;z-index:2147482999;background:#fff;border:1px solid #dbe4f0;border-radius:10px;box-shadow:0 18px 48px rgba(15,23,42,.22);padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <strong>Asistente interno</strong>
+          <div id="globalInternalCopilotScope" class="muted">Sin workspace activo</div>
+        </div>
+      </div>
+      <div id="globalInternalCopilotFeed" style="margin-top:10px"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
+      <form id="globalInternalCopilotForm" class="form-grid" style="margin-top:10px">
+        <label class="span-2">
+          Mensaje
+          <textarea name="message" rows="3" placeholder="Escribe aquí sin salir de la pantalla actual"></textarea>
+        </label>
+        <label class="span-2">
+          Adjunto
+          <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
+        </label>
+        <div class="form-actions span-2">
+          <button type="submit">Enviar</button>
+          <button type="button" id="globalInternalCopilotClearBtn" class="secondary ghost">Limpiar</button>
+          <span id="globalInternalCopilotStatus" class="muted"></span>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(root);
+  const toggle = document.getElementById("globalInternalCopilotToggle");
+  const form = document.getElementById("globalInternalCopilotForm");
+  const clearBtn = document.getElementById("globalInternalCopilotClearBtn");
+  const statusEl = document.getElementById("globalInternalCopilotStatus");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      state.persistentInternalCopilotOpen = !state.persistentInternalCopilotOpen;
+      try {
+        localStorage.setItem("crm.persistentInternalCopilotOpen", state.persistentInternalCopilotOpen ? "1" : "0");
+      } catch (e) {}
+      syncPersistentInternalCopilotWidget();
+    });
+  }
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const textarea = form.querySelector('[name="message"]');
+      const fileInput = form.querySelector('[name="attachment"]');
+      await submitInternalCopilotQuery({
+        message: textarea?.value || "",
+        attachments: fileInput?.files || [],
+        statusEl,
+        clear: () => {
+          if (textarea) textarea.value = "";
+          if (fileInput) fileInput.value = "";
+        },
+      });
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      state.currentWorkspaceInternalCopilotMessages = [];
+      state.currentWorkspaceCopilotAgendaKey = "";
+      renderWorkspaceInternalCopilotFeed([]);
+      const textarea = form?.querySelector('[name="message"]');
+      const fileInput = form?.querySelector('[name="attachment"]');
+      if (textarea) textarea.value = "";
+      if (fileInput) fileInput.value = "";
+      if (statusEl) statusEl.textContent = "";
+    });
+  }
+  syncPersistentInternalCopilotWidget();
+  renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
 };
 
 const maybePrimeWorkspaceInternalCopilotAgenda = async ({ force = false } = {}) => {
@@ -73919,6 +74046,7 @@ const logoutAuthSession = async () => {
 const init = async () => {
   state.booting = true;
   try {
+    ensurePersistentInternalCopilotWidget();
     // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
     // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
     renderCompanyCards();
