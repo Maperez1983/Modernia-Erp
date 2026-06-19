@@ -2480,6 +2480,75 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertGreaterEqual(int(result.get("updated") or 0), 1)
         self.assertTrue(result.get("refresh_supervisor"))
 
+    def test_internal_copilot_prime_operator_console_mode(self):
+        reply = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prime_operator_console",
+            {"current_workspace_view": "rrhh", "current_crm": "rrhh", "copilot_mode": "supervisor"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA", "rol": "Administrador", "servicio": "Administración"},
+            now="2026-06-19T12:10:00Z",
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["action_id"], "prime_operator_console")
+        self.assertEqual(reply["mode"], "supervisor")
+        self.assertTrue(reply["actions"])
+
+    def test_internal_copilot_close_loop_safe_stores_memory(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-loop-1', 'e1', 'Juan Cliente', 'c1', 'Santander', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "close_loop_safe",
+            {"scope": "today", "crm": "fin", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T12:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        rows = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1' AND memory_type = 'close_loop' ORDER BY created_at DESC LIMIT 1"
+        ).fetchall()
+        self.assertTrue(rows)
+        self.assertIn("Ciclo cerrado", str(rows[0]["content"] or ""))
+
+    def test_internal_copilot_reply_mode_legal(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "resume el impacto legal de este cambio",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA", "rol": "Lectura", "servicio": "Seguros"},
+            context={"copilot_mode": "legal", "current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["mode"], "legal")
+
 
 if __name__ == "__main__":
     unittest.main()

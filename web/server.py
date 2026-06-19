@@ -41260,6 +41260,25 @@ def _workspace_internal_copilot_simulation_reply(conn, workspace_id, message, *,
     }
 
 
+def _workspace_internal_copilot_resolve_mode(actor=None, service_hint="", context=None, message=""):
+    actor_map = actor if isinstance(actor, dict) else {}
+    context_map = context if isinstance(context, dict) else {}
+    explicit = normalize_lookup_text(context_map.get("copilot_mode") or "").lower()
+    if explicit in {"operator", "supervisor", "direccion", "legal"}:
+        return explicit
+    text = normalize_lookup_text(message or "").lower()
+    service_text = normalize_lookup_text(service_hint or context_map.get("service_hint") or "").lower()
+    role_text = normalize_lookup_text(actor_map.get("rol") or "").lower()
+    user_service = normalize_lookup_text(actor_map.get("servicio") or "").lower()
+    if any(token in text for token in ("legal", "normativa", "boe", "laboral", "ley", "consulta legal")) or service_text == "legal":
+        return "legal"
+    if any(token in role_text for token in ("direccion", "direct", "gerencia", "control")) or any(token in user_service for token in ("direccion", "control")):
+        return "direccion"
+    if any(token in role_text for token in ("admin", "administrador", "super")) or any(token in user_service for token in ("administracion", "administración")):
+        return "supervisor"
+    return "operator"
+
+
 def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -41335,13 +41354,21 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
     if recent_memory:
         answer_parts.append("y contexto reciente guardado")
     answer = "Ahora mismo te conviene centrarte en " + ", ".join(answer_parts) + "." if answer_parts else "Ahora mismo no veo carga prioritaria abierta en este workspace."
+    mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
+    role_suggestions = {
+        "operator": ["Agenda diaria", "Resolver todo lo seguro", "Abrir revisión guiada"],
+        "supervisor": ["Bandeja unificada", "Resolver todo lo seguro", "Revalidar procesos"],
+        "direccion": ["Bandeja unificada", "Analizar productividad", "Radar legal"],
+        "legal": ["Radar legal", "Agenda diaria", "Ver incidencias"],
+    }
     return {
         "ok": True,
         "intent": "briefing",
         "answer": answer,
+        "mode": mode,
         "cards": cards[:8],
         "actions": actions,
-        "suggestions": ["Agenda diaria", "Bandeja unificada", "Resolver todo lo seguro"],
+        "suggestions": role_suggestions.get(mode, ["Agenda diaria", "Bandeja unificada", "Resolver todo lo seguro"]),
         "sources": list(dict.fromkeys(["task_planner", "workspace_process_supervisor", *pending_sources, "workspace_memory"]))[:8],
     }
 
@@ -41396,6 +41423,7 @@ def _workspace_internal_copilot_continue_reply(conn, workspace_id, message, *, e
     return {
         "ok": True,
         "intent": "continue_context",
+        "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message),
         "answer": "He recuperado el contexto más reciente para que retomes trabajo sin empezar de cero.",
         "cards": cards[:6],
         "actions": actions,
@@ -42611,20 +42639,23 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
             ],
         }
     if ("hipoteca" in text or "hipotecas" in text or "financiacion" in text or "financiación" in text) and any(token in text for token in ("sin importes", "sin importe", "sin datos base", "sin precio")):
-        rows = conn.execute(
-            """
-            SELECT id, cliente_id, cliente, banco, precio, importe_hipoteca, estado
-            FROM hipotecas
-            WHERE empresa_id = ?
-              AND (
-                COALESCE(precio, 0) <= 0
-                OR COALESCE(importe_hipoteca, 0) <= 0
-              )
-            ORDER BY COALESCE(updated_at, created_at) DESC
-            LIMIT 8
-            """,
-            (empresa_id,),
-        ).fetchall() if str(empresa_id or "").strip() else []
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, cliente_id, cliente, banco, precio, importe_hipoteca, estado
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND (
+                    COALESCE(precio, 0) <= 0
+                    OR COALESCE(importe_hipoteca, 0) <= 0
+                  )
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT 8
+                """,
+                (empresa_id,),
+            ).fetchall() if str(empresa_id or "").strip() else []
+        except Exception:
+            rows = []
         if not rows:
             return {
                 "ok": True,
@@ -43336,6 +43367,55 @@ def _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, em
     return deduped_cards, actions, sources
 
 
+def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    context_map = context if isinstance(context, dict) else {}
+    mode = _workspace_internal_copilot_resolve_mode(
+        actor=actor,
+        service_hint=context_map.get("service_hint") or context_map.get("current_crm") or "",
+        context=context_map,
+        message="",
+    )
+    current_view = str(context_map.get("current_workspace_view") or "").strip() or "operations"
+    current_crm = str(context_map.get("current_crm") or context_map.get("service_hint") or "").strip() or current_view
+    briefing = _workspace_internal_copilot_briefing_reply(
+        conn,
+        workspace_id,
+        "qué hago ahora",
+        empresa_id=empresa_id,
+        actor=actor,
+        context=context_map,
+    ) or {}
+    suggestions = {
+        "operator": f"He preparado tu consola operativa para {current_crm}.",
+        "supervisor": f"He preparado la supervisión priorizada de {current_crm}.",
+        "direccion": f"He preparado una vista de control para {current_crm}.",
+        "legal": f"He preparado el seguimiento legal y de riesgos para {current_crm}.",
+    }
+    actions = list(briefing.get("actions") or [])
+    if actions:
+        actions = actions[:]
+    actions.insert(
+        0,
+        {
+            "id": "close_loop_safe",
+            "label": "Cerrar ciclo seguro",
+            "requires_confirmation": True,
+            "confirm_text": "Se lanzarán correcciones seguras, se revalidará el estado y se documentará el resultado en la memoria operativa.",
+            "payload": {"scope": "today", "mode": mode, "view": current_view, "crm": current_crm},
+        },
+    )
+    return {
+        "ok": True,
+        "action_id": "prime_operator_console",
+        "mode": mode,
+        "message": suggestions.get(mode, "He preparado el panel de trabajo del asistente para este CRM."),
+        "cards": list(briefing.get("cards") or [])[:8],
+        "actions": actions[:10],
+        "suggestions": list(briefing.get("suggestions") or [])[:6],
+        "sources": list(dict.fromkeys(["internal_copilot_action", *(briefing.get("sources") or [])]))[:8],
+    }
+
+
 def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     workspace_text = str(workspace_id or "").strip()
     company_text = str(empresa_id or "").strip()
@@ -43362,6 +43442,7 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     response = {
         "ok": True,
         "intent": intent,
+        "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=service_hint, context=context or {}, message=message_text),
         "message": message_text,
         "workspace_id": workspace_text,
         "answer": "",
@@ -44205,6 +44286,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "message": "Tarea creada correctamente.",
+            "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("service_hint") or "", context=payload, message=action_text),
             "sources": ["task_planner"],
             "cards": [{"title": title, "summary": str(payload.get("detail") or "").strip(), "priority": str(payload.get("priority") or "media").strip() or "media", "impact_area": "planificacion"}],
             "actions": [
@@ -44346,6 +44428,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "message": f"Bandeja unificada preparada. He priorizado {len(clean_cards[:12])} pendiente(s) relevantes del workspace.",
+            "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("crm") or "", context=payload, message=action_text),
             "cards": clean_cards[:12],
             "actions": (
                 [
@@ -44369,6 +44452,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "message": f"Agenda diaria preparada. He organizado {len([c for c in agenda_cards if str((c.get('entity') or {}).get('kind') or '').strip() != 'section'])} pendiente(s) por tramos.",
+            "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("crm") or "", context=payload, message=action_text),
             "cards": agenda_cards[:18],
             "actions": (
                 [
@@ -44385,6 +44469,8 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
             "suggestions": ["Atender urgentes hoy", "Revisar esta mañana", "Dejar lo no crítico para después"],
         }
+    if action_text == "prime_operator_console":
+        return _workspace_internal_copilot_prime_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
         safe_action_ids = {
@@ -44441,12 +44527,71 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "message": f"Corrección segura global preparada. Acciones: {len(queued)} · actualizados: {total_updated} · resueltos: {total_resolved} · postprocesos: {len(post_actions)}.",
+            "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("crm") or "", context=payload, message=action_text),
             "updated": total_updated,
             "resolved": total_resolved,
             "post_actions": post_actions,
             "cards": cards[:8],
             "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources]))[:10],
             "suggestions": ["Bandeja unificada", "Agenda diaria", "Revisión guiada"],
+            "refresh_supervisor": True,
+        }
+    if action_text == "close_loop_safe":
+        scope_payload = dict(payload or {})
+        scope_payload.setdefault("scope", "today")
+        scope_payload.setdefault("crm", str(payload.get("crm") or "").strip())
+        safe_result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "resolve_global_safe",
+            scope_payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        ) or {}
+        review_result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "autorreview_global",
+            scope_payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        ) or {}
+        summary = (
+            f"Ciclo cerrado. Actualizados: {int(safe_result.get('updated') or 0)} · "
+            f"resueltos: {int(safe_result.get('resolved') or 0)} · "
+            f"pendientes priorizados tras revalidar: {len(list(review_result.get('cards') or [])[:12])}."
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="close_loop",
+            title="Cierre de ciclo seguro",
+            content=summary,
+            priority="alta",
+            meta={
+                "updated": int(safe_result.get("updated") or 0),
+                "resolved": int(safe_result.get("resolved") or 0),
+                "remaining": len(list(review_result.get("cards") or [])[:12]),
+                "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("crm") or "", context=payload, message=action_text),
+                "crm": str(payload.get("crm") or "").strip(),
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "mode": _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=payload.get("crm") or "", context=payload, message=action_text),
+            "message": summary,
+            "updated": int(safe_result.get("updated") or 0),
+            "resolved": int(safe_result.get("resolved") or 0),
+            "post_actions": list(safe_result.get("post_actions") or []),
+            "cards": list(review_result.get("cards") or [])[:10],
+            "actions": list(review_result.get("actions") or [])[:10],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *(safe_result.get("sources") or []), *(review_result.get("sources") or []), "workspace_memory"]))[:10],
+            "suggestions": ["Bandeja unificada", "Agenda diaria", "Retomar"],
             "refresh_supervisor": True,
         }
     if action_text == "revalidate_current_and_continue":

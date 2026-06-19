@@ -2022,6 +2022,14 @@ const state = {
   currentWorkspaceTenantSection: "",
   currentWorkspaceCopilotAgendaKey: "",
   currentWorkspaceCopilotAgendaLoading: false,
+  currentWorkspaceCopilotPrimeKey: "",
+  persistentInternalCopilotMode: (() => {
+    try {
+      return String(localStorage.getItem("crm.persistentInternalCopilotMode") || "operator").trim() || "operator";
+    } catch {
+      return "operator";
+    }
+  })(),
   persistentInternalCopilotTab: (() => {
     try {
       return String(localStorage.getItem("crm.persistentInternalCopilotTab") || "chat").trim() || "chat";
@@ -8030,6 +8038,9 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  if (state.currentWorkspaceId) {
+    void maybePrimeWorkspaceInternalCopilotAgenda();
+  }
 };
 
 const focusWorkspaceView = (view, element = null, options = {}) => {
@@ -12447,6 +12458,7 @@ const renderWorkspaceCopilotHub = () => {
     internalCopilotClearBtn.addEventListener("click", () => {
       state.currentWorkspaceInternalCopilotMessages = [];
       state.currentWorkspaceCopilotAgendaKey = "";
+      state.currentWorkspaceCopilotPrimeKey = "";
       renderWorkspaceInternalCopilotFeed([]);
       if (internalCopilotStatus) internalCopilotStatus.textContent = "";
     });
@@ -13440,6 +13452,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
 
 const collectInternalCopilotContext = () => {
   const selectedDoc = getGestoriaImportSelectedDoc();
+  const authUser = getAuthScopeUser() || {};
+  const params = new URLSearchParams(window.location.search || "");
   return {
     current_client_id: String(state.currentClienteId || "").trim(),
     current_seguro_id: String(state.currentSeguroId || "").trim(),
@@ -13453,6 +13467,11 @@ const collectInternalCopilotContext = () => {
     current_workspace_view: String(state.currentWorkspaceView || "").trim(),
     current_fincas_tab: String(state.workspaceFincasTab || "").trim(),
     current_rrhh_tab: String(state.workspaceRrhhTab || "").trim(),
+    current_crm: String(params.get("crm") || "").trim(),
+    service_hint: String(params.get("crm") || "").trim(),
+    copilot_mode: String(state.persistentInternalCopilotMode || "operator").trim() || "operator",
+    actor_role: String(authUser?.rol || state.currentWorkspaceMemberRole || "").trim(),
+    actor_service: String(authUser?.servicio || state.currentUserServiceLabel || "").trim(),
   };
 };
 
@@ -13537,9 +13556,19 @@ const getCurrentWorkspaceAutoAgendaMessage = () => {
 const renderGlobalInternalCopilotPanels = () => {
   const widget = document.getElementById("globalInternalCopilotWidget");
   if (!widget) return;
+  const mode = ["operator", "supervisor", "direccion", "legal"].includes(String(state.persistentInternalCopilotMode || "").trim())
+    ? String(state.persistentInternalCopilotMode || "").trim()
+    : "operator";
   const tab = ["chat", "incidencias", "hoy"].includes(String(state.persistentInternalCopilotTab || "").trim())
     ? String(state.persistentInternalCopilotTab || "").trim()
     : "chat";
+  widget.querySelectorAll("[data-global-copilot-mode]").forEach((button) => {
+    const active = String(button.dataset.globalCopilotMode || "").trim() === mode;
+    button.classList.toggle("active", active);
+    button.style.background = active ? "rgba(255,255,255,.22)" : "rgba(255,255,255,.08)";
+    button.style.borderColor = active ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.14)";
+    button.style.color = "#fff";
+  });
   widget.querySelectorAll("[data-global-copilot-tab]").forEach((button) => {
     const active = String(button.dataset.globalCopilotTab || "").trim() === tab;
     button.classList.toggle("active", active);
@@ -13676,6 +13705,40 @@ const runPersistentInternalCopilotQuickAction = async (kind = "") => {
     } catch (e) {}
     renderGlobalInternalCopilotPanels();
     await submitInternalCopilotQuery({ message: "continúa con lo de esta mañana", statusEl });
+    return;
+  }
+  if (normalized === "close_loop") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    const params = new URLSearchParams(window.location.search || "");
+    const result = await apiPost("/api/internal_copilot_action", {
+      workspace_id: String(state.currentWorkspaceId || "").trim(),
+      empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+      service_hint: String(params.get("crm") || "").trim(),
+      action_id: "close_loop_safe",
+      action_payload: collectInternalCopilotContext(),
+    });
+    const messages = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? [...state.currentWorkspaceInternalCopilotMessages] : [];
+    messages.push({
+      role: "assistant",
+      message: String(result?.message || "Ciclo de revisión ejecutado.").trim(),
+      intent: "action_result",
+      suggestions: Array.isArray(result?.suggestions) ? result.suggestions : [],
+      cards: Array.isArray(result?.cards) ? result.cards : [],
+      actions: Array.isArray(result?.actions) ? result.actions : [],
+      sources: Array.isArray(result?.sources) ? result.sources : ["internal_copilot_action"],
+    });
+    state.currentWorkspaceInternalCopilotMessages = messages.slice(-20);
+    renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+    if (result?.refresh_supervisor) {
+      await loadWorkspaceProcessSupervisorFeed({ silent: true });
+      await loadWorkspaceProcessSupervisorHistory({ silent: true });
+    }
+    setUiToast("Ciclo seguro ejecutado", String(result?.message || "Se ha corregido, revalidado y documentado el resultado."));
+    return;
   }
 };
 
@@ -13715,9 +13778,16 @@ const ensurePersistentInternalCopilotWidget = () => {
           <span style="font-size:12px;padding:5px 9px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)">En línea</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button type="button" class="secondary ghost" data-global-copilot-mode="operator" style="border-radius:999px">Operar</button>
+          <button type="button" class="secondary ghost" data-global-copilot-mode="supervisor" style="border-radius:999px">Supervisar</button>
+          <button type="button" class="secondary ghost" data-global-copilot-mode="direccion" style="border-radius:999px">Dirección</button>
+          <button type="button" class="secondary ghost" data-global-copilot-mode="legal" style="border-radius:999px">Legal</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="briefing" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Qué hago ahora</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="resume" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Retomar</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Cerrar ciclo</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Incidencias</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="legal" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Legal</button>
         </div>
@@ -13759,6 +13829,7 @@ const ensurePersistentInternalCopilotWidget = () => {
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué hago ahora" style="border-radius:999px">Qué hago ahora</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="continúa con lo de esta mañana" style="border-radius:999px">Retomar</button>
+            <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px">Cerrar ciclo</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="resume las novedades legales de este workspace" style="border-radius:999px">Radar legal</button>
           </div>
@@ -13810,6 +13881,16 @@ const ensurePersistentInternalCopilotWidget = () => {
       await runPersistentInternalCopilotQuickAction(String(button.dataset.globalCopilotQuick || "").trim());
     });
   });
+  root.querySelectorAll("[data-global-copilot-mode]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.persistentInternalCopilotMode = String(button.dataset.globalCopilotMode || "operator").trim() || "operator";
+      try {
+        localStorage.setItem("crm.persistentInternalCopilotMode", state.persistentInternalCopilotMode);
+      } catch (e) {}
+      renderGlobalInternalCopilotPanels();
+      await maybePrimeWorkspaceInternalCopilotAgenda({ force: true });
+    });
+  });
   root.querySelectorAll("[data-global-copilot-suggest]").forEach((button) => {
     button.addEventListener("click", () => {
       const textarea = form?.querySelector('[name="message"]');
@@ -13827,6 +13908,7 @@ const ensurePersistentInternalCopilotWidget = () => {
     clearBtn.addEventListener("click", () => {
       state.currentWorkspaceInternalCopilotMessages = [];
       state.currentWorkspaceCopilotAgendaKey = "";
+      state.currentWorkspaceCopilotPrimeKey = "";
       renderWorkspaceInternalCopilotFeed([]);
       const textarea = form?.querySelector('[name="message"]');
       const fileInput = form?.querySelector('[name="attachment"]');
@@ -13844,47 +13926,79 @@ const maybePrimeWorkspaceInternalCopilotAgenda = async ({ force = false } = {}) 
   const workspaceId = String(state.currentWorkspaceId || "").trim();
   const target = document.getElementById("workspaceInternalCopilotFeed");
   if (!workspaceId || !target) return;
-  const agendaKey = `${workspaceId}:${new Date().toISOString().slice(0, 10)}`;
+  const params = new URLSearchParams(window.location.search || "");
+  const crm = String(params.get("crm") || "").trim() || String(state.currentWorkspaceView || "").trim() || "operations";
+  const mode = String(state.persistentInternalCopilotMode || "operator").trim() || "operator";
+  const agendaKey = `${workspaceId}:${new Date().toISOString().slice(0, 10)}:${crm}:${mode}`;
   if (!force && state.currentWorkspaceCopilotAgendaLoading) return;
-  if (!force && String(state.currentWorkspaceCopilotAgendaKey || "").trim() === agendaKey) return;
+  if (!force && String(state.currentWorkspaceCopilotPrimeKey || "").trim() === agendaKey) return;
   state.currentWorkspaceCopilotAgendaLoading = true;
   try {
-    const params = new URLSearchParams(window.location.search || "");
+    const primeResult = await apiPost("/api/internal_copilot_action", {
+      workspace_id: workspaceId,
+      empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+      service_hint: String(params.get("crm") || "").trim(),
+      action_id: "prime_operator_console",
+      action_payload: collectInternalCopilotContext(),
+    });
+    const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages)
+      ? [...state.currentWorkspaceInternalCopilotMessages].filter((row) => !row?.meta?.auto_prime_console)
+      : [];
+    const primeCards = Array.isArray(primeResult?.cards) ? primeResult.cards : [];
+    const primeActions = Array.isArray(primeResult?.actions) ? primeResult.actions : [];
+    if (primeCards.length || primeActions.length || String(primeResult?.message || "").trim()) {
+      history.unshift({
+        role: "assistant",
+        intent: "prime_operator_console",
+        message: String(primeResult?.message || "Panel de trabajo preparado.").trim(),
+        suggestions: Array.isArray(primeResult?.suggestions) ? primeResult.suggestions : [],
+        cards: primeCards,
+        actions: primeActions,
+        sources: Array.isArray(primeResult?.sources) ? primeResult.sources : ["internal_copilot_action"],
+        meta: {
+          auto_prime_console: true,
+          agenda_key: agendaKey,
+          mode,
+          crm,
+        },
+      });
+    }
     const result = await apiPost("/api/internal_copilot_action", {
       workspace_id: workspaceId,
       empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
       service_hint: String(params.get("crm") || "").trim(),
       action_id: "daily_review_agenda",
-      action_payload: {},
+      action_payload: collectInternalCopilotContext(),
     });
     const cards = Array.isArray(result?.cards) ? result.cards : [];
     const actions = Array.isArray(result?.actions) ? result.actions : [];
     const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
     const sources = Array.isArray(result?.sources) && result.sources.length ? result.sources : ["daily_review_agenda"];
     const message = String(result?.message || "").trim();
-    if (!cards.length && !actions.length && !message) {
-      state.currentWorkspaceCopilotAgendaKey = agendaKey;
+    if (!cards.length && !actions.length && !message && !history.length) {
+      state.currentWorkspaceCopilotPrimeKey = agendaKey;
       return;
     }
-    const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages)
-      ? [...state.currentWorkspaceInternalCopilotMessages]
-      : [];
     const filteredHistory = history.filter((row) => !row?.meta?.auto_daily_agenda);
-    filteredHistory.unshift({
-      role: "assistant",
-      intent: "daily_review_agenda",
-      message: message || "He preparado la agenda diaria de revisión y el primer bloque prioritario.",
-      suggestions,
-      cards,
-      actions,
-      sources,
-      meta: {
-        auto_daily_agenda: true,
-        agenda_key: agendaKey,
-      },
-    });
+    if (cards.length || actions.length || message) {
+      filteredHistory.unshift({
+        role: "assistant",
+        intent: "daily_review_agenda",
+        message: message || "He preparado la agenda diaria de revisión y el primer bloque prioritario.",
+        suggestions,
+        cards,
+        actions,
+        sources,
+        meta: {
+          auto_daily_agenda: true,
+          agenda_key: agendaKey,
+          mode,
+          crm,
+        },
+      });
+    }
     state.currentWorkspaceInternalCopilotMessages = filteredHistory.slice(-20);
-    state.currentWorkspaceCopilotAgendaKey = agendaKey;
+    state.currentWorkspaceCopilotPrimeKey = agendaKey;
     renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
   } catch (error) {
     console.warn("No se pudo preparar la agenda diaria automática del copilot", error);
