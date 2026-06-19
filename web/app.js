@@ -13658,6 +13658,24 @@ const runPersistentInternalCopilotQuickAction = async (kind = "") => {
     renderGlobalInternalCopilotPanels();
     textarea.value = "Resume las novedades legales relevantes para este workspace y qué impacto tienen en el CRM.";
     textarea.focus();
+    return;
+  }
+  if (normalized === "briefing") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    await submitInternalCopilotQuery({ message: "qué hago ahora", statusEl });
+    return;
+  }
+  if (normalized === "resume") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    await submitInternalCopilotQuery({ message: "continúa con lo de esta mañana", statusEl });
   }
 };
 
@@ -13698,9 +13716,10 @@ const ensurePersistentInternalCopilotWidget = () => {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="briefing" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Qué hago ahora</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="resume" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Retomar</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Incidencias</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="legal" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Legal</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="chat" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Nuevo chat</button>
         </div>
       </div>
       <div style="display:flex;gap:8px;padding:12px 14px 0">
@@ -13738,6 +13757,8 @@ const ensurePersistentInternalCopilotWidget = () => {
           <div style="font-size:12px;font-weight:700;color:#365243;margin-bottom:6px">Consultas rápidas</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué hago ahora" style="border-radius:999px">Qué hago ahora</button>
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="continúa con lo de esta mañana" style="border-radius:999px">Retomar</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="resume las novedades legales de este workspace" style="border-radius:999px">Radar legal</button>
           </div>

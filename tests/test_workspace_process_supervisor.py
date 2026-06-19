@@ -2366,6 +2366,120 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(simulation["ok"])
         self.assertEqual(simulation["intent"], "simulation")
 
+    def test_internal_copilot_briefing_reply(self):
+        server._workspace_internal_copilot_create_task(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            title="Revisar pólizas sin PDF",
+            detail="Bloque de trabajo de seguros",
+            priority="alta",
+            due_at="2026-06-19",
+            source="test",
+            now="2026-06-19T09:00:00Z",
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-brief-1', 'e1', 'Juan Cliente', 'c1', 'BBVA', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué hago ahora",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "briefing")
+        self.assertTrue(reply["cards"])
+        self.assertTrue(any(str(action.get("id") or "") == "resolve_global_safe" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_continue_reply_uses_recent_memory(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="user_note",
+            title="Pendiente de hoy",
+            content="Retomar las rentas incompletas de la mañana",
+            priority="alta",
+            meta={"source": "test"},
+            now="2026-06-19T08:00:00Z",
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "continúa con lo de esta mañana",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "continue_context")
+        self.assertTrue(reply["cards"])
+        self.assertIn("contexto", " ".join(str(card.get("impact_area") or "") for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_action_resolve_global_safe(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-safe-1', 'e1', 'Juan Cliente', 'c1', 'Caixa', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_global_safe",
+            {"scope": "today"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T12:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(int(result.get("updated") or 0), 1)
+        self.assertTrue(result.get("refresh_supervisor"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -77,6 +77,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn('id="globalInternalCopilotPanel"', app_js)
         self.assertIn('id="globalInternalCopilotFeed"', app_js)
         self.assertIn('id="globalInternalCopilotForm"', app_js)
+        self.assertIn('data-global-copilot-quick="briefing"', app_js)
+        self.assertIn('data-global-copilot-quick="resume"', app_js)
         self.assertIn('"/api/internal_copilot_chat"', app_js)
         self.assertIn('"/api/internal_copilot_action"', app_js)
         self.assertIn("current_client_id", app_js)

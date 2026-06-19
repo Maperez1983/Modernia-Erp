@@ -40847,7 +40847,7 @@ def _workspace_internal_copilot_recent_memory(conn, workspace_id, *, actor=None,
     items = []
     for row in rows or []:
         item = dict(row)
-        item["meta"] = parse_json_maybe(item.get("meta_json")) or {}
+        item["meta"] = _safe_json_object(item.get("meta_json") or "{}")
         items.append(item)
     return items
 
@@ -41257,6 +41257,150 @@ def _workspace_internal_copilot_simulation_reply(conn, workspace_id, message, *,
         "answer": f"Simulación previa preparada. El cambio impactaría en: {', '.join(affected) if affected else 'módulo actual, supervisor de procesos y posibles resúmenes relacionados'}.",
         "suggestions": ["Revalidar proceso después", "Crear tarea de revisión", "Ver incidencias abiertas"],
         "sources": ["change_impact_map", "system_invariants"],
+    }
+
+
+def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "que hago ahora",
+            "qué hago ahora",
+            "que hago hoy",
+            "qué hago hoy",
+            "en que me centro",
+            "en qué me centro",
+            "siguiente paso",
+            "siguiente accion",
+            "siguiente acción",
+            "prioriza mi dia",
+            "prioriza mi día",
+            "mi trabajo",
+            "mi bandeja",
+        )
+    ):
+        return None
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=4)
+    recent_memory = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=2)
+    pending_cards, pending_actions, pending_sources = _workspace_internal_copilot_collect_unified_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        str(empresa_id or "").strip(),
+        context if isinstance(context, dict) else {},
+    )
+    cards = []
+    if tasks:
+        for task in tasks[:3]:
+            cards.append(
+                {
+                    "title": str(task.get("title") or "Tarea").strip(),
+                    "summary": str(task.get("detail") or task.get("due_at") or "Pendiente de ejecución").strip(),
+                    "priority": str(task.get("priority") or "media").strip() or "media",
+                    "impact_area": "planificacion",
+                    "entity": {"task_id": str(task.get("id") or "").strip()},
+                }
+            )
+    cards.extend([dict(item) for item in pending_cards[:5]])
+    if recent_memory:
+        memory = recent_memory[0]
+        cards.append(
+            {
+                "title": "Último contexto guardado",
+                "summary": str(memory.get("content") or memory.get("title") or "").strip(),
+                "priority": str(memory.get("priority") or "media").strip() or "media",
+                "impact_area": "contexto",
+                "entity": {"memory_id": str(memory.get("id") or "").strip()},
+            }
+        )
+    actions = [
+        {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today"}},
+        {"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today"}},
+    ]
+    if pending_actions:
+        actions.append(
+            {
+                "id": "resolve_global_safe",
+                "label": "Resolver todo lo seguro",
+                "requires_confirmation": True,
+                "confirm_text": "Se lanzarán todas las acciones seguras disponibles sobre el trabajo abierto del workspace.",
+                "payload": {"scope": "today"},
+            }
+        )
+    answer_parts = []
+    if tasks:
+        answer_parts.append(f"Tienes {len(tasks)} tarea(s) abierta(s)")
+    if pending_cards:
+        answer_parts.append(f"{len(pending_cards)} pendiente(s) operativos priorizados")
+    if recent_memory:
+        answer_parts.append("y contexto reciente guardado")
+    answer = "Ahora mismo te conviene centrarte en " + ", ".join(answer_parts) + "." if answer_parts else "Ahora mismo no veo carga prioritaria abierta en este workspace."
+    return {
+        "ok": True,
+        "intent": "briefing",
+        "answer": answer,
+        "cards": cards[:8],
+        "actions": actions,
+        "suggestions": ["Agenda diaria", "Bandeja unificada", "Resolver todo lo seguro"],
+        "sources": list(dict.fromkeys(["task_planner", "workspace_process_supervisor", *pending_sources, "workspace_memory"]))[:8],
+    }
+
+
+def _workspace_internal_copilot_continue_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("continua", "continúa", "retoma", "sigue con", "lo de antes", "lo de esta mañana", "donde lo deje", "dónde lo dejé")):
+        return None
+    memories = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=4)
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=4)
+    events = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=6, only_open=True).get("rows") or []
+    cards = []
+    if memories:
+        for item in memories[:2]:
+            cards.append(
+                {
+                    "title": str(item.get("title") or "Memoria reciente").strip(),
+                    "summary": str(item.get("content") or "").strip(),
+                    "priority": str(item.get("priority") or "media").strip() or "media",
+                    "impact_area": "contexto",
+                    "entity": {"memory_id": str(item.get("id") or "").strip()},
+                }
+            )
+    if tasks:
+        for item in tasks[:2]:
+            cards.append(
+                {
+                    "title": str(item.get("title") or "Tarea").strip(),
+                    "summary": str(item.get("detail") or item.get("due_at") or "").strip(),
+                    "priority": str(item.get("priority") or "media").strip() or "media",
+                    "impact_area": "planificacion",
+                    "entity": {"task_id": str(item.get("id") or "").strip()},
+                }
+            )
+    if events:
+        cards.extend([_workspace_internal_copilot_card_from_event(row) for row in events[:2]])
+    actions = []
+    if events:
+        actions.append({"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today"}})
+    if tasks:
+        actions.append({"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today"}})
+    if events or tasks:
+        actions.append(
+            {
+                "id": "resolve_global_safe",
+                "label": "Resolver todo lo seguro",
+                "requires_confirmation": True,
+                "confirm_text": "Se lanzarán las acciones seguras disponibles antes de retomar el siguiente bloque.",
+                "payload": {"scope": "today"},
+            }
+        )
+    return {
+        "ok": True,
+        "intent": "continue_context",
+        "answer": "He recuperado el contexto más reciente para que retomes trabajo sin empezar de cero.",
+        "cards": cards[:6],
+        "actions": actions,
+        "suggestions": ["Abrir bandeja unificada", "Agenda diaria", "Revalidar proceso"],
+        "sources": ["workspace_memory", "task_planner", "workspace_process_supervisor"],
     }
 
 
@@ -43232,6 +43376,32 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         response["message"] = message_text
         response["workspace_id"] = workspace_text
         return response
+    continue_reply = _workspace_internal_copilot_continue_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        actor=actor,
+        context=context or {},
+    )
+    if continue_reply:
+        response.update(continue_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    briefing_reply = _workspace_internal_copilot_briefing_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        actor=actor,
+        context=context or {},
+    )
+    if briefing_reply:
+        response.update(briefing_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
     action_reply = _workspace_internal_copilot_build_action_reply(
         conn,
         workspace_text,
@@ -44177,7 +44347,18 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "action_id": action_text,
             "message": f"Bandeja unificada preparada. He priorizado {len(clean_cards[:12])} pendiente(s) relevantes del workspace.",
             "cards": clean_cards[:12],
-            "actions": actions[:10],
+            "actions": (
+                [
+                    {
+                        "id": "resolve_global_safe",
+                        "label": "Resolver todo lo seguro",
+                        "requires_confirmation": True,
+                        "confirm_text": "Se lanzarán las acciones seguras disponibles sobre la bandeja unificada del workspace.",
+                        "payload": {"scope": "today"},
+                    }
+                ]
+                + actions[:10]
+            )[:10],
             "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
             "suggestions": ["Abrir revisión guiada", "Lanzar corrección segura", "Ir al módulo afectado"],
         }
@@ -44189,9 +44370,84 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "action_id": action_text,
             "message": f"Agenda diaria preparada. He organizado {len([c for c in agenda_cards if str((c.get('entity') or {}).get('kind') or '').strip() != 'section'])} pendiente(s) por tramos.",
             "cards": agenda_cards[:18],
-            "actions": actions[:10],
+            "actions": (
+                [
+                    {
+                        "id": "resolve_global_safe",
+                        "label": "Resolver todo lo seguro",
+                        "requires_confirmation": True,
+                        "confirm_text": "Se lanzarán las acciones seguras disponibles sobre el trabajo pendiente del día.",
+                        "payload": {"scope": "today"},
+                    }
+                ]
+                + actions[:10]
+            )[:10],
             "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
             "suggestions": ["Atender urgentes hoy", "Revisar esta mañana", "Dejar lo no crítico para después"],
+        }
+    if action_text == "resolve_global_safe":
+        _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
+        safe_action_ids = {
+            "resolve_domain_safe",
+            "bulk_refresh_mismatched_dashboards",
+            "bulk_revalidate_missing_hipotecas",
+            "bulk_revalidate_rentas_missing_document",
+            "bulk_revalidate_facturas_without_asiento",
+        }
+        queued = []
+        seen = set()
+        for item in actions:
+            if not isinstance(item, dict):
+                continue
+            nested_action_id = str(item.get("id") or "").strip()
+            if nested_action_id not in safe_action_ids:
+                continue
+            key = json.dumps({"id": nested_action_id, "payload": item.get("payload") or {}}, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            queued.append({"id": nested_action_id, "payload": item.get("payload") or {}})
+        if not queued:
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": "Ahora mismo no veo correcciones seguras adicionales para lanzar en bloque.",
+                "sources": ["internal_copilot_action", *list(dict.fromkeys(sources))[:6]],
+                "suggestions": ["Bandeja unificada", "Agenda diaria"],
+                "cards": [],
+                "actions": [],
+            }
+        total_updated = 0
+        total_resolved = 0
+        post_actions = []
+        cards = []
+        nested_sources = []
+        for item in queued:
+            nested = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                item["id"],
+                item["payload"],
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
+            total_updated += int(nested.get("updated") or 0)
+            total_resolved += int(nested.get("resolved") or 0)
+            post_actions.extend(list(nested.get("post_actions") or []))
+            cards.extend(list(nested.get("cards") or []))
+            nested_sources.extend(list(nested.get("sources") or []))
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Corrección segura global preparada. Acciones: {len(queued)} · actualizados: {total_updated} · resueltos: {total_resolved} · postprocesos: {len(post_actions)}.",
+            "updated": total_updated,
+            "resolved": total_resolved,
+            "post_actions": post_actions,
+            "cards": cards[:8],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources]))[:10],
+            "suggestions": ["Bandeja unificada", "Agenda diaria", "Revisión guiada"],
+            "refresh_supervisor": True,
         }
     if action_text == "revalidate_current_and_continue":
         queue_type = str(payload.get("queue_type") or "").strip()
