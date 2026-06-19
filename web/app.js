@@ -2022,6 +2022,13 @@ const state = {
   currentWorkspaceTenantSection: "",
   currentWorkspaceCopilotAgendaKey: "",
   currentWorkspaceCopilotAgendaLoading: false,
+  persistentInternalCopilotTab: (() => {
+    try {
+      return String(localStorage.getItem("crm.persistentInternalCopilotTab") || "chat").trim() || "chat";
+    } catch {
+      return "chat";
+    }
+  })(),
   persistentInternalCopilotOpen: (() => {
     try {
       return (localStorage.getItem("crm.persistentInternalCopilotVisible.v2") || "1") === "1";
@@ -12920,6 +12927,7 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) {
     target.innerHTML = "<p class='muted'>Sin incidencias abiertas en los procesos críticos.</p>";
+    renderGlobalInternalCopilotPanels();
     return;
   }
   target.innerHTML = `
@@ -12975,6 +12983,7 @@ const renderWorkspaceProcessSupervisorFeed = (rows = []) => {
       }
     });
   });
+  renderGlobalInternalCopilotPanels();
   const applyWorkspaceSupervisorNavigation = async (result = {}) => {
     const navigation = result?.navigation && typeof result.navigation === "object" ? result.navigation : null;
     const actionId = String(result?.action_id || "").trim();
@@ -13426,6 +13435,7 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
       }
     });
   }));
+  renderGlobalInternalCopilotPanels();
 };
 
 const collectInternalCopilotContext = () => {
@@ -13519,6 +13529,138 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
   }
 };
 
+const getCurrentWorkspaceAutoAgendaMessage = () => {
+  const messages = Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? state.currentWorkspaceInternalCopilotMessages : [];
+  return messages.find((row) => Boolean(row?.meta?.auto_daily_agenda)) || null;
+};
+
+const renderGlobalInternalCopilotPanels = () => {
+  const widget = document.getElementById("globalInternalCopilotWidget");
+  if (!widget) return;
+  const tab = ["chat", "incidencias", "hoy"].includes(String(state.persistentInternalCopilotTab || "").trim())
+    ? String(state.persistentInternalCopilotTab || "").trim()
+    : "chat";
+  widget.querySelectorAll("[data-global-copilot-tab]").forEach((button) => {
+    const active = String(button.dataset.globalCopilotTab || "").trim() === tab;
+    button.classList.toggle("active", active);
+    button.style.background = active ? "linear-gradient(135deg,#143c2f,#b9922f)" : "#f4f7f2";
+    button.style.color = active ? "#fff" : "#284236";
+    button.style.borderColor = active ? "transparent" : "#dbe4d8";
+  });
+  widget.querySelectorAll("[data-global-copilot-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", String(panel.dataset.globalCopilotPanel || "").trim() !== tab);
+  });
+
+  const incidentsTarget = document.getElementById("globalInternalCopilotIncidents");
+  if (incidentsTarget) {
+    const rows = Array.isArray(state.currentWorkspaceData?.processSupervisorRows) ? state.currentWorkspaceData.processSupervisorRows : [];
+    incidentsTarget.innerHTML = rows.length ? `
+      <div style="display:grid;gap:10px">
+        ${rows.slice(0, 6).map((row) => {
+          const severity = String(row.priority || "media").trim().toLowerCase();
+          const tone = severity === "alta" ? "#b45309" : severity === "critica" ? "#991b1b" : "#365243";
+          const bg = severity === "alta" ? "#fff7ed" : severity === "critica" ? "#fef2f2" : "#f8fbf7";
+          return `
+            <article style="border:1px solid #e3eadf;border-radius:12px;padding:10px 12px;background:${bg}">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+                <div>
+                  <strong style="display:block;color:#1f2d27">${escapeHtml(String(row.title || row.process_type || "Incidencia"))}</strong>
+                  <div class="muted" style="margin-top:4px">${escapeHtml(String(row.summary || "Pendiente de revisión"))}</div>
+                </div>
+                <span style="white-space:nowrap;font-size:12px;padding:4px 8px;border-radius:999px;background:#fff;border:1px solid #eadfbe;color:${tone}">${escapeHtml(String(row.impact || row.priority || "media"))}</span>
+              </div>
+              <div class="muted" style="margin-top:6px;font-size:12px">${escapeHtml(String(row.created_at || ""))}</div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    ` : "<p class='muted'>Sin incidencias abiertas ahora mismo.</p>";
+  }
+
+  const todayTarget = document.getElementById("globalInternalCopilotToday");
+  if (todayTarget) {
+    const agenda = getCurrentWorkspaceAutoAgendaMessage();
+    const cards = Array.isArray(agenda?.cards) ? agenda.cards : [];
+    const actions = Array.isArray(agenda?.actions) ? agenda.actions : [];
+    todayTarget.innerHTML = agenda ? `
+      <div style="display:grid;gap:10px">
+        <div style="padding:10px 12px;border:1px solid #e3eadf;border-radius:12px;background:#f8fbf7">
+          <strong style="display:block;color:#1f2d27">Agenda del día</strong>
+          <div class="muted" style="margin-top:4px">${escapeHtml(String(agenda.message || "Trabajo priorizado para hoy."))}</div>
+        </div>
+        ${cards.slice(0, 4).map((card) => `
+          <article style="border:1px solid #e3eadf;border-radius:12px;padding:10px 12px;background:#fff">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+              <div>
+                <strong style="display:block;color:#1f2d27">${escapeHtml(String(card.title || "Pendiente"))}</strong>
+                <div class="muted" style="margin-top:4px">${escapeHtml(String(card.summary || ""))}</div>
+              </div>
+              <span style="white-space:nowrap;font-size:12px;padding:4px 8px;border-radius:999px;background:#f7f1df;color:#7a5b16">${escapeHtml(String(card.priority || "media"))}</span>
+            </div>
+          </article>
+        `).join("")}
+        ${actions.length ? `
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${actions.slice(0, 3).map((action, index) => `
+              <button
+                type="button"
+                class="secondary ghost"
+                data-copilot-assistant-action="${escapeHtml(String(index))}"
+                data-copilot-message-index="${escapeHtml(String((Array.isArray(state.currentWorkspaceInternalCopilotMessages) ? state.currentWorkspaceInternalCopilotMessages : []).indexOf(agenda)))}"
+                style="border-radius:999px"
+              >${escapeHtml(String(action.label || action.id || "Acción"))}</button>
+            `).join("")}
+          </div>
+        ` : ""}
+      </div>
+    ` : "<p class='muted'>Todavía no hay agenda diaria preparada para este workspace.</p>";
+  }
+};
+
+const runPersistentInternalCopilotQuickAction = async (kind = "") => {
+  const normalized = String(kind || "").trim().toLowerCase();
+  const textarea = document.querySelector('#globalInternalCopilotForm [name="message"]');
+  const statusEl = document.getElementById("globalInternalCopilotStatus");
+  if (!normalized || !textarea) return;
+  if (normalized === "incidencias") {
+    state.persistentInternalCopilotTab = "incidencias";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    return;
+  }
+  if (normalized === "chat") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    textarea.focus();
+    return;
+  }
+  if (normalized === "hoy") {
+    state.persistentInternalCopilotTab = "hoy";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    if (!getCurrentWorkspaceAutoAgendaMessage()) {
+      await submitInternalCopilotQuery({ message: "agenda diaria", statusEl });
+    }
+    return;
+  }
+  if (normalized === "legal") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    textarea.value = "Resume las novedades legales relevantes para este workspace y qué impacto tienen en el CRM.";
+    textarea.focus();
+  }
+};
+
 const syncPersistentInternalCopilotWidget = () => {
   const panel = document.getElementById("globalInternalCopilotPanel");
   const toggle = document.getElementById("globalInternalCopilotToggle");
@@ -13532,6 +13674,7 @@ const syncPersistentInternalCopilotWidget = () => {
     const workspaceName = String(state.currentWorkspaceName || "").trim();
     status.textContent = workspaceName ? `Workspace activo: ${workspaceName}` : "Sin workspace activo";
   }
+  renderGlobalInternalCopilotPanels();
 };
 
 const ensurePersistentInternalCopilotWidget = () => {
@@ -13544,29 +13687,62 @@ const ensurePersistentInternalCopilotWidget = () => {
   root.id = "globalInternalCopilotWidget";
   root.innerHTML = `
     <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Ocultar</button>
-    <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(440px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:auto;z-index:2147482999;background:#fff;border:1px solid #dbe4f0;border-radius:12px;box-shadow:0 18px 48px rgba(15,23,42,.22);padding:12px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;position:sticky;top:0;background:#fff;padding-bottom:8px;z-index:2">
-        <div>
-          <strong>Asistente interno</strong>
-          <div id="globalInternalCopilotScope" class="muted">Sin workspace activo</div>
+    <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(448px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:hidden;z-index:2147482999;background:linear-gradient(180deg,#f6f9f3 0%,#ffffff 14%);border:1px solid #dbe4d8;border-radius:16px;box-shadow:0 22px 52px rgba(15,23,42,.18);display:flex;flex-direction:column">
+      <div style="padding:14px 14px 10px;border-bottom:1px solid #e5ece2;background:linear-gradient(135deg,#173b30 0%,#65744c 56%,#b4943b 100%);color:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+          <div>
+            <strong style="display:block;font-size:17px;letter-spacing:0">Asistente</strong>
+            <div id="globalInternalCopilotScope" style="margin-top:4px;color:rgba(255,255,255,.82);font-size:13px">Sin workspace activo</div>
+          </div>
+          <span style="font-size:12px;padding:5px 9px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)">En línea</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Incidencias</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="legal" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Legal</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="chat" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Nuevo chat</button>
         </div>
       </div>
-      <div id="globalInternalCopilotFeed" style="margin-top:10px;max-height:240px;overflow:auto"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
-      <form id="globalInternalCopilotForm" class="form-grid" style="margin-top:10px">
-        <label class="span-2">
-          Mensaje
-          <textarea name="message" rows="3" placeholder="Escribe aquí sin salir de la pantalla actual"></textarea>
-        </label>
-        <label class="span-2">
-          Adjunto
-          <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
-        </label>
-        <div class="form-actions span-2">
-          <button type="submit">Enviar</button>
-          <button type="button" id="globalInternalCopilotClearBtn" class="secondary ghost">Limpiar</button>
-          <span id="globalInternalCopilotStatus" class="muted"></span>
+      <div style="display:flex;gap:8px;padding:12px 14px 0">
+        <button type="button" data-global-copilot-tab="chat" class="secondary ghost" style="border-radius:999px">Chat</button>
+        <button type="button" data-global-copilot-tab="incidencias" class="secondary ghost" style="border-radius:999px">Incidencias</button>
+        <button type="button" data-global-copilot-tab="hoy" class="secondary ghost" style="border-radius:999px">Hoy</button>
+      </div>
+      <div style="flex:1 1 auto;min-height:0;padding:12px 14px 14px;display:flex;flex-direction:column;gap:12px">
+        <section data-global-copilot-panel="chat" style="display:flex;flex-direction:column;gap:12px;min-height:0;flex:1 1 auto">
+          <div id="globalInternalCopilotFeed" style="flex:1 1 auto;min-height:180px;overflow:auto;padding-right:4px"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
+          <form id="globalInternalCopilotForm" style="display:grid;gap:10px">
+            <div style="border:1px solid #dbe4d8;border-radius:14px;background:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);padding:10px 12px">
+              <textarea name="message" rows="3" placeholder="Escribe aquí sin salir de la pantalla actual" style="width:100%;border:0;outline:none;resize:none;background:transparent;font:inherit;color:#1f2d27"></textarea>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #dbe4d8;border-radius:999px;background:#fff;color:#365243;cursor:pointer">
+                <span>Adjuntar</span>
+                <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" style="display:none" />
+              </label>
+              <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+                <span id="globalInternalCopilotStatus" class="muted"></span>
+                <button type="button" id="globalInternalCopilotClearBtn" class="secondary ghost" style="border-radius:999px">Limpiar</button>
+                <button type="submit" style="border-radius:999px">Enviar</button>
+              </div>
+            </div>
+          </form>
+        </section>
+        <section data-global-copilot-panel="incidencias" class="hidden" style="overflow:auto;flex:1 1 auto;min-height:0">
+          <div id="globalInternalCopilotIncidents"><p class="muted">Sin incidencias abiertas ahora mismo.</p></div>
+        </section>
+        <section data-global-copilot-panel="hoy" class="hidden" style="overflow:auto;flex:1 1 auto;min-height:0">
+          <div id="globalInternalCopilotToday"><p class="muted">Todavía no hay agenda diaria preparada para este workspace.</p></div>
+        </section>
+        <div style="padding:10px 12px;border:1px solid #e3eadf;border-radius:14px;background:#fbfdf9">
+          <div style="font-size:12px;font-weight:700;color:#365243;margin-bottom:6px">Consultas rápidas</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="resume las novedades legales de este workspace" style="border-radius:999px">Radar legal</button>
+          </div>
         </div>
-      </form>
+      </div>
     </div>
   `;
   document.body.appendChild(root);
@@ -13599,6 +13775,33 @@ const ensurePersistentInternalCopilotWidget = () => {
       });
     });
   }
+  root.querySelectorAll("[data-global-copilot-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.persistentInternalCopilotTab = String(button.dataset.globalCopilotTab || "chat").trim() || "chat";
+      try {
+        localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+      } catch (e) {}
+      renderGlobalInternalCopilotPanels();
+    });
+  });
+  root.querySelectorAll("[data-global-copilot-quick]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await runPersistentInternalCopilotQuickAction(String(button.dataset.globalCopilotQuick || "").trim());
+    });
+  });
+  root.querySelectorAll("[data-global-copilot-suggest]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const textarea = form?.querySelector('[name="message"]');
+      if (!textarea) return;
+      textarea.value = String(button.dataset.globalCopilotSuggest || "").trim();
+      state.persistentInternalCopilotTab = "chat";
+      try {
+        localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+      } catch (e) {}
+      renderGlobalInternalCopilotPanels();
+      textarea.focus();
+    });
+  });
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
       state.currentWorkspaceInternalCopilotMessages = [];
@@ -13613,6 +13816,7 @@ const ensurePersistentInternalCopilotWidget = () => {
   }
   syncPersistentInternalCopilotWidget();
   renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
+  renderGlobalInternalCopilotPanels();
 };
 
 const maybePrimeWorkspaceInternalCopilotAgenda = async ({ force = false } = {}) => {
@@ -13695,6 +13899,7 @@ const renderWorkspaceProcessSupervisorHistory = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) {
     target.innerHTML = "<p class='muted'>Sin histórico reciente.</p>";
+    renderGlobalInternalCopilotPanels();
     return;
   }
   target.innerHTML = `
@@ -13707,6 +13912,7 @@ const renderWorkspaceProcessSupervisorHistory = (rows = []) => {
       `).join("")}
     </div>
   `;
+  renderGlobalInternalCopilotPanels();
 };
 
 const loadWorkspaceProcessSupervisorHistory = async ({ silent = false } = {}) => {
