@@ -41279,6 +41279,150 @@ def _workspace_internal_copilot_resolve_mode(actor=None, service_hint="", contex
     return "operator"
 
 
+def _workspace_internal_copilot_normalize_domain(value=""):
+    key = normalize_lookup_text(value or "").lower()
+    aliases = {
+        "fin": "financiaciones",
+        "financiacion": "financiaciones",
+        "financiaciones": "financiaciones",
+        "inmo": "inmobiliaria",
+        "inmobiliaria": "inmobiliaria",
+        "seguros": "seguros",
+        "gestoria": "gestoria",
+        "gestoría": "gestoria",
+        "rrhh": "rrhh",
+        "fincas": "fincas",
+        "legal": "gestoria",
+    }
+    return aliases.get(key, key or "gestoria")
+
+
+def _workspace_internal_copilot_domain_queries(domain=""):
+    normalized = _workspace_internal_copilot_normalize_domain(domain)
+    mapping = {
+        "seguros": ["que polizas estan sin pdf", "qué dashboards no cuadran contra el detalle real"],
+        "gestoria": ["que facturas siguen sin asiento", "que rentas estan sin documento"],
+        "financiaciones": ["que hipotecas estan sin importes base"],
+        "rrhh": ["revisa documentos rrhh caducados"],
+        "fincas": ["revisa comunidades con cuota incoherente"],
+        "inmobiliaria": ["qué es lo más urgente hoy"],
+    }
+    return mapping.get(normalized, ["qué es lo más urgente hoy"])
+
+
+def _workspace_internal_copilot_collect_domain_pending(conn, workspace_id, *, empresa_id="", domain="", context=None):
+    cards = []
+    actions = []
+    sources = []
+    for query in _workspace_internal_copilot_domain_queries(domain):
+        reply = _workspace_internal_copilot_operational_query_reply(
+            conn,
+            workspace_id,
+            query,
+            empresa_id=empresa_id,
+            service_hint=domain,
+            context=context or {},
+        )
+        if not reply:
+            continue
+        cards.extend(list(reply.get("cards") or []))
+        actions.extend(list(reply.get("actions") or []))
+        sources.extend(list(reply.get("sources") or []))
+    deduped_cards = []
+    seen = set()
+    for card in cards:
+        entity = card.get("entity") or {}
+        key = "|".join(
+            [
+                str(card.get("title") or "").strip(),
+                str(entity.get("factura_id") or entity.get("entry_id") or entity.get("hipoteca_id") or entity.get("seguro_id") or entity.get("documento_id") or entity.get("comunidad_id") or "").strip(),
+            ]
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_cards.append(dict(card))
+    return deduped_cards, actions, list(dict.fromkeys(sources))
+
+
+def _workspace_internal_copilot_legal_area_for_context(service_hint="", context=None):
+    context_map = context if isinstance(context, dict) else {}
+    current_crm = _workspace_internal_copilot_normalize_domain(context_map.get("current_crm") or service_hint or "")
+    if current_crm in LEGAL_AREA_DEFINITIONS:
+        return current_crm
+    return "gestoria"
+
+
+def _workspace_internal_copilot_legal_radar_candidates(conn, *, area="gestoria", limit=6):
+    area_key = _workspace_internal_copilot_normalize_domain(area)
+    if area_key not in LEGAL_AREA_DEFINITIONS:
+        area_key = "gestoria"
+    payload = fetch_legal_radar_items(conn, area=area_key, limit=max(6, int(limit or 6)))
+    rows = list(payload.get("rows") or [])
+    candidates = []
+    for row in rows:
+        estado = normalize_lookup_text(row.get("estado") or "").lower()
+        if estado == "aplicado":
+            continue
+        candidates.append(
+            {
+                "id": str(row.get("id") or "").strip(),
+                "title": str(row.get("titulo") or row.get("referencia") or "Novedad legal").strip(),
+                "summary": str(row.get("llm_impact_summary") or row.get("resumen") or row.get("accion_recomendada") or "").strip(),
+                "priority": "alta" if normalize_lookup_text(row.get("impacto") or "").lower() in {"alto", "alta"} else "media",
+                "impact_area": "legal",
+                "area": area_key,
+                "accion_recomendada": str(row.get("accion_recomendada") or "").strip(),
+                "fecha_publicacion": str(row.get("fecha_publicacion") or "").strip(),
+            }
+        )
+        if len(candidates) >= int(limit or 6):
+            break
+    return candidates
+
+
+def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        str(empresa_id or "").strip(),
+        context if isinstance(context, dict) else {},
+    )
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=10)
+    grouped = {}
+    for card in pending_cards:
+        impact = str(card.get("impact_area") or "operativo").strip().lower()
+        grouped[impact] = grouped.get(impact, 0) + 1
+    top_groups = sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:4]
+    cards = [
+        {
+            "title": "Pendientes críticos",
+            "summary": ", ".join(f"{label} ({count})" for label, count in top_groups) if top_groups else "Sin concentración relevante",
+            "priority": "alta" if pending_cards else "media",
+            "impact_area": "direccion",
+        },
+        {
+            "title": "Carga operativa",
+            "summary": f"{len(pending_cards)} pendiente(s) priorizados · {len(tasks)} tarea(s) abierta(s)",
+            "priority": "media",
+            "impact_area": "direccion",
+        },
+    ]
+    return {
+        "ok": True,
+        "action_id": "director_morning_briefing",
+        "mode": "direccion",
+        "message": "He preparado un briefing ejecutivo con la carga crítica y el reparto por impacto del workspace.",
+        "cards": cards + [dict(item) for item in pending_cards[:6]],
+        "actions": [
+            {"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today"}},
+            {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se intentará cerrar el trabajo seguro y recalcular la carga restante.", "payload": dict(context or {})},
+        ],
+        "suggestions": ["Bandeja unificada", "Cerrar ciclo", "Analizar productividad"],
+        "sources": ["workspace_process_supervisor", "task_planner"],
+    }
+
+
 def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -41308,6 +41452,9 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
         str(empresa_id or "").strip(),
         context if isinstance(context, dict) else {},
     )
+    mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
+    if mode == "direccion":
+        return _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
     cards = []
     if tasks:
         for task in tasks[:3]:
@@ -41354,7 +41501,6 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
     if recent_memory:
         answer_parts.append("y contexto reciente guardado")
     answer = "Ahora mismo te conviene centrarte en " + ", ".join(answer_parts) + "." if answer_parts else "Ahora mismo no veo carga prioritaria abierta en este workspace."
-    mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
     role_suggestions = {
         "operator": ["Agenda diaria", "Resolver todo lo seguro", "Abrir revisión guiada"],
         "supervisor": ["Bandeja unificada", "Resolver todo lo seguro", "Revalidar procesos"],
@@ -43394,6 +43540,35 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     actions = list(briefing.get("actions") or [])
     if actions:
         actions = actions[:]
+    if mode == "operator":
+        actions.insert(
+            0,
+            {
+                "id": "run_operator_sequence",
+                "label": "Operar ahora",
+                "payload": {"crm": current_crm, "view": current_view, "mode": mode},
+            },
+        )
+    if mode == "legal":
+        actions.insert(
+            0,
+            {
+                "id": "promote_legal_updates_to_tasks",
+                "label": "Crear tareas legales",
+                "requires_confirmation": True,
+                "confirm_text": "Se crearán tareas de seguimiento a partir del radar legal pendiente para este dominio.",
+                "payload": {"area": _workspace_internal_copilot_legal_area_for_context(current_crm, context_map)},
+            },
+        )
+    if mode == "direccion":
+        actions.insert(
+            0,
+            {
+                "id": "director_morning_briefing",
+                "label": "Briefing ejecutivo",
+                "payload": {"crm": current_crm, "view": current_view, "mode": mode},
+            },
+        )
     actions.insert(
         0,
         {
@@ -44469,8 +44644,110 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
             "suggestions": ["Atender urgentes hoy", "Revisar esta mañana", "Dejar lo no crítico para después"],
         }
+    if action_text == "director_morning_briefing":
+        return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "prime_operator_console":
         return _workspace_internal_copilot_prime_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "promote_legal_updates_to_tasks":
+        area = _workspace_internal_copilot_legal_area_for_context(str(payload.get("area") or payload.get("crm") or "").strip(), payload)
+        candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area=area, limit=6)
+        if not candidates:
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "mode": "legal",
+                "message": "No veo novedades legales pendientes para convertir en tareas ahora mismo.",
+                "cards": [],
+                "actions": [],
+                "sources": ["legal_radar"],
+                "suggestions": ["Radar legal", "Agenda diaria"],
+            }
+        created = []
+        for item in candidates:
+            detail = item["summary"] or item.get("accion_recomendada") or item["title"]
+            task_id = _workspace_internal_copilot_create_task(
+                conn,
+                workspace_text,
+                actor=actor,
+                title=f"[Legal] {item['title']}",
+                detail=detail,
+                priority=item["priority"],
+                due_at=date.today().isoformat(),
+                source="legal_radar",
+                meta={"radar_item_id": item["id"], "area": area, "fecha_publicacion": item.get("fecha_publicacion") or ""},
+                now=now,
+            )
+            created.append({**item, "task_id": task_id})
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "mode": "legal",
+            "message": f"He creado {len(created)} tarea(s) de seguimiento legal para {area}.",
+            "cards": [
+                {
+                    "title": str(item["title"]).strip(),
+                    "summary": str(item["summary"] or item.get("accion_recomendada") or "").strip(),
+                    "priority": str(item["priority"] or "media"),
+                    "impact_area": "legal",
+                    "entity": {"task_id": str(item["task_id"] or "").strip(), "radar_item_id": str(item["id"] or "").strip()},
+                }
+                for item in created[:6]
+            ],
+            "actions": [{"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today"}}],
+            "sources": ["legal_radar", "task_planner"],
+            "suggestions": ["Agenda diaria", "Retomar", "Radar legal"],
+        }
+    if action_text == "run_operator_sequence":
+        domain = _workspace_internal_copilot_normalize_domain(str(payload.get("crm") or payload.get("service_hint") or payload.get("current_crm") or "").strip())
+        cards, actions, sources = _workspace_internal_copilot_collect_domain_pending(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            domain=domain,
+            context=payload,
+        )
+        safe_action = next(
+            (
+                item for item in actions
+                if isinstance(item, dict) and str(item.get("id") or "").strip() in {"resolve_domain_safe", "bulk_refresh_mismatched_dashboards", "bulk_revalidate_missing_hipotecas", "bulk_revalidate_rentas_missing_document", "bulk_revalidate_facturas_without_asiento"}
+            ),
+            None,
+        )
+        safe_result = {}
+        if safe_action:
+            safe_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                str(safe_action.get("id") or "").strip(),
+                safe_action.get("payload") or {},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
+        refreshed_cards, _, _ = _workspace_internal_copilot_collect_domain_pending(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            domain=domain,
+            context=payload,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "mode": "operator",
+            "message": f"Secuencia operativa ejecutada para {domain}. Actualizados: {int(safe_result.get('updated') or 0)} · resueltos: {int(safe_result.get('resolved') or 0)} · pendientes: {len(refreshed_cards[:8])}.",
+            "updated": int(safe_result.get("updated") or 0),
+            "resolved": int(safe_result.get("resolved") or 0),
+            "post_actions": list(safe_result.get("post_actions") or []),
+            "cards": list(refreshed_cards[:8]),
+            "actions": [
+                {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
+                {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
+            ],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or [])]))[:10],
+            "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
+            "refresh_supervisor": True,
+        }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
         safe_action_ids = {

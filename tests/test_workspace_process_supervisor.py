@@ -2549,6 +2549,141 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "legal")
 
+    def test_internal_copilot_run_operator_sequence(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-op-1', 'e1', 'Juan Cliente', 'c1', 'BBVA', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_operator_sequence",
+            {"crm": "fin", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "operator")
+        self.assertIn("Secuencia operativa ejecutada", result["message"])
+
+    def test_internal_copilot_director_briefing_action(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-dir-1', 'ws1', 'e1', 'gestoria', 'gestoria_factura', 'gestoria_factura', 'fac-dir-1', '',
+              '', 'failed', 'error', 'Factura sin asiento', 'Impacto económico alto', '[]', '[]', '{}',
+              'dir-1', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "director_morning_briefing",
+            {"copilot_mode": "direccion", "crm": "gestoria"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA", "rol": "Dirección"},
+            now="2026-06-19T08:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "direccion")
+        self.assertTrue(result["cards"])
+
+    def test_internal_copilot_promote_legal_updates_to_tasks(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS legal_radar_items (
+              id TEXT PRIMARY KEY,
+              area TEXT,
+              fuente TEXT,
+              referencia TEXT,
+              titulo TEXT,
+              fecha_publicacion TEXT,
+              estado TEXT,
+              impacto TEXT,
+              topic_key TEXT,
+              url TEXT,
+              resumen TEXT,
+              accion_recomendada TEXT,
+              affected_documents TEXT,
+              affected_workflows TEXT,
+              affected_clauses TEXT,
+              impact_score REAL,
+              llm_impact_summary TEXT,
+              llm_actions_json TEXT,
+              llm_confidence REAL,
+              llm_review_needed INTEGER,
+              reviewed_at TEXT,
+              reviewed_by TEXT,
+              applied_at TEXT,
+              source_key TEXT,
+              matched_keywords TEXT,
+              auto_detected INTEGER,
+              knowledge_synced_at TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO legal_radar_items (
+              id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
+              topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
+              affected_clauses, impact_score, llm_impact_summary, llm_actions_json,
+              llm_confidence, llm_review_needed, reviewed_at, reviewed_by,
+              applied_at, source_key, matched_keywords, auto_detected, knowledge_synced_at,
+              created_at, updated_at
+            ) VALUES (
+              'lr-1', 'gestoria', 'BOE', 'REF-1', 'Cambio fiscal relevante', '2026-06-19', 'Pendiente', 'Alto',
+              'consultas_hacienda', 'https://example.com', 'Resumen fiscal', 'Revisar plantillas', '[]', '[]',
+              '[]', 0.9, 'Afecta a flujos de gestoría', '[]',
+              0.8, 0, NULL, NULL,
+              NULL, 'boe', '[]', 1, NULL,
+              'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "promote_legal_updates_to_tasks",
+            {"area": "gestoria", "copilot_mode": "legal"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T09:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "legal")
+        tasks = self.conn.execute("SELECT * FROM workspace_internal_copilot_tasks WHERE source = 'legal_radar'").fetchall()
+        self.assertTrue(tasks)
+
 
 if __name__ == "__main__":
     unittest.main()
