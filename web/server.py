@@ -41353,6 +41353,21 @@ def _workspace_internal_copilot_legal_area_for_context(service_hint="", context=
     return "gestoria"
 
 
+def _workspace_internal_copilot_area_route(workspace_id, area="gestoria"):
+    workspace_text = urllib.parse.quote(str(workspace_id or "").strip())
+    area_key = _workspace_internal_copilot_normalize_domain(area)
+    crm_map = {
+        "gestoria": "gestoria",
+        "seguros": "seguros",
+        "financiaciones": "fin",
+        "fincas": "fincas",
+        "rrhh": "rrhh",
+        "inmobiliaria": "inmo",
+    }
+    crm = crm_map.get(area_key, "gestoria")
+    return f"/?holding=1&mode=tenant&workspace={workspace_text}&crm={crm}"
+
+
 def _workspace_internal_copilot_legal_radar_candidates(conn, *, area="gestoria", limit=6):
     area_key = _workspace_internal_copilot_normalize_domain(area)
     if area_key not in LEGAL_AREA_DEFINITIONS:
@@ -44752,7 +44767,10 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 }
                 for item in created[:6]
             ],
-            "actions": [{"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today"}}],
+            "actions": [
+                {"id": "open_module", "label": "Abrir módulo afectado", "payload": {"route": _workspace_internal_copilot_area_route(workspace_text, area)}},
+                {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today"}},
+            ],
             "sources": ["legal_radar", "task_planner"],
             "suggestions": ["Agenda diaria", "Retomar", "Radar legal"],
         }
@@ -44797,6 +44815,17 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ),
             None,
         )
+        guided_result = {}
+        if guided_action:
+            guided_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                str(guided_action.get("id") or "").strip(),
+                guided_action.get("payload") or {},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
         next_actions = [
             {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
             {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
@@ -44823,6 +44852,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or [])]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
             "refresh_supervisor": True,
+            "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)

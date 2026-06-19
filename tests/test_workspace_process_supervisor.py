@@ -2588,6 +2588,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["mode"], "operator")
         self.assertIn("Secuencia operativa ejecutada", result["message"])
         self.assertTrue(any(str(item.get("id") or "") in {"start_review_queue", "close_loop_safe"} for item in (result.get("actions") or [])))
+        self.assertIsNotNone(result.get("navigation"))
 
     def test_internal_copilot_director_briefing_action(self):
         self.conn.execute(
@@ -2735,6 +2736,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         tasks = self.conn.execute("SELECT * FROM workspace_internal_copilot_tasks WHERE source = 'legal_radar'").fetchall()
         self.assertTrue(tasks)
         self.assertTrue(any("Plantillas:" in str(card.get("summary") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "open_module" for action in (result.get("actions") or [])))
 
 
 if __name__ == "__main__":
