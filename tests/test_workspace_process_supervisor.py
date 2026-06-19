@@ -2587,8 +2587,58 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "operator")
         self.assertIn("Secuencia operativa ejecutada", result["message"])
+        self.assertTrue(any(str(item.get("id") or "") in {"start_review_queue", "close_loop_safe"} for item in (result.get("actions") or [])))
 
     def test_internal_copilot_director_briefing_action(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gestoria_facturas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              numero TEXT,
+              fecha_emision TEXT,
+              total REAL,
+              cliente_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seguros (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              tomador TEXT,
+              compania TEXT,
+              poliza_numero TEXT,
+              comision REAL,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              comision REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute("INSERT INTO gestoria_facturas (id, empresa_id, numero, fecha_emision, total, cliente_id, created_at, updated_at) VALUES ('fac-dir-1','e1','F-1','2026-06-19',1200,'c1','now','now')")
+        self.conn.execute("INSERT INTO seguros (id, empresa_id, cliente_id, tomador, compania, poliza_numero, comision, created_at, updated_at) VALUES ('seg-dir-1','e1','c1','Juan','Mapfre','P-1',250,'now','now')")
+        self.conn.execute("INSERT INTO hipotecas (id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, comision, estado, created_at, updated_at) VALUES ('hip-dir-1','e1','Juan','c1','BBVA',100000,80000,900,'Pendiente','now','now')")
         self.conn.execute(
             """
             INSERT INTO workspace_process_supervisor (
@@ -2614,6 +2664,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "direccion")
         self.assertTrue(result["cards"])
+        self.assertTrue(any("Pulso económico" == str(card.get("title") or "") for card in (result.get("cards") or [])))
 
     def test_internal_copilot_promote_legal_updates_to_tasks(self):
         self.conn.execute(
@@ -2662,7 +2713,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
               created_at, updated_at
             ) VALUES (
               'lr-1', 'gestoria', 'BOE', 'REF-1', 'Cambio fiscal relevante', '2026-06-19', 'Pendiente', 'Alto',
-              'consultas_hacienda', 'https://example.com', 'Resumen fiscal', 'Revisar plantillas', '[]', '[]',
+              'consultas_hacienda', 'https://example.com', 'Resumen fiscal', 'Revisar plantillas', '["Checklist fiscal"]', '["Revisión de modelos"]',
               '[]', 0.9, 'Afecta a flujos de gestoría', '[]',
               0.8, 0, NULL, NULL,
               NULL, 'boe', '[]', 1, NULL,
@@ -2683,6 +2734,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["mode"], "legal")
         tasks = self.conn.execute("SELECT * FROM workspace_internal_copilot_tasks WHERE source = 'legal_radar'").fetchall()
         self.assertTrue(tasks)
+        self.assertTrue(any("Plantillas:" in str(card.get("summary") or "") for card in (result.get("cards") or [])))
 
 
 if __name__ == "__main__":

@@ -41374,11 +41374,48 @@ def _workspace_internal_copilot_legal_radar_candidates(conn, *, area="gestoria",
                 "area": area_key,
                 "accion_recomendada": str(row.get("accion_recomendada") or "").strip(),
                 "fecha_publicacion": str(row.get("fecha_publicacion") or "").strip(),
+                "affected_documents": list(row.get("affected_documents") or [])[:6],
+                "affected_workflows": list(row.get("affected_workflows") or [])[:6],
             }
         )
         if len(candidates) >= int(limit or 6):
             break
     return candidates
+
+
+def _workspace_internal_copilot_collect_economic_brief(conn, *, empresa_id=""):
+    company = str(empresa_id or "").strip()
+    summary = {"facturas_total": 0.0, "facturas_count": 0, "seguros_comision": 0.0, "seguros_count": 0, "hipotecas_comision": 0.0, "hipotecas_count": 0}
+    if not company:
+        return summary
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total_count, ROUND(SUM(COALESCE(total, 0)), 2) AS total_importe FROM gestoria_facturas WHERE empresa_id = ?",
+            (company,),
+        ).fetchone()
+        summary["facturas_count"] = int(row_value(row, "total_count") or 0) if row else 0
+        summary["facturas_total"] = round(float(row_value(row, "total_importe") or 0.0), 2) if row else 0.0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total_count, ROUND(SUM(COALESCE(comision, 0)), 2) AS total_importe FROM seguros WHERE empresa_id = ?",
+            (company,),
+        ).fetchone()
+        summary["seguros_count"] = int(row_value(row, "total_count") or 0) if row else 0
+        summary["seguros_comision"] = round(float(row_value(row, "total_importe") or 0.0), 2) if row else 0.0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total_count, ROUND(SUM(COALESCE(comision, 0)), 2) AS total_importe FROM hipotecas WHERE empresa_id = ?",
+            (company,),
+        ).fetchone()
+        summary["hipotecas_count"] = int(row_value(row, "total_count") or 0) if row else 0
+        summary["hipotecas_comision"] = round(float(row_value(row, "total_importe") or 0.0), 2) if row else 0.0
+    except Exception:
+        pass
+    return summary
 
 
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
@@ -41389,6 +41426,7 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
         context if isinstance(context, dict) else {},
     )
     tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=10)
+    economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
     grouped = {}
     for card in pending_cards:
         impact = str(card.get("impact_area") or "operativo").strip().lower()
@@ -41406,6 +41444,16 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
             "summary": f"{len(pending_cards)} pendiente(s) priorizados · {len(tasks)} tarea(s) abierta(s)",
             "priority": "media",
             "impact_area": "direccion",
+        },
+        {
+            "title": "Pulso económico",
+            "summary": (
+                f"Facturas {economics['facturas_count']} · {format_export_money(economics['facturas_total'])} € | "
+                f"Seguros {economics['seguros_count']} · comisión {format_export_money(economics['seguros_comision'])} € | "
+                f"Hipotecas {economics['hipotecas_count']} · comisión {format_export_money(economics['hipotecas_comision'])} €"
+            ),
+            "priority": "media",
+            "impact_area": "economico",
         },
     ]
     return {
@@ -44686,10 +44734,21 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "cards": [
                 {
                     "title": str(item["title"]).strip(),
-                    "summary": str(item["summary"] or item.get("accion_recomendada") or "").strip(),
+                    "summary": " · ".join(
+                        part for part in [
+                            str(item["summary"] or item.get("accion_recomendada") or "").strip(),
+                            (f"Plantillas: {', '.join(item.get('affected_documents') or [])}" if (item.get("affected_documents") or []) else ""),
+                            (f"Flujos: {', '.join(item.get('affected_workflows') or [])}" if (item.get("affected_workflows") or []) else ""),
+                        ] if part
+                    )[:320],
                     "priority": str(item["priority"] or "media"),
                     "impact_area": "legal",
-                    "entity": {"task_id": str(item["task_id"] or "").strip(), "radar_item_id": str(item["id"] or "").strip()},
+                    "entity": {
+                        "task_id": str(item["task_id"] or "").strip(),
+                        "radar_item_id": str(item["id"] or "").strip(),
+                        "affected_documents": list(item.get("affected_documents") or [])[:6],
+                        "affected_workflows": list(item.get("affected_workflows") or [])[:6],
+                    },
                 }
                 for item in created[:6]
             ],
@@ -44731,6 +44790,26 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
+        guided_action = next(
+            (
+                item for item in actions
+                if isinstance(item, dict) and str(item.get("id") or "").strip() == "start_review_queue"
+            ),
+            None,
+        )
+        next_actions = [
+            {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
+            {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
+        ]
+        if guided_action:
+            next_actions.insert(
+                0,
+                {
+                    "id": str(guided_action.get("id") or "").strip(),
+                    "label": "Seguir revisión guiada",
+                    "payload": guided_action.get("payload") or {},
+                },
+            )
         return {
             "ok": True,
             "action_id": action_text,
@@ -44740,10 +44819,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "resolved": int(safe_result.get("resolved") or 0),
             "post_actions": list(safe_result.get("post_actions") or []),
             "cards": list(refreshed_cards[:8]),
-            "actions": [
-                {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
-                {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
-            ],
+            "actions": next_actions,
             "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or [])]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
             "refresh_supervisor": True,
