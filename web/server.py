@@ -24883,6 +24883,10 @@ def fetch_legal_feed_content(source_config, timeout=20):
 def upsert_legal_radar_item_from_detection(conn, detection, now):
     if not detection:
         return {"created": False, "updated": False, "id": None}
+    ensure_column(conn, "legal_radar_items", "llm_impact_summary", "llm_impact_summary TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_actions_json", "llm_actions_json TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_confidence", "llm_confidence REAL")
+    ensure_column(conn, "legal_radar_items", "llm_review_needed", "llm_review_needed INTEGER NOT NULL DEFAULT 0")
     area = str(detection.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
     url = str(detection.get("url") or "").strip()
     reference = str(detection.get("reference") or "").strip()
@@ -24974,7 +24978,7 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
           llm_review_needed, source_key, matched_keywords,
           auto_detected, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -24984,6 +24988,7 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
             reference or None,
             title or "Novedad legal detectada",
             detection.get("published"),
+            "Pendiente",
             detection.get("impacto"),
             detection.get("topic_key"),
             url or None,
@@ -25010,6 +25015,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
 def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
     now_value = now or datetime.now(timezone.utc).isoformat()
     area_value = normalize_legal_area(area)
+    ensure_column(conn, "legal_radar_items", "llm_impact_summary", "llm_impact_summary TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_actions_json", "llm_actions_json TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_confidence", "llm_confidence REAL")
+    ensure_column(conn, "legal_radar_items", "llm_review_needed", "llm_review_needed INTEGER NOT NULL DEFAULT 0")
     path = get_legal_copilot_path(area_value)
     payload = get_legal_copilot_payload(area_value)
     if not isinstance(payload, dict):
@@ -25257,6 +25266,10 @@ def resolve_legal_copilot_topic(area, topic, question):
 
 
 def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
+    ensure_column(conn, "legal_radar_items", "llm_impact_summary", "llm_impact_summary TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_actions_json", "llm_actions_json TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_confidence", "llm_confidence REAL")
+    ensure_column(conn, "legal_radar_items", "llm_review_needed", "llm_review_needed INTEGER NOT NULL DEFAULT 0")
     try:
         limit_value = max(1, min(500, int(limit)))
     except Exception:
@@ -25547,6 +25560,10 @@ def import_legal_radar_items_to_library(conn, *, area="rrhh", limit=3, now=None)
 
 
 def fetch_legal_radar_items_for_digest(conn, *, area="rrhh", estado="pendiente", limit=12):
+    ensure_column(conn, "legal_radar_items", "llm_impact_summary", "llm_impact_summary TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_actions_json", "llm_actions_json TEXT")
+    ensure_column(conn, "legal_radar_items", "llm_confidence", "llm_confidence REAL")
+    ensure_column(conn, "legal_radar_items", "llm_review_needed", "llm_review_needed INTEGER NOT NULL DEFAULT 0")
     area_value = normalize_legal_area(area or "rrhh") or "rrhh"
     estado_value = normalize_lookup_text(estado or "pendiente").lower() or "pendiente"
     try:
