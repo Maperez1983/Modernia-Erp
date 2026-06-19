@@ -3,6 +3,7 @@ import sqlite3
 import sys
 import types
 import unittest
+from datetime import date
 
 if "PIL" not in sys.modules:
     pil_stub = types.ModuleType("PIL")
@@ -1244,6 +1245,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["actions"][0]["id"], "create_seguro")
 
     def test_internal_copilot_review_reply_includes_bulk_revalidate_action(self):
+        today_iso = f"{date.today().isoformat()}T09:00:00Z"
         self.conn.execute(
             """
             INSERT INTO workspace_process_supervisor (
@@ -1254,9 +1256,10 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
               'evt-bulk', 'ws1', 'e1', 'gestoria', 'renta_attach', 'cliente', 'c40', '',
               '', 'warning', 'warning', 'Renta incompleta', 'Falta documento',
               '[{\"code\":\"renta_document_missing\"}]', '[]', '{}',
-              'dbulk', 0, NULL, '2026-06-18T09:00:00Z', '2026-06-18T09:00:00Z'
+              'dbulk', 0, NULL, ?, ?
             )
-            """
+            """,
+            (today_iso, today_iso),
         )
         reply = server.build_workspace_internal_copilot_reply(
             self.conn,

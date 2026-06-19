@@ -2020,6 +2020,8 @@ const state = {
   currentWorkspaceClients: [],
   currentWorkspaceView: "overview",
   currentWorkspaceTenantSection: "",
+  currentWorkspaceCopilotAgendaKey: "",
+  currentWorkspaceCopilotAgendaLoading: false,
   workspaceCompanySearchQuery: "",
   workspaceCompanyShowInactive: false,
   workspaceFincasTab: "dashboard",
@@ -12378,6 +12380,7 @@ const renderWorkspaceCopilotHub = () => {
   void loadWorkspaceProcessSupervisorFeed({ silent: true });
   void loadWorkspaceProcessSupervisorHistory({ silent: true });
   renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
+  void maybePrimeWorkspaceInternalCopilotAgenda();
 
   const fillContractFormDefaults = () => {
     if (!contractForm) return;
@@ -12500,6 +12503,7 @@ const renderWorkspaceCopilotHub = () => {
   if (internalCopilotClearBtn) {
     internalCopilotClearBtn.addEventListener("click", () => {
       state.currentWorkspaceInternalCopilotMessages = [];
+      state.currentWorkspaceCopilotAgendaKey = "";
       renderWorkspaceInternalCopilotFeed([]);
       if (internalCopilotStatus) internalCopilotStatus.textContent = "";
     });
@@ -13482,6 +13486,59 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
       }
     });
   });
+};
+
+const maybePrimeWorkspaceInternalCopilotAgenda = async ({ force = false } = {}) => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const target = document.getElementById("workspaceInternalCopilotFeed");
+  if (!workspaceId || !target) return;
+  const agendaKey = `${workspaceId}:${new Date().toISOString().slice(0, 10)}`;
+  if (!force && state.currentWorkspaceCopilotAgendaLoading) return;
+  if (!force && String(state.currentWorkspaceCopilotAgendaKey || "").trim() === agendaKey) return;
+  state.currentWorkspaceCopilotAgendaLoading = true;
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const result = await apiPost("/api/internal_copilot_action", {
+      workspace_id: workspaceId,
+      empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+      service_hint: String(params.get("crm") || "").trim(),
+      action_id: "daily_review_agenda",
+      action_payload: {},
+    });
+    const cards = Array.isArray(result?.cards) ? result.cards : [];
+    const actions = Array.isArray(result?.actions) ? result.actions : [];
+    const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
+    const sources = Array.isArray(result?.sources) && result.sources.length ? result.sources : ["daily_review_agenda"];
+    const message = String(result?.message || "").trim();
+    if (!cards.length && !actions.length && !message) {
+      state.currentWorkspaceCopilotAgendaKey = agendaKey;
+      return;
+    }
+    const history = Array.isArray(state.currentWorkspaceInternalCopilotMessages)
+      ? [...state.currentWorkspaceInternalCopilotMessages]
+      : [];
+    const filteredHistory = history.filter((row) => !row?.meta?.auto_daily_agenda);
+    filteredHistory.unshift({
+      role: "assistant",
+      intent: "daily_review_agenda",
+      message: message || "He preparado la agenda diaria de revisión y el primer bloque prioritario.",
+      suggestions,
+      cards,
+      actions,
+      sources,
+      meta: {
+        auto_daily_agenda: true,
+        agenda_key: agendaKey,
+      },
+    });
+    state.currentWorkspaceInternalCopilotMessages = filteredHistory.slice(-20);
+    state.currentWorkspaceCopilotAgendaKey = agendaKey;
+    renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+  } catch (error) {
+    console.warn("No se pudo preparar la agenda diaria automática del copilot", error);
+  } finally {
+    state.currentWorkspaceCopilotAgendaLoading = false;
+  }
 };
 
 const loadWorkspaceProcessSupervisorFeed = async ({ silent = false } = {}) => {
