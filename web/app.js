@@ -13526,7 +13526,7 @@ const syncPersistentInternalCopilotWidget = () => {
   if (!panel || !toggle) return;
   const isOpen = Boolean(state.persistentInternalCopilotOpen);
   panel.classList.toggle("hidden", !isOpen);
-  toggle.textContent = isOpen ? "Minimizar asistente" : "Abrir asistente";
+  toggle.textContent = isOpen ? "Ocultar" : "Mostrar asistente";
   toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   if (status) {
     const workspaceName = String(state.currentWorkspaceName || "").trim();
@@ -13543,15 +13543,15 @@ const ensurePersistentInternalCopilotWidget = () => {
   const root = document.createElement("div");
   root.id = "globalInternalCopilotWidget";
   root.innerHTML = `
-    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;bottom:18px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Minimizar asistente</button>
-    <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;bottom:68px;width:min(420px,calc(100vw - 24px));max-height:min(72vh,760px);overflow:auto;z-index:2147482999;background:#fff;border:1px solid #dbe4f0;border-radius:10px;box-shadow:0 18px 48px rgba(15,23,42,.22);padding:12px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Ocultar</button>
+    <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(440px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:auto;z-index:2147482999;background:#fff;border:1px solid #dbe4f0;border-radius:12px;box-shadow:0 18px 48px rgba(15,23,42,.22);padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;position:sticky;top:0;background:#fff;padding-bottom:8px;z-index:2">
         <div>
           <strong>Asistente interno</strong>
           <div id="globalInternalCopilotScope" class="muted">Sin workspace activo</div>
         </div>
       </div>
-      <div id="globalInternalCopilotFeed" style="margin-top:10px"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
+      <div id="globalInternalCopilotFeed" style="margin-top:10px;max-height:240px;overflow:auto"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
       <form id="globalInternalCopilotForm" class="form-grid" style="margin-top:10px">
         <label class="span-2">
           Mensaje
