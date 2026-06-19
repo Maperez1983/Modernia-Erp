@@ -2248,6 +2248,124 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["cards"])
         self.assertIn("Urgente hoy", " ".join(str(card.get("title") or "") for card in result["cards"]))
 
+    def test_internal_copilot_memory_reply_and_action_tables(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "recuerda que mañana tengo que revisar la comunidad norte",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "memory")
+        rows = self.conn.execute("SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1'").fetchall()
+        self.assertTrue(rows)
+
+    def test_internal_copilot_task_reply_and_complete_action(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "crea una tarea para revisar las pólizas sin pdf mañana",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "task_planner")
+        action = next((item for item in reply.get("actions") or [] if item.get("id") == "complete_task"), None)
+        self.assertIsNotNone(action)
+        task_row = self.conn.execute("SELECT * FROM workspace_internal_copilot_tasks WHERE workspace_id = 'ws1' ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIsNotNone(task_row)
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "complete_task",
+            {"task_id": task_row["id"]},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T12:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        done_row = self.conn.execute("SELECT status FROM workspace_internal_copilot_tasks WHERE id = ?", (task_row["id"],)).fetchone()
+        self.assertEqual(done_row["status"], "done")
+
+    def test_internal_copilot_semantic_search_reply(self):
+        self.conn.execute(
+            """
+            INSERT INTO seguros (
+              id, empresa_id, cliente_id, tomador, compania, poliza_numero, created_at, updated_at
+            ) VALUES (
+              'seg-sem-1', 'e1', 'c1', 'Juan Cliente', 'Mapfre', 'POL-7788', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "busca la póliza mapfre 7788",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "semantic_search")
+        self.assertTrue(reply["cards"])
+
+    def test_internal_copilot_document_reply_from_attachment(self):
+        server._workspace_internal_copilot_preview_factura = lambda conn, attachment, actor=None: {
+            "numero": "FAC-1",
+            "fecha_emision": "2026-06-19",
+            "total": 121.0,
+            "cliente_nombre": "Juan Cliente",
+        }
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa este documento factura pdf",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"attachments": [{"filename": "factura.pdf", "key": "facturas/f1.pdf"}]},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "document")
+        self.assertIn("FAC-1", reply["answer"])
+
+    def test_internal_copilot_reconciliation_and_simulation_reply(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-mismatch-1', 'ws1', 'e1', 'seguros', 'seguros_dashboard', 'seguro', 'seg-1', '',
+              '', 'failed', 'warning', 'Dashboard descuadrado', 'El resumen no coincide con el detalle', '[{\"code\":\"dashboard_mismatch\",\"message\":\"Descuadre\"}]', '[]', '{}',
+              'mismatch-1', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        reconciliation = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué dashboard no cuadra contra el detalle real",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(reconciliation["ok"])
+        self.assertEqual(reconciliation["intent"], "reconciliation")
+        simulation = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "simula qué pasa si recalculo este dashboard de seguros",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(simulation["ok"])
+        self.assertEqual(simulation["intent"], "simulation")
+
 
 if __name__ == "__main__":
     unittest.main()

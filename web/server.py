@@ -40690,6 +40690,576 @@ def _workspace_internal_copilot_review_reply(message, open_events, history):
     }
 
 
+def ensure_workspace_internal_copilot_runtime_tables(conn):
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_internal_copilot_memory (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              actor_user_id TEXT,
+              actor_label TEXT,
+              memory_type TEXT NOT NULL,
+              title TEXT,
+              content TEXT,
+              entity_type TEXT,
+              entity_id TEXT,
+              priority TEXT,
+              meta_json TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_internal_copilot_tasks (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              actor_user_id TEXT,
+              actor_label TEXT,
+              title TEXT NOT NULL,
+              detail TEXT,
+              status TEXT NOT NULL DEFAULT 'open',
+              priority TEXT NOT NULL DEFAULT 'media',
+              due_at TEXT,
+              source TEXT,
+              entity_type TEXT,
+              entity_id TEXT,
+              notify_channel TEXT,
+              meta_json TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              completed_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_internal_copilot_actions (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              actor_user_id TEXT,
+              actor_label TEXT,
+              event_type TEXT NOT NULL,
+              message TEXT,
+              payload_json TEXT,
+              result_json TEXT,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+    except Exception:
+        pass
+
+
+def _workspace_internal_copilot_actor_key(actor=None):
+    actor_map = actor if isinstance(actor, dict) else {}
+    actor_user_id = str(actor_map.get("id") or actor_map.get("user_id") or "").strip()
+    actor_label = str(actor_map.get("usuario") or actor_map.get("nombre_completo") or actor_map.get("nombre") or "").strip()
+    return actor_user_id, actor_label
+
+
+def _workspace_internal_copilot_log_event(conn, workspace_id, event_type, *, actor=None, message="", payload=None, result=None, now=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    now = now or datetime.now(timezone.utc).isoformat()
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    try:
+        conn.execute(
+            """
+            INSERT INTO workspace_internal_copilot_actions (
+              id, workspace_id, actor_user_id, actor_label, event_type, message, payload_json, result_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                uuid.uuid4().hex,
+                str(workspace_id or "").strip(),
+                actor_user_id or None,
+                actor_label or None,
+                str(event_type or "").strip() or "event",
+                str(message or "").strip(),
+                json.dumps(payload or {}, ensure_ascii=False),
+                json.dumps(result or {}, ensure_ascii=False),
+                now,
+            ),
+        )
+    except Exception:
+        pass
+
+
+def _workspace_internal_copilot_store_memory_note(conn, workspace_id, *, actor=None, memory_type="note", title="", content="", entity_type="", entity_id="", priority="media", meta=None, now=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    now = now or datetime.now(timezone.utc).isoformat()
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    conn.execute(
+        """
+        INSERT INTO workspace_internal_copilot_memory (
+          id, workspace_id, actor_user_id, actor_label, memory_type, title, content, entity_type, entity_id, priority, meta_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            uuid.uuid4().hex,
+            str(workspace_id or "").strip(),
+            actor_user_id or None,
+            actor_label or None,
+            str(memory_type or "note").strip(),
+            str(title or "").strip() or None,
+            str(content or "").strip() or None,
+            str(entity_type or "").strip() or None,
+            str(entity_id or "").strip() or None,
+            str(priority or "media").strip() or "media",
+            json.dumps(meta or {}, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+
+
+def _workspace_internal_copilot_recent_memory(conn, workspace_id, *, actor=None, limit=6):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    try:
+        if actor_user_id:
+            rows = conn.execute(
+                """
+                SELECT * FROM workspace_internal_copilot_memory
+                WHERE workspace_id = ? AND (actor_user_id = ? OR actor_user_id IS NULL OR actor_user_id = '')
+                ORDER BY updated_at DESC LIMIT ?
+                """,
+                (str(workspace_id or "").strip(), actor_user_id, int(limit)),
+            ).fetchall()
+        elif actor_label:
+            rows = conn.execute(
+                """
+                SELECT * FROM workspace_internal_copilot_memory
+                WHERE workspace_id = ? AND (actor_label = ? OR actor_label IS NULL OR actor_label = '')
+                ORDER BY updated_at DESC LIMIT ?
+                """,
+                (str(workspace_id or "").strip(), actor_label, int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (str(workspace_id or "").strip(), int(limit)),
+            ).fetchall()
+    except Exception:
+        rows = []
+    items = []
+    for row in rows or []:
+        item = dict(row)
+        item["meta"] = parse_json_maybe(item.get("meta_json")) or {}
+        items.append(item)
+    return items
+
+
+def _workspace_internal_copilot_list_tasks(conn, workspace_id, *, actor=None, status="open", limit=12):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    where = ["workspace_id = ?"]
+    params = [str(workspace_id or "").strip()]
+    if status:
+        where.append("status = ?")
+        params.append(str(status).strip())
+    if actor_user_id:
+        where.append("(actor_user_id = ? OR actor_user_id IS NULL OR actor_user_id = '')")
+        params.append(actor_user_id)
+    elif actor_label:
+        where.append("(actor_label = ? OR actor_label IS NULL OR actor_label = '')")
+        params.append(actor_label)
+    params.append(int(limit))
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM workspace_internal_copilot_tasks WHERE {' AND '.join(where)} ORDER BY COALESCE(due_at, updated_at) ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+    except Exception:
+        rows = []
+    return [dict(row) for row in rows or []]
+
+
+def _workspace_internal_copilot_extract_task_due(message):
+    text = normalize_lookup_text(message or "").lower()
+    today = date.today()
+    if "mañana" in text or "manana" in text:
+        return (today + timedelta(days=1)).isoformat()
+    if "hoy" in text:
+        return today.isoformat()
+    if "semana" in text and ("proxima" in text or "próxima" in text):
+        return (today + timedelta(days=7)).isoformat()
+    return ""
+
+
+def _workspace_internal_copilot_create_task(conn, workspace_id, *, actor=None, title="", detail="", priority="media", due_at="", entity_type="", entity_id="", source="chat", notify_channel="", meta=None, now=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    now = now or datetime.now(timezone.utc).isoformat()
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    task_id = uuid.uuid4().hex
+    conn.execute(
+        """
+        INSERT INTO workspace_internal_copilot_tasks (
+          id, workspace_id, actor_user_id, actor_label, title, detail, status, priority, due_at, source, entity_type, entity_id, notify_channel, meta_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            str(workspace_id or "").strip(),
+            actor_user_id or None,
+            actor_label or None,
+            str(title or "").strip(),
+            str(detail or "").strip() or None,
+            str(priority or "media").strip() or "media",
+            str(due_at or "").strip() or None,
+            str(source or "chat").strip(),
+            str(entity_type or "").strip() or None,
+            str(entity_id or "").strip() or None,
+            str(notify_channel or "").strip() or None,
+            json.dumps(meta or {}, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+    return task_id
+
+
+def _workspace_internal_copilot_complete_task(conn, workspace_id, task_id, *, now=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    now = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        UPDATE workspace_internal_copilot_tasks
+        SET status = 'done', completed_at = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (now, now, str(task_id or "").strip(), str(workspace_id or "").strip()),
+    )
+
+
+def _workspace_internal_copilot_snooze_task(conn, workspace_id, task_id, *, due_at="", now=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    now = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        UPDATE workspace_internal_copilot_tasks
+        SET due_at = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (str(due_at or "").strip() or None, now, str(task_id or "").strip(), str(workspace_id or "").strip()),
+    )
+
+
+def _workspace_internal_copilot_semantic_search(conn, workspace_id, empresa_id, message, *, limit=8):
+    workspace_text = str(workspace_id or "").strip()
+    raw = str(message or "").strip()
+    query = _workspace_internal_copilot_extract_client_query(message) or {}
+    term = str(query.get("query") or raw).strip() or raw
+    if not query.get("query"):
+        cleaned = normalize_lookup_text(term)
+        cleaned = re.sub(r"\b(busca|encuentra|localiza|buscar|búsqueda|busqueda|la|el|los|las)\b", " ", cleaned, flags=re.I)
+        tokens = [item for item in re.split(r"\W+", cleaned.lower()) if len(item) >= 3]
+        preferred = next((item for item in tokens if any(ch.isdigit() for ch in item)), "")
+        if not preferred and tokens:
+            preferred = tokens[-1]
+        term = (preferred or re.sub(r"\s+", " ", cleaned).strip()) or term
+    like = f"%{term.lower()}%"
+    results = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, nombre, nif, email, telefono
+            FROM clientes
+            WHERE LOWER(COALESCE(nombre,'')) LIKE ?
+               OR LOWER(COALESCE(nif,'')) LIKE ?
+               OR LOWER(COALESCE(email,'')) LIKE ?
+               OR LOWER(COALESCE(telefono,'')) LIKE ?
+            LIMIT ?
+            """,
+            (like, like, like, like, int(limit)),
+        ).fetchall()
+    except Exception:
+        rows = []
+    for row in rows or []:
+        results.append({
+            "kind": "cliente",
+            "id": str(row_value(row, "id") or "").strip(),
+            "title": str(row_value(row, "nombre") or "Cliente").strip(),
+            "summary": " · ".join([item for item in [row_value(row, "nif"), row_value(row, "email"), row_value(row, "telefono")] if str(item or "").strip()])[:220],
+            "priority": "media",
+        })
+    extra_queries = (
+        ("SELECT id, poliza_numero, compania, tomador FROM seguros WHERE LOWER(COALESCE(poliza_numero,'')) LIKE ? OR LOWER(COALESCE(compania,'')) LIKE ? OR LOWER(COALESCE(tomador,'')) LIKE ? LIMIT ?", ("seguro", "poliza_numero", ("compania", "tomador"))),
+        ("SELECT id, banco, oficina, cliente_nombre FROM hipotecas WHERE LOWER(COALESCE(banco,'')) LIKE ? OR LOWER(COALESCE(oficina,'')) LIKE ? OR LOWER(COALESCE(cliente_nombre,'')) LIKE ? LIMIT ?", ("hipoteca", "banco", ("oficina", "cliente_nombre"))),
+        ("SELECT id, nombre, cif, direccion FROM workspace_fincas_comunidades WHERE workspace_id = ? AND (LOWER(COALESCE(nombre,'')) LIKE ? OR LOWER(COALESCE(cif,'')) LIKE ? OR LOWER(COALESCE(direccion,'')) LIKE ?) LIMIT ?", ("comunidad", "nombre", ("cif", "direccion"))),
+    )
+    for sql, meta in extra_queries:
+        kind, title_field, summary_fields = meta
+        try:
+            if kind == "comunidad":
+                rows = conn.execute(sql, (workspace_text, like, like, like, int(limit))).fetchall()
+            else:
+                rows = conn.execute(sql, (like, like, like, int(limit))).fetchall()
+        except Exception:
+            rows = []
+        for row in rows or []:
+            results.append({
+                "kind": kind,
+                "id": str(row_value(row, "id") or "").strip(),
+                "title": str(row_value(row, title_field) or kind.title()).strip(),
+                "summary": " · ".join([str(row_value(row, field) or "").strip() for field in summary_fields if str(row_value(row, field) or "").strip()])[:220],
+                "priority": "media",
+            })
+    deduped = []
+    seen = set()
+    for item in results:
+        key = f"{item.get('kind')}:{item.get('id')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped[:limit]
+
+
+def _workspace_internal_copilot_document_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    context = context if isinstance(context, dict) else {}
+    attachments = [item for item in (context.get("attachments") or []) if isinstance(item, dict)]
+    text = normalize_lookup_text(message or "").lower()
+    explicit_document_request = any(token in text for token in ("este documento", "este pdf", "adjunto", "archivo", "ocr", "clasifica este documento", "revisa este documento"))
+    if not attachments and not explicit_document_request:
+        return None
+    attachment = (
+        _workspace_internal_copilot_pick_attachment(context, kind="factura")
+        or _workspace_internal_copilot_pick_attachment(context, kind="renta")
+        or _workspace_internal_copilot_pick_attachment(context, kind="seguro")
+        or (attachments[0] if attachments else {})
+    )
+    preview = {}
+    source = "attachment"
+    if attachment:
+        try:
+            if any(token in text for token in ("factura", "asiento", "ocr")):
+                preview = _workspace_internal_copilot_preview_factura(conn, attachment, actor=actor) or {}
+                source = "factura_ocr"
+            elif any(token in text for token in ("renta", "irpf", "modelo 100")):
+                preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=actor) or {}
+                source = "renta_preview"
+            else:
+                preview = _workspace_internal_copilot_preview_seguro(conn, attachment, actor=actor) or {}
+                source = "seguro_preview"
+        except Exception:
+            preview = {}
+    title = str(attachment.get("filename") or attachment.get("key") or "Documento").strip()
+    summary_parts = []
+    for key in ("numero", "fecha_emision", "total", "cliente_nombre", "nif", "poliza_numero", "compania", "ejercicio"):
+        value = preview.get(key)
+        if str(value or "").strip():
+            summary_parts.append(f"{key}: {value}")
+    actions = []
+    if source == "factura_ocr":
+        actions.append({"id": "ingest_factura", "label": "Procesar factura", "payload": preview})
+    elif source == "renta_preview":
+        actions.append({"id": "attach_renta", "label": "Preparar renta", "payload": preview, "requires_confirmation": True, "confirm_text": "Se intentará cargar la renta detectada en el cliente correspondiente."})
+    elif source == "seguro_preview":
+        actions.append({"id": "create_seguro", "label": "Preparar póliza", "payload": preview, "requires_confirmation": True, "confirm_text": "Se intentará registrar la póliza detectada."})
+    return {
+        "ok": True,
+        "intent": "document",
+        "answer": (
+            f"He revisado el documento {title}. "
+            f"{'Datos detectados: ' + '; '.join(summary_parts[:5]) + '.' if summary_parts else 'No hay suficientes datos estructurados todavía; conviene clasificarlo o enlazarlo manualmente.'}"
+        ),
+        "cards": [{"title": title, "summary": "; ".join(summary_parts[:6]) or "Documento listo para clasificación", "priority": "media", "impact_area": "documental"}],
+        "suggestions": ["Clasificar documento", "Buscar cliente relacionado", "Procesar registro"],
+        "actions": actions,
+        "sources": ["document_agent", source],
+    }
+
+
+def _workspace_internal_copilot_task_reply(conn, workspace_id, message, *, actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("tarea", "recordar", "recuerdame", "recuérdame", "pendiente", "lista")):
+        return None
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=8)
+    if any(token in text for token in ("crea", "crear", "añade", "anade", "programa", "recordar", "recuerdame", "recuérdame")):
+        due_at = _workspace_internal_copilot_extract_task_due(message)
+        cleaned = str(message or "").strip()
+        for token in ("créame", "creame", "crea", "crear", "añade", "anade", "programa", "recuérdame", "recuerdame", "recordar", "tarea"):
+            cleaned = re.sub(rf"\b{re.escape(token)}\b", "", cleaned, flags=re.I)
+        title = cleaned.strip(" .:-") or "Tarea del copilot"
+        task_id = _workspace_internal_copilot_create_task(conn, workspace_id, actor=actor, title=title, detail=str(message or "").strip(), priority="media", due_at=due_at, source="chat_task", meta={"created_from_message": True})
+        return {
+            "ok": True,
+            "intent": "task_planner",
+            "answer": f"He creado la tarea: {title}.{f' Vence el {due_at}.' if due_at else ''}",
+            "cards": [{"title": title, "summary": str(message or "").strip(), "priority": "media", "impact_area": "planificacion"}],
+            "actions": [
+                {"id": "complete_task", "label": "Marcar hecha", "payload": {"task_id": task_id}},
+                {"id": "snooze_task", "label": "Mover a mañana", "payload": {"task_id": task_id, "due_at": (date.today() + timedelta(days=1)).isoformat()}},
+            ],
+            "suggestions": ["Ver pendientes", "Agenda diaria", "Bandeja unificada"],
+            "sources": ["task_planner"],
+        }
+    return {
+        "ok": True,
+        "intent": "task_planner",
+        "answer": f"Tienes {len(tasks)} tarea(s) abierta(s)." if tasks else "No tienes tareas abiertas en este workspace.",
+        "cards": [{"title": str(item.get("title") or "Tarea").strip(), "summary": str(item.get("detail") or item.get("due_at") or "").strip(), "priority": str(item.get("priority") or "media"), "impact_area": "planificacion"} for item in tasks[:5]],
+        "suggestions": ["Crear tarea", "Agenda diaria", "Cerrar tarea"],
+        "sources": ["task_planner"],
+    }
+
+
+def _workspace_internal_copilot_memory_reply(conn, workspace_id, message, *, actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("recuerda", "memoria", "acuerdate", "acuérdate", "lo ultimo", "lo último", "antes", "contexto")):
+        return None
+    if any(token in text for token in ("recuerda", "acuérdate", "acuerdate")):
+        _workspace_internal_copilot_store_memory_note(conn, workspace_id, actor=actor, memory_type="user_note", title="Nota de contexto", content=str(message or "").strip(), priority="media", meta={"source": "chat"})
+        return {"ok": True, "intent": "memory", "answer": "He guardado esa nota en la memoria operativa del workspace para este usuario.", "suggestions": ["Ver memoria reciente", "Crear tarea relacionada"], "sources": ["workspace_memory"]}
+    memories = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=6)
+    if not memories:
+        return {"ok": True, "intent": "memory", "answer": "Todavía no tengo memoria operativa guardada para este usuario en este workspace.", "suggestions": ["Recuerda esto para más tarde", "Crear tarea"], "sources": ["workspace_memory"]}
+    return {
+        "ok": True,
+        "intent": "memory",
+        "answer": "Esto es lo último que tengo guardado para ti en este workspace.",
+        "cards": [{"title": str(item.get("title") or item.get("memory_type") or "Memoria").strip(), "summary": str(item.get("content") or "").strip(), "priority": str(item.get("priority") or "media"), "impact_area": "contexto"} for item in memories[:5]],
+        "suggestions": ["Continuar con esto", "Crear tarea", "Ver incidencias relacionadas"],
+        "sources": ["workspace_memory"],
+    }
+
+
+def _workspace_internal_copilot_reconciliation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if any(token in text for token in ("simula", "simular", "que pasa si", "qué pasa si", "impacto si")):
+        return None
+    if not any(token in text for token in ("cuadra", "concili", "descuadre", "descuadr", "resumen", "detalle", "dashboard")):
+        return None
+    incidents = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=20, only_open=True).get("rows") or []
+    mismatches = [row for row in incidents if "dashboard" in str(row.get("process_type") or "").lower() or "mismatch" in json.dumps(row.get("anomalies") or [], ensure_ascii=False).lower()]
+    if not mismatches and "dashboard" in text:
+        operational = _workspace_internal_copilot_operational_query_reply(conn, workspace_id, "qué dashboards no cuadran contra el detalle real", empresa_id=empresa_id, service_hint=service_hint, context=context or {})
+        if operational:
+            operational["intent"] = "reconciliation"
+            operational["sources"] = list(dict.fromkeys(["reconciliation_checks", *(operational.get("sources") or [])]))
+            return operational
+    return {
+        "ok": True,
+        "intent": "reconciliation",
+        "answer": (
+            f"Hay {len(mismatches)} descuadre(s) abierto(s) en dashboard entre detalle y resumen."
+            if mismatches
+            else "Ahora mismo no veo descuadres abiertos de dashboard entre detalle y resumen para ese ámbito."
+        ),
+        "cards": [_workspace_internal_copilot_card_from_event(row) for row in mismatches[:5]],
+        "suggestions": ["Recalcular dashboard", "Revalidar proceso", "Ver incidencias"],
+        "actions": (
+            [
+                {
+                    "id": "bulk_refresh_mismatched_dashboards",
+                    "label": "Recalcular y revalidar",
+                    "requires_confirmation": True,
+                    "confirm_text": f"Se recalcularán y revalidarán {len(mismatches)} dashboard(s) afectados.",
+                    "payload": {"event_ids": [str(row.get("id") or "").strip() for row in mismatches if str(row.get("id") or "").strip()]},
+                },
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "requires_confirmation": True,
+                    "confirm_text": "Se lanzarán las acciones seguras disponibles para el dominio afectado.",
+                    "payload": {"domain": normalize_service_key(service_hint or "seguros") or "seguros"},
+                },
+            ]
+            if mismatches else []
+        ),
+        "sources": ["workspace_process_supervisor", "reconciliation_checks"],
+    }
+
+
+def _workspace_internal_copilot_productivity_reply(conn, workspace_id, message, *, actor=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("productividad", "atasco", "cuello", "bloqueado", "lento", "pendiente total", "pendientes")):
+        return None
+    open_events = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=50, only_open=True).get("rows") or []
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=20)
+    grouped = {}
+    for row in open_events:
+        key = str(row.get("process_type") or row.get("servicio") or "general").strip()
+        grouped[key] = grouped.get(key, 0) + 1
+    top_groups = sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:5]
+    return {
+        "ok": True,
+        "intent": "productivity",
+        "answer": f"Ahora mismo hay {len(open_events)} incidencia(s) abierta(s) y {len(tasks)} tarea(s) activa(s). Los cuellos principales son: {', '.join(f'{name} ({count})' for name, count in top_groups) if top_groups else 'sin bloqueos destacados'}.",
+        "cards": [{"title": name, "summary": f"{count} incidencia(s) abiertas", "priority": "alta" if count >= 3 else "media", "impact_area": "productividad"} for name, count in top_groups],
+        "suggestions": ["Bandeja unificada", "Agenda diaria", "Crear tarea"],
+        "sources": ["workspace_process_supervisor", "task_planner"],
+    }
+
+
+def _workspace_internal_copilot_template_reply(conn, workspace_id, message, *, actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("correo", "mensaje", "plantilla", "resumen para cliente", "borrador")):
+        return None
+    ctx = context if isinstance(context, dict) else {}
+    resolved = None
+    if ctx.get("current_client_id"):
+        try:
+            resolved = conn.execute("SELECT id, nombre, email, telefono FROM clientes WHERE id = ? LIMIT 1", (str(ctx.get("current_client_id") or "").strip(),)).fetchone()
+        except Exception:
+            resolved = None
+    client_name = str(row_value(resolved, "nombre") or "el cliente").strip()
+    answer = f"Borrador preparado para {client_name}: \"Hola {client_name}, te resumo el estado actual del expediente y los siguientes pasos previstos en el CRM.\""
+    return {
+        "ok": True,
+        "intent": "template",
+        "answer": answer,
+        "cards": [{"title": "Borrador de mensaje", "summary": answer, "priority": "media", "impact_area": "comunicacion"}],
+        "suggestions": ["Editar borrador", "Abrir ficha cliente", "Crear tarea de seguimiento"],
+        "sources": ["template_assistant"],
+    }
+
+
+def _workspace_internal_copilot_external_alert_reply(conn, workspace_id, message, *, actor=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("avisa", "avisame", "avísame", "alerta externa", "enviar aviso", "enviar alerta")):
+        return None
+    channel = "email"
+    for candidate in ("whatsapp", "telegram", "slack", "email"):
+        if candidate in text:
+            channel = candidate
+            break
+    return {
+        "ok": True,
+        "intent": "external_alert",
+        "answer": f"Puedo dejar preparada una alerta externa por {channel} ligada a una tarea o incidencia. La ejecución automática del canal aún debe conectarse al proveedor real.",
+        "suggestions": ["Crear tarea con aviso", "Bandeja unificada", "Agenda diaria"],
+        "sources": ["external_alerts"],
+    }
+
+
+def _workspace_internal_copilot_simulation_reply(conn, workspace_id, message, *, actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("simula", "simular", "que pasa si", "qué pasa si", "impacto si")):
+        return None
+    affected = []
+    if "renta" in text:
+        affected.append("rentas / ficha cliente / supervisor de gestoría")
+    if "poliza" in text or "póliza" in text or "seguro" in text:
+        affected.append("pólizas / dashboard de seguros / vínculo con cliente")
+    if "hipoteca" in text:
+        affected.append("hipotecas / pipeline financiero / ficha cliente")
+    if "cliente" in text:
+        affected.append("ficha cliente / servicios vinculados / búsquedas")
+    if "dashboard" in text:
+        affected.append("resumen / reconciliación / alertas del supervisor")
+    return {
+        "ok": True,
+        "intent": "simulation",
+        "answer": f"Simulación previa preparada. El cambio impactaría en: {', '.join(affected) if affected else 'módulo actual, supervisor de procesos y posibles resúmenes relacionados'}.",
+        "suggestions": ["Revalidar proceso después", "Crear tarea de revisión", "Ver incidencias abiertas"],
+        "sources": ["change_impact_map", "system_invariants"],
+    }
+
+
 def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
     if any(token in text for token in ("abre", "abreme", "ábreme", "abrirme", "ficha", "busca", "localiza")) and "cliente" in text:
@@ -42628,6 +43198,15 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     message_text = str(message or "").strip()
     if not workspace_text or not message_text:
         return {"error": "workspace_id y message requeridos"}
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    _workspace_internal_copilot_log_event(
+        conn,
+        workspace_text,
+        "chat_query",
+        actor=actor,
+        message=message_text,
+        payload={"empresa_id": company_text, "service_hint": service_hint, "context": context or {}},
+    )
     intent = _workspace_internal_copilot_intent(message_text)
     memory = _workspace_internal_copilot_memory()
     open_events = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=12, only_open=True).get("rows") or []
@@ -42647,6 +43226,12 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         "cards": [],
         "actions": [],
     }
+    task_reply = _workspace_internal_copilot_task_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
+    if task_reply:
+        response.update(task_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
     action_reply = _workspace_internal_copilot_build_action_reply(
         conn,
         workspace_text,
@@ -42657,6 +43242,72 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if action_reply:
         response.update(action_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    document_reply = _workspace_internal_copilot_document_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if document_reply:
+        response.update(document_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        _workspace_internal_copilot_store_memory_note(conn, workspace_text, actor=actor, memory_type="last_document_query", title="Consulta documental", content=message_text, priority="media", meta={"sources": document_reply.get("sources") or []})
+        return response
+    memory_reply = _workspace_internal_copilot_memory_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
+    if memory_reply:
+        response.update(memory_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    if _workspace_internal_copilot_action_intent(message_text) != "open_client" and any(token in normalize_lookup_text(message_text).lower() for token in ("busca", "encuentra", "localiza", "search semantica", "búsqueda")):
+        semantic = _workspace_internal_copilot_semantic_search(conn, workspace_text, company_text, message_text, limit=8)
+        if semantic:
+            response.update(
+                {
+                    "intent": "semantic_search",
+                    "answer": f"He encontrado {len(semantic)} resultado(s) relevantes en el CRM.",
+                    "cards": [{"title": str(item.get('title') or item.get('kind') or 'Resultado'), "summary": str(item.get('summary') or '').strip(), "priority": str(item.get('priority') or 'media'), "impact_area": str(item.get('kind') or 'busqueda')} for item in semantic[:6]],
+                    "suggestions": ["Abrir ficha cliente", "Revisar duplicados", "Crear tarea de seguimiento"],
+                    "sources": ["semantic_search"],
+                }
+            )
+            response["message"] = message_text
+            response["workspace_id"] = workspace_text
+            return response
+    reconciliation_reply = _workspace_internal_copilot_reconciliation_reply(conn, workspace_text, message_text, empresa_id=company_text, service_hint=service_hint, actor=actor, context=context or {})
+    if reconciliation_reply:
+        response.update(reconciliation_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    productivity_reply = _workspace_internal_copilot_productivity_reply(conn, workspace_text, message_text, actor=actor)
+    if productivity_reply:
+        response.update(productivity_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    template_reply = _workspace_internal_copilot_template_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
+    if template_reply:
+        response.update(template_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    alert_reply = _workspace_internal_copilot_external_alert_reply(conn, workspace_text, message_text, actor=actor)
+    if alert_reply:
+        response.update(alert_reply)
+        response["message"] = message_text
+        response["workspace_id"] = workspace_text
+        return response
+    simulation_reply = _workspace_internal_copilot_simulation_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
+    if simulation_reply:
+        response.update(simulation_reply)
         response["message"] = message_text
         response["workspace_id"] = workspace_text
         return response
@@ -42809,12 +43460,24 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     open_total = len(open_events)
     readiness = int(health.get("readiness_score") or 0)
     process_samples = [str(row.get("title") or row.get("process_type") or "").strip() for row in open_events[:3] if str(row.get("title") or row.get("process_type") or "").strip()]
+    recent_memory = _workspace_internal_copilot_recent_memory(conn, workspace_text, actor=actor, limit=3)
+    task_total = len(_workspace_internal_copilot_list_tasks(conn, workspace_text, actor=actor, status="open", limit=20))
     response["answer"] = (
-        f"El workspace está al {readiness}% de readiness y tiene {open_total} incidencia(s) operativa(s) abierta(s). "
+        f"El workspace está al {readiness}% de readiness, tiene {open_total} incidencia(s) operativa(s) abierta(s) y {task_total} tarea(s) activa(s). "
         f"Lo más reciente es: {', '.join(process_samples) if process_samples else 'sin incidencias destacadas ahora mismo'}."
     )
-    response["suggestions"] = ["Pregúntame por un error concreto", "Pídeme cómo hacer un proceso", "Haz una consulta legal"]
-    response["sources"] = ["workspace_health", "workspace_process_supervisor"]
+    response["suggestions"] = ["Pregúntame por un error concreto", "Pídeme cómo hacer un proceso", "Haz una consulta legal", "Bandeja unificada", "Agenda diaria"]
+    response["sources"] = ["workspace_health", "workspace_process_supervisor", "task_planner", "workspace_memory"]
+    if recent_memory:
+        response["cards"] = [
+            {
+                "title": str(item.get("title") or item.get("memory_type") or "Memoria reciente").strip(),
+                "summary": str(item.get("content") or "").strip(),
+                "priority": str(item.get("priority") or "media"),
+                "impact_area": "contexto",
+            }
+            for item in recent_memory[:3]
+        ]
     return response
 
 
@@ -43339,6 +44002,77 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
     now = now or datetime.now(timezone.utc).isoformat()
     if not workspace_text or not action_text:
         return {"error": "workspace_id y action_id requeridos"}
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    _workspace_internal_copilot_log_event(
+        conn,
+        workspace_text,
+        "action_request",
+        actor=actor,
+        message=action_text,
+        payload=payload,
+        now=now,
+    )
+    if action_text == "create_task":
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            return {"error": "title requerido"}
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=title,
+            detail=str(payload.get("detail") or "").strip(),
+            priority=str(payload.get("priority") or "media").strip() or "media",
+            due_at=str(payload.get("due_at") or "").strip(),
+            entity_type=str(payload.get("entity_type") or "").strip(),
+            entity_id=str(payload.get("entity_id") or "").strip(),
+            source=str(payload.get("source") or "manual").strip(),
+            notify_channel=str(payload.get("notify_channel") or "").strip(),
+            meta=payload.get("meta") if isinstance(payload.get("meta"), dict) else {},
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Tarea creada correctamente.",
+            "sources": ["task_planner"],
+            "cards": [{"title": title, "summary": str(payload.get("detail") or "").strip(), "priority": str(payload.get("priority") or "media").strip() or "media", "impact_area": "planificacion"}],
+            "actions": [
+                {"id": "complete_task", "label": "Marcar hecha", "payload": {"task_id": task_id}},
+                {"id": "snooze_task", "label": "Mover a mañana", "payload": {"task_id": task_id, "due_at": (date.today() + timedelta(days=1)).isoformat()}},
+            ],
+        }
+    if action_text == "complete_task":
+        task_id = str(payload.get("task_id") or "").strip()
+        if not task_id:
+            return {"error": "task_id requerido"}
+        _workspace_internal_copilot_complete_task(conn, workspace_text, task_id, now=now)
+        return {"ok": True, "action_id": action_text, "message": "Tarea marcada como hecha.", "sources": ["task_planner"]}
+    if action_text == "snooze_task":
+        task_id = str(payload.get("task_id") or "").strip()
+        if not task_id:
+            return {"error": "task_id requerido"}
+        due_at = str(payload.get("due_at") or (date.today() + timedelta(days=1)).isoformat()).strip()
+        _workspace_internal_copilot_snooze_task(conn, workspace_text, task_id, due_at=due_at, now=now)
+        return {"ok": True, "action_id": action_text, "message": f"Tarea reprogramada para {due_at}.", "sources": ["task_planner"]}
+    if action_text == "store_memory_note":
+        content = str(payload.get("content") or "").strip()
+        if not content:
+            return {"error": "content requerido"}
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type=str(payload.get("memory_type") or "note").strip() or "note",
+            title=str(payload.get("title") or "Nota").strip(),
+            content=content,
+            entity_type=str(payload.get("entity_type") or "").strip(),
+            entity_id=str(payload.get("entity_id") or "").strip(),
+            priority=str(payload.get("priority") or "media").strip() or "media",
+            meta=payload.get("meta") if isinstance(payload.get("meta"), dict) else {},
+            now=now,
+        )
+        return {"ok": True, "action_id": action_text, "message": "Memoria guardada correctamente.", "sources": ["workspace_memory"]}
     if action_text == "open_client":
         cliente_id = str(payload.get("cliente_id") or "").strip()
         if not cliente_id:
