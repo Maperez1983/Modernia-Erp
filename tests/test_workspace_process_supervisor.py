@@ -3011,6 +3011,34 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["microflow_type"], "documentos_rrhh_caducados")
         self.assertTrue(result.get("refresh_supervisor"))
         self.assertTrue(any(str(card.get("title") or "") == "Microflujo ejecutado" for card in (result.get("cards") or [])))
+        self.assertEqual(result.get("impact_area"), "laboral")
+        self.assertTrue(str(result.get("task_id") or "").strip())
+        rows = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchall()
+        self.assertTrue(rows)
+
+    def test_internal_copilot_action_run_domain_microflow_autocloses_when_clean(self):
+        old_collect = server._workspace_internal_copilot_collect_domain_pending
+        try:
+            def fake_collect(conn, workspace_id, **kwargs):
+                return [], [], ["fake_domain"]
+
+            server._workspace_internal_copilot_collect_domain_pending = fake_collect
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "run_domain_microflow",
+                {"domain": "rrhh", "microflow_type": "documentos_rrhh_caducados"},
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                now="2026-06-19T13:40:00Z",
+            )
+        finally:
+            server._workspace_internal_copilot_collect_domain_pending = old_collect
+        self.assertTrue(result["ok"])
+        self.assertTrue(result.get("auto_closed"))
 
 
 if __name__ == "__main__":

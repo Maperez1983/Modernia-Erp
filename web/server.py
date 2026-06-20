@@ -40921,6 +40921,26 @@ def _workspace_internal_copilot_create_task(conn, workspace_id, *, actor=None, t
     return task_id
 
 
+def _workspace_internal_copilot_domain_task_meta(domain="", *, microflow_type="", impact_area="", assigned_mode="operator"):
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    impact = str(impact_area or "").strip().lower()
+    if not impact:
+        impact = {
+            "gestoria": "economico",
+            "seguros": "economico",
+            "financiaciones": "economico",
+            "rrhh": "laboral",
+            "fincas": "operativo",
+            "inmobiliaria": "operativo",
+        }.get(domain_key, "operativo")
+    return {
+        "domain": domain_key,
+        "microflow_type": str(microflow_type or "").strip(),
+        "impact_area": impact,
+        "assigned_mode": str(assigned_mode or "operator").strip() or "operator",
+    }
+
+
 def _workspace_internal_copilot_complete_task(conn, workspace_id, task_id, *, now=None):
     ensure_workspace_internal_copilot_runtime_tables(conn)
     now = now or datetime.now(timezone.utc).isoformat()
@@ -45369,20 +45389,63 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
+        domain_impact = {
+            "gestoria": "economico",
+            "seguros": "economico",
+            "financiaciones": "economico",
+            "rrhh": "laboral",
+            "fincas": "operativo",
+            "inmobiliaria": "operativo",
+        }.get(domain, "operativo")
+        task_result = {}
+        if refreshed_cards:
+            task_id = _workspace_internal_copilot_create_task(
+                conn,
+                workspace_text,
+                actor=actor,
+                title=f"[{domain}] Revisar {str(microflow.get('title') or microflow_type).strip()}",
+                detail=f"Quedan {len(refreshed_cards[:8])} pendiente(s) tras ejecutar el microflujo {microflow_type}.",
+                priority="alta" if domain_impact in {"economico", "laboral"} else "media",
+                due_at=date.today().isoformat(),
+                source="copilot_microflow",
+                meta=_workspace_internal_copilot_domain_task_meta(domain, microflow_type=microflow_type, impact_area=domain_impact, assigned_mode="operator"),
+                now=now,
+            )
+            task_result = {"task_id": task_id}
+        close_loop_result = {}
+        if not refreshed_cards:
+            close_loop_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                "close_loop_safe",
+                {"crm": domain, "mode": "operator", **dict(payload or {})},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
         return {
             "ok": True,
             "action_id": action_text,
             "mode": "operator",
-            "message": f"Microflujo {microflow_type} ejecutado para {domain}. Actualizados: {updated} · resueltos: {resolved}.",
+            "message": (
+                f"Microflujo {microflow_type} ejecutado para {domain}. Actualizados: {updated} · resueltos: {resolved}."
+                + (
+                    f" He creado una tarea de seguimiento porque quedan {len(refreshed_cards[:8])} pendiente(s)."
+                    if refreshed_cards and task_result.get("task_id")
+                    else " El dominio ha quedado limpio y he cerrado el ciclo automáticamente."
+                    if close_loop_result.get("ok")
+                    else ""
+                )
+            ),
             "updated": updated,
             "resolved": resolved,
             "post_actions": post_actions,
             "cards": [
                 {
                     "title": "Microflujo ejecutado",
-                    "summary": f"{str(microflow.get('title') or microflow_type).strip()} · acciones seguras {', '.join(executed) or '-'} · pendientes tras autorrevisión {len(list(refreshed_cards[:7]))}",
-                    "priority": "media",
-                    "impact_area": domain or "copilot",
+                    "summary": f"{str(microflow.get('title') or microflow_type).strip()} · impacto {domain_impact} · acciones seguras {', '.join(executed) or '-'} · pendientes tras autorrevisión {len(list(refreshed_cards[:7]))}",
+                    "priority": "alta" if domain_impact in {"economico", "laboral"} else "media",
+                    "impact_area": domain_impact,
                 },
                 *refreshed_cards[:7],
             ],
@@ -45390,11 +45453,14 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se cerrará el bloque seguro restante.", "payload": {"crm": domain, "mode": "operator"}},
                 {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
             ],
-            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources, *refreshed_sources, "workspace_memory"]))[:10],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources, *refreshed_sources, *(close_loop_result.get("sources") or []), "workspace_memory", "task_planner"]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
             "refresh_supervisor": True,
             "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,
             "microflow_type": microflow_type,
+            "task_id": str(task_result.get("task_id") or "").strip(),
+            "impact_area": domain_impact,
+            "auto_closed": bool(close_loop_result.get("ok")),
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
