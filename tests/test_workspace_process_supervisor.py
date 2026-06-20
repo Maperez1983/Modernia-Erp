@@ -2926,6 +2926,92 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         ).fetchall()
         self.assertTrue(rows)
 
+    def test_internal_copilot_operational_query_rrhh_docs_expired_includes_safe_resolution(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              persona_id TEXT,
+              tipo TEXT,
+              nombre TEXT,
+              fecha_caducidad TEXT,
+              estado TEXT,
+              permanente INTEGER
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_rrhh_documentos (id, workspace_id, persona_id, tipo, nombre, fecha_caducidad, estado, permanente) VALUES ('doc-safe-1','ws1','p1','DNI','DNI Juan','2026-01-01','caducado',0)"
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "revisa documentos rrhh caducados",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={},
+        )
+        self.assertTrue(any(str(action.get("id") or "") == "resolve_domain_safe" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_action_resolve_domain_safe_rrhh(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "rrhh_docs_expired", "documento_ids": ["doc-rrhh-1"]},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:20:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["updated"], 1)
+
+    def test_internal_copilot_action_resolve_domain_safe_fincas(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "resolve_domain_safe",
+            {"domain": "fincas_communities_quota", "comunidad_ids": ["com-1"]},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:25:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["updated"], 1)
+
+    def test_internal_copilot_action_run_domain_microflow_rrhh_autoreviews(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              persona_id TEXT,
+              tipo TEXT,
+              nombre TEXT,
+              fecha_caducidad TEXT,
+              estado TEXT,
+              permanente INTEGER
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_rrhh_documentos (id, workspace_id, persona_id, tipo, nombre, fecha_caducidad, estado, permanente) VALUES ('doc-micro-1','ws1','p1','DNI','DNI Juan','2026-01-01','caducado',0)"
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_domain_microflow",
+            {"domain": "rrhh", "microflow_type": "documentos_rrhh_caducados"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["microflow_type"], "documentos_rrhh_caducados")
+        self.assertTrue(result.get("refresh_supervisor"))
+        self.assertTrue(any(str(card.get("title") or "") == "Microflujo ejecutado" for card in (result.get("cards") or [])))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41752,6 +41752,20 @@ def _workspace_internal_copilot_detect_domain_microflow(domain="", cards=None, a
             "summary": "Revalidar hipotecas sin importes base y pasar a la cola guiada si quedan pendientes.",
             "safe_ids": ["bulk_revalidate_missing_hipotecas", "resolve_domain_safe"],
         }
+    if domain_key == "rrhh" and "resolve_domain_safe" in action_ids:
+        return {
+            "microflow_type": "documentos_rrhh_caducados",
+            "title": "Microflujo de documentos RRHH caducados",
+            "summary": "Revalidar documentos caducados y mantener preparada la revisión guiada de RRHH.",
+            "safe_ids": ["resolve_domain_safe"],
+        }
+    if domain_key == "fincas" and "resolve_domain_safe" in action_ids:
+        return {
+            "microflow_type": "comunidades_cuota_incoherente",
+            "title": "Microflujo de comunidades con cuota incoherente",
+            "summary": "Revalidar comunidades con cuota incoherente y dejar lista la revisión guiada de Fincas.",
+            "safe_ids": ["resolve_domain_safe"],
+        }
     if domain_key == "seguros" and any(str(card.get("title") or "").lower().find("pdf") >= 0 for card in cards):
         return {
             "microflow_type": "polizas_sin_pdf",
@@ -43491,6 +43505,14 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                         ],
                     },
                 },
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "rrhh_docs_expired",
+                        "documento_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()],
+                    },
+                },
             ],
         }
     if ("comunidad" in text or "comunidades" in text or "fincas" in text) and any(token in text for token in ("cuota incoherente", "cuota desajustada", "cuota", "incoherente")):
@@ -43555,6 +43577,14 @@ def _workspace_internal_copilot_operational_query_reply(conn, workspace_id, mess
                             for row in rows
                             if str(row_value(row, "id") or "").strip()
                         ],
+                    },
+                },
+                {
+                    "id": "resolve_domain_safe",
+                    "label": "Resolver todo lo seguro",
+                    "payload": {
+                        "domain": "fincas_communities_quota",
+                        "comunidad_ids": [str(row_value(row, "id") or "").strip() for row in rows if str(row_value(row, "id") or "").strip()],
                     },
                 },
             ],
@@ -45309,6 +45339,18 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 actor=actor,
                 now=now,
             ) or {}
+        try:
+            perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                "autorreview_domain",
+                {"domain": domain, **dict(payload or {})},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            )
+        except Exception:
+            pass
         _workspace_internal_copilot_store_memory_note(
             conn,
             workspace_text,
@@ -45335,7 +45377,15 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "updated": updated,
             "resolved": resolved,
             "post_actions": post_actions,
-            "cards": refreshed_cards[:8],
+            "cards": [
+                {
+                    "title": "Microflujo ejecutado",
+                    "summary": f"{str(microflow.get('title') or microflow_type).strip()} · acciones seguras {', '.join(executed) or '-'} · pendientes tras autorrevisión {len(list(refreshed_cards[:7]))}",
+                    "priority": "media",
+                    "impact_area": domain or "copilot",
+                },
+                *refreshed_cards[:7],
+            ],
             "actions": [
                 {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se cerrará el bloque seguro restante.", "payload": {"crm": domain, "mode": "operator"}},
                 {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
@@ -45699,6 +45749,62 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "ok": True,
                 "action_id": action_text,
                 "message": f"Corrección segura aplicada sobre {updated} dashboard(s). Resueltos: {resolved}.",
+                "updated": updated,
+                "resolved": resolved,
+                "refresh_supervisor": True,
+            }
+        if domain == "rrhh_docs_expired":
+            documento_ids = [str(item or "").strip() for item in (payload.get("documento_ids") or []) if str(item or "").strip()]
+            updated = 0
+            resolved = 0
+            for documento_id in documento_ids:
+                result = run_workspace_process_supervision(
+                    conn,
+                    process_type="rrhh_document",
+                    servicio="rrhh",
+                    empresa_id=empresa_id,
+                    workspace_id=workspace_text,
+                    entity_type="rrhh_documento",
+                    entity_id=documento_id,
+                    actor=actor,
+                    context={"operation": "revalidate"},
+                    now=now,
+                )
+                updated += 1
+                if str(result.get("status") or "").strip() == "ok":
+                    resolved += 1
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Corrección segura aplicada sobre {updated} documento(s) RRHH. Resueltos: {resolved}.",
+                "updated": updated,
+                "resolved": resolved,
+                "refresh_supervisor": True,
+            }
+        if domain == "fincas_communities_quota":
+            comunidad_ids = [str(item or "").strip() for item in (payload.get("comunidad_ids") or []) if str(item or "").strip()]
+            updated = 0
+            resolved = 0
+            for comunidad_id in comunidad_ids:
+                result = run_workspace_process_supervision(
+                    conn,
+                    process_type="fincas_community",
+                    servicio="fincas",
+                    empresa_id=empresa_id,
+                    workspace_id=workspace_text,
+                    entity_type="fincas_community",
+                    entity_id=comunidad_id,
+                    actor=actor,
+                    context={"operation": "revalidate"},
+                    now=now,
+                )
+                updated += 1
+                if str(result.get("status") or "").strip() == "ok":
+                    resolved += 1
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"Corrección segura aplicada sobre {updated} comunidad(es). Resueltas: {resolved}.",
                 "updated": updated,
                 "resolved": resolved,
                 "refresh_supervisor": True,
