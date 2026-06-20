@@ -41555,6 +41555,123 @@ def _workspace_internal_copilot_refine_reply_with_ollama(response, *, workspace_
     return refined
 
 
+def _workspace_internal_copilot_recent_decision_memory(conn, workspace_id, *, actor=None, domain="", limit=4):
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(4, int(limit or 4)))
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    filtered = []
+    for row in rows:
+        if str(row.get("memory_type") or "").strip() != "decision":
+            continue
+        meta = _safe_json_object(row.get("meta_json") or {})
+        row_domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if domain_key and row_domain and row_domain != domain_key:
+            continue
+        filtered.append({**dict(row), "meta": meta})
+        if len(filtered) >= int(limit or 4):
+            break
+    return filtered
+
+
+def _workspace_internal_copilot_choose_operator_actions(conn, workspace_id, *, domain="", cards=None, actions=None, actor=None, context=None):
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    candidates = [dict(item) for item in (actions or []) if isinstance(item, dict) and str(item.get("id") or "").strip()]
+    safe_ids = {
+        "resolve_domain_safe",
+        "bulk_refresh_mismatched_dashboards",
+        "bulk_revalidate_missing_hipotecas",
+        "bulk_revalidate_rentas_missing_document",
+        "bulk_revalidate_facturas_without_asiento",
+        "bulk_rerun_facturas_ocr",
+        "bulk_rerun_ocr",
+    }
+    guided_ids = {"start_review_queue"}
+    followup_ids = {"autorreview_domain", "close_loop_safe", "daily_review_agenda"}
+    preferred_by_domain = {
+        "gestoria": ["bulk_rerun_facturas_ocr", "bulk_revalidate_facturas_without_asiento", "bulk_revalidate_rentas_missing_document", "resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+        "seguros": ["resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+        "financiaciones": ["bulk_revalidate_missing_hipotecas", "resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+        "rrhh": ["resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+        "fincas": ["resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+        "inmobiliaria": ["resolve_domain_safe", "start_review_queue", "autorreview_domain"],
+    }
+    preferred_order = preferred_by_domain.get(domain_key, ["resolve_domain_safe", "start_review_queue", "autorreview_domain"])
+    by_id = {}
+    for action in candidates:
+        action_id = str(action.get("id") or "").strip()
+        by_id.setdefault(action_id, action)
+    heuristic_order = [by_id[action_id] for action_id in preferred_order if action_id in by_id]
+    remaining = [action for action in candidates if action not in heuristic_order]
+    ordered = heuristic_order + remaining
+    safe_action = next((item for item in ordered if str(item.get("id") or "").strip() in safe_ids), None)
+    guided_action = next((item for item in ordered if str(item.get("id") or "").strip() in guided_ids), None)
+    followup_action = next((item for item in ordered if str(item.get("id") or "").strip() in followup_ids), None)
+    rationale = f"Selección heurística para {domain_key or 'dominio general'}."
+    decision_source = "heuristic"
+    if _workspace_internal_copilot_agent_enabled() and ollama_available() and len(candidates) >= 2:
+        decision_context = {
+            "workspace_id": str(workspace_id or "").strip(),
+            "domain": domain_key,
+            "current_crm": str((context or {}).get("current_crm") or "").strip(),
+            "open_cards": [
+                {
+                    "title": str(card.get("title") or "").strip(),
+                    "priority": str(card.get("priority") or "").strip(),
+                    "impact_area": str(card.get("impact_area") or "").strip(),
+                }
+                for card in list(cards or [])[:6]
+            ],
+            "candidates": [
+                {
+                    "id": str(action.get("id") or "").strip(),
+                    "label": str(action.get("label") or "").strip(),
+                    "requires_confirmation": bool(action.get("requires_confirmation")),
+                }
+                for action in candidates[:10]
+            ],
+            "recent_decisions": [
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "content": str(item.get("content") or "").strip(),
+                    "domain": str((item.get("meta") or {}).get("domain") or "").strip(),
+                }
+                for item in _workspace_internal_copilot_recent_decision_memory(conn, workspace_id, actor=actor, domain=domain_key, limit=3)
+            ],
+        }
+        prompt = (
+            "Elige la mejor secuencia operativa para un asistente interno del CRM. "
+            "Debes priorizar corrección segura, luego revisión guiada y luego cierre/seguimiento. "
+            "Responde SOLO JSON válido con estas claves: safe_action_id, guided_action_id, followup_action_id, rationale.\n\n"
+            + json.dumps(decision_context, ensure_ascii=False)
+        )
+        parsed, err = call_ollama_json(
+            prompt,
+            required_keys={"safe_action_id", "guided_action_id", "followup_action_id", "rationale"},
+            timeout=45,
+            retries=1,
+            model=str(os.environ.get("OLLAMA_COPILOT_MODEL") or os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip() or None,
+            system_text=_workspace_internal_copilot_agent_system_text() + " Elige entre acciones existentes, no inventes IDs.",
+        )
+        if not err and parsed:
+            chosen_safe = by_id.get(str(parsed.get("safe_action_id") or "").strip()) if str(parsed.get("safe_action_id") or "").strip() in safe_ids else None
+            chosen_guided = by_id.get(str(parsed.get("guided_action_id") or "").strip()) if str(parsed.get("guided_action_id") or "").strip() in guided_ids else None
+            chosen_followup = by_id.get(str(parsed.get("followup_action_id") or "").strip()) if str(parsed.get("followup_action_id") or "").strip() in followup_ids else None
+            if chosen_safe is not None:
+                safe_action = chosen_safe
+            if chosen_guided is not None:
+                guided_action = chosen_guided
+            if chosen_followup is not None:
+                followup_action = chosen_followup
+            rationale = str(parsed.get("rationale") or "").strip() or rationale
+            decision_source = "ollama"
+    return {
+        "safe_action": safe_action,
+        "guided_action": guided_action,
+        "followup_action": followup_action,
+        "source": decision_source,
+        "rationale": rationale,
+    }
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -44885,13 +45002,16 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
-        safe_action = next(
-            (
-                item for item in actions
-                if isinstance(item, dict) and str(item.get("id") or "").strip() in {"resolve_domain_safe", "bulk_refresh_mismatched_dashboards", "bulk_revalidate_missing_hipotecas", "bulk_revalidate_rentas_missing_document", "bulk_revalidate_facturas_without_asiento"}
-            ),
-            None,
+        action_plan = _workspace_internal_copilot_choose_operator_actions(
+            conn,
+            workspace_text,
+            domain=domain,
+            cards=cards,
+            actions=actions,
+            actor=actor,
+            context=payload,
         )
+        safe_action = action_plan.get("safe_action")
         safe_result = {}
         if safe_action:
             safe_result = perform_workspace_internal_copilot_action(
@@ -44903,6 +45023,20 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 actor=actor,
                 now=now,
             ) or {}
+        secondary_action = action_plan.get("followup_action")
+        secondary_result = {}
+        if secondary_action and str(secondary_action.get("id") or "").strip() in {"autorreview_domain"}:
+            secondary_payload = dict(secondary_action.get("payload") or {})
+            secondary_payload.setdefault("domain", domain)
+            secondary_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                str(secondary_action.get("id") or "").strip(),
+                secondary_payload,
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
         refreshed_cards, _, _ = _workspace_internal_copilot_collect_domain_pending(
             conn,
             workspace_text,
@@ -44910,13 +45044,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
-        guided_action = next(
-            (
-                item for item in actions
-                if isinstance(item, dict) and str(item.get("id") or "").strip() == "start_review_queue"
-            ),
-            None,
-        )
+        guided_action = action_plan.get("guided_action")
         guided_result = {}
         if guided_action:
             guided_result = perform_workspace_internal_copilot_action(
@@ -44928,6 +45056,31 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 actor=actor,
                 now=now,
             ) or {}
+        decision_summary = (
+            f"Plan {str(action_plan.get('source') or 'heuristic')}: "
+            f"{str((safe_action or {}).get('label') or (safe_action or {}).get('id') or 'sin acción segura')} -> "
+            f"{str((guided_action or {}).get('label') or (guided_action or {}).get('id') or 'sin revisión guiada')}."
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="decision",
+            title=f"Decisión operativa {domain}",
+            content=decision_summary,
+            priority="media",
+            meta={
+                "domain": domain,
+                "decision_source": str(action_plan.get("source") or "heuristic"),
+                "rationale": str(action_plan.get("rationale") or "").strip(),
+                "safe_action_id": str((safe_action or {}).get("id") or "").strip(),
+                "guided_action_id": str((guided_action or {}).get("id") or "").strip(),
+                "followup_action_id": str((secondary_action or {}).get("id") or "").strip(),
+                "updated": int(safe_result.get("updated") or 0),
+                "resolved": int(safe_result.get("resolved") or 0),
+            },
+            now=now,
+        )
         next_actions = [
             {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
             {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
@@ -44945,16 +45098,18 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "mode": "operator",
-            "message": f"Secuencia operativa ejecutada para {domain}. Actualizados: {int(safe_result.get('updated') or 0)} · resueltos: {int(safe_result.get('resolved') or 0)} · pendientes: {len(refreshed_cards[:8])}.",
+            "message": f"Secuencia operativa ejecutada para {domain}. Actualizados: {int(safe_result.get('updated') or 0)} · resueltos: {int(safe_result.get('resolved') or 0)} · pendientes: {len(refreshed_cards[:8])}. {decision_summary}",
             "updated": int(safe_result.get("updated") or 0),
             "resolved": int(safe_result.get("resolved") or 0),
-            "post_actions": list(safe_result.get("post_actions") or []),
+            "post_actions": list(safe_result.get("post_actions") or []) + list(secondary_result.get("post_actions") or []),
             "cards": list(refreshed_cards[:8]),
             "actions": next_actions,
-            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or [])]))[:10],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or []), *(secondary_result.get("sources") or []), "workspace_memory"]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
             "refresh_supervisor": True,
             "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,
+            "decision_source": str(action_plan.get("source") or "heuristic"),
+            "decision_rationale": str(action_plan.get("rationale") or "").strip(),
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)

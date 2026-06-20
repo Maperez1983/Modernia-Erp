@@ -2589,6 +2589,11 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("Secuencia operativa ejecutada", result["message"])
         self.assertTrue(any(str(item.get("id") or "") in {"start_review_queue", "close_loop_safe"} for item in (result.get("actions") or [])))
         self.assertIsNotNone(result.get("navigation"))
+        decision_rows = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1' AND memory_type = 'decision' ORDER BY created_at DESC LIMIT 1"
+        ).fetchall()
+        self.assertTrue(decision_rows)
+        self.assertIn("Decisión operativa", str(decision_rows[0]["title"] or ""))
 
     def test_internal_copilot_director_briefing_action(self):
         self.conn.execute(
@@ -2796,6 +2801,48 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(card.get("title") or "") == "Plan corto" for card in (reply.get("cards") or [])))
         self.assertIn("Operar ahora", list(reply.get("suggestions") or []))
         self.assertTrue(reply.get("risk_flags"))
+
+    def test_internal_copilot_choose_operator_actions_uses_ollama_choice(self):
+        old_ollama_available = server.ollama_available
+        old_call_ollama_json = server.call_ollama_json
+        try:
+            server.ollama_available = lambda: True
+
+            def fake_call_ollama_json(prompt, **kwargs):
+                if "Elige la mejor secuencia operativa para un asistente interno del CRM" in prompt:
+                    return (
+                        {
+                            "safe_action_id": "bulk_revalidate_missing_hipotecas",
+                            "guided_action_id": "start_review_queue",
+                            "followup_action_id": "autorreview_domain",
+                            "rationale": "Primero cierro lo seguro del dominio y luego paso a revisión guiada.",
+                        },
+                        "",
+                    )
+                return ({}, "sin respuesta")
+
+            server.call_ollama_json = fake_call_ollama_json
+            decision = server._workspace_internal_copilot_choose_operator_actions(
+                self.conn,
+                "ws1",
+                domain="fin",
+                cards=[{"title": "Hipotecas incompletas", "priority": "alta", "impact_area": "financiaciones"}],
+                actions=[
+                    {"id": "resolve_domain_safe", "label": "Resolver dominio"},
+                    {"id": "bulk_revalidate_missing_hipotecas", "label": "Revalidar hipotecas"},
+                    {"id": "start_review_queue", "label": "Revisión guiada"},
+                    {"id": "autorreview_domain", "label": "Revisar dominio"},
+                ],
+                actor={"id": "u1", "usuario": "QA"},
+                context={"current_crm": "fin"},
+            )
+        finally:
+            server.ollama_available = old_ollama_available
+            server.call_ollama_json = old_call_ollama_json
+        self.assertEqual(str((decision.get("safe_action") or {}).get("id") or ""), "bulk_revalidate_missing_hipotecas")
+        self.assertEqual(str((decision.get("guided_action") or {}).get("id") or ""), "start_review_queue")
+        self.assertEqual(str((decision.get("followup_action") or {}).get("id") or ""), "autorreview_domain")
+        self.assertEqual(decision.get("source"), "ollama")
 
 
 if __name__ == "__main__":
