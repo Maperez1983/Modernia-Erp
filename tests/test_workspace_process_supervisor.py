@@ -2521,6 +2521,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["actions"])
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
+        self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
@@ -2700,6 +2701,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["mode"], "direccion")
         self.assertTrue(result["cards"])
         self.assertTrue(any("Pulso económico" == str(card.get("title") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any("Asistente hoy" == str(card.get("title") or "") for card in (result.get("cards") or [])))
 
     def test_internal_copilot_promote_legal_updates_to_tasks(self):
         self.conn.execute(
@@ -3071,6 +3073,36 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         checklist = server._workspace_internal_copilot_microflow_checklist("hipotecas_incompletas")
         self.assertTrue(checklist)
         self.assertIn("Revisar hipotecas sin importes base", checklist[0])
+
+    def test_internal_copilot_repeated_playbook_builds_card(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Microflujo hipotecas_incompletas",
+            content="Primera pasada",
+            meta={"microflow_type": "hipotecas_incompletas", "domain": "financiaciones"},
+            now="2026-06-19T08:00:00Z",
+        )
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Microflujo hipotecas_incompletas",
+            content="Segunda pasada",
+            meta={"microflow_type": "hipotecas_incompletas", "domain": "financiaciones"},
+            now="2026-06-19T09:00:00Z",
+        )
+        cards = server._workspace_internal_copilot_repeated_playbook(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            limit=2,
+        )
+        self.assertTrue(cards)
+        self.assertIn("Playbook vivo", str(cards[0]["title"]))
 
 
 if __name__ == "__main__":

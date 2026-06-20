@@ -41880,6 +41880,94 @@ def _workspace_internal_copilot_pick_next_microflow(conn, workspace_id, *, empre
     }
 
 
+def _workspace_internal_copilot_next_record_from_actions(actions):
+    for action in list(actions or []):
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("id") or "").strip() != "start_review_queue":
+            continue
+        payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        if not items:
+            continue
+        first = items[0] if isinstance(items[0], dict) else {}
+        if not first:
+            continue
+        return {
+            "queue_type": str(payload.get("queue_type") or "").strip(),
+            "title": str(first.get("title") or "Siguiente registro").strip(),
+            "summary": str(first.get("summary") or "").strip(),
+            "item": dict(first),
+        }
+    return {}
+
+
+def _workspace_internal_copilot_repeated_playbook(conn, workspace_id, *, actor=None, limit=3):
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=20)
+    counts = {}
+    samples = {}
+    for row in rows:
+        if str(row.get("memory_type") or "").strip() != "decision":
+            continue
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        key = str(meta.get("microflow_type") or meta.get("domain") or "").strip()
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        samples.setdefault(key, meta)
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[: max(1, int(limit or 3))]
+    cards = []
+    for key, count in ranked:
+        if count < 2:
+            continue
+        checklist = _workspace_internal_copilot_microflow_checklist(key)
+        sample = samples.get(key) or {}
+        cards.append(
+            {
+                "title": f"Playbook vivo: {key}",
+                "summary": (
+                    f"Repetido {count} vez/veces. "
+                    + (f"Checklist: {' | '.join(checklist[:4])}" if checklist else "")
+                    + (f" · Último dominio: {sample.get('domain')}" if sample.get("domain") else "")
+                )[:500],
+                "priority": "media",
+                "impact_area": "copilot",
+                "entity": {"microflow_type": key},
+            }
+        )
+    return cards
+
+
+def _workspace_internal_copilot_today_resolution_summary(conn, workspace_id, *, actor=None):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    where = ["workspace_id = ?", "substr(created_at, 1, 10) = ?"]
+    params = [str(workspace_id or "").strip(), date.today().isoformat()]
+    if actor_user_id:
+        where.append("(actor_user_id = ? OR actor_user_id IS NULL OR actor_user_id = '')")
+        params.append(actor_user_id)
+    elif actor_label:
+        where.append("(actor_label = ? OR actor_label IS NULL OR actor_label = '')")
+        params.append(actor_label)
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM workspace_internal_copilot_actions WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT 120",
+            tuple(params),
+        ).fetchall()
+    except Exception:
+        rows = []
+    updated = 0
+    resolved = 0
+    executed = 0
+    for row in rows or []:
+        result = _safe_json_object(row_value(row, "result_json") or {})
+        updated += int(result.get("updated") or 0)
+        resolved += int(result.get("resolved") or 0)
+        if result.get("ok"):
+            executed += 1
+    return {"updated": updated, "resolved": resolved, "executed": executed}
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -41889,6 +41977,7 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
     )
     tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=10)
     economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
+    assistant_today = _workspace_internal_copilot_today_resolution_summary(conn, workspace_id, actor=actor)
     grouped = {}
     for card in pending_cards:
         impact = str(card.get("impact_area") or "operativo").strip().lower()
@@ -41916,6 +42005,12 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
             ),
             "priority": "media",
             "impact_area": "economico",
+        },
+        {
+            "title": "Asistente hoy",
+            "summary": f"Acciones ejecutadas {assistant_today['executed']} · actualizados {assistant_today['updated']} · resueltos {assistant_today['resolved']}",
+            "priority": "media",
+            "impact_area": "direccion",
         },
     ]
     return {
@@ -44079,6 +44174,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
         if next_microflow:
             microflow = next_microflow.get("microflow") or {}
             checklist = list(next_microflow.get("checklist") or [])
+            next_record = _workspace_internal_copilot_next_record_from_actions(next_microflow.get("actions") or [])
             cards.insert(
                 0,
                 {
@@ -44086,6 +44182,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                     "summary": "\n".join(
                         [str(microflow.get("summary") or "").strip()]
                         + ([f"Checklist: {' | '.join(checklist[:4])}"] if checklist else [])
+                        + ([f"Siguiente registro: {next_record.get('title')} · {next_record.get('summary')}".strip()] if next_record else [])
                     )[:500],
                     "priority": "alta",
                     "impact_area": next_microflow.get("domain") or "copilot",
@@ -44102,6 +44199,19 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                     },
                 },
             )
+            if next_record:
+                cards.insert(
+                    1,
+                    {
+                        "title": "Siguiente registro recomendado",
+                        "summary": f"{str(next_record.get('title') or '').strip()} · {str(next_record.get('summary') or '').strip()}".strip(),
+                        "priority": "alta",
+                        "impact_area": next_microflow.get("domain") or "copilot",
+                    },
+                )
+        playbooks = _workspace_internal_copilot_repeated_playbook(conn, workspace_id, actor=actor, limit=2)
+        if playbooks:
+            cards.extend(playbooks[:2])
         actions.insert(
             0,
             {
