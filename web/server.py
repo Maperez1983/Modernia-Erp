@@ -41433,6 +41433,128 @@ def _workspace_internal_copilot_collect_economic_brief(conn, *, empresa_id=""):
     return summary
 
 
+def _workspace_internal_copilot_agent_enabled():
+    raw = str(os.environ.get("RUN_INTERNAL_COPILOT_OLLAMA_AGENT") or "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _workspace_internal_copilot_agent_system_text():
+    return (
+        "Eres el asistente interno principal del CRM. "
+        "Actúas con el criterio de un ingeniero y operador senior: claridad, pragmatismo y rigor. "
+        "Responde siempre en castellano. "
+        "Sé directo, accionable y breve. "
+        "No inventes datos ni acciones no soportadas. "
+        "Si falta contexto o hay riesgo, dilo de forma explícita. "
+        "Prioriza el siguiente paso útil para el usuario. "
+        "Evita relleno, tono comercial o explicaciones largas. "
+        "No reescribas acciones existentes del sistema; mejóralas con mejor criterio, plan y prioridades."
+    )
+
+
+def _workspace_internal_copilot_refine_reply_with_ollama(response, *, workspace_id="", empresa_id="", service_hint="", actor=None, context=None):
+    refined = dict(response or {})
+    refined["assistant_profile"] = "codex_clone_v1"
+    refined["assistant_style"] = "pragmatic_operator"
+    refined["llm_refined"] = False
+    if not _workspace_internal_copilot_agent_enabled() or not ollama_available():
+        return refined
+    if refined.get("error"):
+        return refined
+    answer = str(refined.get("answer") or "").strip()
+    if not answer:
+        return refined
+    actor_map = actor if isinstance(actor, dict) else {}
+    context_map = context if isinstance(context, dict) else {}
+    cards = list(refined.get("cards") or [])
+    actions = list(refined.get("actions") or [])
+    prompt_payload = {
+        "workspace_id": str(workspace_id or "").strip(),
+        "empresa_id": str(empresa_id or "").strip(),
+        "service_hint": str(service_hint or "").strip(),
+        "mode": str(refined.get("mode") or "").strip(),
+        "intent": str(refined.get("intent") or "").strip(),
+        "question": str(refined.get("message") or "").strip(),
+        "current_crm": str(context_map.get("current_crm") or context_map.get("service_hint") or "").strip(),
+        "current_view": str(context_map.get("current_workspace_view") or "").strip(),
+        "actor": {
+            "usuario": str(actor_map.get("usuario") or "").strip(),
+            "rol": str(actor_map.get("rol") or "").strip(),
+            "servicio": str(actor_map.get("servicio") or "").strip(),
+        },
+        "draft_answer": answer,
+        "draft_suggestions": list(refined.get("suggestions") or [])[:8],
+        "top_cards": [
+            {
+                "title": str(card.get("title") or "").strip(),
+                "summary": str(card.get("summary") or "").strip(),
+                "priority": str(card.get("priority") or "").strip(),
+                "impact_area": str(card.get("impact_area") or "").strip(),
+            }
+            for card in cards[:5]
+        ],
+        "actions": [
+            {
+                "id": str(action.get("id") or "").strip(),
+                "label": str(action.get("label") or "").strip(),
+                "requires_confirmation": bool(action.get("requires_confirmation")),
+            }
+            for action in actions[:8]
+        ],
+        "sources": list(refined.get("sources") or [])[:8],
+    }
+    prompt = (
+        "Refina la respuesta operativa de un asistente interno del CRM. "
+        "No cambies el significado de lo ya diagnosticado. "
+        "Responde SOLO con un objeto JSON válido con estas claves: "
+        "answer, plan, suggestions, risk_flags, autonomy_level. "
+        "answer debe ser corto, claro y útil. "
+        "plan debe ser una lista corta de pasos inmediatos. "
+        "risk_flags debe listar riesgos reales si los hay. "
+        "autonomy_level debe ser una de estas opciones: consultar, proponer, ejecutar_seguro, revisar_lote, escalar.\n\n"
+        + json.dumps(prompt_payload, ensure_ascii=False)
+    )
+    parsed, err = call_ollama_json(
+        prompt,
+        required_keys={"answer", "plan", "suggestions", "risk_flags", "autonomy_level"},
+        timeout=45,
+        retries=1,
+        model=str(os.environ.get("OLLAMA_COPILOT_MODEL") or os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip() or None,
+        system_text=_workspace_internal_copilot_agent_system_text() + " Responde SOLO en JSON válido.",
+    )
+    if err or not parsed:
+        return refined
+    llm_answer = str(parsed.get("answer") or "").strip()
+    if llm_answer:
+        refined["answer"] = llm_answer[:1600]
+    plan = _normalize_text_list(parsed.get("plan") or [], max_items=5, max_chars=180)
+    risk_flags = _normalize_text_list(parsed.get("risk_flags") or [], max_items=5, max_chars=180)
+    autonomy_level = normalize_lookup_text(parsed.get("autonomy_level") or "").lower().replace(" ", "_")
+    if autonomy_level not in {"consultar", "proponer", "ejecutar_seguro", "revisar_lote", "escalar"}:
+        autonomy_level = "proponer"
+    combined_suggestions = _normalize_text_list(
+        list(parsed.get("suggestions") or []) + list(refined.get("suggestions") or []),
+        max_items=8,
+        max_chars=180,
+    )
+    if combined_suggestions:
+        refined["suggestions"] = combined_suggestions
+    if plan:
+        plan_card = {
+            "title": "Plan corto",
+            "summary": "\n".join(f"{idx + 1}. {step}" for idx, step in enumerate(plan)),
+            "priority": "media",
+            "impact_area": "copilot",
+        }
+        refined["cards"] = [plan_card, *(cards[:11] if cards else [])][:12]
+    if risk_flags:
+        refined["risk_flags"] = risk_flags
+    refined["autonomy_level"] = autonomy_level
+    refined["plan"] = plan
+    refined["llm_refined"] = True
+    return refined
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -43689,12 +43811,22 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
         "cards": [],
         "actions": [],
     }
+    def _finish(payload):
+        result = dict(payload or {})
+        result["message"] = message_text
+        result["workspace_id"] = workspace_text
+        return _workspace_internal_copilot_refine_reply_with_ollama(
+            result,
+            workspace_id=workspace_text,
+            empresa_id=company_text,
+            service_hint=service_hint,
+            actor=actor,
+            context=context or {},
+        )
     task_reply = _workspace_internal_copilot_task_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
     if task_reply:
         response.update(task_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     continue_reply = _workspace_internal_copilot_continue_reply(
         conn,
         workspace_text,
@@ -43705,9 +43837,7 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if continue_reply:
         response.update(continue_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     briefing_reply = _workspace_internal_copilot_briefing_reply(
         conn,
         workspace_text,
@@ -43718,9 +43848,7 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if briefing_reply:
         response.update(briefing_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     action_reply = _workspace_internal_copilot_build_action_reply(
         conn,
         workspace_text,
@@ -43731,9 +43859,7 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if action_reply:
         response.update(action_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     document_reply = _workspace_internal_copilot_document_reply(
         conn,
         workspace_text,
@@ -43745,16 +43871,12 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if document_reply:
         response.update(document_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
         _workspace_internal_copilot_store_memory_note(conn, workspace_text, actor=actor, memory_type="last_document_query", title="Consulta documental", content=message_text, priority="media", meta={"sources": document_reply.get("sources") or []})
-        return response
+        return _finish(response)
     memory_reply = _workspace_internal_copilot_memory_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
     if memory_reply:
         response.update(memory_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     if _workspace_internal_copilot_action_intent(message_text) != "open_client" and any(token in normalize_lookup_text(message_text).lower() for token in ("busca", "encuentra", "localiza", "search semantica", "búsqueda")):
         semantic = _workspace_internal_copilot_semantic_search(conn, workspace_text, company_text, message_text, limit=8)
         if semantic:
@@ -43767,45 +43889,31 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
                     "sources": ["semantic_search"],
                 }
             )
-            response["message"] = message_text
-            response["workspace_id"] = workspace_text
-            return response
+            return _finish(response)
     reconciliation_reply = _workspace_internal_copilot_reconciliation_reply(conn, workspace_text, message_text, empresa_id=company_text, service_hint=service_hint, actor=actor, context=context or {})
     if reconciliation_reply:
         response.update(reconciliation_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     productivity_reply = _workspace_internal_copilot_productivity_reply(conn, workspace_text, message_text, actor=actor)
     if productivity_reply:
         response.update(productivity_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     template_reply = _workspace_internal_copilot_template_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
     if template_reply:
         response.update(template_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     alert_reply = _workspace_internal_copilot_external_alert_reply(conn, workspace_text, message_text, actor=actor)
     if alert_reply:
         response.update(alert_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     simulation_reply = _workspace_internal_copilot_simulation_reply(conn, workspace_text, message_text, actor=actor, context=context or {})
     if simulation_reply:
         response.update(simulation_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     context_reply = _workspace_internal_copilot_context_reply(conn, workspace_text, context or {}, message_text, empresa_id=company_text)
     if context_reply:
         response.update(context_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     operational_reply = _workspace_internal_copilot_operational_query_reply(
         conn,
         workspace_text,
@@ -43816,17 +43924,13 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if operational_reply:
         response.update(operational_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     if intent == "incident":
         review_reply = _workspace_internal_copilot_review_reply(message_text, open_events, history)
         review_tokens = ("revisa", "hoy", "todas", "listar", "que le falta", "qué le falta", "incoherente", "incoherentes", "duplicado", "duplicados", "duplicada", "duplicadas")
         if review_reply and any(token in normalize_lookup_text(message_text).lower() for token in review_tokens):
             response.update(review_reply)
-            response["message"] = message_text
-            response["workspace_id"] = workspace_text
-            return response
+            return _finish(response)
         relevant = []
         haystack = normalize_lookup_text(message_text).lower()
         for row in open_events:
@@ -43869,10 +43973,10 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             ]
             response["suggestions"] = list(dict.fromkeys([str(action.get("label") or "").strip() for action in (top.get("action_items") or []) if str(action.get("label") or "").strip()]))[:4]
             response["sources"] = ["workspace_process_supervisor", "workspace_process_supervisor_history"]
-            return response
+            return _finish(response)
         response["answer"] = "No veo incidencias abiertas que encajen con esa consulta. El workspace no tiene avisos operativos activos para ese proceso."
         response["sources"] = ["workspace_process_supervisor"]
-        return response
+        return _finish(response)
     if intent == "tutorial":
         processes = _workspace_internal_copilot_pick_processes(message_text, memory.get("processes") or [])
         if processes:
@@ -43896,17 +44000,17 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             ]
             response["suggestions"] = ["Abrir módulo", "Revisar supervisor", "Consultar checklist legal si aplica"]
             response["sources"] = ["process_catalog", "system_invariants"]
-            return response
+            return _finish(response)
         response["answer"] = "Puedo orientarte mejor si me dices el proceso concreto: renta, póliza, factura, hipoteca, cita, comunidad, ausencia o gasto."
         response["sources"] = ["process_catalog"]
-        return response
+        return _finish(response)
     if intent == "legal":
         area = _workspace_internal_copilot_area(service_hint)
         topic_key, topic_payload = resolve_legal_copilot_topic(area, "", message_text)
         if not topic_payload:
             response["answer"] = "No he podido mapear la consulta a un tema legal interno soportado."
             response["sources"] = ["legal_copilot"]
-            return response
+            return _finish(response)
         try:
             recent_updates = fetch_legal_radar_recent_updates(conn, area=area, topic_key=topic_key, limit=5)
         except Exception:
@@ -43939,13 +44043,11 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             max_chars=180,
         )
         response["sources"] = ["legal_copilot", "legal_radar", "legal_library"]
-        return response
+        return _finish(response)
     review_reply = _workspace_internal_copilot_review_reply(message_text, open_events, history)
     if review_reply:
         response.update(review_reply)
-        response["message"] = message_text
-        response["workspace_id"] = workspace_text
-        return response
+        return _finish(response)
     open_total = len(open_events)
     readiness = int(health.get("readiness_score") or 0)
     process_samples = [str(row.get("title") or row.get("process_type") or "").strip() for row in open_events[:3] if str(row.get("title") or row.get("process_type") or "").strip()]
@@ -43967,7 +44069,7 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
             }
             for item in recent_memory[:3]
         ]
-    return response
+    return _finish(response)
 
 
 def _workspace_internal_copilot_resolve_empresa_row(conn, workspace_id, empresa_id, actor=None):
@@ -45818,7 +45920,7 @@ def _build_workspace_process_ollama_message(process_type, status, servicio, anom
         required_keys={"title", "summary", "actions", "review_needed"},
         timeout=45,
         retries=1,
-        system_text="Eres un supervisor operativo del CRM. Responde en JSON válido y en castellano.",
+        system_text=_workspace_internal_copilot_agent_system_text() + " Cuando expliques incidencias de proceso, mantén el foco en diagnóstico y siguiente paso útil. Responde en JSON válido.",
     )
     if err or not parsed:
         return {}

@@ -2738,6 +2738,65 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any("Plantillas:" in str(card.get("summary") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "open_module" for action in (result.get("actions") or [])))
 
+    def test_internal_copilot_reply_exposes_clone_profile_without_ollama(self):
+        old_ollama_available = server.ollama_available
+        try:
+            server.ollama_available = lambda: False
+            reply = server.build_workspace_internal_copilot_reply(
+                self.conn,
+                "ws1",
+                "qué hago ahora",
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                context={},
+            )
+        finally:
+            server.ollama_available = old_ollama_available
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["assistant_profile"], "codex_clone_v1")
+        self.assertEqual(reply["assistant_style"], "pragmatic_operator")
+        self.assertFalse(reply["llm_refined"])
+
+    def test_internal_copilot_reply_refines_with_ollama_plan_and_autonomy(self):
+        old_ollama_available = server.ollama_available
+        old_call_ollama_json = server.call_ollama_json
+        try:
+            server.ollama_available = lambda: True
+
+            def fake_call_ollama_json(prompt, **kwargs):
+                if "Refina la respuesta operativa de un asistente interno del CRM" in prompt:
+                    return (
+                        {
+                            "answer": "Empieza por las hipotecas incompletas y luego cierra el bloque seguro pendiente.",
+                            "plan": ["Revisar hipotecas sin importes base", "Lanzar cierre seguro", "Verificar el estado restante"],
+                            "suggestions": ["Operar ahora", "Cerrar ciclo", "Bandeja unificada"],
+                            "risk_flags": ["Si faltan importes base, no cierres el expediente sin revisar ficha"],
+                            "autonomy_level": "revisar_lote",
+                        },
+                        "",
+                    )
+                return ({}, "sin respuesta")
+
+            server.call_ollama_json = fake_call_ollama_json
+            reply = server.build_workspace_internal_copilot_reply(
+                self.conn,
+                "ws1",
+                "qué hago ahora",
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                context={"current_crm": "fin"},
+            )
+        finally:
+            server.ollama_available = old_ollama_available
+            server.call_ollama_json = old_call_ollama_json
+        self.assertTrue(reply["ok"])
+        self.assertTrue(reply["llm_refined"])
+        self.assertEqual(reply["assistant_profile"], "codex_clone_v1")
+        self.assertEqual(reply["autonomy_level"], "revisar_lote")
+        self.assertTrue(any(str(card.get("title") or "") == "Plan corto" for card in (reply.get("cards") or [])))
+        self.assertIn("Operar ahora", list(reply.get("suggestions") or []))
+        self.assertTrue(reply.get("risk_flags"))
+
 
 if __name__ == "__main__":
     unittest.main()
