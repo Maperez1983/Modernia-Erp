@@ -41572,6 +41572,45 @@ def _workspace_internal_copilot_recent_decision_memory(conn, workspace_id, *, ac
     return filtered
 
 
+def _workspace_internal_copilot_action_success_stats(conn, workspace_id, *, actor=None, domain="", limit=30):
+    ensure_workspace_internal_copilot_runtime_tables(conn)
+    actor_user_id, actor_label = _workspace_internal_copilot_actor_key(actor)
+    where = ["workspace_id = ?"]
+    params = [str(workspace_id or "").strip()]
+    if actor_user_id:
+        where.append("(actor_user_id = ? OR actor_user_id IS NULL OR actor_user_id = '')")
+        params.append(actor_user_id)
+    elif actor_label:
+        where.append("(actor_label = ? OR actor_label IS NULL OR actor_label = '')")
+        params.append(actor_label)
+    params.append(int(max(10, limit or 30)))
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM workspace_internal_copilot_actions WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+    except Exception:
+        rows = []
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    stats = {}
+    for row in rows or []:
+        payload = _safe_json_object(row_value(row, "payload_json") or {})
+        result = _safe_json_object(row_value(row, "result_json") or {})
+        payload_domain = _workspace_internal_copilot_normalize_domain(
+            payload.get("domain") or payload.get("crm") or payload.get("current_crm") or payload.get("service_hint") or ""
+        )
+        if domain_key and payload_domain and payload_domain != domain_key:
+            continue
+        action_id = str(row_value(row, "event_type") or "").strip()
+        if not action_id:
+            continue
+        entry = stats.setdefault(action_id, {"count": 0, "resolved": 0, "updated": 0})
+        entry["count"] += 1
+        entry["resolved"] += int(result.get("resolved") or 0)
+        entry["updated"] += int(result.get("updated") or 0)
+    return stats
+
+
 def _workspace_internal_copilot_choose_operator_actions(conn, workspace_id, *, domain="", cards=None, actions=None, actor=None, context=None):
     domain_key = _workspace_internal_copilot_normalize_domain(domain)
     candidates = [dict(item) for item in (actions or []) if isinstance(item, dict) and str(item.get("id") or "").strip()]
@@ -41599,13 +41638,26 @@ def _workspace_internal_copilot_choose_operator_actions(conn, workspace_id, *, d
     for action in candidates:
         action_id = str(action.get("id") or "").strip()
         by_id.setdefault(action_id, action)
-    heuristic_order = [by_id[action_id] for action_id in preferred_order if action_id in by_id]
+    stats = _workspace_internal_copilot_action_success_stats(conn, workspace_id, actor=actor, domain=domain_key, limit=40)
+
+    def _heuristic_score(action):
+        action_id = str(action.get("id") or "").strip()
+        base = 100 - preferred_order.index(action_id) if action_id in preferred_order else 0
+        stat = stats.get(action_id) or {}
+        return (
+            base
+            + min(12, int(stat.get("count") or 0))
+            + min(20, int(stat.get("resolved") or 0) * 3)
+            + min(12, int(stat.get("updated") or 0))
+        )
+
+    heuristic_order = sorted(candidates, key=_heuristic_score, reverse=True)
     remaining = [action for action in candidates if action not in heuristic_order]
     ordered = heuristic_order + remaining
     safe_action = next((item for item in ordered if str(item.get("id") or "").strip() in safe_ids), None)
     guided_action = next((item for item in ordered if str(item.get("id") or "").strip() in guided_ids), None)
     followup_action = next((item for item in ordered if str(item.get("id") or "").strip() in followup_ids), None)
-    rationale = f"Selección heurística para {domain_key or 'dominio general'}."
+    rationale = f"Selección heurística para {domain_key or 'dominio general'} con prioridad por dominio e histórico reciente del usuario."
     decision_source = "heuristic"
     if _workspace_internal_copilot_agent_enabled() and ollama_available() and len(candidates) >= 2:
         decision_context = {
@@ -41667,6 +41719,7 @@ def _workspace_internal_copilot_choose_operator_actions(conn, workspace_id, *, d
         "safe_action": safe_action,
         "guided_action": guided_action,
         "followup_action": followup_action,
+        "safe_queue": [item for item in ordered if str(item.get("id") or "").strip() in safe_ids][:3],
         "source": decision_source,
         "rationale": rationale,
     }
@@ -45012,17 +45065,32 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             context=payload,
         )
         safe_action = action_plan.get("safe_action")
+        safe_queue = [dict(item) for item in list(action_plan.get("safe_queue") or [])[:3]]
         safe_result = {}
-        if safe_action:
-            safe_result = perform_workspace_internal_copilot_action(
+        total_safe_updated = 0
+        total_safe_resolved = 0
+        total_post_actions = []
+        nested_safe_sources = []
+        executed_safe_ids = []
+        for idx, queued_safe_action in enumerate(safe_queue):
+            nested_safe_result = perform_workspace_internal_copilot_action(
                 conn,
                 workspace_text,
-                str(safe_action.get("id") or "").strip(),
-                safe_action.get("payload") or {},
+                str(queued_safe_action.get("id") or "").strip(),
+                queued_safe_action.get("payload") or {},
                 empresa_id=empresa_id,
                 actor=actor,
                 now=now,
             ) or {}
+            if idx == 0:
+                safe_result = nested_safe_result
+            total_safe_updated += int(nested_safe_result.get("updated") or 0)
+            total_safe_resolved += int(nested_safe_result.get("resolved") or 0)
+            total_post_actions.extend(list(nested_safe_result.get("post_actions") or []))
+            nested_safe_sources.extend(list(nested_safe_result.get("sources") or []))
+            executed_safe_ids.append(str(queued_safe_action.get("id") or "").strip())
+        if not safe_result:
+            safe_result = {}
         secondary_action = action_plan.get("followup_action")
         secondary_result = {}
         if secondary_action and str(secondary_action.get("id") or "").strip() in {"autorreview_domain"}:
@@ -45058,7 +45126,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ) or {}
         decision_summary = (
             f"Plan {str(action_plan.get('source') or 'heuristic')}: "
-            f"{str((safe_action or {}).get('label') or (safe_action or {}).get('id') or 'sin acción segura')} -> "
+            f"{', '.join(str(item.get('label') or item.get('id') or '').strip() for item in safe_queue[:2]) or str((safe_action or {}).get('label') or (safe_action or {}).get('id') or 'sin acción segura')} -> "
             f"{str((guided_action or {}).get('label') or (guided_action or {}).get('id') or 'sin revisión guiada')}."
         )
         _workspace_internal_copilot_store_memory_note(
@@ -45074,13 +45142,28 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "decision_source": str(action_plan.get("source") or "heuristic"),
                 "rationale": str(action_plan.get("rationale") or "").strip(),
                 "safe_action_id": str((safe_action or {}).get("id") or "").strip(),
+                "safe_action_ids": executed_safe_ids,
                 "guided_action_id": str((guided_action or {}).get("id") or "").strip(),
                 "followup_action_id": str((secondary_action or {}).get("id") or "").strip(),
-                "updated": int(safe_result.get("updated") or 0),
-                "resolved": int(safe_result.get("resolved") or 0),
+                "updated": total_safe_updated,
+                "resolved": total_safe_resolved,
             },
             now=now,
         )
+        rationale_card = {
+            "title": "Plan operativo elegido",
+            "summary": "\n".join(
+                part
+                for part in [
+                    decision_summary,
+                    (f"Criterio: {str(action_plan.get('rationale') or '').strip()}" if str(action_plan.get("rationale") or "").strip() else ""),
+                    (f"Acciones seguras encadenadas: {', '.join(executed_safe_ids)}" if executed_safe_ids else ""),
+                ]
+                if part
+            )[:500],
+            "priority": "media",
+            "impact_area": "copilot",
+        }
         next_actions = [
             {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
             {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
@@ -45098,13 +45181,13 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "ok": True,
             "action_id": action_text,
             "mode": "operator",
-            "message": f"Secuencia operativa ejecutada para {domain}. Actualizados: {int(safe_result.get('updated') or 0)} · resueltos: {int(safe_result.get('resolved') or 0)} · pendientes: {len(refreshed_cards[:8])}. {decision_summary}",
-            "updated": int(safe_result.get("updated") or 0),
-            "resolved": int(safe_result.get("resolved") or 0),
-            "post_actions": list(safe_result.get("post_actions") or []) + list(secondary_result.get("post_actions") or []),
-            "cards": list(refreshed_cards[:8]),
+            "message": f"Secuencia operativa ejecutada para {domain}. Actualizados: {total_safe_updated} · resueltos: {total_safe_resolved} · pendientes: {len(refreshed_cards[:8])}. {decision_summary}",
+            "updated": total_safe_updated,
+            "resolved": total_safe_resolved,
+            "post_actions": list(total_post_actions) + list(secondary_result.get("post_actions") or []),
+            "cards": [rationale_card, *list(refreshed_cards[:7])],
             "actions": next_actions,
-            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *(safe_result.get("sources") or []), *(secondary_result.get("sources") or []), "workspace_memory"]))[:10],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_safe_sources, *(secondary_result.get("sources") or []), "workspace_memory"]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
             "refresh_supervisor": True,
             "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,

@@ -2589,6 +2589,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("Secuencia operativa ejecutada", result["message"])
         self.assertTrue(any(str(item.get("id") or "") in {"start_review_queue", "close_loop_safe"} for item in (result.get("actions") or [])))
         self.assertIsNotNone(result.get("navigation"))
+        self.assertTrue(any(str(card.get("title") or "") == "Plan operativo elegido" for card in (result.get("cards") or [])))
         decision_rows = self.conn.execute(
             "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1' AND memory_type = 'decision' ORDER BY created_at DESC LIMIT 1"
         ).fetchall()
@@ -2843,6 +2844,42 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(str((decision.get("guided_action") or {}).get("id") or ""), "start_review_queue")
         self.assertEqual(str((decision.get("followup_action") or {}).get("id") or ""), "autorreview_domain")
         self.assertEqual(decision.get("source"), "ollama")
+
+    def test_internal_copilot_choose_operator_actions_uses_user_success_history(self):
+        now = "2026-06-19T10:00:00Z"
+        server._workspace_internal_copilot_log_event(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_missing_hipotecas",
+            actor={"id": "u1", "usuario": "QA"},
+            payload={"domain": "fin"},
+            result={"updated": 2, "resolved": 2},
+            now=now,
+        )
+        server._workspace_internal_copilot_log_event(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_missing_hipotecas",
+            actor={"id": "u1", "usuario": "QA"},
+            payload={"domain": "fin"},
+            result={"updated": 1, "resolved": 1},
+            now=now,
+        )
+        decision = server._workspace_internal_copilot_choose_operator_actions(
+            self.conn,
+            "ws1",
+            domain="fin",
+            cards=[{"title": "Hipotecas incompletas", "priority": "alta", "impact_area": "financiaciones"}],
+            actions=[
+                {"id": "resolve_domain_safe", "label": "Resolver dominio"},
+                {"id": "bulk_revalidate_missing_hipotecas", "label": "Revalidar hipotecas"},
+                {"id": "start_review_queue", "label": "Revisión guiada"},
+            ],
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "fin"},
+        )
+        self.assertEqual(str((decision.get("safe_action") or {}).get("id") or ""), "bulk_revalidate_missing_hipotecas")
+        self.assertTrue(len(list(decision.get("safe_queue") or [])) >= 1)
 
 
 if __name__ == "__main__":
