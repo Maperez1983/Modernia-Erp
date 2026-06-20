@@ -2702,6 +2702,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["cards"])
         self.assertTrue(any("Pulso económico" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any("Asistente hoy" == str(card.get("title") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any("Aprendizaje del asistente" == str(card.get("title") or "") for card in (result.get("cards") or [])))
 
     def test_internal_copilot_promote_legal_updates_to_tasks(self):
         self.conn.execute(
@@ -3103,6 +3104,57 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.assertTrue(cards)
         self.assertIn("Playbook vivo", str(cards[0]["title"]))
+
+    def test_internal_copilot_microflow_detects_stuck_and_suggests_escalation(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Primera pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T08:00:00Z",
+        )
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Segunda pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T09:00:00Z",
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              persona_id TEXT,
+              tipo TEXT,
+              nombre TEXT,
+              fecha_caducidad TEXT,
+              estado TEXT,
+              permanente INTEGER
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_rrhh_documentos (id, workspace_id, persona_id, tipo, nombre, fecha_caducidad, estado, permanente) VALUES ('doc-stuck-1','ws1','p1','DNI','DNI Juan','2026-01-01','caducado',0)"
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_domain_microflow",
+            {"domain": "rrhh", "microflow_type": "documentos_rrhh_caducados"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:50:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result.get("stuck_signal", {}).get("stuck"))
+        self.assertTrue(any("Escalar a legal" == str(action.get("label") or "") for action in (result.get("actions") or [])))
 
 
 if __name__ == "__main__":

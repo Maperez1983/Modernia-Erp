@@ -41968,6 +41968,62 @@ def _workspace_internal_copilot_today_resolution_summary(conn, workspace_id, *, 
     return {"updated": updated, "resolved": resolved, "executed": executed}
 
 
+def _workspace_internal_copilot_learning_summary(conn, workspace_id, *, actor=None, limit=60):
+    stats = _workspace_internal_copilot_action_success_stats(conn, workspace_id, actor=actor, domain="", limit=limit)
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=20)
+    by_domain = {}
+    for row in rows:
+        if str(row.get("memory_type") or "").strip() != "decision":
+            continue
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if not domain:
+            continue
+        bucket = by_domain.setdefault(domain, {"count": 0, "resolved": 0})
+        bucket["count"] += 1
+        bucket["resolved"] += int(meta.get("resolved") or 0)
+    ranked = sorted(by_domain.items(), key=lambda item: (item[1]["resolved"], item[1]["count"]), reverse=True)
+    top = ranked[:3]
+    return {
+        "domains": top,
+        "actions": stats,
+    }
+
+
+def _workspace_internal_copilot_stuck_signal(conn, workspace_id, *, actor=None, domain="", limit=6):
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(6, int(limit or 6)))
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    relevant = []
+    for row in rows:
+        if str(row.get("memory_type") or "").strip() != "decision":
+            continue
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        row_domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if domain_key and row_domain and row_domain != domain_key:
+            continue
+        relevant.append(meta)
+    if len(relevant) < 2:
+        return {}
+    last = relevant[:3]
+    unresolved = [item for item in last if int(item.get("resolved") or 0) <= 0]
+    if len(unresolved) < 2:
+        return {}
+    impact = {
+        "gestoria": "supervisor",
+        "seguros": "supervisor",
+        "financiaciones": "supervisor",
+        "rrhh": "legal",
+        "fincas": "supervisor",
+        "inmobiliaria": "supervisor",
+    }.get(domain_key or _workspace_internal_copilot_normalize_domain(unresolved[0].get("domain") or ""), "supervisor")
+    return {
+        "stuck": True,
+        "domain": domain_key or _workspace_internal_copilot_normalize_domain(unresolved[0].get("domain") or ""),
+        "count": len(unresolved),
+        "escalation_mode": impact,
+    }
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -41978,6 +42034,7 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
     tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=10)
     economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
     assistant_today = _workspace_internal_copilot_today_resolution_summary(conn, workspace_id, actor=actor)
+    learning = _workspace_internal_copilot_learning_summary(conn, workspace_id, actor=actor, limit=80)
     grouped = {}
     for card in pending_cards:
         impact = str(card.get("impact_area") or "operativo").strip().lower()
@@ -42009,6 +42066,15 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
         {
             "title": "Asistente hoy",
             "summary": f"Acciones ejecutadas {assistant_today['executed']} · actualizados {assistant_today['updated']} · resueltos {assistant_today['resolved']}",
+            "priority": "media",
+            "impact_area": "direccion",
+        },
+        {
+            "title": "Aprendizaje del asistente",
+            "summary": " · ".join(
+                f"{domain}: {values['resolved']} resueltos / {values['count']} decisiones"
+                for domain, values in list(learning.get("domains") or [])[:3]
+            ) or "Sin suficiente histórico todavía",
             "priority": "media",
             "impact_area": "direccion",
         },
@@ -45618,6 +45684,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
+        stuck_signal = _workspace_internal_copilot_stuck_signal(conn, workspace_text, actor=actor, domain=domain, limit=6)
         domain_impact = {
             "gestoria": "economico",
             "seguros": "economico",
@@ -45681,6 +45748,23 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "actions": [
                 {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se cerrará el bloque seguro restante.", "payload": {"crm": domain, "mode": "operator"}},
                 {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
+                *(
+                    [
+                        {
+                            "id": "store_memory",
+                            "label": f"Escalar a {str(stuck_signal.get('escalation_mode') or 'supervisor').strip()}",
+                            "payload": {
+                                "memory_type": "escalation",
+                                "title": f"Escalado sugerido {domain}",
+                                "content": f"Atasco detectado en {domain}. Repeticiones sin resolución: {int(stuck_signal.get('count') or 0)}.",
+                                "priority": "alta",
+                                "meta": {"domain": domain, "escalation_mode": str(stuck_signal.get('escalation_mode') or 'supervisor').strip()},
+                            },
+                        }
+                    ]
+                    if stuck_signal.get("stuck")
+                    else []
+                ),
             ],
             "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources, *refreshed_sources, *(close_loop_result.get("sources") or []), "workspace_memory", "task_planner"]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
@@ -45690,6 +45774,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "task_id": str(task_result.get("task_id") or "").strip(),
             "impact_area": domain_impact,
             "auto_closed": bool(close_loop_result.get("ok")),
+            "stuck_signal": stuck_signal,
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
