@@ -41844,6 +41844,8 @@ def _workspace_internal_copilot_pick_next_microflow(conn, workspace_id, *, empre
     current_domain = _workspace_internal_copilot_normalize_domain(
         context_map.get("current_crm") or context_map.get("service_hint") or ""
     )
+    strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=6)
+    strategy_by_domain = {str(item.get("domain") or "").strip(): dict(item) for item in strategy_rank}
     candidate_domains = [current_domain] if current_domain else []
     candidate_domains.extend([item for item in ["gestoria", "seguros", "financiaciones", "rrhh", "fincas", "inmobiliaria"] if item not in candidate_domains])
     ranked = []
@@ -41865,7 +41867,8 @@ def _workspace_internal_copilot_pick_next_microflow(conn, workspace_id, *, empre
             history_score += int(stat.get("resolved") or 0) * 3 + int(stat.get("updated") or 0)
         pending_score = len(cards) * 5
         crm_bonus = 40 if domain == current_domain and current_domain else 0
-        total_score = crm_bonus + pending_score + history_score
+        strategy_bonus = int((strategy_by_domain.get(domain) or {}).get("score") or 0)
+        total_score = crm_bonus + pending_score + history_score + strategy_bonus
         ranked.append((total_score, domain, microflow, cards, actions))
     if not ranked:
         return {}
@@ -41990,6 +41993,49 @@ def _workspace_internal_copilot_learning_summary(conn, workspace_id, *, actor=No
     }
 
 
+def _workspace_internal_copilot_strategy_ranking(conn, workspace_id, *, actor=None, limit=5):
+    stats = _workspace_internal_copilot_action_success_stats(conn, workspace_id, actor=actor, domain="", limit=80)
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=40)
+    by_domain = {}
+    for row in rows:
+        if str(row.get("memory_type") or "").strip() != "decision":
+            continue
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if not domain:
+            continue
+        bucket = by_domain.setdefault(domain, {"domain": domain, "decisions": 0, "resolved": 0, "updated": 0, "actions": set()})
+        bucket["decisions"] += 1
+        bucket["resolved"] += int(meta.get("resolved") or 0)
+        bucket["updated"] += int(meta.get("updated") or 0)
+        for key in ("safe_action_id", "guided_action_id", "followup_action_id"):
+            action_id = str(meta.get(key) or "").strip()
+            if action_id:
+                bucket["actions"].add(action_id)
+    ranked = []
+    for domain, bucket in by_domain.items():
+        best_action_id = ""
+        best_score = -1
+        for action_id in list(bucket.get("actions") or []):
+            stat = stats.get(action_id) or {}
+            score = int(stat.get("resolved") or 0) * 4 + int(stat.get("updated") or 0) * 2 + bucket["resolved"]
+            if score > best_score:
+                best_score = score
+                best_action_id = action_id
+        ranked.append(
+            {
+                "domain": domain,
+                "best_action_id": best_action_id,
+                "resolved": int(bucket.get("resolved") or 0),
+                "updated": int(bucket.get("updated") or 0),
+                "decisions": int(bucket.get("decisions") or 0),
+                "score": max(0, int(best_score if best_score >= 0 else 0)),
+            }
+        )
+    ranked.sort(key=lambda item: (int(item.get("score") or 0), int(item.get("resolved") or 0), int(item.get("decisions") or 0)), reverse=True)
+    return ranked[: max(1, int(limit or 5))]
+
+
 def _workspace_internal_copilot_stuck_signal(conn, workspace_id, *, actor=None, domain="", limit=6):
     rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(6, int(limit or 6)))
     domain_key = _workspace_internal_copilot_normalize_domain(domain)
@@ -42021,6 +42067,23 @@ def _workspace_internal_copilot_stuck_signal(conn, workspace_id, *, actor=None, 
         "domain": domain_key or _workspace_internal_copilot_normalize_domain(unresolved[0].get("domain") or ""),
         "count": len(unresolved),
         "escalation_mode": impact,
+    }
+
+
+def _workspace_internal_copilot_mode_switch_recommendation(conn, workspace_id, *, actor=None, domain="", current_mode="operator"):
+    stuck = _workspace_internal_copilot_stuck_signal(conn, workspace_id, actor=actor, domain=domain, limit=6)
+    if not stuck.get("stuck"):
+        return {}
+    recommended = str(stuck.get("escalation_mode") or "").strip().lower() or "supervisor"
+    current = str(current_mode or "operator").strip().lower() or "operator"
+    if recommended == current:
+        return {}
+    domain_key = _workspace_internal_copilot_normalize_domain(domain or stuck.get("domain") or "")
+    return {
+        "mode": recommended,
+        "domain": domain_key,
+        "reason": f"Atasco sostenido en {domain_key or 'el dominio actual'} con {int(stuck.get('count') or 0)} repeticiones sin resolución.",
+        "stuck_signal": stuck,
     }
 
 
@@ -44228,6 +44291,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     if actions:
         actions = actions[:]
     cards = list(briefing.get("cards") or [])[:8]
+    strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=3)
     next_microflow = {}
     if mode == "operator":
         next_microflow = _workspace_internal_copilot_pick_next_microflow(
@@ -44275,9 +44339,50 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                         "impact_area": next_microflow.get("domain") or "copilot",
                     },
                 )
+        if strategy_rank:
+            top_strategy = strategy_rank[0]
+            cards.append(
+                {
+                    "title": "Estrategia eficaz aprendida",
+                    "summary": (
+                        f"{str(top_strategy.get('domain') or '').strip()}: "
+                        f"{str(top_strategy.get('best_action_id') or 'sin acción dominante').strip()} · "
+                        f"{int(top_strategy.get('resolved') or 0)} resueltos / {int(top_strategy.get('decisions') or 0)} decisiones"
+                    )[:500],
+                    "priority": "media",
+                    "impact_area": "copilot",
+                }
+            )
         playbooks = _workspace_internal_copilot_repeated_playbook(conn, workspace_id, actor=actor, limit=2)
         if playbooks:
             cards.extend(playbooks[:2])
+        if next_microflow:
+            mode_switch = _workspace_internal_copilot_mode_switch_recommendation(
+                conn,
+                workspace_id,
+                actor=actor,
+                domain=str(next_microflow.get("domain") or "").strip(),
+                current_mode=mode,
+            )
+            if mode_switch:
+                target_mode = str(mode_switch.get("mode") or "").strip()
+                cards.insert(
+                    0,
+                    {
+                        "title": f"Cambiar a modo {target_mode}",
+                        "summary": str(mode_switch.get("reason") or "El asistente recomienda escalar el modo de trabajo para desbloquear el dominio.").strip(),
+                        "priority": "alta",
+                        "impact_area": "copilot",
+                    },
+                )
+                actions.insert(
+                    0,
+                    {
+                        "id": "set_copilot_mode",
+                        "label": f"Pasar a {target_mode}",
+                        "payload": {"mode": target_mode, "domain": str(mode_switch.get("domain") or "").strip(), "reason": str(mode_switch.get("reason") or "").strip()},
+                    },
+                )
         actions.insert(
             0,
             {
@@ -45361,6 +45466,32 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": list(dict.fromkeys(["workspace_process_supervisor", *sources]))[:10],
             "suggestions": ["Atender urgentes hoy", "Revisar esta mañana", "Dejar lo no crítico para después"],
         }
+    if action_text == "set_copilot_mode":
+        target_mode = str(payload.get("mode") or "").strip().lower() or "operator"
+        if target_mode not in {"operator", "supervisor", "direccion", "legal"}:
+            target_mode = "operator"
+        reason = str(payload.get("reason") or "").strip()
+        domain = _workspace_internal_copilot_normalize_domain(payload.get("domain") or "")
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="mode_switch",
+            title=f"Cambio de modo a {target_mode}",
+            content=reason or f"El asistente cambió el modo a {target_mode}.",
+            priority="alta" if target_mode in {"supervisor", "legal"} else "media",
+            meta={"mode": target_mode, "domain": domain, "reason": reason},
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He cambiado el asistente a modo {target_mode}.",
+            "mode_switch": {"mode": target_mode, "domain": domain, "reason": reason},
+            "refresh_supervisor": True,
+            "sources": ["internal_copilot_action"],
+            "suggestions": ["Qué hago ahora", "Operar ahora", "Bandeja unificada"],
+        }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "prime_operator_console":
@@ -45685,6 +45816,15 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             context=payload,
         )
         stuck_signal = _workspace_internal_copilot_stuck_signal(conn, workspace_text, actor=actor, domain=domain, limit=6)
+        strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_text, actor=actor, limit=5)
+        strategy_match = next((item for item in strategy_rank if str(item.get("domain") or "").strip() == domain), {})
+        mode_switch = _workspace_internal_copilot_mode_switch_recommendation(
+            conn,
+            workspace_text,
+            actor=actor,
+            domain=domain,
+            current_mode="operator",
+        )
         domain_impact = {
             "gestoria": "economico",
             "seguros": "economico",
@@ -45743,11 +45883,41 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                     "priority": "alta" if domain_impact in {"economico", "laboral"} else "media",
                     "impact_area": domain_impact,
                 },
+                *(
+                    [
+                        {
+                            "title": "Estrategia eficaz del dominio",
+                            "summary": (
+                                f"{domain}: {str(strategy_match.get('best_action_id') or 'sin acción dominante').strip()} · "
+                                f"{int(strategy_match.get('resolved') or 0)} resueltos / {int(strategy_match.get('decisions') or 0)} decisiones"
+                            )[:320],
+                            "priority": "media",
+                            "impact_area": "copilot",
+                        }
+                    ]
+                    if strategy_match
+                    else []
+                ),
                 *refreshed_cards[:7],
             ],
             "actions": [
                 {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se cerrará el bloque seguro restante.", "payload": {"crm": domain, "mode": "operator"}},
                 {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
+                *(
+                    [
+                        {
+                            "id": "set_copilot_mode",
+                            "label": f"Pasar a {str(mode_switch.get('mode') or '').strip()}",
+                            "payload": {
+                                "mode": str(mode_switch.get("mode") or "").strip(),
+                                "domain": domain,
+                                "reason": str(mode_switch.get("reason") or "").strip(),
+                            },
+                        }
+                    ]
+                    if mode_switch
+                    else []
+                ),
                 *(
                     [
                         {

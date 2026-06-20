@@ -3156,6 +3156,100 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result.get("stuck_signal", {}).get("stuck"))
         self.assertTrue(any("Escalar a legal" == str(action.get("label") or "") for action in (result.get("actions") or [])))
 
+    def test_internal_copilot_strategy_ranking_prioritizes_best_domain(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa gestoria",
+            content="Resolución de facturas",
+            meta={"domain": "gestoria", "resolved": 3, "updated": 3, "safe_action_id": "bulk_revalidate_facturas_without_asiento"},
+            now="2026-06-19T08:00:00Z",
+        )
+        server._workspace_internal_copilot_log_event(
+            self.conn,
+            "ws1",
+            "bulk_revalidate_facturas_without_asiento",
+            actor={"id": "u1", "usuario": "QA"},
+            payload={"domain": "gestoria"},
+            result={"updated": 3, "resolved": 3},
+            now="2026-06-19T08:05:00Z",
+        )
+        ranked = server._workspace_internal_copilot_strategy_ranking(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            limit=3,
+        )
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["domain"], "gestoria")
+        self.assertEqual(ranked[0]["best_action_id"], "bulk_revalidate_facturas_without_asiento")
+
+    def test_internal_copilot_prime_operator_console_suggests_mode_switch_when_stuck(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Primera pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T08:00:00Z",
+        )
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Segunda pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T09:00:00Z",
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              persona_id TEXT,
+              tipo TEXT,
+              nombre TEXT,
+              fecha_caducidad TEXT,
+              estado TEXT,
+              permanente INTEGER
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_rrhh_documentos (id, workspace_id, persona_id, tipo, nombre, fecha_caducidad, estado, permanente) VALUES ('doc-prime-rrhh-1','ws1','p1','DNI','DNI Juan','2026-01-01','caducado',0)"
+        )
+        reply = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prime_operator_console",
+            {"current_crm": "rrhh", "service_hint": "rrhh", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:55:00Z",
+        )
+        self.assertTrue(reply["ok"])
+        self.assertTrue(any(str(action.get("id") or "") == "set_copilot_mode" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_action_set_copilot_mode_returns_mode_switch(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "set_copilot_mode",
+            {"mode": "legal", "domain": "rrhh", "reason": "Atasco sostenido en rrhh."},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T14:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("mode_switch", {}).get("mode"), "legal")
+        self.assertEqual(result["action_id"], "set_copilot_mode")
+
 
 if __name__ == "__main__":
     unittest.main()

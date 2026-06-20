@@ -13301,6 +13301,9 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           await loadWorkspaceProcessSupervisorFeed({ silent: true });
           await loadWorkspaceProcessSupervisorHistory({ silent: true });
         }
+        if (result?.mode_switch?.mode) {
+          await setPersistentInternalCopilotMode(String(result.mode_switch.mode || "").trim() || "operator", { rePrime: true });
+        }
         if (result?.navigation) {
           await applyWorkspaceSupervisorNavigation(result);
         }
@@ -13340,6 +13343,8 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
           setUiToast("Revisión guiada actualizada", String(result?.message || "Se ha revalidado el registro actual y se ha abierto el siguiente."));
         } else if (String(action.id || "").trim() === "start_review_queue" || String(action.id || "").trim() === "continue_review_queue") {
           setUiToast("Revisión guiada", String(result?.message || "Se ha abierto el siguiente registro de la revisión guiada."));
+        } else if (String(action.id || "").trim() === "set_copilot_mode") {
+          setUiToast("Modo del asistente actualizado", String(result?.message || "El asistente ha cambiado de modo operativo."));
         } else {
           setUiToast("Acción ejecutada", String(result?.message || "La acción se ha completado."));
         }
@@ -13646,6 +13651,20 @@ const renderGlobalInternalCopilotPanels = () => {
   }
 };
 
+const setPersistentInternalCopilotMode = async (mode = "operator", { rePrime = false } = {}) => {
+  const normalized = ["operator", "supervisor", "direccion", "legal"].includes(String(mode || "").trim())
+    ? String(mode || "").trim()
+    : "operator";
+  state.persistentInternalCopilotMode = normalized;
+  try {
+    localStorage.setItem("crm.persistentInternalCopilotMode", normalized);
+  } catch (e) {}
+  renderGlobalInternalCopilotPanels();
+  if (rePrime) {
+    await maybePrimeWorkspaceInternalCopilotAgenda({ force: true });
+  }
+};
+
 const runPersistentInternalCopilotQuickAction = async (kind = "") => {
   const normalized = String(kind || "").trim().toLowerCase();
   const textarea = document.querySelector('#globalInternalCopilotForm [name="message"]');
@@ -13883,12 +13902,7 @@ const ensurePersistentInternalCopilotWidget = () => {
   });
   root.querySelectorAll("[data-global-copilot-mode]").forEach((button) => {
     button.addEventListener("click", async () => {
-      state.persistentInternalCopilotMode = String(button.dataset.globalCopilotMode || "operator").trim() || "operator";
-      try {
-        localStorage.setItem("crm.persistentInternalCopilotMode", state.persistentInternalCopilotMode);
-      } catch (e) {}
-      renderGlobalInternalCopilotPanels();
-      await maybePrimeWorkspaceInternalCopilotAgenda({ force: true });
+      await setPersistentInternalCopilotMode(String(button.dataset.globalCopilotMode || "operator").trim() || "operator", { rePrime: true });
     });
   });
   root.querySelectorAll("[data-global-copilot-suggest]").forEach((button) => {
