@@ -2481,19 +2481,46 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result.get("refresh_supervisor"))
 
     def test_internal_copilot_prime_operator_console_mode(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-prime-1', 'e1', 'Juan Cliente', 'c1', 'BBVA', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
         reply = server.perform_workspace_internal_copilot_action(
             self.conn,
             "ws1",
             "prime_operator_console",
-            {"current_workspace_view": "rrhh", "current_crm": "rrhh", "copilot_mode": "supervisor"},
+            {"current_workspace_view": "fin", "current_crm": "fin", "copilot_mode": "operator"},
             empresa_id="e1",
             actor={"id": "u1", "usuario": "QA", "rol": "Administrador", "servicio": "Administración"},
             now="2026-06-19T12:10:00Z",
         )
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["action_id"], "prime_operator_console")
-        self.assertEqual(reply["mode"], "supervisor")
+        self.assertEqual(reply["mode"], "operator")
         self.assertTrue(reply["actions"])
+        self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
+        self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
@@ -3039,6 +3066,11 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
             server._workspace_internal_copilot_collect_domain_pending = old_collect
         self.assertTrue(result["ok"])
         self.assertTrue(result.get("auto_closed"))
+
+    def test_internal_copilot_microflow_checklist_returns_steps(self):
+        checklist = server._workspace_internal_copilot_microflow_checklist("hipotecas_incompletas")
+        self.assertTrue(checklist)
+        self.assertIn("Revisar hipotecas sin importes base", checklist[0])
 
 
 if __name__ == "__main__":

@@ -41796,6 +41796,90 @@ def _workspace_internal_copilot_detect_domain_microflow(domain="", cards=None, a
     return {}
 
 
+def _workspace_internal_copilot_microflow_checklist(microflow_type=""):
+    key = str(microflow_type or "").strip()
+    mapping = {
+        "facturas_sin_asiento": [
+            "Identificar facturas sin asiento abiertas",
+            "Relanzar OCR si el documento existe",
+            "Revalidar las facturas que sigan pendientes",
+            "Pasar a revisión guiada de las que no cierren",
+        ],
+        "rentas_sin_documento": [
+            "Detectar rentas sin documento asociado",
+            "Revalidar entradas incompletas",
+            "Abrir revisión guiada si persisten",
+            "Cerrar el bloque seguro restante",
+        ],
+        "hipotecas_incompletas": [
+            "Revisar hipotecas sin importes base",
+            "Revalidar expedientes incompletos",
+            "Abrir revisión guiada si falta dato crítico",
+            "Cerrar o replanificar el resto",
+        ],
+        "polizas_sin_pdf": [
+            "Detectar pólizas contratadas sin PDF",
+            "Abrir revisión guiada de los casos",
+            "Corregir vínculos o adjuntos",
+            "Cerrar el bloque cuando no queden abiertos",
+        ],
+        "documentos_rrhh_caducados": [
+            "Revisar documentos RRHH caducados",
+            "Revalidar los documentos afectados",
+            "Abrir revisión guiada de RRHH",
+            "Crear seguimiento si queda trabajo abierto",
+        ],
+        "comunidades_cuota_incoherente": [
+            "Detectar comunidades con cuota incoherente",
+            "Revalidar el cálculo base",
+            "Abrir revisión guiada de Fincas",
+            "Cerrar o replanificar según el resultado",
+        ],
+    }
+    return list(mapping.get(key, []))
+
+
+def _workspace_internal_copilot_pick_next_microflow(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    context_map = context if isinstance(context, dict) else {}
+    current_domain = _workspace_internal_copilot_normalize_domain(
+        context_map.get("current_crm") or context_map.get("service_hint") or ""
+    )
+    candidate_domains = [current_domain] if current_domain else []
+    candidate_domains.extend([item for item in ["gestoria", "seguros", "financiaciones", "rrhh", "fincas", "inmobiliaria"] if item not in candidate_domains])
+    ranked = []
+    for domain in candidate_domains:
+        cards, actions, _ = _workspace_internal_copilot_collect_domain_pending(
+            conn,
+            str(workspace_id or "").strip(),
+            empresa_id=str(empresa_id or "").strip(),
+            domain=domain,
+            context=context_map,
+        )
+        microflow = _workspace_internal_copilot_detect_domain_microflow(domain, cards=cards, actions=actions) or {}
+        if not microflow:
+            continue
+        stats = _workspace_internal_copilot_action_success_stats(conn, workspace_id, actor=actor, domain=domain, limit=40)
+        history_score = 0
+        for action_id in list(microflow.get("safe_ids") or []):
+            stat = stats.get(action_id) or {}
+            history_score += int(stat.get("resolved") or 0) * 3 + int(stat.get("updated") or 0)
+        pending_score = len(cards) * 5
+        crm_bonus = 40 if domain == current_domain and current_domain else 0
+        total_score = crm_bonus + pending_score + history_score
+        ranked.append((total_score, domain, microflow, cards, actions))
+    if not ranked:
+        return {}
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    _, domain, microflow, cards, actions = ranked[0]
+    return {
+        "domain": domain,
+        "microflow": microflow,
+        "cards": cards,
+        "actions": actions,
+        "checklist": _workspace_internal_copilot_microflow_checklist(str(microflow.get("microflow_type") or "").strip()),
+    }
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -43982,7 +44066,42 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     actions = list(briefing.get("actions") or [])
     if actions:
         actions = actions[:]
+    cards = list(briefing.get("cards") or [])[:8]
+    next_microflow = {}
     if mode == "operator":
+        next_microflow = _workspace_internal_copilot_pick_next_microflow(
+            conn,
+            workspace_id,
+            empresa_id=empresa_id,
+            actor=actor,
+            context=context_map,
+        )
+        if next_microflow:
+            microflow = next_microflow.get("microflow") or {}
+            checklist = list(next_microflow.get("checklist") or [])
+            cards.insert(
+                0,
+                {
+                    "title": f"Siguiente microflujo: {str(microflow.get('title') or 'Trabajo recomendado').strip()}",
+                    "summary": "\n".join(
+                        [str(microflow.get("summary") or "").strip()]
+                        + ([f"Checklist: {' | '.join(checklist[:4])}"] if checklist else [])
+                    )[:500],
+                    "priority": "alta",
+                    "impact_area": next_microflow.get("domain") or "copilot",
+                },
+            )
+            actions.insert(
+                0,
+                {
+                    "id": "run_domain_microflow",
+                    "label": "Ejecutar siguiente microflujo",
+                    "payload": {
+                        "domain": str(next_microflow.get("domain") or "").strip(),
+                        "microflow_type": str((microflow or {}).get("microflow_type") or "").strip(),
+                    },
+                },
+            )
         actions.insert(
             0,
             {
@@ -44026,7 +44145,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
         "action_id": "prime_operator_console",
         "mode": mode,
         "message": suggestions.get(mode, "He preparado el panel de trabajo del asistente para este CRM."),
-        "cards": list(briefing.get("cards") or [])[:8],
+        "cards": cards[:8],
         "actions": actions[:10],
         "suggestions": list(briefing.get("suggestions") or [])[:6],
         "sources": list(dict.fromkeys(["internal_copilot_action", *(briefing.get("sources") or [])]))[:8],
