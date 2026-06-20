@@ -41725,6 +41725,43 @@ def _workspace_internal_copilot_choose_operator_actions(conn, workspace_id, *, d
     }
 
 
+def _workspace_internal_copilot_detect_domain_microflow(domain="", cards=None, actions=None):
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    cards = [dict(item) for item in (cards or []) if isinstance(item, dict)]
+    actions = [dict(item) for item in (actions or []) if isinstance(item, dict)]
+    action_ids = {str(item.get("id") or "").strip(): item for item in actions}
+    if domain_key == "gestoria":
+        if "bulk_rerun_facturas_ocr" in action_ids or "bulk_revalidate_facturas_without_asiento" in action_ids:
+            return {
+                "microflow_type": "facturas_sin_asiento",
+                "title": "Microflujo de facturas sin asiento",
+                "summary": "Relanzar OCR donde haya documento y revalidar las facturas que sigan abiertas.",
+                "safe_ids": ["bulk_rerun_facturas_ocr", "bulk_revalidate_facturas_without_asiento", "resolve_domain_safe"],
+            }
+        if "bulk_revalidate_rentas_missing_document" in action_ids:
+            return {
+                "microflow_type": "rentas_sin_documento",
+                "title": "Microflujo de rentas incompletas",
+                "summary": "Revalidar rentas sin documento y dejar la revisión guiada preparada si siguen abiertas.",
+                "safe_ids": ["bulk_revalidate_rentas_missing_document", "resolve_domain_safe"],
+            }
+    if domain_key == "financiaciones" and "bulk_revalidate_missing_hipotecas" in action_ids:
+        return {
+            "microflow_type": "hipotecas_incompletas",
+            "title": "Microflujo de hipotecas incompletas",
+            "summary": "Revalidar hipotecas sin importes base y pasar a la cola guiada si quedan pendientes.",
+            "safe_ids": ["bulk_revalidate_missing_hipotecas", "resolve_domain_safe"],
+        }
+    if domain_key == "seguros" and any(str(card.get("title") or "").lower().find("pdf") >= 0 for card in cards):
+        return {
+            "microflow_type": "polizas_sin_pdf",
+            "title": "Microflujo de pólizas sin PDF",
+            "summary": "Concentrar la revisión guiada de pólizas sin PDF y cerrar después el bloque seguro.",
+            "safe_ids": ["resolve_domain_safe"],
+        }
+    return {}
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -45055,6 +45092,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain=domain,
             context=payload,
         )
+        microflow = _workspace_internal_copilot_detect_domain_microflow(domain, cards=cards, actions=actions)
         action_plan = _workspace_internal_copilot_choose_operator_actions(
             conn,
             workspace_text,
@@ -45164,10 +45202,29 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "priority": "media",
             "impact_area": "copilot",
         }
+        microflow_card = (
+            {
+                "title": str(microflow.get("title") or "Microflujo operativo").strip(),
+                "summary": str(microflow.get("summary") or "").strip(),
+                "priority": "media",
+                "impact_area": domain or "copilot",
+            }
+            if microflow
+            else None
+        )
         next_actions = [
             {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se lanzará un cierre completo con documentación del resultado.", "payload": {"crm": domain, "mode": "operator"}},
             {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
         ]
+        if microflow:
+            next_actions.insert(
+                0,
+                {
+                    "id": "run_domain_microflow",
+                    "label": "Ejecutar microflujo",
+                    "payload": {"domain": domain, "microflow_type": str(microflow.get("microflow_type") or "").strip()},
+                },
+            )
         if guided_action:
             next_actions.insert(
                 0,
@@ -45185,7 +45242,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "updated": total_safe_updated,
             "resolved": total_safe_resolved,
             "post_actions": list(total_post_actions) + list(secondary_result.get("post_actions") or []),
-            "cards": [rationale_card, *list(refreshed_cards[:7])],
+            "cards": [item for item in [rationale_card, microflow_card, *list(refreshed_cards[:6])] if item],
             "actions": next_actions,
             "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_safe_sources, *(secondary_result.get("sources") or []), "workspace_memory"]))[:10],
             "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
@@ -45193,6 +45250,101 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,
             "decision_source": str(action_plan.get("source") or "heuristic"),
             "decision_rationale": str(action_plan.get("rationale") or "").strip(),
+            "microflow": microflow,
+        }
+    if action_text == "run_domain_microflow":
+        domain = _workspace_internal_copilot_normalize_domain(str(payload.get("domain") or payload.get("crm") or "").strip())
+        requested_type = str(payload.get("microflow_type") or "").strip()
+        cards, actions, sources = _workspace_internal_copilot_collect_domain_pending(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            domain=domain,
+            context=payload,
+        )
+        microflow = _workspace_internal_copilot_detect_domain_microflow(domain, cards=cards, actions=actions) or {}
+        microflow_type = requested_type or str(microflow.get("microflow_type") or "").strip()
+        if not microflow_type:
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "message": f"No detecto un microflujo claro para {domain} ahora mismo.",
+                "cards": cards[:6],
+                "actions": actions[:6],
+                "sources": list(dict.fromkeys(["internal_copilot_action", *sources]))[:8],
+                "suggestions": ["Agenda diaria", "Bandeja unificada"],
+            }
+        action_map = {str(item.get("id") or "").strip(): dict(item) for item in actions if isinstance(item, dict)}
+        executed = []
+        updated = 0
+        resolved = 0
+        post_actions = []
+        nested_sources = []
+        for action_id in list(microflow.get("safe_ids") or []):
+            action_item = action_map.get(action_id)
+            if not action_item:
+                continue
+            nested = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                action_id,
+                action_item.get("payload") or {},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
+            updated += int(nested.get("updated") or 0)
+            resolved += int(nested.get("resolved") or 0)
+            post_actions.extend(list(nested.get("post_actions") or []))
+            nested_sources.extend(list(nested.get("sources") or []))
+            executed.append(action_id)
+        guided_result = {}
+        if "start_review_queue" in action_map:
+            guided_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                "start_review_queue",
+                action_map["start_review_queue"].get("payload") or {},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="decision",
+            title=f"Microflujo {microflow_type}",
+            content=f"Microflujo ejecutado para {domain}: {', '.join(executed) or 'sin acciones ejecutables'}",
+            priority="media",
+            meta={"domain": domain, "microflow_type": microflow_type, "safe_action_ids": executed, "updated": updated, "resolved": resolved},
+            now=now,
+        )
+        refreshed_cards, _, refreshed_sources = _workspace_internal_copilot_collect_domain_pending(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            domain=domain,
+            context=payload,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "mode": "operator",
+            "message": f"Microflujo {microflow_type} ejecutado para {domain}. Actualizados: {updated} · resueltos: {resolved}.",
+            "updated": updated,
+            "resolved": resolved,
+            "post_actions": post_actions,
+            "cards": refreshed_cards[:8],
+            "actions": [
+                {"id": "close_loop_safe", "label": "Cerrar ciclo", "requires_confirmation": True, "confirm_text": "Se cerrará el bloque seguro restante.", "payload": {"crm": domain, "mode": "operator"}},
+                {"id": "autorreview_domain", "label": "Revisar dominio", "payload": {"domain": domain}},
+            ],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *sources, *nested_sources, *refreshed_sources, "workspace_memory"]))[:10],
+            "suggestions": ["Cerrar ciclo", "Revisión guiada", "Agenda diaria"],
+            "refresh_supervisor": True,
+            "navigation": guided_result.get("navigation") if isinstance(guided_result, dict) else None,
+            "microflow_type": microflow_type,
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)

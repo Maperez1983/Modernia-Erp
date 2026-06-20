@@ -2590,6 +2590,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(item.get("id") or "") in {"start_review_queue", "close_loop_safe"} for item in (result.get("actions") or [])))
         self.assertIsNotNone(result.get("navigation"))
         self.assertTrue(any(str(card.get("title") or "") == "Plan operativo elegido" for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (result.get("actions") or [])))
         decision_rows = self.conn.execute(
             "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1' AND memory_type = 'decision' ORDER BY created_at DESC LIMIT 1"
         ).fetchall()
@@ -2880,6 +2881,50 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         )
         self.assertEqual(str((decision.get("safe_action") or {}).get("id") or ""), "bulk_revalidate_missing_hipotecas")
         self.assertTrue(len(list(decision.get("safe_queue") or [])) >= 1)
+
+    def test_internal_copilot_action_run_domain_microflow_financiaciones(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-micro-1', 'e1', 'Juan Cliente', 'c1', 'BBVA', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_domain_microflow",
+            {"domain": "financiaciones", "microflow_type": "hipotecas_incompletas"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T13:15:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "operator")
+        self.assertEqual(result["microflow_type"], "hipotecas_incompletas")
+        self.assertTrue(result.get("refresh_supervisor"))
+        rows = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_memory WHERE workspace_id = 'ws1' AND title = 'Microflujo hipotecas_incompletas' ORDER BY created_at DESC LIMIT 1"
+        ).fetchall()
+        self.assertTrue(rows)
 
 
 if __name__ == "__main__":
