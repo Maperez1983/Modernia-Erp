@@ -13477,6 +13477,8 @@ const collectInternalCopilotContext = () => {
     copilot_mode: String(state.persistentInternalCopilotMode || "operator").trim() || "operator",
     actor_role: String(authUser?.rol || state.currentWorkspaceMemberRole || "").trim(),
     actor_service: String(authUser?.servicio || state.currentUserServiceLabel || "").trim(),
+    current_workspace_name: String(state.currentWorkspaceName || "").trim(),
+    current_workspace_company_name: String(state.currentWorkspaceCompanyName || "").trim(),
   };
 };
 

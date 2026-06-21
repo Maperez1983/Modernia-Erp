@@ -41165,6 +41165,45 @@ def _workspace_internal_copilot_memory_reply(conn, workspace_id, message, *, act
     }
 
 
+def _workspace_internal_copilot_visible_context_card(context=None):
+    ctx = dict(context or {})
+    view = str(ctx.get("current_workspace_view") or "").strip() or "overview"
+    crm = _workspace_internal_copilot_normalize_domain(ctx.get("current_crm") or ctx.get("service_hint") or "")
+    refs = []
+    mapping = [
+        ("current_client_id", "cliente"),
+        ("current_seguro_id", "póliza"),
+        ("current_renta_entry_id", "renta"),
+        ("current_hipoteca_id", "hipoteca"),
+        ("current_factura_id", "factura"),
+        ("current_rrhh_document_id", "documento RRHH"),
+        ("current_persona_id", "persona"),
+        ("current_community_id", "comunidad"),
+    ]
+    for key, label in mapping:
+        value = str(ctx.get(key) or "").strip()
+        if value:
+            refs.append(f"{label}: {value}")
+    tabs = []
+    if str(ctx.get("current_fincas_tab") or "").strip():
+        tabs.append(f"fincas/{str(ctx.get('current_fincas_tab') or '').strip()}")
+    if str(ctx.get("current_rrhh_tab") or "").strip():
+        tabs.append(f"rrhh/{str(ctx.get('current_rrhh_tab') or '').strip()}")
+    summary = f"CRM {crm or 'global'} · vista {view}"
+    if str(ctx.get("current_workspace_name") or "").strip():
+        summary += f" · workspace {str(ctx.get('current_workspace_name') or '').strip()}"
+    if tabs:
+        summary += f" · tabs {', '.join(tabs[:2])}"
+    if refs:
+        summary += f" · contexto {', '.join(refs[:4])}"
+    return {
+        "title": "Contexto visible",
+        "summary": summary,
+        "priority": "media",
+        "impact_area": crm or "contexto",
+    }
+
+
 def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -41202,6 +41241,7 @@ def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, e
             "priority": "alta",
             "impact_area": "plataforma",
         },
+        _workspace_internal_copilot_visible_context_card(context),
         {
             "title": "Módulos de plataforma",
             "summary": " · ".join(str(item.get("name") or "").strip() for item in list(blueprint.get("platform_modules") or [])[:5]),
@@ -41263,7 +41303,8 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
             "summary": f"Modo {mode} · dominio {current_domain or 'global'} · {len(pending_cards)} pendientes · {len(tasks)} tareas",
             "priority": "alta",
             "impact_area": "operativo",
-        }
+        },
+        _workspace_internal_copilot_visible_context_card(context),
     ]
     if tooling:
         cards.append(
@@ -42223,14 +42264,15 @@ def _workspace_internal_copilot_agent_enabled():
 def _workspace_internal_copilot_agent_system_text():
     return (
         "Eres el asistente interno principal del CRM. "
-        "Actúas con el criterio de un ingeniero y operador senior: claridad, pragmatismo y rigor. "
+        "Actúas como si fueras un ingeniero y operador senior dentro del propio sistema: claridad, pragmatismo y rigor. "
         "Responde siempre en castellano. "
         "Sé directo, accionable y breve. "
         "No inventes datos ni acciones no soportadas. "
         "Si falta contexto o hay riesgo, dilo de forma explícita. "
-        "Prioriza el siguiente paso útil para el usuario. "
+        "Prioriza el siguiente paso útil para el usuario usando el contexto visible de la pantalla, el CRM abierto, el workspace actual y las incidencias vivas. "
         "Evita relleno, tono comercial o explicaciones largas. "
-        "No reescribas acciones existentes del sistema; mejóralas con mejor criterio, plan y prioridades."
+        "No reescribas acciones existentes del sistema; mejóralas con mejor criterio, plan y prioridades. "
+        "Debes sonar como un operador embebido en Verifika2, no como un chatbot externo."
     )
 
 

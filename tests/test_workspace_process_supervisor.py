@@ -850,6 +850,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result.get("action_id"), "copilot_work_center")
         self.assertTrue(any(str(card.get("title") or "") == "Herramientas disponibles" for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Contexto visible" for card in (result.get("cards") or [])))
 
     def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
         self.conn.execute(

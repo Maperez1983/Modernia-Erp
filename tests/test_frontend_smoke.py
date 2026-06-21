@@ -96,6 +96,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("current_rrhh_document_id", app_js)
         self.assertIn("current_persona_id", app_js)
         self.assertIn("current_community_id", app_js)
+        self.assertIn("current_workspace_name", app_js)
+        self.assertIn("current_workspace_company_name", app_js)
         self.assertIn("renderWorkspaceInternalCopilotFeed", app_js)
         self.assertIn('name="attachment"', app_js)
         self.assertIn("multiple", app_js)
