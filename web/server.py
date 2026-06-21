@@ -41873,6 +41873,13 @@ def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message
                 "payload": {"plan": plan_payload},
             },
             {
+                "id": "run_implementation_session",
+                "label": "Lanzar sesión de implementación",
+                "requires_confirmation": True,
+                "confirm_text": "Se intentará ejecutar la mejora con bundle técnico, validación y artefactos de sesión.",
+                "payload": {"plan": plan_payload},
+            },
+            {
                 "id": "prepare_implementation_task",
                 "label": "Crear tarea de implementación",
                 "payload": {"plan": plan_payload},
@@ -47212,6 +47219,67 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["architecture_review", "task_planner", "workspace_memory"],
             "suggestions": ["Crear tarea de implementación", "Preparar bundle técnico", "Qué hago ahora"],
+        }
+    if action_text == "run_implementation_session":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or "supervisor").strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or f"Implementación pendiente en {domain}.").strip()
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=_normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220),
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        apply_result = _workspace_internal_copilot_execute_codefix_session(bundle, now=now, max_attempts=3)
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="implementation_session",
+            title=f"Sesión de implementación {domain}",
+            content=str(apply_result.get("summary") or diagnosis).strip(),
+            priority="alta" if str(apply_result.get("status") or "") != "passed" else "media",
+            meta={
+                "domain": domain,
+                "assigned_mode": assigned_mode,
+                "status": str(apply_result.get("status") or "").strip(),
+                "attempts_count": int(apply_result.get("attempts_count") or 0),
+                "applied_files": list(apply_result.get("applied_files") or []),
+                "session_summary_path": str(apply_result.get("session_summary_path") or "").strip(),
+            },
+            now=now,
+        )
+        cards = [
+            {
+                "title": "Sesión de implementación",
+                "summary": f"Estado {str(apply_result.get('status') or '').strip() or '-'} · intentos {int(apply_result.get('attempts_count') or 0)} · ficheros {', '.join(list(apply_result.get('applied_files') or [])[:4]) or '-'}",
+                "priority": "alta" if str(apply_result.get("status") or "") != "passed" else "media",
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Resumen técnico",
+                "summary": str(apply_result.get("summary") or diagnosis).strip()[:500],
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+        ]
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He ejecutado la sesión de implementación para {domain}. {str(apply_result.get('summary') or '').strip()}",
+            "apply_result": apply_result,
+            "cards": cards,
+            "sources": ["implementation_planner", "workspace_memory"],
+            "suggestions": (
+                ["Validar bundle", "Materializar artefactos", "Crear tarea de implementación"]
+                if str(apply_result.get("status") or "") != "passed"
+                else ["Qué hago ahora", "Operar ahora", "Bandeja unificada"]
+            ),
         }
     if action_text == "prepare_code_autofix_bundle":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
