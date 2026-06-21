@@ -42222,6 +42222,129 @@ def _workspace_internal_copilot_post_change_inspection(conn, workspace_id, *, do
     }
 
 
+def _workspace_internal_copilot_strategy_options(domain="", message="", *, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    current_view = str((context or {}).get("current_view") or "").strip()
+    options = [
+        {
+            "id": "targeted_fix",
+            "title": "Arreglo dirigido",
+            "summary": f"Tocar lo mínimo en {domain or 'el dominio'} y validar el flujo exacto afectado.",
+            "when": "cuando la causa ya está razonablemente acotada",
+            "risk": "puede quedarse corto si el problema es más estructural",
+        },
+        {
+            "id": "safe_containment",
+            "title": "Contención operativa",
+            "summary": "Contener el impacto con supervisor, avisos, revalidación o cierre parcial mientras se acota mejor la causa.",
+            "when": "cuando el cambio técnico todavía no es fiable o el impacto operativo manda",
+            "risk": "reduce daño, pero no arregla la raíz por sí sola",
+        },
+        {
+            "id": "short_redesign",
+            "title": "Rediseño corto",
+            "summary": f"Replantear la zona local de {domain or 'el dominio'} para evitar parches repetidos y mejorar consistencia.",
+            "when": "cuando el problema viene de un diseño débil o de varias capas desalineadas",
+            "risk": "más superficie y más validación antes de cerrar",
+        },
+    ]
+    if any(token in text for token in ("urgente", "hoy", "bloqueado", "atascado", "cliente esperando")):
+        recommended_id = "safe_containment"
+    elif any(token in text for token in ("mal planteado", "rediseña", "reorganiza", "deuda", "repetido", "varias capas")):
+        recommended_id = "short_redesign"
+    else:
+        recommended_id = "targeted_fix"
+    if current_view and current_view in ("dashboard", "workspace_dashboard"):
+        recommended_id = "safe_containment" if recommended_id == "targeted_fix" else recommended_id
+    recommended = next((item for item in options if str(item.get("id") or "") == recommended_id), options[0])
+    return {"recommended": recommended, "options": options}
+
+
+def _workspace_internal_copilot_strategy_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "que estrategia",
+            "qué estrategia",
+            "mejor estrategia",
+            "arreglar o redisenar",
+            "arreglar o rediseñar",
+            "contener o arreglar",
+            "rediseñar o parchear",
+            "parche o rediseño",
+        )
+    ):
+        return None
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip() or "gestoria"
+    strategy = _workspace_internal_copilot_strategy_options(domain=domain, message=message, context=context if isinstance(context, dict) else {})
+    recommended = dict(strategy.get("recommended") or {})
+    options = [dict(item) for item in list(strategy.get("options") or [])[:4] if isinstance(item, dict)]
+    decision = (
+        f"Para {domain} conviene empezar por {str(recommended.get('title') or '').lower()}: "
+        f"{str(recommended.get('summary') or '').strip()}"
+    )
+    plan_payload = {
+        "domain": domain,
+        "assigned_mode": "supervisor",
+        "risk_level": "medium" if str(recommended.get("id") or "") != "short_redesign" else "high",
+        "diagnosis": decision,
+        "decision": decision,
+        "strategy_options": options,
+        "recommended_strategy": recommended,
+        "probable_files": list(scope.get("probable_files") or []),
+        "probable_tests": list(scope.get("probable_tests") or []),
+        "context": str(message or "").strip(),
+    }
+    return {
+        "ok": True,
+        "intent": "strategy_review",
+        "answer": f"He preparado una revisión de estrategia para {domain}, comparando arreglo dirigido, contención y rediseño corto.",
+        "cards": [
+            {
+                "title": "Estrategia recomendada",
+                "summary": decision,
+                "priority": "alta",
+                "impact_area": "arquitectura",
+            },
+            *[
+                {
+                    "title": f"Opción: {str(item.get('title') or '').strip()}",
+                    "summary": f"{str(item.get('summary') or '').strip()} · {str(item.get('when') or '').strip()}",
+                    "priority": "media",
+                    "impact_area": "arquitectura",
+                }
+                for item in options[:3]
+            ],
+        ],
+        "actions": [
+            {
+                "id": "prepare_strategy_review",
+                "label": "Guardar revisión de estrategia",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_discovery_review",
+                "label": "Abrir discovery técnico",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_cross_layer_decision",
+                "label": "Pasar a revisión transversal",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_implementation_task",
+                "label": "Crear tarea técnica",
+                "payload": {"plan": plan_payload},
+            },
+        ],
+        "suggestions": ["Guardar revisión de estrategia", "Abrir discovery técnico", "Pasar a revisión transversal"],
+        "sources": ["architecture_review", "implementation_planner", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("implementa", "mejora", "añade", "agrega", "refactoriza", "cambia", "haz que")):
@@ -46471,6 +46594,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if platform_reply:
         response.update(platform_reply)
         return _finish(response)
+    strategy_reply = _workspace_internal_copilot_strategy_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if strategy_reply:
+        response.update(strategy_reply)
+        return _finish(response)
     discovery_reply = _workspace_internal_copilot_discovery_reply(
         conn,
         workspace_text,
@@ -47730,6 +47865,63 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["architecture_review", "task_planner", "workspace_memory"],
             "suggestions": ["Pasar a revisión transversal", "Guardar decisión técnica", "Crear tarea técnica"],
+        }
+    if action_text == "prepare_strategy_review":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        decision_text = str(plan.get("decision") or plan.get("diagnosis") or f"Estrategia pendiente para {domain}.").strip()
+        options = [dict(item) for item in list(plan.get("strategy_options") or [])[:4] if isinstance(item, dict)]
+        recommended = dict(plan.get("recommended_strategy") or {})
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Estrategia:{domain}] Elección de enfoque",
+            detail=decision_text,
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="strategy_review",
+            meta={
+                "domain": domain,
+                "decision": decision_text,
+                "strategy_options": options,
+                "recommended_strategy": recommended,
+                "probable_files": _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180),
+                "probable_tests": _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180),
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="strategy_review",
+            title=f"Revisión de estrategia {domain}",
+            content=decision_text,
+            priority="alta",
+            meta={
+                "task_id": task_id,
+                "domain": domain,
+                "recommended_strategy": recommended,
+                "strategy_options": options,
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He guardado la revisión de estrategia para {domain}.",
+            "cards": [
+                {
+                    "title": "Revisión de estrategia guardada",
+                    "summary": f"{decision_text[:320]}",
+                    "priority": "alta",
+                    "impact_area": "arquitectura",
+                }
+            ],
+            "sources": ["architecture_review", "task_planner", "workspace_memory"],
+            "suggestions": ["Abrir discovery técnico", "Pasar a revisión transversal", "Crear tarea técnica"],
         }
     if action_text == "prepare_cross_layer_decision":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
