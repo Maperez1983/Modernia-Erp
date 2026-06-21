@@ -3344,6 +3344,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply.get("intent"), "code_autofix")
         self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_task" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Diff propuesto" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
@@ -3374,6 +3375,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         meta = server._safe_json_object(task["meta_json"] or "{}")
         self.assertEqual(meta.get("domain"), "gestoria")
         self.assertEqual(meta.get("assigned_mode"), "supervisor")
+        self.assertIn("*** Begin Patch", str(meta.get("proposed_diff") or ""))
+        self.assertIn("Ficheros probables", str(meta.get("patch_prompt") or ""))
 
 
 if __name__ == "__main__":
