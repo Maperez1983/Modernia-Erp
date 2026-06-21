@@ -838,11 +838,12 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "copilot_work_center" for action in (reply.get("actions") or [])))
 
     def test_internal_copilot_action_work_center_returns_domain_tooling(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('c1', 'Juan Cliente', '12345678Z', 'juan@test.local', 'now', 'now')")
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
             "ws1",
             "copilot_work_center",
-            {"current_crm": "gestoria", "copilot_mode": "operator"},
+            {"current_crm": "gestoria", "copilot_mode": "operator", "current_client_id": "c1"},
             empresa_id="e1",
             actor={"id": "u1", "usuario": "QA"},
             now="2026-06-21T11:00:00Z",
@@ -851,6 +852,38 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result.get("action_id"), "copilot_work_center")
         self.assertTrue(any(str(card.get("title") or "") == "Herramientas disponibles" for card in (result.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Contexto visible" for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (result.get("actions") or [])))
+
+    def test_internal_copilot_action_diagnose_current_entity_uses_open_client_context(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('cdiag1', 'Cliente Visible', '55555555L', 'visible@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload, dedupe_key,
+              acknowledged, created_at, updated_at
+            ) VALUES (
+              'wps-visible-1', 'ws1', 'e1', 'gestoria', 'renta_attach', 'cliente', 'cdiag1', 'u1',
+              'QA', 'open', 'warning', 'Renta pendiente', 'Hay que revisar la renta del cliente visible',
+              '[]', '[]', '{}', 'dup-visible-1', 0, '2026-06-21T09:00:00Z', '2026-06-21T09:00:00Z'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "diagnose_current_entity",
+            {"current_crm": "gestoria", "current_client_id": "cdiag1"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T11:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("ficha actual", str(result.get("message") or "").lower())
+        self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (result.get("cards") or [])))
+        self.assertTrue(any("Renta pendiente" == str(card.get("title") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "revalidate_current_entity" for action in (result.get("actions") or [])))
 
     def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
         self.conn.execute(
@@ -2542,7 +2575,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
             self.conn,
             "ws1",
             "prime_operator_console",
-            {"current_workspace_view": "fin", "current_crm": "fin", "copilot_mode": "operator"},
+            {"current_workspace_view": "fin", "current_crm": "fin", "copilot_mode": "operator", "current_hipoteca_id": "hip-prime-1"},
             empresa_id="e1",
             actor={"id": "u1", "usuario": "QA", "rol": "Administrador", "servicio": "Administración"},
             now="2026-06-19T12:10:00Z",
@@ -2551,6 +2584,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["action_id"], "prime_operator_console")
         self.assertEqual(reply["mode"], "operator")
         self.assertTrue(reply["actions"])
+        self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))

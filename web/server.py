@@ -41204,6 +41204,222 @@ def _workspace_internal_copilot_visible_context_card(context=None):
     }
 
 
+def _workspace_internal_copilot_current_entity_summary(conn, workspace_id, *, empresa_id="", context=None):
+    ctx = dict(context or {})
+    workspace_text = str(workspace_id or "").strip()
+    company_text = str(empresa_id or "").strip()
+    current_domain = _workspace_internal_copilot_normalize_domain(ctx.get("current_crm") or ctx.get("service_hint") or "")
+    mappings = [
+        ("current_factura_id", "gestoria", "factura"),
+        ("current_renta_entry_id", "gestoria", "renta"),
+        ("current_seguro_id", "seguros", "poliza"),
+        ("current_hipoteca_id", "financiaciones", "hipoteca"),
+        ("current_rrhh_document_id", "rrhh", "documento_rrhh"),
+        ("current_community_id", "fincas", "comunidad"),
+        ("current_client_id", "clientes", "cliente"),
+    ]
+    for key, domain, entity_kind in mappings:
+        entity_id = str(ctx.get(key) or "").strip()
+        if not entity_id:
+            continue
+        if entity_kind == "factura":
+            row = conn.execute("SELECT id, numero, total, tipo FROM gestoria_facturas WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "numero") or "Factura").strip(),
+                    "summary": f"total {row_value(row, 'total') or '-'} · tipo {row_value(row, 'tipo') or '-'}",
+                }
+        if entity_kind == "poliza":
+            row = conn.execute("SELECT id, poliza_numero, compania, estado FROM seguros WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "poliza_numero") or "Póliza").strip(),
+                    "summary": f"{row_value(row, 'compania') or '-'} · {row_value(row, 'estado') or '-'}",
+                }
+        if entity_kind == "hipoteca":
+            row = conn.execute("SELECT id, cliente, banco, estado FROM hipotecas WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "cliente") or "Hipoteca").strip(),
+                    "summary": f"{row_value(row, 'banco') or '-'} · {row_value(row, 'estado') or '-'}",
+                }
+        if entity_kind == "documento_rrhh":
+            row = conn.execute("SELECT id, nombre, tipo, estado FROM workspace_rrhh_documentos WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "nombre") or "Documento RRHH").strip(),
+                    "summary": f"{row_value(row, 'tipo') or '-'} · {row_value(row, 'estado') or '-'}",
+                }
+        if entity_kind == "comunidad":
+            row = conn.execute("SELECT id, nombre, direccion, estado FROM workspace_fincas_comunidades WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "nombre") or "Comunidad").strip(),
+                    "summary": f"{row_value(row, 'direccion') or '-'} · {row_value(row, 'estado') or '-'}",
+                }
+        if entity_kind == "cliente":
+            row = conn.execute("SELECT id, nombre, nif, email FROM clientes WHERE id = ? LIMIT 1", (entity_id,)).fetchone()
+            if row:
+                return {
+                    "domain": current_domain or "clientes",
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": str(row_value(row, "nombre") or "Cliente").strip(),
+                    "summary": " · ".join(
+                        item for item in [str(row_value(row, "nif") or "").strip(), str(row_value(row, "email") or "").strip()] if item
+                    ),
+                }
+        if entity_kind == "renta":
+            cliente_id = str(ctx.get("current_client_id") or "").strip()
+            if cliente_id:
+                return {
+                    "domain": domain,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "title": f"Renta {entity_id}",
+                    "summary": f"cliente {cliente_id}",
+                }
+    open_events = fetch_workspace_process_supervisor_events(conn, workspace_text, limit=20, only_open=True).get("rows") or []
+    for row in open_events:
+        snapshot = row.get("entity_snapshot") or {}
+        for entity_key, entity_kind in (
+            ("factura_id", "factura"),
+            ("entry_id", "renta"),
+            ("seguro_id", "poliza"),
+            ("hipoteca_id", "hipoteca"),
+            ("documento_id", "documento_rrhh"),
+            ("comunidad_id", "comunidad"),
+            ("cliente_id", "cliente"),
+        ):
+            snapshot_id = str(snapshot.get(entity_key) or "").strip()
+            if entity_key == "entry_id":
+                current_id = str(ctx.get("current_renta_entry_id") or "").strip()
+            elif entity_key == "documento_id":
+                current_id = str(ctx.get("current_rrhh_document_id") or "").strip()
+            else:
+                current_id = str(ctx.get(f"current_{entity_key}") or "").strip()
+            if snapshot_id and current_id and snapshot_id == current_id:
+                return {
+                    "domain": _workspace_internal_copilot_normalize_domain(row.get("servicio") or company_text or current_domain),
+                    "entity_kind": entity_kind,
+                    "entity_id": snapshot_id,
+                    "title": str(row.get("title") or snapshot.get("title") or "Entidad actual").strip(),
+                    "summary": str(row.get("summary") or snapshot.get("summary") or "").strip(),
+                }
+    return {}
+
+
+def _workspace_internal_copilot_current_entity_actions(entity_summary):
+    item = dict(entity_summary or {})
+    entity_kind = str(item.get("entity_kind") or "").strip()
+    entity_id = str(item.get("entity_id") or "").strip()
+    domain = _workspace_internal_copilot_normalize_domain(item.get("domain") or "")
+    if not entity_kind or not entity_id:
+        return []
+    payload = {"domain": domain, "entity_kind": entity_kind, "entity_id": entity_id}
+    actions = [
+        {"id": "diagnose_current_entity", "label": "Diagnosticar esta ficha", "payload": payload},
+        {"id": "revalidate_current_entity", "label": "Revalidar esta ficha", "payload": payload},
+    ]
+    if entity_kind == "cliente":
+        actions.append({"id": "open_client", "label": "Abrir ficha cliente", "payload": {"cliente_id": entity_id}})
+    return actions[:3]
+
+
+def _workspace_internal_copilot_current_entity_card(entity_summary):
+    item = dict(entity_summary or {})
+    if not item:
+        return {}
+    return {
+        "title": "Entidad actual",
+        "summary": f"{str(item.get('title') or '').strip()} · {str(item.get('summary') or '').strip()}".strip(" ·"),
+        "priority": "alta",
+        "impact_area": _workspace_internal_copilot_normalize_domain(item.get("domain") or "") or "operativo",
+        "entity": {"entity_kind": str(item.get("entity_kind") or "").strip(), "entity_id": str(item.get("entity_id") or "").strip()},
+    }
+
+
+def _workspace_internal_copilot_related_open_events(conn, workspace_id, entity_summary):
+    summary = dict(entity_summary or {})
+    entity_id = str(summary.get("entity_id") or "").strip()
+    entity_kind = str(summary.get("entity_kind") or "").strip()
+    if not entity_id or not entity_kind:
+        return []
+    open_events = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=25, only_open=True).get("rows") or []
+    related = []
+    for row in open_events:
+        snapshot = row.get("entity_snapshot") or {}
+        if entity_kind == "factura" and str(snapshot.get("factura_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "renta" and str(snapshot.get("entry_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "poliza" and str(snapshot.get("seguro_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "hipoteca" and str(snapshot.get("hipoteca_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "documento_rrhh" and str(snapshot.get("documento_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "comunidad" and str(snapshot.get("comunidad_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+        elif entity_kind == "cliente" and str(snapshot.get("cliente_id") or row.get("entity_id") or "").strip() == entity_id:
+            related.append(row)
+    return related
+
+
+def _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
+    if not summary:
+        return {
+            "ok": True,
+            "action_id": "diagnose_current_entity",
+            "message": "No tengo una entidad abierta clara para diagnosticar.",
+            "cards": [],
+            "actions": [],
+            "sources": ["internal_copilot_action"],
+            "suggestions": ["Qué hago ahora", "Bandeja unificada"],
+        }
+    domain = _workspace_internal_copilot_normalize_domain(summary.get("domain") or "")
+    entity_kind = str(summary.get("entity_kind") or "").strip()
+    related = _workspace_internal_copilot_related_open_events(conn, workspace_id, summary)
+    cards = [_workspace_internal_copilot_current_entity_card(summary)]
+    cards.extend([_workspace_internal_copilot_card_from_event(row) for row in related[:4]])
+    actions = _workspace_internal_copilot_current_entity_actions(summary)
+    if related:
+        return {
+            "ok": True,
+            "action_id": "diagnose_current_entity",
+            "message": f"He encontrado {len(related)} incidencia(s) activa(s) ligadas a la ficha actual de {domain or entity_kind}.",
+            "cards": cards[:6],
+            "actions": actions,
+            "sources": ["internal_copilot_action", "workspace_process_supervisor"],
+            "suggestions": ["Revalidar esta ficha", "Cerrar ciclo", "Operar ahora"],
+        }
+    return {
+        "ok": True,
+        "action_id": "diagnose_current_entity",
+        "message": f"No veo incidencias activas ligadas a la ficha actual de {domain or entity_kind}.",
+        "cards": cards[:2],
+        "actions": actions,
+        "sources": ["internal_copilot_action", "workspace_process_supervisor"],
+        "suggestions": ["Revalidar esta ficha", "Qué hago ahora", "Operar ahora"],
+    }
+
+
 def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -41290,6 +41506,7 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
     mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message="")
     current_domain = _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or (context or {}).get("service_hint") or "")
     tooling = _workspace_internal_copilot_domain_tooling(current_domain)
+    current_entity = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
     pending_cards, _, pending_sources = _workspace_internal_copilot_collect_unified_pending(
         conn,
         str(workspace_id or "").strip(),
@@ -41306,6 +41523,8 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
         },
         _workspace_internal_copilot_visible_context_card(context),
     ]
+    if current_entity:
+        cards.append(_workspace_internal_copilot_current_entity_card(current_entity))
     if tooling:
         cards.append(
             {
@@ -41316,17 +41535,23 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
             }
         )
     cards.extend([dict(item) for item in pending_cards[:4]])
+    actions = []
+    if current_entity:
+        actions.extend(_workspace_internal_copilot_current_entity_actions(current_entity))
+    actions.extend(
+        [
+            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
+            {"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today", "copilot_mode": mode}},
+            {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today", "copilot_mode": mode}},
+        ]
+    )
     return {
         "ok": True,
         "action_id": "copilot_work_center",
         "mode": mode,
         "message": "He preparado el centro de trabajo del asistente para este workspace.",
         "cards": cards[:8],
-        "actions": [
-            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
-            {"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today", "copilot_mode": mode}},
-            {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today", "copilot_mode": mode}}
-        ],
+        "actions": actions[:10],
         "suggestions": ["Operar ahora", "Qué hago ahora", "Cerrar ciclo"],
         "sources": list(dict.fromkeys(["verifika2_intelligence_layer", *pending_sources, "task_planner"]))[:8],
     }
@@ -45115,6 +45340,10 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     if actions:
         actions = actions[:]
     cards = list(briefing.get("cards") or [])[:8]
+    current_entity = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context_map)
+    if current_entity:
+        cards.insert(0, _workspace_internal_copilot_current_entity_card(current_entity))
+        actions = [*_workspace_internal_copilot_current_entity_actions(current_entity), *actions]
     strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=3)
     next_microflow = {}
     if mode == "operator":
@@ -46686,6 +46915,29 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         return _workspace_internal_copilot_work_center_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "prime_operator_console":
         return _workspace_internal_copilot_prime_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "diagnose_current_entity":
+        return _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "revalidate_current_entity":
+        summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_text, empresa_id=empresa_id, context=payload)
+        related = _workspace_internal_copilot_related_open_events(conn, workspace_text, summary)
+        if not related:
+            return _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+        updated = 0
+        resolved = 0
+        for row in related[:5]:
+            event_id = str(row.get("id") or "").strip()
+            if not event_id:
+                continue
+            result = perform_workspace_process_supervisor_action(conn, workspace_text, event_id, "revalidate_process", actor=actor, now=now)
+            updated += 1
+            if str(((result or {}).get("process_supervision") or {}).get("status") or "").strip() == "ok":
+                resolved += 1
+        diagnose = _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+        diagnose["action_id"] = action_text
+        diagnose["message"] = f"He revalidado {updated} incidencia(s) ligadas a la ficha actual. {resolved} quedaron limpias."
+        diagnose["updated"] = updated
+        diagnose["resolved"] = resolved
+        return diagnose
     if action_text == "promote_legal_updates_to_tasks":
         area = _workspace_internal_copilot_legal_area_for_context(str(payload.get("area") or payload.get("crm") or "").strip(), payload)
         candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area=area, limit=6)
