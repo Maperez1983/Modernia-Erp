@@ -3683,6 +3683,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 self.assertTrue(result["ok"])
                 self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
                 self.assertEqual((result.get("apply_result") or {}).get("attempts_count"), 1)
+                self.assertEqual((result.get("apply_result") or {}).get("validation_bundle", {}).get("probable_files"), ["sample_module.py"])
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
                 self.assertTrue(Path(str((result.get("apply_result") or {}).get("session_summary_path") or "")).exists())
         finally:
@@ -3738,6 +3739,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 )
                 self.assertTrue(result["ok"])
                 self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
+                self.assertEqual((result.get("apply_result") or {}).get("validation_bundle", {}).get("probable_files"), ["sample_module.py"])
                 self.assertEqual((result.get("apply_result") or {}).get("attempts_count"), 2)
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
         finally:

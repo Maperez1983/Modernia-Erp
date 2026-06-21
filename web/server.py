@@ -42079,6 +42079,8 @@ def _workspace_internal_copilot_generate_codefix_edits(bundle):
         "diagnosis": str((bundle or {}).get("diagnosis") or "").strip(),
         "patch_outline": list((bundle or {}).get("patch_outline") or [])[:6],
         "probable_tests": list((bundle or {}).get("probable_tests") or [])[:6],
+        "validation_focus": list((bundle or {}).get("validation_focus") or [])[:6],
+        "code_targets": list((bundle or {}).get("code_targets") or [])[:8],
         "files": files,
     }
     prompt = (
@@ -42126,6 +42128,21 @@ def _workspace_internal_copilot_generate_codefix_edits(bundle):
     }
 
 
+def _workspace_internal_copilot_validation_bundle_for_edits(bundle, edits):
+    base = dict(bundle or {})
+    edited_files = _normalize_text_list([str(item.get("file") or "").strip() for item in list(edits or []) if isinstance(item, dict)], max_items=8, max_chars=180)
+    if not edited_files:
+        return dict(base)
+    return _workspace_internal_copilot_build_codefix_bundle(
+        domain=str(base.get("domain") or "").strip(),
+        assigned_mode=str(base.get("assigned_mode") or "supervisor").strip() or "supervisor",
+        diagnosis=str(base.get("diagnosis") or "").strip(),
+        patch_outline=_normalize_text_list(base.get("patch_outline") or [], max_items=8, max_chars=220),
+        probable_files=edited_files,
+        probable_tests=_normalize_text_list(base.get("probable_tests") or [], max_items=8, max_chars=180),
+    )
+
+
 def _workspace_internal_copilot_apply_codefix_edits(bundle, generated, *, now=None):
     root = Path(_workspace_internal_copilot_codefix_root()).resolve()
     result = {
@@ -42161,8 +42178,14 @@ def _workspace_internal_copilot_apply_codefix_edits(bundle, generated, *, now=No
             updated = current.replace(find_text, str(edit.get("replace") or ""), 1)
             candidate.write_text(updated, encoding="utf-8")
             result["applied_files"].append(file_path)
-        validation = _workspace_internal_copilot_run_validation_bundle(bundle)
+        validation_bundle = _workspace_internal_copilot_validation_bundle_for_edits(bundle, edits)
+        validation = _workspace_internal_copilot_run_validation_bundle(validation_bundle)
         result["validation"] = validation
+        result["validation_bundle"] = {
+            "probable_files": list(validation_bundle.get("probable_files") or []),
+            "validation_commands": list(validation_bundle.get("validation_commands") or []),
+            "validation_focus": list(validation_bundle.get("validation_focus") or []),
+        }
         if str(validation.get("status") or "").strip() != "passed":
             for file_path, original in originals.items():
                 ((root / file_path).resolve()).write_text(original, encoding="utf-8")
