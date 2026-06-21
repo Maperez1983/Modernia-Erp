@@ -41571,7 +41571,18 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
                 "impact_area": current_domain or "operativo",
             }
         )
+    process_actions = []
     if processes:
+        process_actions = [
+            {
+                "id": "run_catalog_process",
+                "label": str(item.get("label") or "Ejecutar proceso").strip(),
+                "requires_confirmation": True,
+                "confirm_text": f"Se ejecutará el proceso {str(item.get('label') or '').strip()} con el contexto actual.",
+                "payload": {"process_id": str(item.get("id") or "").strip(), "context": dict(context or {})},
+            }
+            for item in processes[:4]
+        ]
         cards.append(
             {
                 "title": "Procesos ejecutables",
@@ -41593,6 +41604,7 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
     actions = []
     if current_entity:
         actions.extend(_workspace_internal_copilot_current_entity_actions(current_entity))
+    actions.extend(process_actions)
     actions.extend(
         [
             {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
@@ -44122,28 +44134,28 @@ def _workspace_internal_copilot_process_catalog():
         "gestoria": [
             {"id": "renta_attach", "label": "Cargar renta", "mode": "directo"},
             {"id": "factura_ocr", "label": "Procesar factura OCR", "mode": "directo"},
-            {"id": "dashboard_reconcile", "label": "Reconciliar dashboard gestoría", "mode": "supervisado"},
+            {"id": "dashboard_reconcile", "label": "Reconciliar dashboard gestoría", "mode": "directo"},
         ],
         "seguros": [
             {"id": "seguro_create", "label": "Alta de póliza", "mode": "directo"},
-            {"id": "seguro_receipts", "label": "Revisión de recibos", "mode": "guiado"},
-            {"id": "seguro_dashboard", "label": "Reconciliar dashboard de seguros", "mode": "supervisado"},
+            {"id": "seguro_receipts", "label": "Revisión de recibos", "mode": "directo"},
+            {"id": "seguro_dashboard", "label": "Reconciliar dashboard de seguros", "mode": "directo"},
         ],
         "financiaciones": [
             {"id": "hipoteca_create", "label": "Alta de hipoteca", "mode": "directo"},
-            {"id": "hipoteca_revalidate", "label": "Revalidar hipotecas incompletas", "mode": "guiado"},
+            {"id": "hipoteca_revalidate", "label": "Revalidar hipotecas incompletas", "mode": "directo"},
         ],
         "rrhh": [
             {"id": "rrhh_document_update", "label": "Actualizar documento RRHH", "mode": "directo"},
-            {"id": "rrhh_expiry_review", "label": "Revisión de caducidades", "mode": "guiado"},
+            {"id": "rrhh_expiry_review", "label": "Revisión de caducidades", "mode": "directo"},
         ],
         "fincas": [
             {"id": "community_update", "label": "Actualizar comunidad", "mode": "directo"},
-            {"id": "community_quota_review", "label": "Revisión de cuotas incoherentes", "mode": "guiado"},
+            {"id": "community_quota_review", "label": "Revisión de cuotas incoherentes", "mode": "directo"},
         ],
         "inmobiliaria": [
             {"id": "client_open_update", "label": "Abrir y actualizar cliente", "mode": "directo"},
-            {"id": "workflow_supervision", "label": "Supervisión de flujo inmobiliario", "mode": "supervisado"},
+            {"id": "workflow_supervision", "label": "Supervisión de flujo inmobiliario", "mode": "directo"},
         ],
     }
 
@@ -44342,6 +44354,33 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
                 "cards": [{"title": "Sin cambios de comunidad", "summary": "No hay patch definido para la comunidad abierta.", "priority": "media", "impact_area": "fincas"}],
             }
         return {"ok": True, "action_id": "update_current_community", "action_payload": {"comunidad_id": comunidad_id, "patch": patch}}
+    if process_key == "dashboard_reconcile":
+        domain = _workspace_internal_copilot_normalize_domain(str(data.get("domain") or context.get("current_crm") or "gestoria").strip()) or "gestoria"
+        return {"ok": True, "action_id": "autorreview_domain", "action_payload": {"domain": domain, **dict(context or {})}}
+    if process_key in {"seguro_receipts", "seguro_dashboard"}:
+        return {"ok": True, "action_id": "autorreview_domain", "action_payload": {"domain": "seguros", **dict(context or {})}}
+    if process_key == "hipoteca_revalidate":
+        return {"ok": True, "action_id": "run_domain_microflow", "action_payload": {"domain": "financiaciones", "microflow_type": "hipotecas_missing_base", **dict(context or {})}}
+    if process_key == "rrhh_expiry_review":
+        return {"ok": True, "action_id": "run_domain_microflow", "action_payload": {"domain": "rrhh", "microflow_type": "rrhh_docs_expired", **dict(context or {})}}
+    if process_key == "community_quota_review":
+        return {"ok": True, "action_id": "run_domain_microflow", "action_payload": {"domain": "fincas", "microflow_type": "fincas_communities_quota", **dict(context or {})}}
+    if process_key == "workflow_supervision":
+        return {"ok": True, "action_id": "autorreview_domain", "action_payload": {"domain": "inmobiliaria", **dict(context or {})}}
+    if process_key == "client_open_update":
+        cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        if not cliente_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para abrir y actualizar cliente necesito una ficha de cliente abierta o un cliente resuelto.",
+                "suggestions": ["Abrir cliente", "Indicar cliente"],
+                "cards": [{"title": "Falta cliente", "summary": "No hay cliente visible para abrir o actualizar.", "priority": "alta", "impact_area": "inmobiliaria"}],
+            }
+        patch = dict(data.get("patch") or {}) if isinstance(data.get("patch"), dict) else {}
+        if patch:
+            return {"ok": True, "action_id": "update_client_basic", "action_payload": {"cliente_id": cliente_id, "patch": patch}}
+        return {"ok": True, "action_id": "open_client", "action_payload": {"cliente_id": cliente_id}}
     return {
         "ok": True,
         "guided": True,

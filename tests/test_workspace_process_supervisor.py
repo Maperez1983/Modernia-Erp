@@ -2770,6 +2770,59 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(result["executed_process"], "renta_attach")
         self.assertIn("cliente", str(result.get("message") or "").lower())
 
+    def test_internal_copilot_run_catalog_process_executes_domain_microflow(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-cat-1', 'e1', 'Juan Cliente', 'c1', 'Santander', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_catalog_process",
+            {"process_id": "hipoteca_revalidate", "context": {"current_crm": "financiaciones"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-21T09:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "run_catalog_process")
+        self.assertEqual(result["executed_process"], "hipoteca_revalidate")
+        self.assertEqual(result["delegated_action"], "run_domain_microflow")
+
+    def test_internal_copilot_work_center_includes_catalog_process_actions(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "copilot_work_center",
+            {"current_crm": "gestoria", "current_client_id": "c1"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T09:15:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(str(action.get("id") or "") == "run_catalog_process" for action in (result.get("actions") or [])))
+
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
             """
