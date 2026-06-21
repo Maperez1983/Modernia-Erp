@@ -42222,6 +42222,29 @@ def _workspace_internal_copilot_post_change_inspection(conn, workspace_id, *, do
     }
 
 
+def _workspace_internal_copilot_closeout_guidance(domain="", *, inspection=None, plan=None):
+    domain_text = _workspace_internal_copilot_normalize_domain(domain or "")
+    inspection_map = inspection if isinstance(inspection, dict) else {}
+    plan_map = plan if isinstance(plan, dict) else {}
+    status = str(inspection_map.get("status") or "").strip().lower()
+    checklist = _normalize_text_list(inspection_map.get("checklist") or plan_map.get("delivery_checklist") or [], max_items=10, max_chars=200)
+    if status == "blocked":
+        return {
+            "next_step": f"Abrir discovery técnico en {domain_text or 'el dominio'} y acotar la causa antes de otro intento.",
+            "why": "El cambio no ha quedado validado y seguir parchando ahora aumentaría ruido y retrabajo.",
+        }
+    if status == "followup":
+        focus = checklist[0] if checklist else "cerrar el impacto operativo restante"
+        return {
+            "next_step": f"Cerrar primero el impacto restante en {domain_text or 'el dominio'}: {focus}.",
+            "why": "La validación técnica pasó, pero todavía quedan incidencias abiertas del mismo dominio.",
+        }
+    return {
+        "next_step": f"Autorrevisar {domain_text or 'el dominio'} y seguir con el siguiente bloque prioritario.",
+        "why": "No hay incidencias abiertas ligadas al cambio y el trabajo queda razonablemente cerrado.",
+    }
+
+
 def _workspace_internal_copilot_strategy_options(domain="", message="", *, context=None):
     text = normalize_lookup_text(message or "").lower()
     current_view = str((context or {}).get("current_view") or "").strip()
@@ -48119,6 +48142,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             apply_result=apply_result,
             context=payload,
         )
+        closeout = _workspace_internal_copilot_closeout_guidance(domain, inspection=inspection, plan=plan)
         _workspace_internal_copilot_store_memory_note(
             conn,
             workspace_text,
@@ -48136,6 +48160,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "session_summary_path": str(apply_result.get("session_summary_path") or "").strip(),
                 "inspection": inspection,
                 "strategy_id": str(plan.get("recommended_strategy_id") or ((plan.get("recommended_strategy") or {}).get("id") if isinstance(plan.get("recommended_strategy"), dict) else "") or "").strip(),
+                "closeout": closeout,
             },
             now=now,
         )
@@ -48178,6 +48203,14 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "title": "Inspección posterior",
                 "summary": str(inspection.get("summary") or "").strip()[:500],
                 "priority": "alta" if str(inspection.get("status") or "") != "clean" else "media",
+                "impact_area": "operativo",
+            }
+        )
+        cards.append(
+            {
+                "title": "Siguiente paso exacto",
+                "summary": f"{str(closeout.get('next_step') or '').strip()} · {str(closeout.get('why') or '').strip()}",
+                "priority": "alta",
                 "impact_area": "operativo",
             }
         )

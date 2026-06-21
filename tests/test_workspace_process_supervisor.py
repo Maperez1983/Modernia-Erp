@@ -3898,6 +3898,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 self.assertTrue(any(str(card.get("title") or "") == "Impacto de entrega" for card in (result.get("cards") or [])))
                 self.assertTrue(any(str(card.get("title") or "") == "Siguiente validación de cierre" for card in (result.get("cards") or [])))
                 self.assertTrue(any(str(card.get("title") or "") == "Inspección posterior" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(card.get("title") or "") == "Siguiente paso exacto" for card in (result.get("cards") or [])))
                 self.assertTrue(any(str(action.get("id") or "") == "autorreview_domain" for action in (result.get("actions") or [])))
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
         finally:
@@ -3945,6 +3946,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 self.assertTrue(result["ok"])
                 self.assertEqual((result.get("apply_result") or {}).get("status"), "failed")
                 self.assertTrue(any(str(card.get("title") or "") == "Inspección posterior" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(card.get("title") or "") == "Siguiente paso exacto" for card in (result.get("cards") or [])))
                 self.assertTrue(any(str(action.get("id") or "") == "prepare_discovery_review" for action in (result.get("actions") or [])))
         finally:
             server._workspace_internal_copilot_codefix_root = old_root
