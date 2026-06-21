@@ -44154,6 +44154,203 @@ def _workspace_internal_copilot_domain_processes(domain=""):
     return list(catalog.get(domain_key, []))
 
 
+def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empresa_id, process_id, payload=None, *, actor=None):
+    data = dict(payload or {})
+    context = data.get("context") if isinstance(data.get("context"), dict) else {}
+    process_key = str(process_id or data.get("process_id") or "").strip()
+    low_message = normalize_lookup_text(data.get("message") or "").lower()
+    if process_key == "renta_attach":
+        cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        if not cliente_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para cargar una renta necesito una ficha de cliente abierta o un cliente resuelto.",
+                "suggestions": ["Abrir cliente", "Indicar cliente"],
+                "cards": [{"title": "Falta cliente", "summary": "El proceso de renta necesita cliente visible o identificado.", "priority": "alta", "impact_area": "gestoria"}],
+            }
+        attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="renta")
+        if not attachment:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para cargar la renta necesito el PDF o documento de la renta adjunto.",
+                "suggestions": ["Adjuntar renta"],
+                "cards": [{"title": "Falta documento", "summary": "No hay un adjunto de renta disponible en el contexto actual.", "priority": "alta", "impact_area": "gestoria"}],
+            }
+        preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=actor) or {}
+        ejercicio = str(data.get("ejercicio") or preview.get("ejercicio") or "").strip()
+        if not ejercicio:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "He detectado el cliente y el documento, pero me falta el ejercicio de la renta.",
+                "suggestions": ["Indicar ejercicio"],
+                "cards": [{"title": "Falta ejercicio", "summary": "El OCR de renta no ha devuelto ejercicio y no venía en la orden.", "priority": "alta", "impact_area": "gestoria"}],
+            }
+        return {
+            "ok": True,
+            "action_id": "attach_renta",
+            "action_payload": {
+                "cliente_id": cliente_id,
+                "ejercicio": ejercicio,
+                "estado_presentacion": "Presentada" if "presentad" in low_message else "Borrador",
+                "doc_key": str(attachment.get("key") or "").strip(),
+                "doc_url": str(attachment.get("public_url") or "").strip(),
+            },
+        }
+    if process_key == "factura_ocr":
+        cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="factura")
+        if not cliente_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para procesar una factura por OCR necesito cliente visible o resuelto.",
+                "suggestions": ["Abrir cliente", "Indicar cliente"],
+                "cards": [{"title": "Falta cliente", "summary": "El OCR de factura necesita una ficha de cliente destino.", "priority": "alta", "impact_area": "gestoria"}],
+            }
+        if not attachment:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para procesar la factura necesito el PDF o imagen adjunta.",
+                "suggestions": ["Adjuntar factura"],
+                "cards": [{"title": "Falta factura", "summary": "No hay un adjunto de factura disponible en el contexto actual.", "priority": "alta", "impact_area": "gestoria"}],
+            }
+        return {
+            "ok": True,
+            "action_id": "ingest_factura",
+            "action_payload": {
+                "cliente_id": cliente_id,
+                "s3_key": str(attachment.get("key") or "").strip(),
+                "filename": str(attachment.get("filename") or "factura.pdf").strip(),
+                "tipo_factura": "venta" if "venta" in low_message else "compra",
+            },
+        }
+    if process_key == "seguro_create":
+        cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        if not cliente_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para dar de alta una póliza necesito una ficha de cliente abierta o un cliente resuelto.",
+                "suggestions": ["Abrir cliente", "Indicar cliente"],
+                "cards": [{"title": "Falta cliente", "summary": "La alta de póliza necesita cliente identificado.", "priority": "alta", "impact_area": "seguros"}],
+            }
+        client_row = conn.execute("SELECT id, nombre, nif, email, telefono, direccion, fecha_nacimiento FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+        if not client_row:
+            return {"error": "Cliente no encontrado para el proceso de póliza"}
+        resolved_client = dict(client_row)
+        seguro_payload = _workspace_internal_copilot_extract_seguro_payload(str(data.get("message") or ""), resolved_client)
+        attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="seguro")
+        if attachment:
+            seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
+            seguro_payload.setdefault("poliza_url", str(attachment.get("public_url") or "").strip())
+            preview = _workspace_internal_copilot_preview_seguro(conn, attachment, actor=actor) or {}
+            for key in ("compania", "poliza_numero", "fecha_efecto", "fecha_vencimiento", "ramo"):
+                if preview.get(key) not in (None, ""):
+                    seguro_payload.setdefault(key, preview.get(key))
+        missing = []
+        if not str(seguro_payload.get("compania") or "").strip():
+            missing.append("compañía")
+        if not str(seguro_payload.get("poliza_numero") or "").strip():
+            missing.append("número de póliza")
+        if missing:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": f"Puedo preparar la póliza del cliente actual, pero faltan: {', '.join(missing)}.",
+                "suggestions": ["Adjuntar póliza", "Indicar compañía", "Indicar número de póliza"],
+                "cards": [{"title": "Faltan datos de póliza", "summary": ", ".join(missing), "priority": "alta", "impact_area": "seguros"}],
+            }
+        return {"ok": True, "action_id": "create_seguro", "action_payload": seguro_payload}
+    if process_key == "hipoteca_create":
+        cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        if not cliente_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para crear una hipoteca necesito cliente visible o resuelto.",
+                "suggestions": ["Abrir cliente", "Indicar cliente"],
+                "cards": [{"title": "Falta cliente", "summary": "La hipoteca necesita una ficha de cliente activa.", "priority": "alta", "impact_area": "financiaciones"}],
+            }
+        client_row = conn.execute("SELECT id, nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+        if not client_row:
+            return {"error": "Cliente no encontrado para el proceso de hipoteca"}
+        hip_payload = _workspace_internal_copilot_extract_hipoteca_payload(str(data.get("message") or ""), dict(client_row))
+        for key in ("banco", "precio", "importe_hipoteca", "comision", "fecha_encargo", "estado"):
+            if data.get(key) not in (None, ""):
+                hip_payload[key] = data.get(key)
+        missing = []
+        if not str(hip_payload.get("banco") or "").strip():
+            missing.append("banco")
+        if hip_payload.get("importe_hipoteca") in (None, "", 0):
+            missing.append("importe de hipoteca")
+        if missing:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": f"Puedo arrancar la hipoteca del cliente actual, pero faltan: {', '.join(missing)}.",
+                "suggestions": ["Indicar banco", "Indicar importe"],
+                "cards": [{"title": "Faltan datos de hipoteca", "summary": ", ".join(missing), "priority": "alta", "impact_area": "financiaciones"}],
+            }
+        return {"ok": True, "action_id": "create_hipoteca", "action_payload": hip_payload}
+    if process_key == "rrhh_document_update":
+        documento_id = str(data.get("documento_id") or context.get("current_rrhh_document_id") or "").strip()
+        persona_id = str(data.get("persona_id") or context.get("current_persona_id") or "").strip()
+        if not documento_id or not persona_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para actualizar un documento RRHH necesito que esté abierto el documento y su trabajador.",
+                "suggestions": ["Abrir documento RRHH"],
+                "cards": [{"title": "Falta documento RRHH", "summary": "No hay documento RRHH abierto en el contexto actual.", "priority": "alta", "impact_area": "rrhh"}],
+            }
+        patch = dict(data.get("patch") or {}) if isinstance(data.get("patch"), dict) else {}
+        attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="rrhh")
+        if attachment:
+            patch.setdefault("doc_key", str(attachment.get("key") or "").strip())
+            patch.setdefault("doc_url", str(attachment.get("public_url") or "").strip())
+            patch.setdefault("nombre", str(attachment.get("filename") or "").strip())
+        if not patch:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Puedo actualizar el documento RRHH abierto, pero necesito un adjunto o cambios concretos.",
+                "suggestions": ["Adjuntar documento", "Indicar caducidad"],
+                "cards": [{"title": "Sin cambios RRHH", "summary": "No hay patch ni adjunto para el documento abierto.", "priority": "media", "impact_area": "rrhh"}],
+            }
+        return {"ok": True, "action_id": "update_current_rrhh_document", "action_payload": {"documento_id": documento_id, "persona_id": persona_id, "patch": patch}}
+    if process_key == "community_update":
+        comunidad_id = str(data.get("comunidad_id") or context.get("current_community_id") or "").strip()
+        patch = dict(data.get("patch") or {}) if isinstance(data.get("patch"), dict) else {}
+        if not comunidad_id:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Para actualizar una comunidad necesito que la comunidad esté abierta en el contexto actual.",
+                "suggestions": ["Abrir comunidad"],
+                "cards": [{"title": "Falta comunidad", "summary": "No hay comunidad abierta en el contexto actual.", "priority": "alta", "impact_area": "fincas"}],
+            }
+        if not patch:
+            return {
+                "ok": True,
+                "guided": True,
+                "message": "Puedo actualizar la comunidad abierta, pero necesito una cuota, dirección, estado o algún cambio concreto.",
+                "suggestions": ["Indicar cuota", "Indicar dirección"],
+                "cards": [{"title": "Sin cambios de comunidad", "summary": "No hay patch definido para la comunidad abierta.", "priority": "media", "impact_area": "fincas"}],
+            }
+        return {"ok": True, "action_id": "update_current_community", "action_payload": {"comunidad_id": comunidad_id, "patch": patch}}
+    return {
+        "ok": True,
+        "guided": True,
+        "message": "Ese proceso todavía no tiene ejecución directa desde el catálogo. Lo dejo en modo guiado o supervisado.",
+        "suggestions": ["Operar ahora", "Autorrevisar dominio"],
+        "cards": [{"title": "Proceso guiado", "summary": str(process_key or "Proceso").strip(), "priority": "media", "impact_area": _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or "") or "operativo"}],
+    }
+
+
 def _workspace_internal_copilot_process_capability_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -44176,6 +44373,22 @@ def _workspace_internal_copilot_process_capability_reply(conn, workspace_id, mes
     mode_groups = {"directo": [], "guiado": [], "supervisado": []}
     for item in processes:
         mode_groups.setdefault(str(item.get("mode") or "guiado").strip(), []).append(str(item.get("label") or "").strip())
+    actions = [
+        {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": domain}},
+        {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
+    ]
+    for item in processes[:6]:
+        if str(item.get("mode") or "").strip() != "directo":
+            continue
+        actions.append(
+            {
+                "id": "run_catalog_process",
+                "label": str(item.get("label") or "Ejecutar proceso").strip(),
+                "requires_confirmation": True,
+                "confirm_text": f"Se ejecutará el proceso {str(item.get('label') or '').strip()} con el contexto visible actual.",
+                "payload": {"process_id": str(item.get("id") or "").strip(), "context": dict(context or {}), "message": str(message or "").strip()},
+            }
+        )
     return {
         "ok": True,
         "intent": "process_capabilities",
@@ -44200,10 +44413,7 @@ def _workspace_internal_copilot_process_capability_reply(conn, workspace_id, mes
                 "impact_area": domain,
             },
         ],
-        "actions": [
-            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": domain}},
-            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
-        ],
+        "actions": actions,
         "suggestions": ["Operar ahora", "Qué hago ahora", "Centro IA"],
         "sources": ["verifika2_intelligence_layer", "workspace_process_supervisor"],
     }
@@ -47612,6 +47822,45 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         payload=payload,
         now=now,
     )
+    if action_text == "run_catalog_process":
+        process_id = str(payload.get("process_id") or "").strip()
+        prepared = _workspace_internal_copilot_prepare_catalog_process(
+            conn,
+            workspace_text,
+            empresa_id,
+            process_id,
+            payload,
+            actor=actor,
+        )
+        if prepared.get("guided"):
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "executed_process": process_id,
+                "message": str(prepared.get("message") or "Proceso guiado listo.").strip(),
+                "cards": list(prepared.get("cards") or []),
+                "suggestions": list(prepared.get("suggestions") or []),
+            }
+        if prepared.get("error"):
+            return prepared
+        delegated_action = str(prepared.get("action_id") or "").strip()
+        delegated_payload = prepared.get("action_payload") if isinstance(prepared.get("action_payload"), dict) else {}
+        result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            delegated_action,
+            delegated_payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        )
+        if result.get("ok"):
+            result = dict(result)
+            result["action_id"] = action_text
+            result["executed_process"] = process_id
+            result["delegated_action"] = delegated_action
+            result["message"] = f"Proceso {process_id} ejecutado. {str(result.get('message') or '').strip()}".strip()
+        return result
     if action_text == "create_task":
         title = str(payload.get("title") or "").strip()
         if not title:

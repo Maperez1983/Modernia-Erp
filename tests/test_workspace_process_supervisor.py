@@ -2723,6 +2723,52 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply.get("intent"), "process_capabilities")
         self.assertTrue(any(str(card.get("title") or "") == "Procesos ejecutables" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_catalog_process" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_run_catalog_process_executes_renta_attach(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, telefono, created_at, updated_at) VALUES ('cproc1', 'Cliente Proceso', '90909090Z', 'proc@test.local', '+34600999000', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio) VALUES ('ceproc1', 'cproc1', 'e1', 'gestoria')")
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        original_preview = server._workspace_internal_copilot_preview_renta
+        server._workspace_internal_copilot_preview_renta = lambda conn, attachment, actor=None: {"ejercicio": "2025"}
+        try:
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "run_catalog_process",
+                {
+                    "process_id": "renta_attach",
+                    "context": {
+                        "current_client_id": "cproc1",
+                        "attachments": [{"key": "rentas/proc1.pdf", "public_url": "", "filename": "renta-2025.pdf", "content_type": "application/pdf"}],
+                    },
+                },
+                empresa_id="e1",
+                actor={"user_id": "u1", "usuario": "QA"},
+                now="2026-06-21T09:00:00Z",
+            )
+        finally:
+            server._workspace_internal_copilot_preview_renta = original_preview
+        cg = self.conn.execute("SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = 'cproc1'").fetchone()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "run_catalog_process")
+        self.assertEqual(result["executed_process"], "renta_attach")
+        self.assertIsNotNone(cg)
+
+    def test_internal_copilot_run_catalog_process_guides_when_context_missing(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_catalog_process",
+            {"process_id": "renta_attach", "context": {}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-21T09:05:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "run_catalog_process")
+        self.assertEqual(result["executed_process"], "renta_attach")
+        self.assertIn("cliente", str(result.get("message") or "").lower())
 
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
