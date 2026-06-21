@@ -41868,6 +41868,11 @@ def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message
         ],
         "actions": [
             {
+                "id": "prepare_architecture_decision",
+                "label": "Preparar decisión técnica",
+                "payload": {"plan": plan_payload},
+            },
+            {
                 "id": "prepare_implementation_task",
                 "label": "Crear tarea de implementación",
                 "payload": {"plan": plan_payload},
@@ -41892,6 +41897,88 @@ def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message
         ],
         "suggestions": ["Crear tarea técnica", "Preparar bundle técnico", "Qué riesgo tiene"],
         "sources": ["implementation_planner", "change_impact_map", "workspace_process_supervisor"],
+    }
+
+
+def _workspace_internal_copilot_architecture_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("arquitectura", "diseno", "diseño", "enfoque", "tradeoff", "alternativa", "decision tecnica", "decisión técnica")):
+        return None
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip()
+    options = _workspace_internal_copilot_implementation_options(domain=domain, message=message)
+    recommended = next((item for item in options if str(item.get("id") or "") == "balanced"), options[0] if options else {})
+    decision = {
+        "context": str(message or "").strip(),
+        "domain": domain,
+        "recommended_option": recommended,
+        "alternatives": options,
+        "decision": (
+            f"Para {domain} conviene una implementación equilibrada: "
+            "cambio dirigido, test de regresión y mejora local de consistencia sin abrir refactor amplio salvo necesidad."
+        ),
+        "risks": [
+            "abrir demasiado alcance en frontend y backend a la vez",
+            "tocar módulos compartidos sin cobertura dirigida",
+            "dejar la mejora sin revalidación funcional del flujo afectado",
+        ],
+    }
+    return {
+        "ok": True,
+        "intent": "architecture_decision",
+        "answer": f"He preparado una decisión técnica para {domain} con alternativa recomendada y riesgos principales.",
+        "cards": [
+            {
+                "title": "Decisión técnica recomendada",
+                "summary": str(decision.get("decision") or "").strip(),
+                "priority": "alta",
+                "impact_area": "arquitectura",
+            },
+            *[
+                {
+                    "title": f"Alternativa: {str(item.get('title') or '').strip()}",
+                    "summary": f"{str(item.get('summary') or '').strip()} · {str(item.get('tradeoff') or '').strip()}",
+                    "priority": "media",
+                    "impact_area": "arquitectura",
+                }
+                for item in options[:3]
+            ],
+            {
+                "title": "Riesgos a vigilar",
+                "summary": " | ".join(list(decision.get("risks") or [])[:3]),
+                "priority": "media",
+                "impact_area": "arquitectura",
+            },
+        ],
+        "actions": [
+            {
+                "id": "prepare_architecture_decision",
+                "label": "Guardar decisión técnica",
+                "payload": {"plan": decision},
+            },
+            {
+                "id": "prepare_implementation_task",
+                "label": "Crear tarea de implementación",
+                "payload": {
+                    "plan": {
+                        "domain": domain,
+                        "assigned_mode": "supervisor",
+                        "diagnosis": str(decision.get("decision") or "").strip(),
+                        "patch_outline": [
+                            "aplicar el enfoque recomendado",
+                            "añadir validación dirigida",
+                            "mantener alcance controlado",
+                        ],
+                        "probable_files": list(scope.get("probable_files") or []),
+                        "probable_tests": list(scope.get("probable_tests") or []),
+                        "implementation_options": options,
+                        "recommended_option": recommended,
+                    }
+                },
+            },
+        ],
+        "suggestions": ["Guardar decisión técnica", "Crear tarea de implementación", "Preparar bundle técnico"],
+        "sources": ["architecture_review", "implementation_planner"],
     }
 
 
@@ -45950,6 +46037,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if platform_reply:
         response.update(platform_reply)
         return _finish(response)
+    architecture_reply = _workspace_internal_copilot_architecture_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if architecture_reply:
+        response.update(architecture_reply)
+        return _finish(response)
     implementation_reply = _workspace_internal_copilot_implementation_reply(
         conn,
         workspace_text,
@@ -47056,6 +47155,63 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["implementation_planner", "task_planner"],
             "suggestions": ["Preparar bundle técnico", "Validar bundle", "Aplicar implementación controlada"],
+        }
+    if action_text == "prepare_architecture_decision":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        decision_text = str(plan.get("decision") or plan.get("diagnosis") or f"Decisión técnica pendiente para {domain}.").strip()
+        alternatives = [dict(item) for item in list(plan.get("alternatives") or plan.get("implementation_options") or [])[:4] if isinstance(item, dict)]
+        recommended = dict(plan.get("recommended_option") or {})
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Arquitectura:{domain}] Decisión técnica",
+            detail=decision_text,
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="architecture_review",
+            meta={
+                "domain": domain,
+                "decision": decision_text,
+                "alternatives": alternatives,
+                "recommended_option": recommended,
+                "context": str(plan.get("context") or "").strip(),
+                "risks": list(plan.get("risks") or []),
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="architecture_decision",
+            title=f"Decisión técnica {domain}",
+            content=decision_text,
+            priority="alta",
+            meta={
+                "task_id": task_id,
+                "domain": domain,
+                "recommended_option": recommended,
+                "alternatives": alternatives,
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He guardado la decisión técnica para {domain}.",
+            "cards": [
+                {
+                    "title": "Decisión técnica guardada",
+                    "summary": f"{decision_text[:360]}",
+                    "priority": "alta",
+                    "impact_area": "arquitectura",
+                }
+            ],
+            "sources": ["architecture_review", "task_planner", "workspace_memory"],
+            "suggestions": ["Crear tarea de implementación", "Preparar bundle técnico", "Qué hago ahora"],
         }
     if action_text == "prepare_code_autofix_bundle":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}

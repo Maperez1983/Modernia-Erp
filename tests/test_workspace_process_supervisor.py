@@ -3532,7 +3532,23 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply.get("intent"), "implementation_plan")
         self.assertTrue(any(str(action.get("id") or "") == "prepare_implementation_task" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_architecture_decision" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Enfoque recomendado" for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_architecture_reply_prepares_decision(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué enfoque de arquitectura conviene para mejorar gestoría sin abrir demasiado alcance",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "architecture_decision")
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_architecture_decision" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Decisión técnica recomendada" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
@@ -3598,6 +3614,35 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(task["source"], "implementation_plan")
         self.assertEqual(meta.get("domain"), "gestoria")
         self.assertTrue(list(meta.get("implementation_options") or []))
+
+    def test_internal_copilot_action_prepare_architecture_decision_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_architecture_decision",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "decision": "Usar una implementación equilibrada para no abrir demasiado alcance.",
+                    "alternatives": [{"id": "minimal", "title": "Ajuste mínimo"}],
+                    "recommended_option": {"id": "balanced", "title": "Implementación equilibrada"},
+                    "risks": ["tocar demasiadas capas a la vez"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:03:00Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(task["source"], "architecture_review")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertTrue(list(meta.get("alternatives") or []))
 
     def test_internal_copilot_action_prepare_code_autofix_bundle_returns_commands(self):
         result = server.perform_workspace_internal_copilot_action(
