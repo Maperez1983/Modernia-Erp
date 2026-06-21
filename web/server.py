@@ -41363,6 +41363,44 @@ def _workspace_internal_copilot_build_patch_diff_stub(*, probable_files=None, pa
     return "*** Begin Patch\n" + "\n".join(blocks) + "\n*** End Patch"
 
 
+def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode="supervisor", diagnosis="", patch_outline=None, probable_files=None, probable_tests=None):
+    probable_files = _normalize_text_list(probable_files or [], max_items=8, max_chars=180)
+    probable_tests = _normalize_text_list(probable_tests or [], max_items=8, max_chars=180)
+    patch_outline = _normalize_text_list(patch_outline or [], max_items=8, max_chars=220)
+    branch_slug = re.sub(r"[^a-z0-9_.-]+", "-", normalize_lookup_text(domain or "copilot-fix").lower()).strip("-") or "copilot-fix"
+    branch_name = f"copilot-fix/{branch_slug}-{date.today().isoformat()}"
+    commands = []
+    python_files = [item for item in probable_files if str(item).endswith(".py")]
+    if python_files:
+        commands.append("python3 -m py_compile " + " ".join(python_files[:6]))
+    if any(str(item).endswith("web/app.js") for item in probable_files):
+        commands.append("node --check web/app.js")
+    if probable_tests:
+        commands.append("./.venv/bin/python -m unittest " + " ".join(probable_tests[:6]))
+    if not commands:
+        commands.append("./.venv/bin/python -m unittest tests.test_workspace_process_supervisor")
+    return {
+        "branch_name": branch_name,
+        "assigned_mode": str(assigned_mode or "supervisor").strip() or "supervisor",
+        "diagnosis": str(diagnosis or "").strip(),
+        "probable_files": probable_files,
+        "probable_tests": probable_tests,
+        "patch_outline": patch_outline,
+        "patch_prompt": _workspace_internal_copilot_build_patch_prompt(
+            domain=domain,
+            diagnosis=diagnosis,
+            patch_outline=patch_outline,
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        ),
+        "proposed_diff": _workspace_internal_copilot_build_patch_diff_stub(
+            probable_files=probable_files,
+            patch_outline=patch_outline,
+        ),
+        "validation_commands": commands,
+    }
+
+
 def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("autofix", "arregla el codigo", "arregla el código", "corrige el codigo", "corrige el código", "parche", "fix bug", "toca codigo", "toca código", "repara el codigo", "repara el código")):
@@ -41451,17 +41489,15 @@ def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, em
         "probable_files": list(heuristics.get("probable_files") or []),
         "probable_tests": list(heuristics.get("probable_tests") or []),
     }
-    plan_payload["patch_prompt"] = _workspace_internal_copilot_build_patch_prompt(
+    bundle = _workspace_internal_copilot_build_codefix_bundle(
         domain=domain,
+        assigned_mode=assigned_mode,
         diagnosis=heuristics["diagnosis"],
         patch_outline=plan_payload["patch_outline"],
         probable_files=plan_payload["probable_files"],
         probable_tests=plan_payload["probable_tests"],
     )
-    plan_payload["proposed_diff"] = _workspace_internal_copilot_build_patch_diff_stub(
-        probable_files=plan_payload["probable_files"],
-        patch_outline=plan_payload["patch_outline"],
-    )
+    plan_payload.update(bundle)
     return {
         "ok": True,
         "intent": "code_autofix",
@@ -41494,11 +41530,22 @@ def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, em
                 "priority": "media",
                 "impact_area": "codigo",
             },
+            {
+                "title": "Validación propuesta",
+                "summary": " | ".join(list(plan_payload.get("validation_commands") or [])[:3])[:500],
+                "priority": "media",
+                "impact_area": "codigo",
+            },
         ],
         "actions": [
             {
                 "id": "prepare_code_autofix_task",
                 "label": "Crear tarea técnica",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_code_autofix_bundle",
+                "label": "Preparar bundle de ejecución",
                 "payload": {"plan": plan_payload},
             },
             {
@@ -45764,17 +45811,17 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
         probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
         probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
-        patch_prompt = str(plan.get("patch_prompt") or "").strip() or _workspace_internal_copilot_build_patch_prompt(
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
             domain=domain,
+            assigned_mode=assigned_mode,
             diagnosis=diagnosis,
             patch_outline=patch_outline,
             probable_files=probable_files,
             probable_tests=probable_tests,
         )
-        proposed_diff = str(plan.get("proposed_diff") or "").strip() or _workspace_internal_copilot_build_patch_diff_stub(
-            probable_files=probable_files,
-            patch_outline=patch_outline,
-        )
+        patch_prompt = str(plan.get("patch_prompt") or bundle.get("patch_prompt") or "").strip()
+        proposed_diff = str(plan.get("proposed_diff") or bundle.get("proposed_diff") or "").strip()
+        validation_commands = list(plan.get("validation_commands") or bundle.get("validation_commands") or [])
         risk_level = str(plan.get("risk_level") or "medium").strip() or "medium"
         title = f"[Código:{domain}] Reparación guiada"
         detail = (
@@ -45800,6 +45847,8 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "patch_outline": patch_outline,
                 "patch_prompt": patch_prompt,
                 "proposed_diff": proposed_diff,
+                "validation_commands": validation_commands,
+                "branch_name": str(plan.get("branch_name") or bundle.get("branch_name") or "").strip(),
             },
             now=now,
         )
@@ -45819,6 +45868,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "probable_tests": probable_tests,
                 "patch_prompt": patch_prompt,
                 "proposed_diff": proposed_diff,
+                "validation_commands": validation_commands,
             },
             now=now,
         )
@@ -45846,9 +45896,76 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                     "priority": "media",
                     "impact_area": "codigo",
                 },
+                {
+                    "title": "Comandos de validación",
+                    "summary": " | ".join(validation_commands[:3])[:500],
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
             ],
             "sources": ["internal_copilot_action", "task_planner", "workspace_memory"],
             "suggestions": ["Pasar a supervisor", "Qué hago ahora", "Bandeja unificada"],
+        }
+    if action_text == "prepare_code_autofix_bundle":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or ("legal" if domain == "rrhh" else "supervisor")).strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or "Plan de reparación de código pendiente.").strip()
+        patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=patch_outline,
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="code_autofix_bundle",
+            title=f"Bundle de reparación {domain}",
+            content=diagnosis,
+            priority="media",
+            meta=bundle,
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He preparado el bundle de ejecución para {domain}.",
+            "bundle": bundle,
+            "cards": [
+                {
+                    "title": "Rama sugerida",
+                    "summary": str(bundle.get("branch_name") or "").strip(),
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+                {
+                    "title": "Prompt de parche",
+                    "summary": str(bundle.get("patch_prompt") or "")[:500],
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+                {
+                    "title": "Comandos de validación",
+                    "summary": " | ".join(list(bundle.get("validation_commands") or [])[:4])[:500],
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+                {
+                    "title": "Diff propuesto",
+                    "summary": str(bundle.get("proposed_diff") or "")[:500],
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+            ],
+            "sources": ["internal_copilot_action", "workspace_memory"],
+            "suggestions": ["Crear tarea técnica", "Pasar a supervisor", "Qué hago ahora"],
         }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)

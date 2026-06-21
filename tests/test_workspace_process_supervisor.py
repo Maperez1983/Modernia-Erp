@@ -3344,6 +3344,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply.get("intent"), "code_autofix")
         self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_task" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Diff propuesto" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
@@ -3377,6 +3378,32 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(meta.get("assigned_mode"), "supervisor")
         self.assertIn("*** Begin Patch", str(meta.get("proposed_diff") or ""))
         self.assertIn("Ficheros probables", str(meta.get("patch_prompt") or ""))
+        self.assertTrue(list(meta.get("validation_commands") or []))
+
+    def test_internal_copilot_action_prepare_code_autofix_bundle_returns_commands(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_code_autofix_bundle",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "assigned_mode": "supervisor",
+                    "diagnosis": "Fallo en flujo de factura sin asiento.",
+                    "patch_outline": ["corregir handler", "añadir test de regresión"],
+                    "probable_files": ["web/server.py", "web/app.js"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:05:00Z",
+        )
+        self.assertTrue(result["ok"])
+        bundle = result.get("bundle") or {}
+        self.assertIn("copilot-fix/gestoria-", str(bundle.get("branch_name") or ""))
+        self.assertTrue(list(bundle.get("validation_commands") or []))
+        self.assertIn("*** Begin Patch", str(bundle.get("proposed_diff") or ""))
 
 
 if __name__ == "__main__":
