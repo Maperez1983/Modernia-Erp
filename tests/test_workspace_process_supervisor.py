@@ -2708,6 +2708,21 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Perfil de foco" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
+        self.assertTrue(any("Procesos ejecutables" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_process_capability_reply_lists_domain_processes(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué procesos puedes ejecutar",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "process_capabilities")
+        self.assertTrue(any(str(card.get("title") or "") == "Procesos ejecutables" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(

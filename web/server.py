@@ -41542,6 +41542,7 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
     current_domain = _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or (context or {}).get("service_hint") or "")
     tooling = _workspace_internal_copilot_domain_tooling(current_domain)
     focus_profile = _workspace_internal_copilot_focus_profile(conn, workspace_id, actor=actor, limit=3)
+    processes = _workspace_internal_copilot_domain_processes(current_domain)
     current_entity = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
     pending_cards, _, pending_sources = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -41566,6 +41567,15 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
             {
                 "title": "Herramientas disponibles",
                 "summary": ", ".join(list(tooling.get("tools") or [])[:8]),
+                "priority": "media",
+                "impact_area": current_domain or "operativo",
+            }
+        )
+    if processes:
+        cards.append(
+            {
+                "title": "Procesos ejecutables",
+                "summary": " · ".join(f"{str(item.get('label') or '').strip()} ({str(item.get('mode') or '').strip()})" for item in processes[:5]),
                 "priority": "media",
                 "impact_area": current_domain or "operativo",
             }
@@ -44107,6 +44117,98 @@ def _workspace_internal_copilot_focus_profile(conn, workspace_id, *, actor=None,
     }
 
 
+def _workspace_internal_copilot_process_catalog():
+    return {
+        "gestoria": [
+            {"id": "renta_attach", "label": "Cargar renta", "mode": "directo"},
+            {"id": "factura_ocr", "label": "Procesar factura OCR", "mode": "directo"},
+            {"id": "dashboard_reconcile", "label": "Reconciliar dashboard gestoría", "mode": "supervisado"},
+        ],
+        "seguros": [
+            {"id": "seguro_create", "label": "Alta de póliza", "mode": "directo"},
+            {"id": "seguro_receipts", "label": "Revisión de recibos", "mode": "guiado"},
+            {"id": "seguro_dashboard", "label": "Reconciliar dashboard de seguros", "mode": "supervisado"},
+        ],
+        "financiaciones": [
+            {"id": "hipoteca_create", "label": "Alta de hipoteca", "mode": "directo"},
+            {"id": "hipoteca_revalidate", "label": "Revalidar hipotecas incompletas", "mode": "guiado"},
+        ],
+        "rrhh": [
+            {"id": "rrhh_document_update", "label": "Actualizar documento RRHH", "mode": "directo"},
+            {"id": "rrhh_expiry_review", "label": "Revisión de caducidades", "mode": "guiado"},
+        ],
+        "fincas": [
+            {"id": "community_update", "label": "Actualizar comunidad", "mode": "directo"},
+            {"id": "community_quota_review", "label": "Revisión de cuotas incoherentes", "mode": "guiado"},
+        ],
+        "inmobiliaria": [
+            {"id": "client_open_update", "label": "Abrir y actualizar cliente", "mode": "directo"},
+            {"id": "workflow_supervision", "label": "Supervisión de flujo inmobiliario", "mode": "supervisado"},
+        ],
+    }
+
+
+def _workspace_internal_copilot_domain_processes(domain=""):
+    catalog = _workspace_internal_copilot_process_catalog()
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    return list(catalog.get(domain_key, []))
+
+
+def _workspace_internal_copilot_process_capability_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "que procesos puedes ejecutar",
+            "qué procesos puedes ejecutar",
+            "que puedes ejecutar",
+            "qué puedes ejecutar",
+            "procesos ejecutables",
+            "catalogo de procesos",
+            "catálogo de procesos",
+        )
+    ):
+        return None
+    domain = _workspace_internal_copilot_normalize_domain(
+        str((context or {}).get("current_crm") or (context or {}).get("service_hint") or service_hint or "").strip()
+    ) or "gestoria"
+    processes = _workspace_internal_copilot_domain_processes(domain)
+    mode_groups = {"directo": [], "guiado": [], "supervisado": []}
+    for item in processes:
+        mode_groups.setdefault(str(item.get("mode") or "guiado").strip(), []).append(str(item.get("label") or "").strip())
+    return {
+        "ok": True,
+        "intent": "process_capabilities",
+        "answer": f"He cargado los procesos ejecutables del dominio {domain}.",
+        "cards": [
+            {
+                "title": "Procesos ejecutables",
+                "summary": " · ".join(f"{str(item.get('label') or '').strip()} ({str(item.get('mode') or '').strip()})" for item in processes[:6]),
+                "priority": "alta",
+                "impact_area": domain,
+            },
+            {
+                "title": "Capacidad directa",
+                "summary": ", ".join(mode_groups.get("directo") or []) or "Sin procesos directos ahora mismo",
+                "priority": "media",
+                "impact_area": domain,
+            },
+            {
+                "title": "Capacidad guiada o supervisada",
+                "summary": ", ".join((mode_groups.get("guiado") or []) + (mode_groups.get("supervisado") or [])) or "Sin procesos guiados ahora mismo",
+                "priority": "media",
+                "impact_area": domain,
+            },
+        ],
+        "actions": [
+            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": domain}},
+            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
+        ],
+        "suggestions": ["Operar ahora", "Qué hago ahora", "Centro IA"],
+        "sources": ["verifika2_intelligence_layer", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_stuck_signal(conn, workspace_id, *, actor=None, domain="", limit=6):
     rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(6, int(limit or 6)))
     domain_key = _workspace_internal_copilot_normalize_domain(domain)
@@ -46365,6 +46467,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     current_view = str(context_map.get("current_workspace_view") or "").strip() or "operations"
     current_crm = str(context_map.get("current_crm") or context_map.get("service_hint") or "").strip() or current_view
     focus_profile = _workspace_internal_copilot_focus_profile(conn, workspace_id, actor=actor, limit=3)
+    processes = _workspace_internal_copilot_domain_processes(current_crm)
     briefing = _workspace_internal_copilot_briefing_reply(
         conn,
         workspace_id,
@@ -46395,6 +46498,16 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                 "summary": str(focus_profile.get("summary") or "").strip(),
                 "priority": "media",
                 "impact_area": "copilot",
+            },
+        )
+    if mode == "operator" and processes:
+        cards.insert(
+            0,
+            {
+                "title": "Procesos ejecutables",
+                "summary": " · ".join(f"{str(item.get('label') or '').strip()} ({str(item.get('mode') or '').strip()})" for item in processes[:5]),
+                "priority": "media",
+                "impact_area": current_crm or "operativo",
             },
         )
     current_entity_priority = _workspace_internal_copilot_current_entity_priority(conn, workspace_id, empresa_id=empresa_id, context=context_map)
@@ -46721,6 +46834,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     platform_reply = _workspace_internal_copilot_platform_reply(conn, workspace_text, message_text, empresa_id=company_text, actor=actor, context=context or {})
     if platform_reply:
         response.update(platform_reply)
+        return _finish(response)
+    process_capability_reply = _workspace_internal_copilot_process_capability_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if process_capability_reply:
+        response.update(process_capability_reply)
         return _finish(response)
     strategy_reply = _workspace_internal_copilot_strategy_reply(
         conn,
