@@ -915,7 +915,61 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("He priorizado la ficha actual", str(result.get("message") or ""))
         self.assertTrue(any(str(card.get("title") or "") == "Plan operativo elegido" for card in (result.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_operator_sequence" for action in (result.get("actions") or [])))
-        self.assertTrue(any(str(action.get("id") or "") == "revalidate_current_entity" for action in (result.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") in {"revalidate_current_entity", "run_current_entity_microflow"} for action in (result.get("actions") or [])))
+
+    def test_internal_copilot_action_run_current_entity_microflow(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, estado, created_at, updated_at
+            ) VALUES (
+              'hip-entity-1', 'e1', 'Cliente Hipoteca', 'c1', 'BBVA', 0, 0, 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload, dedupe_key,
+              acknowledged, created_at, updated_at
+            ) VALUES (
+              'wps-entity-micro-1', 'ws1', 'e1', 'financiaciones', 'hipoteca_update', 'hipoteca', 'hip-entity-1', 'u1',
+              'QA', 'open', 'warning', 'Hipoteca incompleta', 'Faltan importes base en la ficha visible',
+              '[]', '[]', '{}', 'dup-entity-micro-1', 0, '2026-06-21T09:00:00Z', '2026-06-21T09:00:00Z'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_current_entity_microflow",
+            {"current_crm": "fin", "crm": "fin", "current_hipoteca_id": "hip-entity-1", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T11:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("action_id"), "run_current_entity_microflow")
+        self.assertTrue(any(str(action.get("id") or "") == "run_operator_sequence" for action in (result.get("actions") or [])))
+        self.assertTrue(result.get("microflow_type"))
+        self.assertIn("microflujo de la ficha actual", str(result.get("message") or "").lower())
 
     def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
         self.conn.execute(
@@ -2629,6 +2683,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["action_id"], "prime_operator_console")
         self.assertEqual(reply["mode"], "operator")
         self.assertTrue(reply["actions"])
+        self.assertTrue(any(str(card.get("title") or "") == "Microflujo de la ficha actual" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_current_entity_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Prioridad de la ficha actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (reply.get("actions") or [])))

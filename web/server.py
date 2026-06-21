@@ -41433,6 +41433,28 @@ def _workspace_internal_copilot_current_entity_priority(conn, workspace_id, *, e
     }
 
 
+def _workspace_internal_copilot_current_entity_microflow(conn, workspace_id, *, empresa_id="", context=None):
+    priority = _workspace_internal_copilot_current_entity_priority(conn, workspace_id, empresa_id=empresa_id, context=context)
+    if not priority:
+        return {}
+    domain = str(priority.get("domain") or "").strip()
+    cards, actions, _ = _workspace_internal_copilot_collect_domain_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        empresa_id=str(empresa_id or "").strip(),
+        domain=domain,
+        context=context if isinstance(context, dict) else {},
+    )
+    microflow = _workspace_internal_copilot_detect_domain_microflow(domain, cards=cards, actions=actions) or {}
+    if not microflow:
+        return {}
+    return {
+        **priority,
+        "microflow": microflow,
+        "checklist": _workspace_internal_copilot_microflow_checklist(str(microflow.get("microflow_type") or "").strip()),
+    }
+
+
 def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -45373,6 +45395,35 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                 "impact_area": str(current_entity_priority.get("domain") or "operativo").strip() or "operativo",
             },
         )
+    current_entity_microflow = _workspace_internal_copilot_current_entity_microflow(conn, workspace_id, empresa_id=empresa_id, context=context_map)
+    if current_entity_microflow:
+        microflow = current_entity_microflow.get("microflow") or {}
+        checklist = list(current_entity_microflow.get("checklist") or [])
+        cards.insert(
+            0,
+            {
+                "title": "Microflujo de la ficha actual",
+                "summary": "\n".join(
+                    item
+                    for item in [
+                        str(microflow.get("title") or "Microflujo operativo").strip(),
+                        str(microflow.get("summary") or "").strip(),
+                        f"Checklist: {' | '.join(checklist[:4])}" if checklist else "",
+                    ]
+                    if item
+                )[:500],
+                "priority": "alta",
+                "impact_area": str(current_entity_microflow.get("domain") or "operativo").strip() or "operativo",
+            },
+        )
+        actions.insert(
+            0,
+            {
+                "id": "run_current_entity_microflow",
+                "label": "Resolver ficha actual",
+                "payload": dict(context_map or {}),
+            },
+        )
     strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=3)
     next_microflow = {}
     if mode == "operator":
@@ -46967,6 +47018,107 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         diagnose["updated"] = updated
         diagnose["resolved"] = resolved
         return diagnose
+    if action_text == "run_current_entity_microflow":
+        entity_microflow = _workspace_internal_copilot_current_entity_microflow(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            context=payload,
+        )
+        if not entity_microflow:
+            return _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+        revalidation = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "revalidate_current_entity",
+            payload,
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        ) or {}
+        refreshed_priority = _workspace_internal_copilot_current_entity_priority(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            context=payload,
+        )
+        if not refreshed_priority:
+            result = dict(revalidation)
+            result["action_id"] = action_text
+            result["message"] = "La ficha actual ha quedado limpia tras la revalidación del microflujo."
+            result["auto_closed"] = True
+            return result
+        microflow = entity_microflow.get("microflow") or {}
+        domain_result = perform_workspace_internal_copilot_action(
+            conn,
+            workspace_text,
+            "run_domain_microflow",
+            {
+                **dict(payload or {}),
+                "domain": str(entity_microflow.get("domain") or "").strip(),
+                "microflow_type": str(microflow.get("microflow_type") or "").strip(),
+            },
+            empresa_id=empresa_id,
+            actor=actor,
+            now=now,
+        ) or {}
+        followup = _workspace_internal_copilot_diagnose_current_entity_reply(
+            conn,
+            workspace_text,
+            empresa_id=empresa_id,
+            actor=actor,
+            context=payload,
+        )
+        result_cards = []
+        result_cards.extend(list(revalidation.get("cards") or [])[:3])
+        result_cards.extend(list(domain_result.get("cards") or [])[:4])
+        result_cards.extend(list(followup.get("cards") or [])[:3])
+        result_actions = []
+        seen_actions = set()
+        for action in list(followup.get("actions") or [])[:4] + [
+            {
+                "id": "run_operator_sequence",
+                "label": "Seguir con el dominio",
+                "payload": {**dict(payload or {}), "skip_current_entity_priority": True},
+            },
+            {
+                "id": "close_loop_safe",
+                "label": "Cerrar ciclo",
+                "requires_confirmation": True,
+                "confirm_text": "Se lanzará un cierre completo con documentación del resultado.",
+                "payload": {"crm": str(entity_microflow.get("domain") or "").strip(), "mode": "operator"},
+            },
+        ]:
+            if not isinstance(action, dict):
+                continue
+            action_key = json.dumps(
+                {"id": str(action.get("id") or "").strip(), "payload": action.get("payload") or {}},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if action_key in seen_actions:
+                continue
+            seen_actions.add(action_key)
+            result_actions.append(action)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "mode": "operator",
+            "message": (
+                f"He ejecutado el microflujo de la ficha actual en {str(entity_microflow.get('domain') or 'el dominio actual').strip()}. "
+                f"{str(domain_result.get('message') or revalidation.get('message') or '').strip()}"
+            ).strip(),
+            "updated": int(revalidation.get("updated") or 0) + int(domain_result.get("updated") or 0),
+            "resolved": int(revalidation.get("resolved") or 0) + int(domain_result.get("resolved") or 0),
+            "cards": result_cards[:8],
+            "actions": result_actions[:8],
+            "sources": list(dict.fromkeys(["internal_copilot_action", *(revalidation.get("sources") or []), *(domain_result.get("sources") or []), *(followup.get("sources") or [])]))[:10],
+            "suggestions": ["Cerrar ciclo", "Diagnosticar esta ficha", "Seguir con el dominio"],
+            "refresh_supervisor": True,
+            "navigation": domain_result.get("navigation") or revalidation.get("navigation"),
+            "microflow_type": str(microflow.get("microflow_type") or "").strip(),
+            "auto_closed": bool(domain_result.get("auto_closed") or domain_result.get("close_loop_result")),
+        }
     if action_text == "promote_legal_updates_to_tasks":
         area = _workspace_internal_copilot_legal_area_for_context(str(payload.get("area") or payload.get("crm") or "").strip(), payload)
         candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area=area, limit=6)
@@ -47044,10 +47196,17 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             domain = str(current_entity_priority.get("domain") or "").strip() or _workspace_internal_copilot_normalize_domain(
                 str(payload.get("crm") or payload.get("service_hint") or payload.get("current_crm") or "").strip()
             )
+            entity_microflow = _workspace_internal_copilot_current_entity_microflow(
+                conn,
+                workspace_text,
+                empresa_id=empresa_id,
+                context=payload,
+            )
+            entity_action = "run_current_entity_microflow" if entity_microflow else "revalidate_current_entity"
             entity_result = perform_workspace_internal_copilot_action(
                 conn,
                 workspace_text,
-                "revalidate_current_entity",
+                entity_action,
                 payload,
                 empresa_id=empresa_id,
                 actor=actor,
@@ -47055,7 +47214,8 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ) or {}
             decision_summary = (
                 f"Prioridad explícita a la ficha actual de {str(summary.get('title') or domain or 'la entidad abierta').strip()}. "
-                f"Se ha atacado primero ese bloque antes del backlog general del dominio."
+                f"Se ha atacado primero ese bloque antes del backlog general del dominio"
+                + (" con microflujo específico de la ficha." if entity_microflow else " con revalidación directa.")
             )
             _workspace_internal_copilot_store_memory_note(
                 conn,
@@ -47070,6 +47230,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                     "entity_kind": str(summary.get("entity_kind") or "").strip(),
                     "entity_id": str(summary.get("entity_id") or "").strip(),
                     "decision_source": "current_entity_priority",
+                    "entity_action": entity_action,
                     "updated": int(entity_result.get("updated") or 0),
                     "resolved": int(entity_result.get("resolved") or 0),
                 },
