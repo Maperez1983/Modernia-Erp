@@ -41420,6 +41420,19 @@ def _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_id
     }
 
 
+def _workspace_internal_copilot_current_entity_priority(conn, workspace_id, *, empresa_id="", context=None):
+    summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
+    related = _workspace_internal_copilot_related_open_events(conn, workspace_id, summary)
+    if not summary or not related:
+        return {}
+    return {
+        "summary": summary,
+        "related": related,
+        "domain": _workspace_internal_copilot_normalize_domain(summary.get("domain") or ""),
+        "entity_kind": str(summary.get("entity_kind") or "").strip(),
+    }
+
+
 def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -45344,6 +45357,22 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     if current_entity:
         cards.insert(0, _workspace_internal_copilot_current_entity_card(current_entity))
         actions = [*_workspace_internal_copilot_current_entity_actions(current_entity), *actions]
+    current_entity_priority = _workspace_internal_copilot_current_entity_priority(conn, workspace_id, empresa_id=empresa_id, context=context_map)
+    if current_entity_priority:
+        summary = current_entity_priority.get("summary") or {}
+        related = list(current_entity_priority.get("related") or [])
+        cards.insert(
+            0,
+            {
+                "title": "Prioridad de la ficha actual",
+                "summary": (
+                    f"{str(summary.get('title') or 'Ficha actual').strip()} · "
+                    f"{len(related)} incidencia(s) abierta(s) ligadas a esta entidad."
+                )[:500],
+                "priority": "alta",
+                "impact_area": str(current_entity_priority.get("domain") or "operativo").strip() or "operativo",
+            },
+        )
     strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=3)
     next_microflow = {}
     if mode == "operator":
@@ -47002,6 +47031,95 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "suggestions": ["Agenda diaria", "Retomar", "Radar legal"],
         }
     if action_text == "run_operator_sequence":
+        current_entity_priority = {}
+        if not bool(payload.get("skip_current_entity_priority")):
+            current_entity_priority = _workspace_internal_copilot_current_entity_priority(
+                conn,
+                workspace_text,
+                empresa_id=empresa_id,
+                context=payload,
+            )
+        if current_entity_priority:
+            summary = current_entity_priority.get("summary") or {}
+            domain = str(current_entity_priority.get("domain") or "").strip() or _workspace_internal_copilot_normalize_domain(
+                str(payload.get("crm") or payload.get("service_hint") or payload.get("current_crm") or "").strip()
+            )
+            entity_result = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                "revalidate_current_entity",
+                payload,
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
+            decision_summary = (
+                f"Prioridad explícita a la ficha actual de {str(summary.get('title') or domain or 'la entidad abierta').strip()}. "
+                f"Se ha atacado primero ese bloque antes del backlog general del dominio."
+            )
+            _workspace_internal_copilot_store_memory_note(
+                conn,
+                workspace_text,
+                actor=actor,
+                memory_type="decision",
+                title=f"Decisión operativa {domain or 'entidad_actual'}",
+                content=decision_summary,
+                priority="alta",
+                meta={
+                    "domain": domain,
+                    "entity_kind": str(summary.get("entity_kind") or "").strip(),
+                    "entity_id": str(summary.get("entity_id") or "").strip(),
+                    "decision_source": "current_entity_priority",
+                    "updated": int(entity_result.get("updated") or 0),
+                    "resolved": int(entity_result.get("resolved") or 0),
+                },
+                now=now,
+            )
+            cards = [
+                {
+                    "title": "Plan operativo elegido",
+                    "summary": decision_summary,
+                    "priority": "alta",
+                    "impact_area": domain or "operativo",
+                },
+                *(list(entity_result.get("cards") or [])[:7]),
+            ]
+            actions = list(entity_result.get("actions") or [])[:6]
+            actions.extend(
+                [
+                    {
+                        "id": "run_operator_sequence",
+                        "label": "Seguir con el dominio",
+                        "payload": {**dict(payload or {}), "skip_current_entity_priority": True},
+                    },
+                    {
+                        "id": "close_loop_safe",
+                        "label": "Cerrar ciclo",
+                        "requires_confirmation": True,
+                        "confirm_text": "Se lanzará un cierre completo con documentación del resultado.",
+                        "payload": {"crm": domain, "mode": "operator"},
+                    },
+                ]
+            )
+            return {
+                "ok": True,
+                "action_id": action_text,
+                "mode": "operator",
+                "message": (
+                    f"He priorizado la ficha actual antes que el dominio general. "
+                    f"{str(entity_result.get('message') or '').strip()}"
+                ).strip(),
+                "updated": int(entity_result.get("updated") or 0),
+                "resolved": int(entity_result.get("resolved") or 0),
+                "cards": cards[:8],
+                "actions": actions[:8],
+                "sources": list(dict.fromkeys(["internal_copilot_action", *(entity_result.get("sources") or []), "workspace_memory"]))[:10],
+                "suggestions": ["Revalidar esta ficha", "Seguir con el dominio", "Cerrar ciclo"],
+                "refresh_supervisor": True,
+                "navigation": entity_result.get("navigation"),
+                "decision_source": "current_entity_priority",
+                "decision_rationale": decision_summary,
+            }
         domain = _workspace_internal_copilot_normalize_domain(str(payload.get("crm") or payload.get("service_hint") or payload.get("current_crm") or "").strip())
         cards, actions, sources = _workspace_internal_copilot_collect_domain_pending(
             conn,

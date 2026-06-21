@@ -885,6 +885,38 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any("Renta pendiente" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "revalidate_current_entity" for action in (result.get("actions") or [])))
 
+    def test_internal_copilot_run_operator_sequence_prioritizes_current_entity(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('cop-entity-1', 'Cliente Prioritario', '88888888T', 'prio@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload, dedupe_key,
+              acknowledged, created_at, updated_at
+            ) VALUES (
+              'wps-priority-1', 'ws1', 'e1', 'gestoria', 'renta_attach', 'cliente', 'cop-entity-1', 'u1',
+              'QA', 'open', 'warning', 'Cliente prioritario', 'Hay una renta pendiente ligada a la ficha visible',
+              '[]', '[]', '{}', 'dup-priority-1', 0, '2026-06-21T09:30:00Z', '2026-06-21T09:30:00Z'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_operator_sequence",
+            {"crm": "gestoria", "current_crm": "gestoria", "current_client_id": "cop-entity-1", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T11:20:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "operator")
+        self.assertEqual(result.get("decision_source"), "current_entity_priority")
+        self.assertIn("He priorizado la ficha actual", str(result.get("message") or ""))
+        self.assertTrue(any(str(card.get("title") or "") == "Plan operativo elegido" for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_operator_sequence" for action in (result.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "revalidate_current_entity" for action in (result.get("actions") or [])))
+
     def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
         self.conn.execute(
             """
@@ -2571,6 +2603,19 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
             )
             """
         )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload, dedupe_key,
+              acknowledged, created_at, updated_at
+            ) VALUES (
+              'wps-prime-hip-1', 'ws1', 'e1', 'financiaciones', 'hipoteca_update', 'hipoteca', 'hip-prime-1', 'u1',
+              'QA', 'open', 'warning', 'Hipoteca incompleta', 'Faltan importes base en la ficha abierta',
+              '[]', '[]', '{}', 'dup-hip-prime-1', 0, '2026-06-19T10:00:00Z', '2026-06-19T10:00:00Z'
+            )
+            """
+        )
         reply = server.perform_workspace_internal_copilot_action(
             self.conn,
             "ws1",
@@ -2584,6 +2629,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["action_id"], "prime_operator_console")
         self.assertEqual(reply["mode"], "operator")
         self.assertTrue(reply["actions"])
+        self.assertTrue(any(str(card.get("title") or "") == "Prioridad de la ficha actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
