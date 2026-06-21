@@ -3551,6 +3551,22 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "prepare_architecture_decision" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Decisión técnica recomendada" for card in (reply.get("cards") or [])))
 
+    def test_internal_copilot_cross_layer_reply_prepares_transversal_review(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "tenemos un cambio complejo en gestoría que afecta backend y frontend y varias capas",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "cross_layer_review")
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_cross_layer_decision" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_implementation_session" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Capas afectadas" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -3644,6 +3660,38 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(task["source"], "architecture_review")
         self.assertEqual(meta.get("domain"), "gestoria")
         self.assertTrue(list(meta.get("alternatives") or []))
+
+    def test_internal_copilot_action_prepare_cross_layer_decision_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_cross_layer_decision",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "decision": "Cambio transversal en gestoría con backend, frontend y tests.",
+                    "layers": [{"id": "backend", "title": "Backend"}, {"id": "frontend", "title": "Frontend"}],
+                    "recommended_order": ["Backend", "Frontend", "Tests"],
+                    "probable_files": ["web/server.py", "web/app.js"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                    "risks": ["abrir demasiado alcance"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:03:30Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(task["source"], "cross_layer_review")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertTrue(list(meta.get("layers") or []))
+        self.assertTrue(list(meta.get("recommended_order") or []))
 
     def test_internal_copilot_action_run_implementation_session(self):
         old_root = server._workspace_internal_copilot_codefix_root

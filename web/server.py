@@ -41795,6 +41795,178 @@ def _workspace_internal_copilot_implementation_options(domain="", message=""):
     ]
 
 
+def _workspace_internal_copilot_cross_layer_layers(service_hint="", context=None, message=""):
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip() or "gestoria"
+    text = normalize_lookup_text(message or "").lower()
+    layers = [
+        {
+            "id": "backend",
+            "title": "Backend",
+            "summary": f"Revisar handlers, validaciones y lógica de negocio del dominio {domain}.",
+            "risk": "contratos de API o reglas de negocio inconsistentes",
+        },
+        {
+            "id": "frontend",
+            "title": "Frontend",
+            "summary": f"Ajustar la vista y las acciones del CRM en {domain} para que reflejen bien el cambio.",
+            "risk": "estado visual inconsistente o flujo roto en pantalla",
+        },
+        {
+            "id": "tests",
+            "title": "Tests",
+            "summary": "Añadir o ajustar regresión dirigida y validar solo la superficie afectada.",
+            "risk": "dejar el cambio sin cobertura o sin validación real",
+        },
+    ]
+    if any(token in text for token in ("tabla", "schema", "base de datos", "sqlite", "postgres", "dato", "datos", "migracion", "migración")):
+        layers.append(
+            {
+                "id": "data",
+                "title": "Datos",
+                "summary": "Comprobar persistencia, compatibilidad de datos y posibles ajustes de lectura/escritura.",
+                "risk": "descuadre entre modelo, registros existentes y reporting",
+            }
+        )
+    if any(token in text for token in ("dashboard", "resumen", "detalle", "cuadra", "cuadre", "supervisor", "agenda", "incidencia")):
+        layers.append(
+            {
+                "id": "supervision",
+                "title": "Supervisor",
+                "summary": "Revalidar reconciliación, alertas y microflujos ligados al cambio.",
+                "risk": "dejar incoherencias silenciosas en resumen o supervisión",
+            }
+        )
+    if domain == "rrhh" or any(token in text for token in ("legal", "laboral", "normativa", "ley", "convenio")):
+        layers.append(
+            {
+                "id": "legal",
+                "title": "Legal",
+                "summary": "Alinear la implementación con obligaciones, documentación o flujos sensibles.",
+                "risk": "introducir una solución funcionalmente correcta pero legalmente incompleta",
+            }
+        )
+    return {"domain": domain, "layers": layers}
+
+
+def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "cambio complejo",
+            "cambio transversal",
+            "varias capas",
+            "backend y frontend",
+            "frontend y backend",
+            "impacto entre modulos",
+            "impacto entre módulos",
+            "afecta varias capas",
+            "afecta backend",
+        )
+    ):
+        return None
+    layer_info = _workspace_internal_copilot_cross_layer_layers(service_hint, context=context, message=message)
+    domain = str(layer_info.get("domain") or "gestoria").strip() or "gestoria"
+    layers = list(layer_info.get("layers") or [])
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    recommended_order = [str(item.get("title") or "").strip() for item in layers]
+    decision = (
+        f"Este cambio en {domain} conviene tratarlo como revisión transversal: "
+        "primero backend y reglas, después pantalla/flujo visible, luego validación dirigida y por último reconciliación o impactos laterales."
+    )
+    patch_outline = [
+        "delimitar la superficie exacta del cambio y los contratos que toca",
+        "corregir backend y validaciones antes de tocar la vista",
+        "ajustar frontend y acciones del flujo visible",
+        "añadir o ajustar test dirigido y revalidar impactos cruzados",
+    ]
+    plan_payload = {
+        "domain": domain,
+        "assigned_mode": "supervisor",
+        "risk_level": "high" if len(layers) >= 4 else "medium",
+        "diagnosis": decision,
+        "decision": decision,
+        "patch_outline": patch_outline,
+        "probable_files": list(scope.get("probable_files") or []),
+        "probable_tests": list(scope.get("probable_tests") or []),
+        "cross_layer": True,
+        "layers": layers,
+        "recommended_order": recommended_order,
+        "context": str(message or "").strip(),
+        "risks": [str(item.get("risk") or "").strip() for item in layers[:6] if str(item.get("risk") or "").strip()],
+    }
+    bundle = _workspace_internal_copilot_build_codefix_bundle(
+        domain=domain,
+        assigned_mode="supervisor",
+        diagnosis=decision,
+        patch_outline=patch_outline,
+        probable_files=plan_payload["probable_files"],
+        probable_tests=plan_payload["probable_tests"],
+    )
+    plan_payload.update(bundle)
+    return {
+        "ok": True,
+        "intent": "cross_layer_review",
+        "answer": f"He preparado una revisión transversal para {domain}, con capas afectadas, orden recomendado y bundle técnico reutilizable.",
+        "cards": [
+            {
+                "title": "Decisión transversal",
+                "summary": decision,
+                "priority": "alta",
+                "impact_area": "arquitectura",
+            },
+            {
+                "title": "Capas afectadas",
+                "summary": " · ".join(recommended_order[:6]),
+                "priority": "alta" if len(layers) >= 4 else "media",
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Riesgos cruzados",
+                "summary": " | ".join(plan_payload["risks"][:4])[:500],
+                "priority": "media",
+                "impact_area": "arquitectura",
+            },
+            {
+                "title": "Archivos y tests probables",
+                "summary": (
+                    f"Ficheros: {', '.join(plan_payload['probable_files'][:4])} · "
+                    f"Tests: {', '.join(plan_payload['probable_tests'][:3])}"
+                )[:500],
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+        ],
+        "actions": [
+            {
+                "id": "prepare_cross_layer_decision",
+                "label": "Guardar revisión transversal",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "run_implementation_session",
+                "label": "Lanzar sesión transversal",
+                "requires_confirmation": True,
+                "confirm_text": "Se intentará ejecutar el cambio complejo con bundle técnico, validación y resumen de sesión.",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_implementation_task",
+                "label": "Crear tarea transversal",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_code_autofix_bundle",
+                "label": "Preparar bundle técnico",
+                "payload": {"plan": plan_payload},
+            },
+        ],
+        "suggestions": ["Guardar revisión transversal", "Lanzar sesión transversal", "Qué riesgo tiene"],
+        "sources": ["architecture_review", "implementation_planner", "change_impact_map", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("implementa", "mejora", "añade", "agrega", "refactoriza", "cambia", "haz que")):
@@ -46044,6 +46216,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if platform_reply:
         response.update(platform_reply)
         return _finish(response)
+    cross_layer_reply = _workspace_internal_copilot_cross_layer_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if cross_layer_reply:
+        response.update(cross_layer_reply)
+        return _finish(response)
     architecture_reply = _workspace_internal_copilot_architecture_reply(
         conn,
         workspace_text,
@@ -47219,6 +47403,65 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["architecture_review", "task_planner", "workspace_memory"],
             "suggestions": ["Crear tarea de implementación", "Preparar bundle técnico", "Qué hago ahora"],
+        }
+    if action_text == "prepare_cross_layer_decision":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        decision_text = str(plan.get("decision") or plan.get("diagnosis") or f"Revisión transversal pendiente para {domain}.").strip()
+        layers = [dict(item) for item in list(plan.get("layers") or [])[:8] if isinstance(item, dict)]
+        recommended_order = _normalize_text_list(plan.get("recommended_order") or [], max_items=8, max_chars=120)
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Transversal:{domain}] Revisión compleja",
+            detail=decision_text,
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="cross_layer_review",
+            meta={
+                "domain": domain,
+                "decision": decision_text,
+                "layers": layers,
+                "recommended_order": recommended_order,
+                "probable_files": _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180),
+                "probable_tests": _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180),
+                "risks": _normalize_text_list(plan.get("risks") or [], max_items=8, max_chars=180),
+                "cross_layer": True,
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="cross_layer_decision",
+            title=f"Revisión transversal {domain}",
+            content=decision_text,
+            priority="alta",
+            meta={
+                "task_id": task_id,
+                "domain": domain,
+                "layers": layers,
+                "recommended_order": recommended_order,
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He guardado la revisión transversal para {domain}.",
+            "cards": [
+                {
+                    "title": "Revisión transversal guardada",
+                    "summary": f"{decision_text[:320]} · capas: {', '.join(recommended_order[:5]) or '-'}",
+                    "priority": "alta",
+                    "impact_area": "arquitectura",
+                }
+            ],
+            "sources": ["architecture_review", "task_planner", "workspace_memory"],
+            "suggestions": ["Crear tarea transversal", "Lanzar sesión transversal", "Preparar bundle técnico"],
         }
     if action_text == "run_implementation_session":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
