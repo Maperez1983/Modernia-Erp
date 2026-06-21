@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import sys
+import tempfile
 import types
 import unittest
 from datetime import date
@@ -3348,6 +3349,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "validate_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "materialize_code_autofix_bundle" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "apply_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Diff propuesto" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
@@ -3461,6 +3463,58 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         artifacts = result.get("artifacts") or {}
         self.assertTrue(str(artifacts.get("artifact_dir") or "").strip())
         self.assertTrue(Path(str(artifacts.get("bundle_path") or "")).exists())
+
+    def test_internal_copilot_action_apply_code_autofix_bundle_updates_file_and_validates(self):
+        old_root = server._workspace_internal_copilot_codefix_root
+        old_generate = server._workspace_internal_copilot_generate_codefix_edits
+        old_validate = server._workspace_internal_copilot_run_validation_bundle
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                target = root / "sample_module.py"
+                target.write_text("value = 1\n", encoding="utf-8")
+                server._workspace_internal_copilot_codefix_root = lambda: root
+                server._workspace_internal_copilot_generate_codefix_edits = lambda bundle: {
+                    "status": "ready",
+                    "summary": "Cambio exacto listo.",
+                    "edits": [
+                        {
+                            "file": "sample_module.py",
+                            "find": "value = 1",
+                            "replace": "value = 2",
+                            "reason": "Ajustar valor de prueba",
+                        }
+                    ],
+                }
+                server._workspace_internal_copilot_run_validation_bundle = lambda bundle: {
+                    "status": "passed",
+                    "steps": [{"command": "python3 -m py_compile sample_module.py", "status": "passed"}],
+                }
+                result = server.perform_workspace_internal_copilot_action(
+                    self.conn,
+                    "ws1",
+                    "apply_code_autofix_bundle",
+                    {
+                        "plan": {
+                            "domain": "gestoria",
+                            "assigned_mode": "supervisor",
+                            "diagnosis": "Fallo en flujo de factura sin asiento.",
+                            "patch_outline": ["corregir valor"],
+                            "probable_files": ["sample_module.py"],
+                            "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                        }
+                    },
+                    empresa_id="e1",
+                    actor={"id": "u1", "usuario": "QA"},
+                    now="2026-06-21T10:20:00Z",
+                )
+                self.assertTrue(result["ok"])
+                self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
+                self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+        finally:
+            server._workspace_internal_copilot_codefix_root = old_root
+            server._workspace_internal_copilot_generate_codefix_edits = old_generate
+            server._workspace_internal_copilot_run_validation_bundle = old_validate
 
 
 if __name__ == "__main__":

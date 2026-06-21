@@ -41496,6 +41496,155 @@ def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
     }
 
 
+def _workspace_internal_copilot_read_codefix_context(bundle):
+    root = Path(_workspace_internal_copilot_codefix_root()).resolve()
+    contexts = []
+    for file_path in _normalize_text_list((bundle or {}).get("probable_files") or [], max_items=8, max_chars=180):
+        candidate = (root / str(file_path or "").strip()).resolve()
+        try:
+            candidate.relative_to(root)
+        except Exception:
+            continue
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8")
+        except Exception:
+            try:
+                raw = candidate.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+        contexts.append({"file": str(file_path).strip(), "content": str(raw or "")[:16000]})
+    return contexts
+
+
+def _workspace_internal_copilot_generate_codefix_edits(bundle):
+    files = _workspace_internal_copilot_read_codefix_context(bundle)
+    if not files:
+        return {"status": "needs_more_data", "summary": "No he podido leer los ficheros probables del bundle.", "edits": []}
+    if not (_workspace_internal_copilot_agent_enabled() and ollama_available()):
+        return {"status": "needs_more_data", "summary": "Ollama no está disponible para generar ediciones exactas del código.", "edits": []}
+    payload = {
+        "domain": str((bundle or {}).get("domain") or "").strip(),
+        "diagnosis": str((bundle or {}).get("diagnosis") or "").strip(),
+        "patch_outline": list((bundle or {}).get("patch_outline") or [])[:6],
+        "probable_tests": list((bundle or {}).get("probable_tests") or [])[:6],
+        "files": files,
+    }
+    prompt = (
+        "Responde SOLO en JSON valido. "
+        "Prepara ediciones exactas y minimas para corregir el problema. "
+        "Devuelve: "
+        "{\"status\":\"ready|needs_more_data|no_safe_edit\","
+        "\"summary\":\"...\","
+        "\"edits\":[{\"file\":\"...\",\"find\":\"...\",\"replace\":\"...\",\"reason\":\"...\"}]}.\n"
+        "Reglas: solo puedes editar ficheros incluidos en files; usa reemplazos literales exactos; "
+        "no inventes rutas; no devuelvas Markdown.\n\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    required = {"status": "", "summary": "", "edits": []}
+    try:
+        parsed = call_ollama_json(prompt, schema_hint=required)
+    except Exception as exc:
+        return {
+            "status": "needs_more_data",
+            "summary": f"No he podido generar ediciones con Ollama: {type(exc).__name__}: {exc}",
+            "edits": [],
+        }
+    status = str(parsed.get("status") or "").strip().lower() or "needs_more_data"
+    allowed_files = {str(item.get("file") or "").strip() for item in files if str(item.get("file") or "").strip()}
+    edits = []
+    for item in list(parsed.get("edits") or [])[:8]:
+        row = item if isinstance(item, dict) else {}
+        file_path = str(row.get("file") or "").strip()
+        find_text = str(row.get("find") or "")
+        replace_text = str(row.get("replace") or "")
+        if not file_path or file_path not in allowed_files or not find_text or find_text == replace_text:
+            continue
+        edits.append(
+            {
+                "file": file_path,
+                "find": find_text,
+                "replace": replace_text,
+                "reason": str(row.get("reason") or "").strip(),
+            }
+        )
+    return {
+        "status": status if edits else ("no_safe_edit" if status == "ready" else status),
+        "summary": str(parsed.get("summary") or "").strip(),
+        "edits": edits,
+    }
+
+
+def _workspace_internal_copilot_apply_codefix_edits(bundle, generated, *, now=None):
+    root = Path(_workspace_internal_copilot_codefix_root()).resolve()
+    result = {
+        "status": "failed",
+        "summary": "",
+        "applied_files": [],
+        "validation": {"status": "partial", "steps": []},
+        "artifact_dir": "",
+        "reverted": False,
+    }
+    edits = list((generated or {}).get("edits") or [])
+    if not edits:
+        result["status"] = "needs_more_data"
+        result["summary"] = str((generated or {}).get("summary") or "No hay ediciones aplicables.").strip()
+        return result
+    originals = {}
+    try:
+        for edit in edits:
+            file_path = str(edit.get("file") or "").strip()
+            candidate = (root / file_path).resolve()
+            try:
+                candidate.relative_to(root)
+            except Exception:
+                raise ValueError(f"Ruta fuera de alcance: {file_path}")
+            if not candidate.exists() or not candidate.is_file():
+                raise FileNotFoundError(file_path)
+            current = candidate.read_text(encoding="utf-8")
+            find_text = str(edit.get("find") or "")
+            if current.count(find_text) != 1:
+                raise ValueError(f"Reemplazo ambiguo o inexistente en {file_path}")
+            if file_path not in originals:
+                originals[file_path] = current
+            updated = current.replace(find_text, str(edit.get("replace") or ""), 1)
+            candidate.write_text(updated, encoding="utf-8")
+            result["applied_files"].append(file_path)
+        validation = _workspace_internal_copilot_run_validation_bundle(bundle)
+        result["validation"] = validation
+        if str(validation.get("status") or "").strip() != "passed":
+            for file_path, original in originals.items():
+                ((root / file_path).resolve()).write_text(original, encoding="utf-8")
+            result["status"] = "failed"
+            result["summary"] = "El cambio se aplicó, pero la validación falló y he revertido los archivos."
+            result["reverted"] = True
+            return result
+        materialized = _workspace_internal_copilot_materialize_codefix_bundle(
+            {
+                **dict(bundle or {}),
+                "applied_edits": edits,
+                "applied_files": list(result["applied_files"]),
+                "applied_at": str(now or datetime.now(timezone.utc).isoformat()),
+            },
+            now=now,
+        )
+        result["artifact_dir"] = str(materialized.get("artifact_dir") or "").strip()
+        result["status"] = "passed"
+        result["summary"] = "He aplicado el cambio en código y ha pasado la validación dirigida."
+        return result
+    except Exception as exc:
+        for file_path, original in originals.items():
+            try:
+                ((root / file_path).resolve()).write_text(original, encoding="utf-8")
+            except Exception:
+                pass
+        result["status"] = "failed"
+        result["summary"] = f"No he podido aplicar el fix de forma segura: {type(exc).__name__}: {exc}"
+        result["reverted"] = bool(originals)
+        return result
+
+
 def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("autofix", "arregla el codigo", "arregla el código", "corrige el codigo", "corrige el código", "parche", "fix bug", "toca codigo", "toca código", "repara el codigo", "repara el código")):
@@ -41651,6 +41800,13 @@ def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, em
             {
                 "id": "materialize_code_autofix_bundle",
                 "label": "Materializar artefactos",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "apply_code_autofix_bundle",
+                "label": "Aplicar fix controlado",
+                "requires_confirmation": True,
+                "confirm_text": "Se intentará editar el código en los ficheros probables, validar y revertir si falla.",
                 "payload": {"plan": plan_payload},
             },
             {
@@ -46180,6 +46336,81 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["internal_copilot_action", "workspace_memory"],
             "suggestions": ["Validar bundle", "Crear tarea técnica", "Pasar a supervisor"],
+        }
+    if action_text == "apply_code_autofix_bundle":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or ("legal" if domain == "rrhh" else "supervisor")).strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or "Plan de reparación de código pendiente.").strip()
+        patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=patch_outline,
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        generated = _workspace_internal_copilot_generate_codefix_edits(bundle)
+        apply_result = _workspace_internal_copilot_apply_codefix_edits(bundle, generated, now=now)
+        priority = "alta" if str(apply_result.get("status") or "") == "failed" else "media"
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="code_autofix_applied",
+            title=f"Ejecución fix {domain}",
+            content=str(apply_result.get("summary") or "").strip(),
+            priority=priority,
+            meta={"domain": domain, "bundle": bundle, "generated": generated, "apply_result": apply_result},
+            now=now,
+        )
+        cards = [
+            {
+                "title": "Aplicación controlada",
+                "summary": str(apply_result.get("summary") or "").strip(),
+                "priority": priority,
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Ediciones propuestas",
+                "summary": " | ".join(
+                    f"{str(item.get('file') or '').strip()}: {str(item.get('reason') or 'edición exacta').strip()}"
+                    for item in list(generated.get("edits") or [])[:4]
+                )[:500] or str(generated.get("summary") or "").strip(),
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Estado de validación",
+                "summary": f"{str((apply_result.get('validation') or {}).get('status') or 'partial').strip()} · {len(list((apply_result.get('validation') or {}).get('steps') or []))} paso(s)",
+                "priority": priority,
+                "impact_area": "codigo",
+            },
+        ]
+        cards.extend(
+            {
+                "title": "Comando validado",
+                "summary": f"{str(step.get('status') or '').strip()} · {str(step.get('command') or '').strip()}",
+                "priority": "media",
+                "impact_area": "codigo",
+            }
+            for step in list((apply_result.get("validation") or {}).get("steps") or [])[:4]
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": str(apply_result.get("summary") or "He intentado aplicar el fix controlado.").strip(),
+            "apply_result": apply_result,
+            "cards": cards[:7],
+            "sources": ["internal_copilot_action", "workspace_memory"],
+            "suggestions": (
+                ["Validar bundle", "Materializar artefactos", "Crear tarea técnica"]
+                if str(apply_result.get("status") or "") != "passed"
+                else ["Qué hago ahora", "Operar ahora", "Bandeja unificada"]
+            ),
         }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
