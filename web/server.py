@@ -41808,12 +41808,64 @@ def _workspace_internal_copilot_build_patch_diff_stub(*, probable_files=None, pa
     return "*** Begin Patch\n" + "\n".join(blocks) + "\n*** End Patch"
 
 
+def _workspace_internal_copilot_build_code_context(*, probable_files=None, max_files=3):
+    root = Path(_workspace_internal_copilot_codefix_root()).resolve()
+    entries = []
+    for file_path in _normalize_text_list(probable_files or [], max_items=max_files, max_chars=180):
+        candidate = (root / str(file_path or "").strip()).resolve()
+        try:
+            candidate.relative_to(root)
+        except Exception:
+            continue
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8")
+        except Exception:
+            try:
+                raw = candidate.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+        lines = str(raw or "").splitlines()
+        preview = "\n".join(lines[: min(len(lines), 80)]).strip()
+        symbols = []
+        for line in lines[:200]:
+            text = str(line or "").strip()
+            if text.startswith("def ") or text.startswith("class ") or text.startswith("const ") or text.startswith("function "):
+                symbols.append(text[:160])
+            if len(symbols) >= 8:
+                break
+        entries.append(
+            {
+                "file": str(file_path).strip(),
+                "symbols": symbols,
+                "preview": preview[:4000],
+            }
+        )
+    return entries
+
+
+def _workspace_internal_copilot_build_validation_focus(*, probable_files=None, probable_tests=None):
+    files = _normalize_text_list(probable_files or [], max_items=8, max_chars=180)
+    tests = _normalize_text_list(probable_tests or [], max_items=8, max_chars=180)
+    focus = []
+    if any(str(item).endswith(".py") for item in files):
+        focus.append("backend_python")
+    if any(str(item).endswith(".js") for item in files):
+        focus.append("frontend_js")
+    if tests:
+        focus.append("targeted_tests")
+    return focus
+
+
 def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode="supervisor", diagnosis="", patch_outline=None, probable_files=None, probable_tests=None):
     probable_files = _normalize_text_list(probable_files or [], max_items=8, max_chars=180)
     probable_tests = _normalize_text_list(probable_tests or [], max_items=8, max_chars=180)
     patch_outline = _normalize_text_list(patch_outline or [], max_items=8, max_chars=220)
     branch_slug = re.sub(r"[^a-z0-9_.-]+", "-", normalize_lookup_text(domain or "copilot-fix").lower()).strip("-") or "copilot-fix"
     branch_name = f"copilot-fix/{branch_slug}-{date.today().isoformat()}"
+    code_context = _workspace_internal_copilot_build_code_context(probable_files=probable_files)
+    validation_focus = _workspace_internal_copilot_build_validation_focus(probable_files=probable_files, probable_tests=probable_tests)
     commands = []
     python_files = [item for item in probable_files if str(item).endswith(".py")]
     if python_files:
@@ -41831,6 +41883,8 @@ def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode
         "probable_files": probable_files,
         "probable_tests": probable_tests,
         "patch_outline": patch_outline,
+        "code_context": code_context,
+        "validation_focus": validation_focus,
         "patch_prompt": _workspace_internal_copilot_build_patch_prompt(
             domain=domain,
             diagnosis=diagnosis,
@@ -41926,16 +41980,19 @@ def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
     diff_path = out_dir / "proposed_patch.diff"
     commands_path = out_dir / "validation_commands.txt"
     bundle_path = out_dir / "bundle.json"
+    context_path = out_dir / "code_context.json"
     prompt_path.write_text(str((bundle or {}).get("patch_prompt") or "").strip() + "\n", encoding="utf-8")
     diff_path.write_text(str((bundle or {}).get("proposed_diff") or "").strip() + "\n", encoding="utf-8")
     commands = [str(item).strip() for item in list((bundle or {}).get("validation_commands") or []) if str(item).strip()]
     commands_path.write_text("\n".join(commands).strip() + ("\n" if commands else ""), encoding="utf-8")
+    context_path.write_text(json.dumps(list((bundle or {}).get("code_context") or []), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     bundle_path.write_text(json.dumps(bundle or {}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "artifact_dir": str(out_dir),
         "prompt_path": str(prompt_path),
         "diff_path": str(diff_path),
         "commands_path": str(commands_path),
+        "context_path": str(context_path),
         "bundle_path": str(bundle_path),
     }
 
