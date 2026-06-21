@@ -3820,7 +3820,55 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 self.assertTrue(Path(str((result.get("apply_result") or {}).get("session_summary_path") or "")).exists())
                 self.assertTrue(any(str(card.get("title") or "") == "Impacto de entrega" for card in (result.get("cards") or [])))
                 self.assertTrue(any(str(card.get("title") or "") == "Siguiente validación de cierre" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(card.get("title") or "") == "Inspección posterior" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(action.get("id") or "") == "autorreview_domain" for action in (result.get("actions") or [])))
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+        finally:
+            server._workspace_internal_copilot_codefix_root = old_root
+            server._workspace_internal_copilot_generate_codefix_edits = old_generate
+            server._workspace_internal_copilot_run_validation_bundle = old_validate
+
+    def test_internal_copilot_action_run_implementation_session_opens_discovery_on_failed_validation(self):
+        old_root = server._workspace_internal_copilot_codefix_root
+        old_generate = server._workspace_internal_copilot_generate_codefix_edits
+        old_validate = server._workspace_internal_copilot_run_validation_bundle
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                target = root / "sample_module.py"
+                target.write_text("value = 1\n", encoding="utf-8")
+                server._workspace_internal_copilot_codefix_root = lambda: root
+                server._workspace_internal_copilot_generate_codefix_edits = lambda bundle: {
+                    "status": "ready",
+                    "summary": "Cambio exacto listo.",
+                    "edits": [{"file": "sample_module.py", "find": "value = 1", "replace": "value = 2", "reason": "Ajuste"}],
+                }
+                server._workspace_internal_copilot_run_validation_bundle = lambda bundle: {
+                    "status": "failed",
+                    "steps": [{"command": "python3 -m py_compile sample_module.py", "status": "failed", "detail": "syntax error"}],
+                }
+                result = server.perform_workspace_internal_copilot_action(
+                    self.conn,
+                    "ws1",
+                    "run_implementation_session",
+                    {
+                        "plan": {
+                            "domain": "gestoria",
+                            "assigned_mode": "supervisor",
+                            "diagnosis": "Implementar mejora compleja en gestoría.",
+                            "patch_outline": ["corregir valor"],
+                            "probable_files": ["sample_module.py"],
+                            "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                        }
+                    },
+                    empresa_id="e1",
+                    actor={"id": "u1", "usuario": "QA"},
+                    now="2026-06-21T10:04:30Z",
+                )
+                self.assertTrue(result["ok"])
+                self.assertEqual((result.get("apply_result") or {}).get("status"), "failed")
+                self.assertTrue(any(str(card.get("title") or "") == "Inspección posterior" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(action.get("id") or "") == "prepare_discovery_review" for action in (result.get("actions") or [])))
         finally:
             server._workspace_internal_copilot_codefix_root = old_root
             server._workspace_internal_copilot_generate_codefix_edits = old_generate

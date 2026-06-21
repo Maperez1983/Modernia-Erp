@@ -42177,6 +42177,51 @@ def _workspace_internal_copilot_discovery_reply(conn, workspace_id, message, *, 
     }
 
 
+def _workspace_internal_copilot_post_change_inspection(conn, workspace_id, *, domain="", plan=None, apply_result=None, context=None):
+    domain_text = _workspace_internal_copilot_normalize_domain(domain or "")
+    plan_map = plan if isinstance(plan, dict) else {}
+    result_map = apply_result if isinstance(apply_result, dict) else {}
+    status = str(result_map.get("status") or "").strip().lower()
+    dimensions = [dict(item) for item in list(plan_map.get("dimensions") or [])[:8] if isinstance(item, dict)]
+    checklist = _normalize_text_list(plan_map.get("delivery_checklist") or [], max_items=10, max_chars=200)
+    open_rows = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=40, only_open=True).get("rows") or []
+    matching = []
+    for row in open_rows:
+        row_domain = _workspace_internal_copilot_normalize_domain(row.get("servicio") or row.get("service_key") or row.get("process_type") or "")
+        process_text = normalize_lookup_text(row.get("process_type") or "").lower()
+        if row_domain == domain_text or domain_text in process_text:
+            matching.append(row)
+    if status != "passed":
+        return {
+            "status": "blocked",
+            "summary": "La sesión no ha quedado validada. Conviene pasar a discovery o revisión transversal antes de insistir con más cambios.",
+            "open_events": len(matching),
+            "next_action": "prepare_discovery_review",
+        }
+    if matching:
+        impact_titles = [str(item.get("title") or "").strip() for item in dimensions[:4] if str(item.get("title") or "").strip()]
+        return {
+            "status": "followup",
+            "summary": (
+                f"El cambio ha pasado validación técnica, pero siguen {len(matching)} incidencia(s) abierta(s) en {domain_text or 'el dominio'}. "
+                f"Conviene cerrar impacto operativo{' y de ' + ', '.join(impact_titles[:2]).lower() if impact_titles else ''}."
+            ),
+            "open_events": len(matching),
+            "next_action": "close_loop_safe",
+            "checklist": checklist,
+        }
+    return {
+        "status": "clean",
+        "summary": (
+            f"No veo incidencias abiertas ligadas a {domain_text or 'el dominio'} tras la sesión. "
+            "El cambio queda razonablemente cerrado a nivel técnico y operativo."
+        ),
+        "open_events": 0,
+        "next_action": "autorreview_domain",
+        "checklist": checklist,
+    }
+
+
 def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("implementa", "mejora", "añade", "agrega", "refactoriza", "cambia", "haz que")):
@@ -47812,6 +47857,14 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             probable_tests=probable_tests,
         )
         apply_result = _workspace_internal_copilot_execute_codefix_session(bundle, now=now, max_attempts=3)
+        inspection = _workspace_internal_copilot_post_change_inspection(
+            conn,
+            workspace_text,
+            domain=domain,
+            plan=plan,
+            apply_result=apply_result,
+            context=payload,
+        )
         _workspace_internal_copilot_store_memory_note(
             conn,
             workspace_text,
@@ -47827,6 +47880,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "attempts_count": int(apply_result.get("attempts_count") or 0),
                 "applied_files": list(apply_result.get("applied_files") or []),
                 "session_summary_path": str(apply_result.get("session_summary_path") or "").strip(),
+                "inspection": inspection,
             },
             now=now,
         )
@@ -47864,17 +47918,57 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                     "impact_area": "operativo",
                 }
             )
+        cards.append(
+            {
+                "title": "Inspección posterior",
+                "summary": str(inspection.get("summary") or "").strip()[:500],
+                "priority": "alta" if str(inspection.get("status") or "") != "clean" else "media",
+                "impact_area": "operativo",
+            }
+        )
+        suggestions = ["Qué hago ahora", "Operar ahora", "Bandeja unificada"]
+        actions = []
+        inspection_action = str(inspection.get("next_action") or "").strip()
+        if inspection_action == "prepare_discovery_review":
+            actions.append(
+                {
+                    "id": "prepare_discovery_review",
+                    "label": "Abrir discovery técnico",
+                    "payload": {"plan": plan},
+                }
+            )
+            suggestions = ["Abrir discovery técnico", "Guardar decisión técnica", "Crear tarea técnica"]
+        elif inspection_action == "close_loop_safe":
+            actions.append(
+                {
+                    "id": "close_loop_safe",
+                    "label": "Cerrar impacto restante",
+                    "requires_confirmation": True,
+                    "confirm_text": "Se intentará cerrar el trabajo seguro restante del dominio tras el cambio aplicado.",
+                    "payload": {"crm": domain, "mode": "operator"},
+                }
+            )
+            suggestions = ["Cerrar impacto restante", "Autorrevisar dominio", "Qué hago ahora"]
+        elif inspection_action == "autorreview_domain":
+            actions.append(
+                {
+                    "id": "autorreview_domain",
+                    "label": "Autorrevisar dominio",
+                    "payload": {"domain": domain},
+                }
+            )
         return {
             "ok": True,
             "action_id": action_text,
             "message": f"He ejecutado la sesión de implementación para {domain}. {str(apply_result.get('summary') or '').strip()}",
             "apply_result": apply_result,
             "cards": cards,
+            "actions": actions,
             "sources": ["implementation_planner", "workspace_memory"],
             "suggestions": (
                 ["Validar bundle", "Materializar artefactos", "Crear tarea de implementación"]
-                if str(apply_result.get("status") or "") != "passed"
-                else ["Qué hago ahora", "Operar ahora", "Bandeja unificada"]
+                if str(apply_result.get("status") or "") != "passed" and inspection_action != "prepare_discovery_review"
+                else suggestions
             ),
         }
     if action_text == "prepare_code_autofix_bundle":
