@@ -2827,6 +2827,87 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(any(str(action.get("id") or "") == "run_catalog_process" for action in (result.get("actions") or [])))
 
+    def test_internal_copilot_prepare_catalog_process_autofills_open_seguro(self):
+        self.conn.execute("INSERT INTO empresas (id, nombre, created_at, updated_at) VALUES ('e1', 'Empresa Demo', 'now', 'now')")
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('csegctx', 'Cliente Seguro', '12121212A', 'segctx@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO seguros (
+              id, empresa_id, cliente_id, tomador, compania, poliza_numero, ramo, estado, created_at, updated_at
+            ) VALUES (
+              'segctx1', 'e1', 'csegctx', 'Cliente Seguro', 'Mapfre', 'PX-1', 'Hogar', 'Presupuesto', 'now', 'now'
+            )
+            """
+        )
+        result = server._workspace_internal_copilot_prepare_catalog_process(
+            self.conn,
+            "ws1",
+            "e1",
+            "seguro_create",
+            {"context": {"current_seguro_id": "segctx1", "current_crm": "seguros"}},
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "create_seguro")
+        self.assertEqual(str(result["action_payload"].get("cliente_id") or ""), "csegctx")
+        self.assertEqual(str(result["action_payload"].get("compania") or ""), "Mapfre")
+        self.assertEqual(str(result["action_payload"].get("poliza_numero") or ""), "PX-1")
+
+    def test_internal_copilot_run_catalog_process_autofills_open_rrhh_document(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, fecha_caducidad, estado, created_at, updated_at
+            ) VALUES (
+              'rd-auto-1', 'ws1', 'e1', 'p1', 'DNI', 'dni.pdf', '2026-12-31', 'Activo', 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_catalog_process",
+            {
+                "process_id": "rrhh_document_update",
+                "context": {
+                    "current_rrhh_document_id": "rd-auto-1",
+                    "current_persona_id": "p1",
+                    "current_crm": "rrhh",
+                    "attachments": [{"key": "rrhh/new-dni.pdf", "public_url": "", "filename": "dni-nuevo.pdf", "content_type": "application/pdf"}],
+                },
+            },
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-21T09:25:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["delegated_action"], "update_current_rrhh_document")
+        post_actions = result.get("post_actions") or []
+        self.assertTrue(post_actions)
+        self.assertEqual(post_actions[0]["post_endpoint"], "/api/workspace_rrhh_documento")
+
+    def test_internal_copilot_run_catalog_process_autofills_open_community(self):
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_fincas_comunidades (
+              id, workspace_id, empresa_id, nombre, direccion, estado, presidente, secretario, cuota_sugerida, cuota_mensual, created_at, updated_at
+            ) VALUES (
+              'fc-auto-1', 'ws1', 'e1', 'Comunidad Auto', 'Calle Auto 1', 'Activa', 'Pedro', 'Ana', 145, 120, 'now', 'now'
+            )
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_catalog_process",
+            {"process_id": "community_update", "context": {"current_community_id": "fc-auto-1", "current_crm": "fincas"}},
+            empresa_id="e1",
+            actor={"user_id": "u1", "usuario": "QA"},
+            now="2026-06-21T09:30:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["delegated_action"], "update_current_community")
+
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
             """

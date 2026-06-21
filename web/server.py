@@ -44300,6 +44300,15 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
         }
     if process_key == "seguro_create":
         cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        current_seguro_id = str(context.get("current_seguro_id") or data.get("seguro_id") or "").strip()
+        current_seguro_row = None
+        if current_seguro_id:
+            current_seguro_row = conn.execute(
+                "SELECT id, cliente_id, compania, poliza_numero, ramo, fecha_efecto, fecha_vencimiento, poliza_key, poliza_url FROM seguros WHERE id = ? LIMIT 1",
+                (current_seguro_id,),
+            ).fetchone()
+            if current_seguro_row and not cliente_id:
+                cliente_id = str(row_value(current_seguro_row, "cliente_id") or "").strip()
         if not cliente_id:
             return {
                 "ok": True,
@@ -44313,6 +44322,11 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
             return {"error": "Cliente no encontrado para el proceso de póliza"}
         resolved_client = dict(client_row)
         seguro_payload = _workspace_internal_copilot_extract_seguro_payload(str(data.get("message") or ""), resolved_client)
+        if current_seguro_row:
+            for key in ("compania", "poliza_numero", "ramo", "fecha_efecto", "fecha_vencimiento", "poliza_key", "poliza_url"):
+                value = row_value(current_seguro_row, key)
+                if value not in (None, ""):
+                    seguro_payload.setdefault(key, value)
         attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="seguro")
         if attachment:
             seguro_payload.setdefault("poliza_key", str(attachment.get("key") or "").strip())
@@ -44378,11 +44392,22 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
                 "cards": [{"title": "Falta documento RRHH", "summary": "No hay documento RRHH abierto en el contexto actual.", "priority": "alta", "impact_area": "rrhh"}],
             }
         patch = dict(data.get("patch") or {}) if isinstance(data.get("patch"), dict) else {}
+        current_doc = conn.execute(
+            "SELECT tipo, nombre, estado, fecha_emision, fecha_caducidad, notas FROM workspace_rrhh_documentos WHERE id = ? LIMIT 1",
+            (documento_id,),
+        ).fetchone()
+        if current_doc:
+            for key in ("tipo", "estado", "fecha_emision", "fecha_caducidad", "notas"):
+                value = row_value(current_doc, key)
+                if value not in (None, ""):
+                    patch.setdefault(key, value)
         attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="rrhh")
         if attachment:
             patch.setdefault("doc_key", str(attachment.get("key") or "").strip())
             patch.setdefault("doc_url", str(attachment.get("public_url") or "").strip())
             patch.setdefault("nombre", str(attachment.get("filename") or "").strip())
+        elif current_doc and str(row_value(current_doc, "nombre") or "").strip():
+            patch.setdefault("nombre", str(row_value(current_doc, "nombre") or "").strip())
         if not patch:
             return {
                 "ok": True,
@@ -44403,6 +44428,19 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
                 "suggestions": ["Abrir comunidad"],
                 "cards": [{"title": "Falta comunidad", "summary": "No hay comunidad abierta en el contexto actual.", "priority": "alta", "impact_area": "fincas"}],
             }
+        current_community = conn.execute(
+            "SELECT nombre, direccion, estado, presidente, secretario, cuota_sugerida, cuota_mensual FROM workspace_fincas_comunidades WHERE id = ? LIMIT 1",
+            (comunidad_id,),
+        ).fetchone()
+        if current_community:
+            suggested = row_value(current_community, "cuota_sugerida")
+            current_monthly = row_value(current_community, "cuota_mensual")
+            if not patch and suggested not in (None, "") and str(suggested) != str(current_monthly):
+                patch["cuota_mensual"] = suggested
+            for key in ("nombre", "direccion", "estado", "presidente", "secretario"):
+                value = row_value(current_community, key)
+                if value not in (None, ""):
+                    patch.setdefault(key, value)
         if not patch:
             return {
                 "ok": True,
