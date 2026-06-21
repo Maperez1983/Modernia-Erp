@@ -40492,13 +40492,30 @@ def _workspace_internal_copilot_memory():
         process_catalog = json.loads((docs_dir / "process_catalog.json").read_text(encoding="utf-8"))
         business_rules = json.loads((docs_dir / "business_rules.json").read_text(encoding="utf-8"))
         system_invariants = json.loads((docs_dir / "system_invariants.json").read_text(encoding="utf-8"))
+        intelligence_layer = json.loads((docs_dir / "verifika2_intelligence_layer.json").read_text(encoding="utf-8"))
         return {
             "processes": process_catalog.get("processes") or [],
             "business_rules": business_rules.get("rules") or business_rules.get("items") or [],
             "system_invariants": system_invariants.get("global_invariants") or [],
+            "intelligence_layer": intelligence_layer,
         }
     except Exception:
-        return {"processes": [], "business_rules": [], "system_invariants": []}
+        return {"processes": [], "business_rules": [], "system_invariants": [], "intelligence_layer": {}}
+
+
+def _workspace_internal_copilot_platform_blueprint():
+    try:
+        docs_dir = ROOT.parent / "docs"
+        return json.loads((docs_dir / "verifika2_intelligence_layer.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"platform_modules": [], "autonomy_levels": [], "domain_tooling": [], "governance_rules": [], "roadmap": []}
+
+
+def _workspace_internal_copilot_domain_tooling(domain=""):
+    blueprint = _workspace_internal_copilot_platform_blueprint()
+    domain_key = _workspace_internal_copilot_normalize_domain(domain or "")
+    rows = list(blueprint.get("domain_tooling") or [])
+    return next((item for item in rows if _workspace_internal_copilot_normalize_domain(item.get("domain") or "") == domain_key), {})
 
 
 def _workspace_internal_copilot_intent(message):
@@ -41145,6 +41162,132 @@ def _workspace_internal_copilot_memory_reply(conn, workspace_id, message, *, act
         "cards": [{"title": str(item.get("title") or item.get("memory_type") or "Memoria").strip(), "summary": str(item.get("content") or "").strip(), "priority": str(item.get("priority") or "media"), "impact_area": "contexto"} for item in memories[:5]],
         "suggestions": ["Continuar con esto", "Crear tarea", "Ver incidencias relacionadas"],
         "sources": ["workspace_memory"],
+    }
+
+
+def _workspace_internal_copilot_platform_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "verifika2 intelligence",
+            "intelligence layer",
+            "arquitectura del asistente",
+            "arquitectura de la inteligencia",
+            "capacidades del asistente",
+            "que puede hacer el sistema",
+            "qué puede hacer el sistema",
+            "empresa de desarrollo",
+            "centro de trabajo del asistente",
+            "modelo de autonomia",
+            "modelo de autonomía",
+        )
+    ):
+        return None
+    blueprint = _workspace_internal_copilot_platform_blueprint()
+    mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
+    current_domain = _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or (context or {}).get("service_hint") or "")
+    tooling = _workspace_internal_copilot_domain_tooling(current_domain)
+    pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        str(empresa_id or "").strip(),
+        context if isinstance(context, dict) else {},
+    )
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=8)
+    cards = [
+        {
+            "title": "Verifika2 Intelligence Layer",
+            "summary": str(blueprint.get("vision") or "").strip(),
+            "priority": "alta",
+            "impact_area": "plataforma",
+        },
+        {
+            "title": "Módulos de plataforma",
+            "summary": " · ".join(str(item.get("name") or "").strip() for item in list(blueprint.get("platform_modules") or [])[:5]),
+            "priority": "media",
+            "impact_area": "plataforma",
+        },
+        {
+            "title": "Autonomía activa",
+            "summary": f"Modo {mode} · niveles: " + ", ".join(str(item.get("label") or "").strip() for item in list(blueprint.get("autonomy_levels") or [])),
+            "priority": "media",
+            "impact_area": "gobierno",
+        },
+        {
+            "title": "Centro de trabajo actual",
+            "summary": f"{len(pending_cards)} pendiente(s) priorizados · {len(tasks)} tarea(s) abierta(s) · dominio {current_domain or 'global'}",
+            "priority": "media",
+            "impact_area": "operativo",
+        },
+    ]
+    if tooling:
+        cards.append(
+            {
+                "title": f"Herramientas del dominio {current_domain}",
+                "summary": ", ".join(list(tooling.get("tools") or [])[:6]),
+                "priority": "media",
+                "impact_area": current_domain or "operativo",
+            }
+        )
+    return {
+        "ok": True,
+        "intent": "platform_blueprint",
+        "mode": mode,
+        "answer": "He cargado la arquitectura operativa de la inteligencia Verifika2 y el centro de trabajo actual del asistente.",
+        "cards": cards,
+        "actions": [
+            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": current_domain or "", "copilot_mode": mode}},
+            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
+            {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": dict(context or {})}
+        ],
+        "suggestions": ["Qué hago ahora", "Bandeja unificada", "Operar ahora"],
+        "sources": ["verifika2_intelligence_layer", "workspace_process_supervisor", "task_planner"],
+    }
+
+
+def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message="")
+    current_domain = _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or (context or {}).get("service_hint") or "")
+    tooling = _workspace_internal_copilot_domain_tooling(current_domain)
+    pending_cards, _, pending_sources = _workspace_internal_copilot_collect_unified_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        str(empresa_id or "").strip(),
+        context if isinstance(context, dict) else {},
+    )
+    tasks = _workspace_internal_copilot_list_tasks(conn, workspace_id, actor=actor, status="open", limit=6)
+    cards = [
+        {
+            "title": "Centro de trabajo",
+            "summary": f"Modo {mode} · dominio {current_domain or 'global'} · {len(pending_cards)} pendientes · {len(tasks)} tareas",
+            "priority": "alta",
+            "impact_area": "operativo",
+        }
+    ]
+    if tooling:
+        cards.append(
+            {
+                "title": "Herramientas disponibles",
+                "summary": ", ".join(list(tooling.get("tools") or [])[:8]),
+                "priority": "media",
+                "impact_area": current_domain or "operativo",
+            }
+        )
+    cards.extend([dict(item) for item in pending_cards[:4]])
+    return {
+        "ok": True,
+        "action_id": "copilot_work_center",
+        "mode": mode,
+        "message": "He preparado el centro de trabajo del asistente para este workspace.",
+        "cards": cards[:8],
+        "actions": [
+            {"id": "prime_operator_console", "label": "Preparar consola operativa", "payload": dict(context or {})},
+            {"id": "autorreview_global", "label": "Bandeja unificada", "payload": {"scope": "today", "copilot_mode": mode}},
+            {"id": "daily_review_agenda", "label": "Agenda diaria", "payload": {"scope": "today", "copilot_mode": mode}}
+        ],
+        "suggestions": ["Operar ahora", "Qué hago ahora", "Cerrar ciclo"],
+        "sources": list(dict.fromkeys(["verifika2_intelligence_layer", *pending_sources, "task_planner"]))[:8],
     }
 
 
@@ -45206,6 +45349,10 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if simulation_reply:
         response.update(simulation_reply)
         return _finish(response)
+    platform_reply = _workspace_internal_copilot_platform_reply(conn, workspace_text, message_text, empresa_id=company_text, actor=actor, context=context or {})
+    if platform_reply:
+        response.update(platform_reply)
+        return _finish(response)
     codefix_reply = _workspace_internal_copilot_codefix_reply(
         conn,
         workspace_text,
@@ -46493,6 +46640,8 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "copilot_work_center":
+        return _workspace_internal_copilot_work_center_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "prime_operator_console":
         return _workspace_internal_copilot_prime_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "promote_legal_updates_to_tasks":

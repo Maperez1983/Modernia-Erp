@@ -13717,6 +13717,15 @@ const runPersistentInternalCopilotQuickAction = async (kind = "") => {
     await submitInternalCopilotQuery({ message: "qué hago ahora", statusEl });
     return;
   }
+  if (normalized === "platform") {
+    state.persistentInternalCopilotTab = "chat";
+    try {
+      localStorage.setItem("crm.persistentInternalCopilotTab", state.persistentInternalCopilotTab);
+    } catch (e) {}
+    renderGlobalInternalCopilotPanels();
+    await submitInternalCopilotQuery({ message: "arquitectura de la inteligencia verifika2", statusEl });
+    return;
+  }
   if (normalized === "resume") {
     state.persistentInternalCopilotTab = "chat";
     try {
@@ -13805,6 +13814,7 @@ const ensurePersistentInternalCopilotWidget = () => {
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="briefing" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Qué hago ahora</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="platform" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Centro IA</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="resume" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Retomar</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Cerrar ciclo</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Incidencias</button>
@@ -13847,6 +13857,7 @@ const ensurePersistentInternalCopilotWidget = () => {
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué hago ahora" style="border-radius:999px">Qué hago ahora</button>
+            <button type="button" class="secondary ghost" data-global-copilot-suggest="arquitectura de la inteligencia verifika2" style="border-radius:999px">Centro IA</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="continúa con lo de esta mañana" style="border-radius:999px">Retomar</button>
             <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px">Cerrar ciclo</button>
             <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>

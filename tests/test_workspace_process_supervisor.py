@@ -822,6 +822,35 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["intent"], "tutorial")
         self.assertTrue(reply["cards"])
 
+    def test_internal_copilot_platform_reply_exposes_blueprint(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "quiero ver la arquitectura de la inteligencia verifika2",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"user_id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria", "copilot_mode": "operator"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "platform_blueprint")
+        self.assertTrue(any(str(card.get("title") or "") == "Verifika2 Intelligence Layer" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "copilot_work_center" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_action_work_center_returns_domain_tooling(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "copilot_work_center",
+            {"current_crm": "gestoria", "copilot_mode": "operator"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T11:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("action_id"), "copilot_work_center")
+        self.assertTrue(any(str(card.get("title") or "") == "Herramientas disponibles" for card in (result.get("cards") or [])))
+
     def test_supervisor_action_rerun_ocr_for_rrhh_document_returns_endpoint(self):
         self.conn.execute(
             """

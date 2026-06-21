@@ -1,0 +1,67 @@
+{
+  "kind": "verifika2_intelligence_layer",
+  "version": 1,
+  "name": "Verifika2 Intelligence Layer",
+  "vision": "Convertir el CRM en un sistema operativo asistido por inteligencia, capaz de operar, supervisar, explicar, corregir y preparar mejoras técnicas dentro de Verifika2.",
+  "platform_modules": [
+    {
+      "id": "conversation_surface",
+      "name": "Capa de conversación",
+      "purpose": "Mantener un punto único de interacción para trabajo diario, incidencias, tutoriales y consultas legales.",
+      "capabilities": ["chat interno", "agenda diaria", "bandeja unificada", "avisos contextuales", "revisión guiada"]
+    },
+    {
+      "id": "decision_engine",
+      "name": "Motor de decisión",
+      "purpose": "Clasificar intención, priorizar trabajo, recomendar modo y decidir si actuar, pedir confirmación o escalar.",
+      "capabilities": ["clasificación de intención", "priorización", "selección de microflujo", "cambio de modo", "detección de atasco"]
+    },
+    {
+      "id": "execution_tools",
+      "name": "Herramientas ejecutables",
+      "purpose": "Operar de verdad sobre el CRM y sobre bundles técnicos controlados.",
+      "capabilities": ["crear/editar registros", "revalidar procesos", "recalcular dashboards", "OCR y reprocesado", "autofix técnico controlado"]
+    },
+    {
+      "id": "governance_control",
+      "name": "Gobierno y control",
+      "purpose": "Limitar autonomía, trazar acciones y evitar cambios ambiguos o destructivos.",
+      "capabilities": ["permisos", "confirmaciones", "rollback", "trazabilidad", "validación postacción"]
+    },
+    {
+      "id": "learning_memory",
+      "name": "Memoria y aprendizaje",
+      "purpose": "Recordar contexto, estrategias eficaces, incidentes y decisiones para mejorar con el uso real.",
+      "capabilities": ["memoria por usuario", "ranking de estrategias", "playbooks vivos", "memoria técnica", "historial de sesiones"]
+    }
+  ],
+  "autonomy_levels": [
+    {"id": "consultar", "label": "Consultar", "description": "Explica, resume y orienta sin tocar datos ni procesos."},
+    {"id": "proponer", "label": "Proponer", "description": "Sugiere plan, checklist y siguientes pasos, pero no ejecuta."},
+    {"id": "ejecutar_seguro", "label": "Ejecutar seguro", "description": "Lanza acciones seguras y reversibles dentro del CRM."},
+    {"id": "revisar_lote", "label": "Revisar lote", "description": "Opera sobre colas guiadas, revisiones masivas y cierres de ciclo seguros."},
+    {"id": "escalar", "label": "Escalar", "description": "Cambia a modo supervisor/legal/dirección o crea trabajo técnico cuando el problema supera el nivel seguro."}
+  ],
+  "domain_tooling": [
+    {"domain": "gestoria", "tools": ["rentas", "facturas OCR", "contabilidad", "dashboard gestoría", "conciliación factura-asiento"]},
+    {"domain": "seguros", "tools": ["pólizas", "recibos", "siniestros", "dashboard seguros", "revisión de PDF y vínculos cliente"]},
+    {"domain": "financiaciones", "tools": ["hipotecas", "pipeline", "comisiones", "revalidación de importes base"]},
+    {"domain": "rrhh", "tools": ["documentos", "ausencias", "gastos", "caducidades", "escalado legal/laboral"]},
+    {"domain": "fincas", "tools": ["comunidades", "incidencias", "proveedores", "juntas", "contabilidad", "cuotas incoherentes"]},
+    {"domain": "inmobiliaria", "tools": ["agenda", "clientes", "inmuebles", "captaciones", "operaciones", "supervisión de visibilidad"]}
+  ],
+  "governance_rules": [
+    "No borrar ni fusionar datos sin confirmación fuerte.",
+    "No desplegar cambios de código automáticamente.",
+    "No editar fuera de los ficheros probables en autofix controlado.",
+    "Revertir cualquier fix técnico si la validación dirigida falla.",
+    "Escalar automáticamente cuando el impacto sea económico o laboral y el atasco sea sostenido."
+  ],
+  "roadmap": [
+    "Copilot operativo unificado como centro de trabajo.",
+    "Agente ejecutor por dominio con más microflujos completos.",
+    "Supervisor proactivo por usuario y por CRM.",
+    "Ingeniería asistida con edición controlada, validación e iteración.",
+    "Autonomía avanzada con gobierno estricto y métricas de valor real."
+  ]
+}

@@ -85,6 +85,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn('data-global-copilot-mode="direccion"', app_js)
         self.assertIn('data-global-copilot-mode="legal"', app_js)
         self.assertIn('data-global-copilot-quick="close_loop"', app_js)
+        self.assertIn('data-global-copilot-quick="platform"', app_js)
         self.assertIn('"/api/internal_copilot_chat"', app_js)
         self.assertIn('"/api/internal_copilot_action"', app_js)
         self.assertIn("current_client_id", app_js)
