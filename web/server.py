@@ -41324,14 +41324,21 @@ def _workspace_internal_copilot_current_entity_summary(conn, workspace_id, *, em
     return {}
 
 
-def _workspace_internal_copilot_current_entity_actions(entity_summary):
+def _workspace_internal_copilot_current_entity_actions(entity_summary, context=None):
     item = dict(entity_summary or {})
+    ctx = dict(context or {})
     entity_kind = str(item.get("entity_kind") or "").strip()
     entity_id = str(item.get("entity_id") or "").strip()
     domain = _workspace_internal_copilot_normalize_domain(item.get("domain") or "")
     if not entity_kind or not entity_id:
         return []
-    payload = {"domain": domain, "entity_kind": entity_kind, "entity_id": entity_id}
+    payload = {
+        "domain": domain,
+        "entity_kind": entity_kind,
+        "entity_id": entity_id,
+        "current_crm": str(ctx.get("current_crm") or domain or "").strip(),
+        "current_workspace_view": str(ctx.get("current_workspace_view") or "").strip(),
+    }
     actions = [
         {"id": "diagnose_current_entity", "label": "Diagnosticar esta ficha", "payload": payload},
         {"id": "revalidate_current_entity", "label": "Revalidar esta ficha", "payload": payload},
@@ -41347,16 +41354,36 @@ def _workspace_internal_copilot_current_entity_actions(entity_summary):
     process_info = process_map.get(entity_kind)
     if process_info:
         process_id, label = process_info
+        process_context = {
+            "current_crm": str(ctx.get("current_crm") or domain or "").strip(),
+            "current_workspace_view": str(ctx.get("current_workspace_view") or "").strip(),
+            "current_workspace_name": str(ctx.get("current_workspace_name") or "").strip(),
+            "current_workspace_company_name": str(ctx.get("current_workspace_company_name") or "").strip(),
+            "active_tabs": list(ctx.get("active_tabs") or []),
+            "attachments": [dict(item) for item in (ctx.get("attachments") or []) if isinstance(item, dict)][:4],
+            "current_client_id": str(ctx.get("current_client_id") or "").strip(),
+            "current_community_id": str(ctx.get("current_community_id") or "").strip(),
+            "current_rrhh_document_id": str(ctx.get("current_rrhh_document_id") or "").strip(),
+            "current_persona_id": str(ctx.get("current_persona_id") or "").strip(),
+            "current_seguro_id": str(ctx.get("current_seguro_id") or "").strip(),
+            "current_hipoteca_id": str(ctx.get("current_hipoteca_id") or "").strip(),
+            "current_factura_id": str(ctx.get("current_factura_id") or "").strip(),
+            "current_factura_document_id": str(ctx.get("current_factura_document_id") or "").strip(),
+            "current_renta_entry_id": str(ctx.get("current_renta_entry_id") or "").strip(),
+        }
+        if entity_kind == "cliente":
+            process_context["current_client_id"] = entity_id
+        elif entity_kind == "comunidad":
+            process_context["current_community_id"] = entity_id
+        elif entity_kind == "documento_rrhh":
+            process_context["current_rrhh_document_id"] = entity_id
+        elif entity_kind == "poliza":
+            process_context["current_seguro_id"] = entity_id
+        elif entity_kind == "hipoteca":
+            process_context["current_hipoteca_id"] = entity_id
         process_payload = {
             "process_id": process_id,
-            "context": {
-                "current_crm": domain,
-                "current_client_id": entity_id if entity_kind == "cliente" else "",
-                "current_community_id": entity_id if entity_kind == "comunidad" else "",
-                "current_rrhh_document_id": entity_id if entity_kind == "documento_rrhh" else "",
-                "current_seguro_id": entity_id if entity_kind == "poliza" else "",
-                "current_hipoteca_id": entity_id if entity_kind == "hipoteca" else "",
-            },
+            "context": process_context,
         }
         actions.append(
             {
@@ -41429,7 +41456,7 @@ def _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_id
     related = _workspace_internal_copilot_related_open_events(conn, workspace_id, summary)
     cards = [_workspace_internal_copilot_current_entity_card(summary)]
     cards.extend([_workspace_internal_copilot_card_from_event(row) for row in related[:4]])
-    actions = _workspace_internal_copilot_current_entity_actions(summary)
+    actions = _workspace_internal_copilot_current_entity_actions(summary, context=context)
     if related:
         return {
             "ok": True,
@@ -41634,7 +41661,7 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
     cards.extend([dict(item) for item in pending_cards[:4]])
     actions = []
     if current_entity:
-        actions.extend(_workspace_internal_copilot_current_entity_actions(current_entity))
+        actions.extend(_workspace_internal_copilot_current_entity_actions(current_entity, context=context))
     actions.extend(process_actions)
     actions.extend(
         [
@@ -46769,7 +46796,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     current_entity = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context_map)
     if current_entity:
         cards.insert(0, _workspace_internal_copilot_current_entity_card(current_entity))
-        actions = [*_workspace_internal_copilot_current_entity_actions(current_entity), *actions]
+        actions = [*_workspace_internal_copilot_current_entity_actions(current_entity, context=context_map), *actions]
     if mode == "operator" and list(focus_profile.get("top_domains") or []):
         cards.insert(
             0,

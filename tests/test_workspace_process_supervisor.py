@@ -2705,6 +2705,9 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_catalog_process" for action in (reply.get("actions") or [])))
+        run_catalog = next((action for action in (reply.get("actions") or []) if str(action.get("id") or "") == "run_catalog_process"), {})
+        process_context = ((run_catalog.get("payload") or {}).get("context") or {}) if isinstance(run_catalog.get("payload"), dict) else {}
+        self.assertEqual(str(process_context.get("current_hipoteca_id") or ""), "hip-prime-1")
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
