@@ -3569,6 +3569,22 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(card.get("title") or "") == "Capas afectadas" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Checklist de cierre" for card in (reply.get("cards") or [])))
 
+    def test_internal_copilot_discovery_reply_prepares_ambiguous_change_review(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "esto esta mal planteado en gestoria, investiga el problema raro y reorganiza el flujo",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "discovery_review")
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_discovery_review" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_cross_layer_decision" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Evidencia mínima" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -3726,6 +3742,39 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(meta.get("domain"), "gestoria")
         self.assertTrue(list(meta.get("delivery_checklist") or []))
         self.assertTrue(list(meta.get("dimensions") or []))
+
+    def test_internal_copilot_action_prepare_discovery_review_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_discovery_review",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "decision": "Discovery técnico antes de abrir un cambio amplio.",
+                    "hypotheses": [{"id": "scope_mismatch", "title": "Alcance mal delimitado"}],
+                    "evidence": ["localizar flujo", "acotar backend y frontend"],
+                    "execution_path": ["descubrir origen", "decidir enfoque", "preparar bundle"],
+                    "probable_files": ["web/server.py"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:03:45Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(task["source"], "discovery_review")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertTrue(list(meta.get("hypotheses") or []))
+        self.assertTrue(list(meta.get("evidence") or []))
+        self.assertTrue(list(meta.get("execution_path") or []))
 
     def test_internal_copilot_action_run_implementation_session(self):
         old_root = server._workspace_internal_copilot_codefix_root

@@ -42034,6 +42034,149 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
     }
 
 
+def _workspace_internal_copilot_discovery_hypotheses(service_hint="", context=None, message=""):
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip() or "gestoria"
+    text = normalize_lookup_text(message or "").lower()
+    hypotheses = [
+        {
+            "id": "scope_mismatch",
+            "title": "Alcance mal delimitado",
+            "summary": f"El problema en {domain} puede venir de mezclar necesidad funcional, deuda local y validación insuficiente.",
+        },
+        {
+            "id": "flow_gap",
+            "title": "Flujo roto o incompleto",
+            "summary": "Puede haber un paso del flujo que actualiza backend pero no deja la pantalla, supervisor o resumen en el mismo estado.",
+        },
+        {
+            "id": "validation_gap",
+            "title": "Cobertura de validación pobre",
+            "summary": "Es posible que el cambio anterior no cubriera la superficie real del problema ni su regresión principal.",
+        },
+    ]
+    if any(token in text for token in ("dashboard", "resumen", "detalle", "cuadra", "datos", "import", "ocr")):
+        hypotheses.append(
+            {
+                "id": "data_reconciliation",
+                "title": "Descuadre de datos",
+                "summary": "Puede haber inconsistencia entre persistencia, resumen visible e instrumentos de reconciliación.",
+            }
+        )
+    evidence = [
+        "localizar el flujo exacto y la pantalla implicada",
+        "identificar backend, frontend y validación tocados",
+        "reproducir el fallo o la fricción con un caso mínimo",
+        "acotar qué parte del comportamiento esperado no se cumple",
+    ]
+    if any(token in text for token in ("legal", "rrhh", "laboral", "convenio")):
+        evidence.append("comprobar también el impacto documental o legal antes de cerrar la causa")
+    execution_path = [
+        "descubrir el origen real antes de tocar código amplio",
+        "decidir si basta ajuste local, revisión transversal o rediseño corto",
+        "preparar bundle técnico solo cuando la causa ya esté acotada",
+    ]
+    return {"domain": domain, "hypotheses": hypotheses, "evidence": evidence, "execution_path": execution_path}
+
+
+def _workspace_internal_copilot_discovery_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(
+        token in text
+        for token in (
+            "investiga",
+            "no se donde",
+            "no sé dónde",
+            "problema raro",
+            "mal planteado",
+            "reorganiza",
+            "rediseña",
+            "redisenya",
+            "esto esta mal",
+            "esto está mal",
+            "no tengo claro",
+        )
+    ):
+        return None
+    discovery = _workspace_internal_copilot_discovery_hypotheses(service_hint, context=context, message=message)
+    domain = str(discovery.get("domain") or "gestoria").strip() or "gestoria"
+    hypotheses = list(discovery.get("hypotheses") or [])
+    evidence = _normalize_text_list(discovery.get("evidence") or [], max_items=8, max_chars=200)
+    execution_path = _normalize_text_list(discovery.get("execution_path") or [], max_items=6, max_chars=200)
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    plan_payload = {
+        "domain": domain,
+        "assigned_mode": "supervisor",
+        "risk_level": "medium",
+        "diagnosis": f"Problema ambiguo o mal delimitado en {domain}. Conviene discovery técnico antes de abrir implementación amplia.",
+        "decision": f"Hacer discovery dirigido en {domain} antes de tocar varias capas sin evidencia suficiente.",
+        "probable_files": list(scope.get("probable_files") or []),
+        "probable_tests": list(scope.get("probable_tests") or []),
+        "hypotheses": hypotheses,
+        "evidence": evidence,
+        "execution_path": execution_path,
+        "context": str(message or "").strip(),
+    }
+    return {
+        "ok": True,
+        "intent": "discovery_review",
+        "answer": f"He preparado una revisión de discovery para {domain}: hipótesis, evidencia a recoger y ruta de decisión antes de abrir un cambio amplio.",
+        "cards": [
+            {
+                "title": "Discovery recomendado",
+                "summary": str(plan_payload.get("decision") or "").strip(),
+                "priority": "alta",
+                "impact_area": "arquitectura",
+            },
+            *[
+                {
+                    "title": f"Hipótesis: {str(item.get('title') or '').strip()}",
+                    "summary": str(item.get("summary") or "").strip(),
+                    "priority": "media",
+                    "impact_area": "codigo",
+                }
+                for item in hypotheses[:4]
+            ],
+            {
+                "title": "Evidencia mínima",
+                "summary": " | ".join(evidence[:4])[:500],
+                "priority": "media",
+                "impact_area": "operativo",
+            },
+            {
+                "title": "Ruta propuesta",
+                "summary": " | ".join(execution_path[:3])[:500],
+                "priority": "media",
+                "impact_area": "arquitectura",
+            },
+        ],
+        "actions": [
+            {
+                "id": "prepare_discovery_review",
+                "label": "Guardar discovery técnico",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_cross_layer_decision",
+                "label": "Pasar a revisión transversal",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_architecture_decision",
+                "label": "Guardar decisión técnica",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_implementation_task",
+                "label": "Crear tarea técnica",
+                "payload": {"plan": plan_payload},
+            },
+        ],
+        "suggestions": ["Guardar discovery técnico", "Pasar a revisión transversal", "Qué hago ahora"],
+        "sources": ["architecture_review", "implementation_planner", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("implementa", "mejora", "añade", "agrega", "refactoriza", "cambia", "haz que")):
@@ -46283,6 +46426,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if platform_reply:
         response.update(platform_reply)
         return _finish(response)
+    discovery_reply = _workspace_internal_copilot_discovery_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if discovery_reply:
+        response.update(discovery_reply)
+        return _finish(response)
     cross_layer_reply = _workspace_internal_copilot_cross_layer_reply(
         conn,
         workspace_text,
@@ -47470,6 +47625,66 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["architecture_review", "task_planner", "workspace_memory"],
             "suggestions": ["Crear tarea de implementación", "Preparar bundle técnico", "Qué hago ahora"],
+        }
+    if action_text == "prepare_discovery_review":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        decision_text = str(plan.get("decision") or plan.get("diagnosis") or f"Discovery pendiente para {domain}.").strip()
+        hypotheses = [dict(item) for item in list(plan.get("hypotheses") or [])[:8] if isinstance(item, dict)]
+        evidence = _normalize_text_list(plan.get("evidence") or [], max_items=10, max_chars=200)
+        execution_path = _normalize_text_list(plan.get("execution_path") or [], max_items=8, max_chars=200)
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Discovery:{domain}] Investigación técnica",
+            detail=decision_text,
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="discovery_review",
+            meta={
+                "domain": domain,
+                "decision": decision_text,
+                "hypotheses": hypotheses,
+                "evidence": evidence,
+                "execution_path": execution_path,
+                "probable_files": _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180),
+                "probable_tests": _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180),
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="discovery_review",
+            title=f"Discovery técnico {domain}",
+            content=decision_text,
+            priority="alta",
+            meta={
+                "task_id": task_id,
+                "domain": domain,
+                "hypotheses": hypotheses,
+                "evidence": evidence,
+                "execution_path": execution_path,
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He guardado el discovery técnico para {domain}.",
+            "cards": [
+                {
+                    "title": "Discovery técnico guardado",
+                    "summary": f"{decision_text[:280]} · evidencia: {' | '.join(evidence[:3]) or '-'}",
+                    "priority": "alta",
+                    "impact_area": "arquitectura",
+                }
+            ],
+            "sources": ["architecture_review", "task_planner", "workspace_memory"],
+            "suggestions": ["Pasar a revisión transversal", "Guardar decisión técnica", "Crear tarea técnica"],
         }
     if action_text == "prepare_cross_layer_decision":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
