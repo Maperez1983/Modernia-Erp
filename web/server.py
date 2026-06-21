@@ -41770,6 +41770,131 @@ def _workspace_internal_copilot_codefix_scope(service_hint="", context=None, mes
     return scope
 
 
+def _workspace_internal_copilot_implementation_options(domain="", message=""):
+    domain_text = str(domain or "global").strip() or "global"
+    request_text = str(message or "").strip()
+    return [
+        {
+            "id": "minimal",
+            "title": "Ajuste mínimo",
+            "summary": f"Tocar lo justo en {domain_text} para resolver \"{request_text[:80]}\" sin abrir refactor adicional.",
+            "tradeoff": "rápido, menor riesgo, menos mejora estructural",
+        },
+        {
+            "id": "balanced",
+            "title": "Implementación equilibrada",
+            "summary": f"Resolver la mejora en {domain_text}, añadir test de regresión y dejar la zona más consistente.",
+            "tradeoff": "mejor equilibrio entre alcance, calidad y tiempo",
+        },
+        {
+            "id": "structural",
+            "title": "Mejora estructural",
+            "summary": f"Reordenar la zona afectada de {domain_text} para reducir deuda técnica y repetir menos lógica.",
+            "tradeoff": "más impacto positivo, más superficie y más validación",
+        },
+    ]
+
+
+def _workspace_internal_copilot_implementation_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("implementa", "mejora", "añade", "agrega", "refactoriza", "cambia", "haz que")):
+        return None
+    if any(token in text for token in ("arregla el codigo", "arregla el código", "corrige el codigo", "corrige el código", "parche", "autofix", "fix bug")):
+        return None
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip()
+    options = _workspace_internal_copilot_implementation_options(domain=domain, message=message)
+    recommended = next((item for item in options if str(item.get("id") or "") == "balanced"), options[0] if options else {})
+    diagnosis = (
+        f"Petición de mejora para {domain}. "
+        "Conviene preparar una implementación equilibrada: cambio dirigido, test de regresión y validación del flujo afectado."
+    )
+    patch_outline = [
+        "identificar el punto exacto del flujo o pantalla afectada",
+        "aplicar la mejora con el patrón local existente",
+        "añadir o ajustar test de regresión dirigido",
+        "revalidar el flujo funcional afectado",
+    ]
+    plan_payload = {
+        "domain": domain,
+        "assigned_mode": "supervisor",
+        "risk_level": "medium",
+        "diagnosis": diagnosis,
+        "patch_outline": patch_outline,
+        "probable_files": list(scope.get("probable_files") or []),
+        "probable_tests": list(scope.get("probable_tests") or []),
+        "implementation_options": options,
+        "recommended_option": recommended,
+        "requested_change": str(message or "").strip(),
+    }
+    bundle = _workspace_internal_copilot_build_codefix_bundle(
+        domain=domain,
+        assigned_mode="supervisor",
+        diagnosis=diagnosis,
+        patch_outline=patch_outline,
+        probable_files=plan_payload["probable_files"],
+        probable_tests=plan_payload["probable_tests"],
+    )
+    plan_payload.update(bundle)
+    return {
+        "ok": True,
+        "intent": "implementation_plan",
+        "answer": f"He preparado una propuesta de implementación para {domain} con un enfoque equilibrado, que es el que mejor encaja con el código actual.",
+        "cards": [
+            {
+                "title": "Enfoque recomendado",
+                "summary": f"{str(recommended.get('title') or '').strip()} · {str(recommended.get('tradeoff') or '').strip()}",
+                "priority": "alta",
+                "impact_area": "codigo",
+            },
+            *[
+                {
+                    "title": f"Opción: {str(item.get('title') or '').strip()}",
+                    "summary": f"{str(item.get('summary') or '').strip()} · {str(item.get('tradeoff') or '').strip()}",
+                    "priority": "media",
+                    "impact_area": "codigo",
+                }
+                for item in options[:3]
+            ],
+            {
+                "title": "Archivos y tests probables",
+                "summary": (
+                    f"Ficheros: {', '.join(list(plan_payload.get('probable_files') or [])[:4])} · "
+                    f"Tests: {', '.join(list(plan_payload.get('probable_tests') or [])[:3])}"
+                )[:500],
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+        ],
+        "actions": [
+            {
+                "id": "prepare_implementation_task",
+                "label": "Crear tarea de implementación",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_code_autofix_bundle",
+                "label": "Preparar bundle técnico",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "validate_code_autofix_bundle",
+                "label": "Validar bundle",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "apply_code_autofix_bundle",
+                "label": "Aplicar implementación controlada",
+                "requires_confirmation": True,
+                "confirm_text": "Se intentará materializar la mejora en código y validarla sobre los ficheros probables.",
+                "payload": {"plan": plan_payload},
+            },
+        ],
+        "suggestions": ["Crear tarea técnica", "Preparar bundle técnico", "Qué riesgo tiene"],
+        "sources": ["implementation_planner", "change_impact_map", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_build_patch_prompt(*, domain="", diagnosis="", patch_outline=None, probable_files=None, probable_tests=None):
     lines = [
         f"Dominio: {str(domain or '').strip()}",
@@ -45825,6 +45950,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if platform_reply:
         response.update(platform_reply)
         return _finish(response)
+    implementation_reply = _workspace_internal_copilot_implementation_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if implementation_reply:
+        response.update(implementation_reply)
+        return _finish(response)
     codefix_reply = _workspace_internal_copilot_codefix_reply(
         conn,
         workspace_text,
@@ -46864,6 +47001,61 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["internal_copilot_action", "task_planner", "workspace_memory"],
             "suggestions": ["Pasar a supervisor", "Qué hago ahora", "Bandeja unificada"],
+        }
+    if action_text == "prepare_implementation_task":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or "supervisor").strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or f"Implementación pendiente en {domain}.").strip()
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        options = [dict(item) for item in list(plan.get("implementation_options") or [])[:4] if isinstance(item, dict)]
+        recommended = dict(plan.get("recommended_option") or {})
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=_normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220),
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Implementación:{domain}] Mejora guiada",
+            detail=diagnosis,
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="implementation_plan",
+            meta={
+                "domain": domain,
+                "assigned_mode": assigned_mode,
+                "implementation_options": options,
+                "recommended_option": recommended,
+                "probable_files": probable_files,
+                "probable_tests": probable_tests,
+                "patch_prompt": str(bundle.get("patch_prompt") or "").strip(),
+                "proposed_diff": str(bundle.get("proposed_diff") or "").strip(),
+                "validation_commands": list(bundle.get("validation_commands") or []),
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He creado la tarea de implementación para {domain} con el enfoque recomendado.",
+            "cards": [
+                {
+                    "title": "Implementación planificada",
+                    "summary": f"Modo {assigned_mode} · opción {str(recommended.get('title') or 'equilibrada').strip()} · ficheros {', '.join(probable_files[:3])}",
+                    "priority": "alta",
+                    "impact_area": "codigo",
+                }
+            ],
+            "sources": ["implementation_planner", "task_planner"],
+            "suggestions": ["Preparar bundle técnico", "Validar bundle", "Aplicar implementación controlada"],
         }
     if action_text == "prepare_code_autofix_bundle":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}

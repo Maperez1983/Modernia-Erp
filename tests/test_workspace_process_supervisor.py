@@ -3519,6 +3519,21 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "apply_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Diff propuesto" for card in (reply.get("cards") or [])))
 
+    def test_internal_copilot_implementation_reply_prepares_options(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "implementa una mejora en gestoría para que el flujo de facturas sea más consistente",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "implementation_plan")
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_implementation_task" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Enfoque recomendado" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -3551,6 +3566,38 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("*** Begin Patch", str(meta.get("proposed_diff") or ""))
         self.assertIn("Ficheros probables", str(meta.get("patch_prompt") or ""))
         self.assertTrue(list(meta.get("validation_commands") or []))
+
+    def test_internal_copilot_action_prepare_implementation_task_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_implementation_task",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "assigned_mode": "supervisor",
+                    "diagnosis": "Implementar mejora de consistencia en gestoría.",
+                    "patch_outline": ["corregir flujo", "añadir test"],
+                    "probable_files": ["web/server.py", "web/app.js"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                    "implementation_options": [{"id": "balanced", "title": "Implementación equilibrada"}],
+                    "recommended_option": {"id": "balanced", "title": "Implementación equilibrada"},
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:02:00Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(task["source"], "implementation_plan")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertTrue(list(meta.get("implementation_options") or []))
 
     def test_internal_copilot_action_prepare_code_autofix_bundle_returns_commands(self):
         result = server.perform_workspace_internal_copilot_action(
