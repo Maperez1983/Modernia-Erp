@@ -3510,6 +3510,63 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 )
                 self.assertTrue(result["ok"])
                 self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
+                self.assertEqual((result.get("apply_result") or {}).get("attempts_count"), 1)
+                self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+                self.assertTrue(Path(str((result.get("apply_result") or {}).get("session_summary_path") or "")).exists())
+        finally:
+            server._workspace_internal_copilot_codefix_root = old_root
+            server._workspace_internal_copilot_generate_codefix_edits = old_generate
+            server._workspace_internal_copilot_run_validation_bundle = old_validate
+
+    def test_internal_copilot_action_apply_code_autofix_bundle_retries_after_failed_validation(self):
+        old_root = server._workspace_internal_copilot_codefix_root
+        old_generate = server._workspace_internal_copilot_generate_codefix_edits
+        old_validate = server._workspace_internal_copilot_run_validation_bundle
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                target = root / "sample_module.py"
+                target.write_text("value = 1\n", encoding="utf-8")
+                server._workspace_internal_copilot_codefix_root = lambda: root
+                edits_queue = [
+                    {
+                        "status": "ready",
+                        "summary": "Primer intento.",
+                        "edits": [{"file": "sample_module.py", "find": "value = 1", "replace": "value = 3", "reason": "Primer ajuste"}],
+                    },
+                    {
+                        "status": "ready",
+                        "summary": "Segundo intento.",
+                        "edits": [{"file": "sample_module.py", "find": "value = 1", "replace": "value = 2", "reason": "Segundo ajuste"}],
+                    },
+                ]
+                validation_queue = [
+                    {"status": "failed", "steps": [{"command": "python3 -m py_compile sample_module.py", "status": "failed", "detail": "AssertionError"}]},
+                    {"status": "passed", "steps": [{"command": "python3 -m py_compile sample_module.py", "status": "passed"}]},
+                ]
+                server._workspace_internal_copilot_generate_codefix_edits = lambda bundle: edits_queue.pop(0)
+                server._workspace_internal_copilot_run_validation_bundle = lambda bundle: validation_queue.pop(0)
+                result = server.perform_workspace_internal_copilot_action(
+                    self.conn,
+                    "ws1",
+                    "apply_code_autofix_bundle",
+                    {
+                        "plan": {
+                            "domain": "gestoria",
+                            "assigned_mode": "supervisor",
+                            "diagnosis": "Fallo en flujo de factura sin asiento.",
+                            "patch_outline": ["corregir valor"],
+                            "probable_files": ["sample_module.py"],
+                            "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                        }
+                    },
+                    empresa_id="e1",
+                    actor={"id": "u1", "usuario": "QA"},
+                    now="2026-06-21T10:25:00Z",
+                )
+                self.assertTrue(result["ok"])
+                self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
+                self.assertEqual((result.get("apply_result") or {}).get("attempts_count"), 2)
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
         finally:
             server._workspace_internal_copilot_codefix_root = old_root

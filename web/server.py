@@ -41496,6 +41496,14 @@ def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
     }
 
 
+def _workspace_internal_copilot_write_codefix_session_summary(artifact_dir, payload):
+    out_dir = Path(str(artifact_dir or "")).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = out_dir / "session_summary.json"
+    summary_path.write_text(json.dumps(payload or {}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return str(summary_path)
+
+
 def _workspace_internal_copilot_read_codefix_context(bundle):
     root = Path(_workspace_internal_copilot_codefix_root()).resolve()
     contexts = []
@@ -41643,6 +41651,77 @@ def _workspace_internal_copilot_apply_codefix_edits(bundle, generated, *, now=No
         result["summary"] = f"No he podido aplicar el fix de forma segura: {type(exc).__name__}: {exc}"
         result["reverted"] = bool(originals)
         return result
+
+
+def _workspace_internal_copilot_refine_codefix_bundle(bundle, apply_result, attempt_index):
+    base = dict(bundle or {})
+    validation = dict((apply_result or {}).get("validation") or {})
+    failed_steps = [step for step in list(validation.get("steps") or []) if str(step.get("status") or "").strip() == "failed"]
+    failure_detail = " | ".join(str(step.get("detail") or "").strip()[:240] for step in failed_steps[:2]).strip()
+    previous_outline = _normalize_text_list(base.get("patch_outline") or [], max_items=8, max_chars=220)
+    refinement = f"ajustar intento {int(attempt_index or 1) + 1} segun validacion fallida"
+    if failure_detail:
+        refinement = f"{refinement}: {failure_detail[:180]}"
+    updated_outline = previous_outline + [refinement]
+    updated_diagnosis = str(base.get("diagnosis") or "").strip()
+    if failure_detail:
+        updated_diagnosis = f"{updated_diagnosis} Validación previa fallida: {failure_detail[:300]}".strip()
+    return _workspace_internal_copilot_build_codefix_bundle(
+        domain=str(base.get("domain") or "").strip(),
+        assigned_mode=str(base.get("assigned_mode") or "supervisor").strip() or "supervisor",
+        diagnosis=updated_diagnosis,
+        patch_outline=updated_outline,
+        probable_files=_normalize_text_list(base.get("probable_files") or [], max_items=8, max_chars=180),
+        probable_tests=_normalize_text_list(base.get("probable_tests") or [], max_items=8, max_chars=180),
+    )
+
+
+def _workspace_internal_copilot_execute_codefix_session(bundle, *, now=None, max_attempts=3):
+    attempts = []
+    current_bundle = dict(bundle or {})
+    final_result = {
+        "status": "needs_more_data",
+        "summary": "No he podido ejecutar la sesión de fix.",
+        "applied_files": [],
+        "validation": {"status": "partial", "steps": []},
+        "artifact_dir": "",
+        "reverted": False,
+    }
+    for index in range(max(1, int(max_attempts or 1))):
+        generated = _workspace_internal_copilot_generate_codefix_edits(current_bundle)
+        apply_result = _workspace_internal_copilot_apply_codefix_edits(current_bundle, generated, now=now)
+        attempt_record = {
+            "attempt": index + 1,
+            "bundle": current_bundle,
+            "generated": generated,
+            "apply_result": apply_result,
+        }
+        attempts.append(attempt_record)
+        final_result = dict(apply_result or final_result)
+        if str(apply_result.get("status") or "").strip() == "passed":
+            break
+        if str(generated.get("status") or "").strip() in {"needs_more_data", "no_safe_edit"}:
+            break
+        current_bundle = _workspace_internal_copilot_refine_codefix_bundle(current_bundle, apply_result, index + 1)
+    artifact_dir = str(final_result.get("artifact_dir") or "").strip()
+    if not artifact_dir:
+        artifact_dir = str(_workspace_internal_copilot_artifact_dir(domain=str((bundle or {}).get("domain") or "codefix"), now=now))
+        Path(artifact_dir).mkdir(parents=True, exist_ok=True)
+    session_summary_path = _workspace_internal_copilot_write_codefix_session_summary(
+        artifact_dir,
+        {
+            "branch_name": str((bundle or {}).get("branch_name") or "").strip(),
+            "domain": str((bundle or {}).get("domain") or "").strip(),
+            "attempts": attempts,
+            "final_result": final_result,
+        },
+    )
+    final_result["artifact_dir"] = artifact_dir
+    final_result["attempts"] = attempts
+    final_result["attempts_count"] = len(attempts)
+    final_result["session_summary_path"] = session_summary_path
+    final_result["branch_name"] = str((bundle or {}).get("branch_name") or "").strip()
+    return final_result
 
 
 def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
@@ -46353,8 +46432,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             probable_files=probable_files,
             probable_tests=probable_tests,
         )
-        generated = _workspace_internal_copilot_generate_codefix_edits(bundle)
-        apply_result = _workspace_internal_copilot_apply_codefix_edits(bundle, generated, now=now)
+        apply_result = _workspace_internal_copilot_execute_codefix_session(bundle, now=now, max_attempts=3)
         priority = "alta" if str(apply_result.get("status") or "") == "failed" else "media"
         _workspace_internal_copilot_store_memory_note(
             conn,
@@ -46364,7 +46442,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             title=f"Ejecución fix {domain}",
             content=str(apply_result.get("summary") or "").strip(),
             priority=priority,
-            meta={"domain": domain, "bundle": bundle, "generated": generated, "apply_result": apply_result},
+            meta={"domain": domain, "bundle": bundle, "attempts_count": int(apply_result.get("attempts_count") or 0), "apply_result": apply_result},
             now=now,
         )
         cards = [
@@ -46375,11 +46453,12 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "impact_area": "codigo",
             },
             {
-                "title": "Ediciones propuestas",
-                "summary": " | ".join(
-                    f"{str(item.get('file') or '').strip()}: {str(item.get('reason') or 'edición exacta').strip()}"
-                    for item in list(generated.get("edits") or [])[:4]
-                )[:500] or str(generated.get("summary") or "").strip(),
+                "title": "Sesión de fix",
+                "summary": (
+                    f"Rama {str(apply_result.get('branch_name') or '').strip() or 'sin rama'} · "
+                    f"{int(apply_result.get('attempts_count') or 0)} intento(s) · "
+                    f"resumen {str(apply_result.get('session_summary_path') or '').strip()}"
+                )[:500],
                 "priority": "media",
                 "impact_area": "codigo",
             },
