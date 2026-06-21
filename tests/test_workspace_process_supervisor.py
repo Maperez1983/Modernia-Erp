@@ -2703,6 +2703,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any("Pulso económico" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any("Asistente hoy" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any("Aprendizaje del asistente" == str(card.get("title") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any("Estrategias dominantes" == str(card.get("title") or "") for card in (result.get("cards") or [])))
 
     def test_internal_copilot_promote_legal_updates_to_tasks(self):
         self.conn.execute(
@@ -3249,6 +3250,73 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result.get("mode_switch", {}).get("mode"), "legal")
         self.assertEqual(result["action_id"], "set_copilot_mode")
+
+    def test_internal_copilot_microflow_auto_switches_mode_on_high_impact_stuck(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Primera pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T07:00:00Z",
+        )
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Segunda pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T08:00:00Z",
+        )
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decisión operativa rrhh",
+            content="Tercera pasada sin resolución",
+            meta={"domain": "rrhh", "resolved": 0},
+            now="2026-06-19T09:00:00Z",
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              persona_id TEXT,
+              tipo TEXT,
+              nombre TEXT,
+              fecha_caducidad TEXT,
+              estado TEXT,
+              permanente INTEGER
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_rrhh_documentos (id, workspace_id, persona_id, tipo, nombre, fecha_caducidad, estado, permanente) VALUES ('doc-auto-switch-1','ws1','p1','DNI','DNI Juan','2026-01-01','caducado',0)"
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "run_domain_microflow",
+            {"domain": "rrhh", "microflow_type": "documentos_rrhh_caducados"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T14:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual((result.get("mode_switch") or {}).get("mode"), "legal")
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(meta.get("assigned_mode"), "legal")
 
 
 if __name__ == "__main__":

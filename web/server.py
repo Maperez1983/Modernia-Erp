@@ -42087,6 +42087,16 @@ def _workspace_internal_copilot_mode_switch_recommendation(conn, workspace_id, *
     }
 
 
+def _workspace_internal_copilot_should_auto_switch_mode(mode_switch, *, impact_area=""):
+    item = dict(mode_switch or {})
+    if not item:
+        return False
+    stuck = item.get("stuck_signal") if isinstance(item.get("stuck_signal"), dict) else {}
+    count = int(stuck.get("count") or 0)
+    impact = str(impact_area or "").strip().lower()
+    return count >= 3 and impact in {"economico", "laboral"}
+
+
 def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, _ = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -42098,6 +42108,7 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
     economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
     assistant_today = _workspace_internal_copilot_today_resolution_summary(conn, workspace_id, actor=actor)
     learning = _workspace_internal_copilot_learning_summary(conn, workspace_id, actor=actor, limit=80)
+    strategy_rank = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=3)
     grouped = {}
     for card in pending_cards:
         impact = str(card.get("impact_area") or "operativo").strip().lower()
@@ -42138,6 +42149,15 @@ def _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, *, e
                 f"{domain}: {values['resolved']} resueltos / {values['count']} decisiones"
                 for domain, values in list(learning.get("domains") or [])[:3]
             ) or "Sin suficiente histórico todavía",
+            "priority": "media",
+            "impact_area": "direccion",
+        },
+        {
+            "title": "Estrategias dominantes",
+            "summary": " · ".join(
+                f"{str(item.get('domain') or '').strip()}: {str(item.get('best_action_id') or 'sin acción dominante').strip()} ({int(item.get('resolved') or 0)} resueltos)"
+                for item in list(strategy_rank or [])[:3]
+            ) or "Sin ranking suficiente todavía",
             "priority": "media",
             "impact_area": "direccion",
         },
@@ -45833,6 +45853,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "fincas": "operativo",
             "inmobiliaria": "operativo",
         }.get(domain, "operativo")
+        assigned_mode = str((mode_switch.get("mode") if mode_switch else "") or "operator").strip() or "operator"
         task_result = {}
         if refreshed_cards:
             task_id = _workspace_internal_copilot_create_task(
@@ -45844,10 +45865,21 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 priority="alta" if domain_impact in {"economico", "laboral"} else "media",
                 due_at=date.today().isoformat(),
                 source="copilot_microflow",
-                meta=_workspace_internal_copilot_domain_task_meta(domain, microflow_type=microflow_type, impact_area=domain_impact, assigned_mode="operator"),
+                meta=_workspace_internal_copilot_domain_task_meta(domain, microflow_type=microflow_type, impact_area=domain_impact, assigned_mode=assigned_mode),
                 now=now,
             )
             task_result = {"task_id": task_id}
+        auto_mode_switch = {}
+        if _workspace_internal_copilot_should_auto_switch_mode(mode_switch, impact_area=domain_impact):
+            auto_mode_switch = perform_workspace_internal_copilot_action(
+                conn,
+                workspace_text,
+                "set_copilot_mode",
+                {"mode": assigned_mode, "domain": domain, "reason": str(mode_switch.get("reason") or "").strip()},
+                empresa_id=empresa_id,
+                actor=actor,
+                now=now,
+            ) or {}
         close_loop_result = {}
         if not refreshed_cards:
             close_loop_result = perform_workspace_internal_copilot_action(
@@ -45866,10 +45898,15 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": (
                 f"Microflujo {microflow_type} ejecutado para {domain}. Actualizados: {updated} · resueltos: {resolved}."
                 + (
-                    f" He creado una tarea de seguimiento porque quedan {len(refreshed_cards[:8])} pendiente(s)."
+                    f" He creado una tarea de seguimiento en modo {assigned_mode} porque quedan {len(refreshed_cards[:8])} pendiente(s)."
                     if refreshed_cards and task_result.get("task_id")
                     else " El dominio ha quedado limpio y he cerrado el ciclo automáticamente."
                     if close_loop_result.get("ok")
+                    else ""
+                )
+                + (
+                    f" He escalado automáticamente el asistente a modo {assigned_mode}."
+                    if auto_mode_switch.get("ok")
                     else ""
                 )
             ),
@@ -45945,6 +45982,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "impact_area": domain_impact,
             "auto_closed": bool(close_loop_result.get("ok")),
             "stuck_signal": stuck_signal,
+            "mode_switch": auto_mode_switch.get("mode_switch") if isinstance(auto_mode_switch, dict) else None,
         }
     if action_text == "resolve_global_safe":
         _, actions, sources = _workspace_internal_copilot_collect_unified_pending(conn, workspace_text, empresa_id, payload)
