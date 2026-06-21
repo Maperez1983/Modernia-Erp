@@ -41849,6 +41849,44 @@ def _workspace_internal_copilot_cross_layer_layers(service_hint="", context=None
     return {"domain": domain, "layers": layers}
 
 
+def _workspace_internal_copilot_cross_layer_dimensions(domain="", message=""):
+    text = normalize_lookup_text(message or "").lower()
+    dimensions = [
+        {
+            "id": "product",
+            "title": "Producto",
+            "summary": f"Confirmar que el flujo principal de {domain or 'global'} sigue siendo más claro y no gana pasos innecesarios.",
+        },
+        {
+            "id": "ux",
+            "title": "UX",
+            "summary": "Verificar estados visibles, navegación, mensajes y acciones para que el usuario no quede perdido tras el cambio.",
+        },
+        {
+            "id": "operations",
+            "title": "Operación",
+            "summary": "Revalidar supervisor, pendientes, agenda diaria o colas guiadas que puedan verse afectadas.",
+        },
+    ]
+    if any(token in text for token in ("dato", "datos", "tabla", "schema", "import", "dashboard", "resumen", "detalle", "migracion", "migración")):
+        dimensions.append(
+            {
+                "id": "data",
+                "title": "Datos",
+                "summary": "Asegurar compatibilidad entre persistencia, resúmenes, importaciones y registros ya existentes.",
+            }
+        )
+    if domain == "rrhh" or any(token in text for token in ("legal", "laboral", "normativa", "convenio", "ley")):
+        dimensions.append(
+            {
+                "id": "legal",
+                "title": "Legal",
+                "summary": "Comprobar documentación, plantillas y pasos sensibles antes de considerar cerrado el cambio.",
+            }
+        )
+    return dimensions
+
+
 def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -41869,8 +41907,18 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
     layer_info = _workspace_internal_copilot_cross_layer_layers(service_hint, context=context, message=message)
     domain = str(layer_info.get("domain") or "gestoria").strip() or "gestoria"
     layers = list(layer_info.get("layers") or [])
+    dimensions = _workspace_internal_copilot_cross_layer_dimensions(domain=domain, message=message)
     scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
     recommended_order = [str(item.get("title") or "").strip() for item in layers]
+    delivery_checklist = [
+        "validar backend y contratos afectados",
+        "revisar la pantalla o flujo visible tras el cambio",
+        "ejecutar tests dirigidos y revalidar incidencias relacionadas",
+    ]
+    if any(str(item.get("id") or "") == "data" for item in dimensions):
+        delivery_checklist.append("comprobar que datos, resúmenes e importaciones siguen cuadrando")
+    if any(str(item.get("id") or "") == "legal" for item in dimensions):
+        delivery_checklist.append("confirmar documentación o impacto legal antes de cerrar")
     decision = (
         f"Este cambio en {domain} conviene tratarlo como revisión transversal: "
         "primero backend y reglas, después pantalla/flujo visible, luego validación dirigida y por último reconciliación o impactos laterales."
@@ -41892,7 +41940,9 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
         "probable_tests": list(scope.get("probable_tests") or []),
         "cross_layer": True,
         "layers": layers,
+        "dimensions": dimensions,
         "recommended_order": recommended_order,
+        "delivery_checklist": delivery_checklist,
         "context": str(message or "").strip(),
         "risks": [str(item.get("risk") or "").strip() for item in layers[:6] if str(item.get("risk") or "").strip()],
     }
@@ -41929,6 +41979,18 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
                 "impact_area": "arquitectura",
             },
             {
+                "title": "Impacto de producto y datos",
+                "summary": " · ".join(str(item.get("title") or "").strip() for item in dimensions[:5]),
+                "priority": "media",
+                "impact_area": "producto",
+            },
+            {
+                "title": "Checklist de cierre",
+                "summary": " | ".join(delivery_checklist[:4])[:500],
+                "priority": "media",
+                "impact_area": "operativo",
+            },
+            {
                 "title": "Archivos y tests probables",
                 "summary": (
                     f"Ficheros: {', '.join(plan_payload['probable_files'][:4])} · "
@@ -41942,6 +42004,11 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
             {
                 "id": "prepare_cross_layer_decision",
                 "label": "Guardar revisión transversal",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "prepare_delivery_review",
+                "label": "Guardar checklist de cierre",
                 "payload": {"plan": plan_payload},
             },
             {
@@ -41962,7 +42029,7 @@ def _workspace_internal_copilot_cross_layer_reply(conn, workspace_id, message, *
                 "payload": {"plan": plan_payload},
             },
         ],
-        "suggestions": ["Guardar revisión transversal", "Lanzar sesión transversal", "Qué riesgo tiene"],
+        "suggestions": ["Guardar revisión transversal", "Guardar checklist de cierre", "Lanzar sesión transversal"],
         "sources": ["architecture_review", "implementation_planner", "change_impact_map", "workspace_process_supervisor"],
     }
 
@@ -47463,6 +47530,57 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": ["architecture_review", "task_planner", "workspace_memory"],
             "suggestions": ["Crear tarea transversal", "Lanzar sesión transversal", "Preparar bundle técnico"],
         }
+    if action_text == "prepare_delivery_review":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        checklist = _normalize_text_list(plan.get("delivery_checklist") or [], max_items=10, max_chars=200)
+        dimensions = [dict(item) for item in list(plan.get("dimensions") or [])[:8] if isinstance(item, dict)]
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=f"[Entrega:{domain}] Checklist de cierre",
+            detail=str(plan.get("decision") or plan.get("diagnosis") or f"Cierre pendiente para {domain}.").strip(),
+            priority="alta",
+            due_at=date.today().isoformat(),
+            source="delivery_review",
+            meta={
+                "domain": domain,
+                "delivery_checklist": checklist,
+                "dimensions": dimensions,
+                "cross_layer": bool(plan.get("cross_layer")),
+                "probable_files": _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180),
+                "probable_tests": _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180),
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="delivery_review",
+            title=f"Checklist de cierre {domain}",
+            content=" | ".join(checklist[:4]) if checklist else f"Cierre pendiente en {domain}",
+            priority="alta",
+            meta={"task_id": task_id, "domain": domain, "dimensions": dimensions, "delivery_checklist": checklist},
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "task_id": task_id,
+            "message": f"He guardado el checklist de cierre para {domain}.",
+            "cards": [
+                {
+                    "title": "Checklist de cierre guardado",
+                    "summary": " | ".join(checklist[:4])[:500] if checklist else f"Cierre pendiente en {domain}",
+                    "priority": "alta",
+                    "impact_area": "operativo",
+                }
+            ],
+            "sources": ["implementation_planner", "task_planner", "workspace_memory"],
+            "suggestions": ["Lanzar sesión transversal", "Preparar bundle técnico", "Qué hago ahora"],
+        }
     if action_text == "run_implementation_session":
         plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
         domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
@@ -47511,6 +47629,26 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "impact_area": "codigo",
             },
         ]
+        dimensions = [dict(item) for item in list(plan.get("dimensions") or [])[:8] if isinstance(item, dict)]
+        checklist = _normalize_text_list(plan.get("delivery_checklist") or [], max_items=10, max_chars=200)
+        if dimensions:
+            cards.append(
+                {
+                    "title": "Impacto de entrega",
+                    "summary": " · ".join(str(item.get("title") or "").strip() for item in dimensions[:5]),
+                    "priority": "media",
+                    "impact_area": "producto",
+                }
+            )
+        if checklist:
+            cards.append(
+                {
+                    "title": "Siguiente validación de cierre",
+                    "summary": " | ".join(checklist[:4])[:500],
+                    "priority": "media",
+                    "impact_area": "operativo",
+                }
+            )
         return {
             "ok": True,
             "action_id": action_text,

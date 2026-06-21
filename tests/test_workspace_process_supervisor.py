@@ -3564,8 +3564,10 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply.get("intent"), "cross_layer_review")
         self.assertTrue(any(str(action.get("id") or "") == "prepare_cross_layer_decision" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_delivery_review" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_implementation_session" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Capas afectadas" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Checklist de cierre" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
@@ -3693,6 +3695,38 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(list(meta.get("layers") or []))
         self.assertTrue(list(meta.get("recommended_order") or []))
 
+    def test_internal_copilot_action_prepare_delivery_review_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_delivery_review",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "decision": "Cambio transversal en gestoría con cierre dirigido.",
+                    "dimensions": [{"id": "product", "title": "Producto"}, {"id": "ux", "title": "UX"}],
+                    "delivery_checklist": ["validar backend", "revisar pantalla", "ejecutar tests"],
+                    "cross_layer": True,
+                    "probable_files": ["web/server.py"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:03:40Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(task["source"], "delivery_review")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertTrue(list(meta.get("delivery_checklist") or []))
+        self.assertTrue(list(meta.get("dimensions") or []))
+
     def test_internal_copilot_action_run_implementation_session(self):
         old_root = server._workspace_internal_copilot_codefix_root
         old_generate = server._workspace_internal_copilot_generate_codefix_edits
@@ -3724,6 +3758,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                             "patch_outline": ["corregir valor"],
                             "probable_files": ["sample_module.py"],
                             "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                            "dimensions": [{"id": "product", "title": "Producto"}, {"id": "ux", "title": "UX"}],
+                            "delivery_checklist": ["validar backend", "revisar pantalla", "ejecutar tests"],
                         }
                     },
                     empresa_id="e1",
@@ -3733,6 +3769,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
                 self.assertTrue(result["ok"])
                 self.assertEqual((result.get("apply_result") or {}).get("status"), "passed")
                 self.assertTrue(Path(str((result.get("apply_result") or {}).get("session_summary_path") or "")).exists())
+                self.assertTrue(any(str(card.get("title") or "") == "Impacto de entrega" for card in (result.get("cards") or [])))
+                self.assertTrue(any(str(card.get("title") or "") == "Siguiente validación de cierre" for card in (result.get("cards") or [])))
                 self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
         finally:
             server._workspace_internal_copilot_codefix_root = old_root
