@@ -41541,6 +41541,7 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
     mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message="")
     current_domain = _workspace_internal_copilot_normalize_domain((context or {}).get("current_crm") or (context or {}).get("service_hint") or "")
     tooling = _workspace_internal_copilot_domain_tooling(current_domain)
+    focus_profile = _workspace_internal_copilot_focus_profile(conn, workspace_id, actor=actor, limit=3)
     current_entity = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
     pending_cards, _, pending_sources = _workspace_internal_copilot_collect_unified_pending(
         conn,
@@ -41567,6 +41568,15 @@ def _workspace_internal_copilot_work_center_reply(conn, workspace_id, *, empresa
                 "summary": ", ".join(list(tooling.get("tools") or [])[:8]),
                 "priority": "media",
                 "impact_area": current_domain or "operativo",
+            }
+        )
+    if list(focus_profile.get("top_domains") or []):
+        cards.append(
+            {
+                "title": "Perfil de foco",
+                "summary": str(focus_profile.get("summary") or "").strip(),
+                "priority": "media",
+                "impact_area": "copilot",
             }
         )
     cards.extend([dict(item) for item in pending_cards[:4]])
@@ -44073,6 +44083,30 @@ def _workspace_internal_copilot_strategy_ranking(conn, workspace_id, *, actor=No
     return ranked[: max(1, int(limit or 5))]
 
 
+def _workspace_internal_copilot_focus_profile(conn, workspace_id, *, actor=None, limit=3):
+    ranking = _workspace_internal_copilot_strategy_ranking(conn, workspace_id, actor=actor, limit=max(1, int(limit or 3)))
+    top = []
+    for item in ranking[: max(1, int(limit or 3))]:
+        domain = str(item.get("domain") or "").strip()
+        if not domain:
+            continue
+        top.append(
+            {
+                "domain": domain,
+                "best_action_id": str(item.get("best_action_id") or "").strip(),
+                "resolved": int(item.get("resolved") or 0),
+                "score": int(item.get("score") or 0),
+            }
+        )
+    return {
+        "top_domains": top,
+        "summary": " · ".join(
+            f"{item['domain']}: {item['best_action_id'] or 'sin acción dominante'} ({item['resolved']} resueltos)"
+            for item in top[:3]
+        ) if top else "Sin foco dominante todavía",
+    }
+
+
 def _workspace_internal_copilot_stuck_signal(conn, workspace_id, *, actor=None, domain="", limit=6):
     rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(6, int(limit or 6)))
     domain_key = _workspace_internal_copilot_normalize_domain(domain)
@@ -46330,6 +46364,7 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     )
     current_view = str(context_map.get("current_workspace_view") or "").strip() or "operations"
     current_crm = str(context_map.get("current_crm") or context_map.get("service_hint") or "").strip() or current_view
+    focus_profile = _workspace_internal_copilot_focus_profile(conn, workspace_id, actor=actor, limit=3)
     briefing = _workspace_internal_copilot_briefing_reply(
         conn,
         workspace_id,
@@ -46352,6 +46387,16 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
     if current_entity:
         cards.insert(0, _workspace_internal_copilot_current_entity_card(current_entity))
         actions = [*_workspace_internal_copilot_current_entity_actions(current_entity), *actions]
+    if mode == "operator" and list(focus_profile.get("top_domains") or []):
+        cards.insert(
+            0,
+            {
+                "title": "Perfil de foco",
+                "summary": str(focus_profile.get("summary") or "").strip(),
+                "priority": "media",
+                "impact_area": "copilot",
+            },
+        )
     current_entity_priority = _workspace_internal_copilot_current_entity_priority(conn, workspace_id, empresa_id=empresa_id, context=context_map)
     if current_entity_priority:
         summary = current_entity_priority.get("summary") or {}

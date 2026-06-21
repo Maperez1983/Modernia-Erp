@@ -2632,6 +2632,22 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result.get("refresh_supervisor"))
 
     def test_internal_copilot_prime_operator_console_mode(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="decision",
+            title="Decision financiaciones",
+            content="Microflujo cerrado",
+            priority="media",
+            meta={
+                "domain": "financiaciones",
+                "safe_action_id": "bulk_revalidate_missing_hipotecas",
+                "resolved": 2,
+                "updated": 2,
+            },
+            now="2026-06-19T09:00:00Z",
+        )
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS hipotecas (
@@ -2691,6 +2707,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
+        self.assertTrue(any("Perfil de foco" == str(card.get("title") or "") for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
