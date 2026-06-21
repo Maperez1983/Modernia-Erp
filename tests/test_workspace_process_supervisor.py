@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from datetime import date
+from pathlib import Path
 
 try:
     import PIL  # noqa: F401
@@ -3345,6 +3346,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply.get("intent"), "code_autofix")
         self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_task" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_bundle" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "validate_code_autofix_bundle" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "materialize_code_autofix_bundle" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Diff propuesto" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
@@ -3404,6 +3407,60 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("copilot-fix/gestoria-", str(bundle.get("branch_name") or ""))
         self.assertTrue(list(bundle.get("validation_commands") or []))
         self.assertIn("*** Begin Patch", str(bundle.get("proposed_diff") or ""))
+
+    def test_internal_copilot_action_validate_code_autofix_bundle_reports_status(self):
+        old_runner = server._workspace_internal_copilot_run_validation_bundle
+        try:
+            server._workspace_internal_copilot_run_validation_bundle = lambda bundle: {
+                "status": "passed",
+                "steps": [{"command": "python3 -m py_compile web/server.py", "status": "passed"}],
+            }
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "validate_code_autofix_bundle",
+                {
+                    "plan": {
+                        "domain": "gestoria",
+                        "assigned_mode": "supervisor",
+                        "diagnosis": "Fallo en flujo de factura sin asiento.",
+                        "patch_outline": ["corregir handler"],
+                        "probable_files": ["web/server.py"],
+                        "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                    }
+                },
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                now="2026-06-21T10:10:00Z",
+            )
+        finally:
+            server._workspace_internal_copilot_run_validation_bundle = old_runner
+        self.assertTrue(result["ok"])
+        self.assertEqual((result.get("validation") or {}).get("status"), "passed")
+
+    def test_internal_copilot_action_materialize_code_autofix_bundle_writes_artifacts(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "materialize_code_autofix_bundle",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "assigned_mode": "supervisor",
+                    "diagnosis": "Fallo en flujo de factura sin asiento.",
+                    "patch_outline": ["corregir handler", "añadir test de regresión"],
+                    "probable_files": ["web/server.py", "web/app.js"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:15:00Z",
+        )
+        self.assertTrue(result["ok"])
+        artifacts = result.get("artifacts") or {}
+        self.assertTrue(str(artifacts.get("artifact_dir") or "").strip())
+        self.assertTrue(Path(str(artifacts.get("bundle_path") or "")).exists())
 
 
 if __name__ == "__main__":

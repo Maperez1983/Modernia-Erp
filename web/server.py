@@ -26,6 +26,7 @@ import imaplib
 import email
 import html
 import textwrap
+import shlex
 import xml.etree.ElementTree as ET
 import socket
 import ipaddress
@@ -41401,6 +41402,100 @@ def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode
     }
 
 
+def _workspace_internal_copilot_codefix_root():
+    raw = str(os.environ.get("CRM_CODEFIX_ROOT") or (ROOT.parent)).strip()
+    return Path(raw).resolve()
+
+
+def _workspace_internal_copilot_artifact_dir(*, domain="", now=None):
+    stamp_source = now or datetime.now(timezone.utc)
+    if isinstance(stamp_source, str):
+        try:
+            stamp_source = datetime.fromisoformat(stamp_source.replace("Z", "+00:00"))
+        except Exception:
+            stamp_source = datetime.now(timezone.utc)
+    stamp = stamp_source.strftime("%Y%m%dT%H%M%SZ")
+    slug = re.sub(r"[^a-z0-9_.-]+", "-", normalize_lookup_text(domain or "codefix").lower()).strip("-") or "codefix"
+    return _workspace_internal_copilot_codefix_root() / "_scratch" / "copilot_codefix" / f"{slug}-{stamp}"
+
+
+def _workspace_internal_copilot_is_safe_validation_command(command=""):
+    text = str(command or "").strip()
+    return (
+        text.startswith("python3 -m py_compile ")
+        or text.startswith("node --check ")
+        or text.startswith("./.venv/bin/python -m unittest ")
+    )
+
+
+def _workspace_internal_copilot_run_validation_bundle(bundle):
+    root = _workspace_internal_copilot_codefix_root()
+    commands = [str(item).strip() for item in list((bundle or {}).get("validation_commands") or []) if str(item).strip()]
+    steps = []
+    overall = "passed"
+    for command in commands:
+        if not _workspace_internal_copilot_is_safe_validation_command(command):
+            steps.append({"command": command, "status": "skipped", "detail": "comando no permitido"})
+            overall = "partial"
+            continue
+        try:
+            proc = subprocess.run(
+                shlex.split(command),
+                cwd=str(root),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=300,
+            )
+            status = "passed" if proc.returncode == 0 else "failed"
+            if status == "failed":
+                overall = "failed"
+            elif overall != "failed" and proc.returncode == 0 and overall == "passed":
+                overall = "passed"
+            steps.append(
+                {
+                    "command": command,
+                    "status": status,
+                    "returncode": int(proc.returncode or 0),
+                    "detail": str((proc.stdout or "")[-1200:]).strip(),
+                }
+            )
+        except Exception as exc:
+            overall = "failed"
+            steps.append(
+                {
+                    "command": command,
+                    "status": "failed",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            )
+    if not commands:
+        overall = "partial"
+    return {"status": overall, "steps": steps}
+
+
+def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
+    domain = str((bundle or {}).get("domain") or "codefix").strip()
+    out_dir = _workspace_internal_copilot_artifact_dir(domain=domain, now=now)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = out_dir / "codex_repair_prompt.md"
+    diff_path = out_dir / "proposed_patch.diff"
+    commands_path = out_dir / "validation_commands.txt"
+    bundle_path = out_dir / "bundle.json"
+    prompt_path.write_text(str((bundle or {}).get("patch_prompt") or "").strip() + "\n", encoding="utf-8")
+    diff_path.write_text(str((bundle or {}).get("proposed_diff") or "").strip() + "\n", encoding="utf-8")
+    commands = [str(item).strip() for item in list((bundle or {}).get("validation_commands") or []) if str(item).strip()]
+    commands_path.write_text("\n".join(commands).strip() + ("\n" if commands else ""), encoding="utf-8")
+    bundle_path.write_text(json.dumps(bundle or {}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "artifact_dir": str(out_dir),
+        "prompt_path": str(prompt_path),
+        "diff_path": str(diff_path),
+        "commands_path": str(commands_path),
+        "bundle_path": str(bundle_path),
+    }
+
+
 def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("autofix", "arregla el codigo", "arregla el código", "corrige el codigo", "corrige el código", "parche", "fix bug", "toca codigo", "toca código", "repara el codigo", "repara el código")):
@@ -41546,6 +41641,16 @@ def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, em
             {
                 "id": "prepare_code_autofix_bundle",
                 "label": "Preparar bundle de ejecución",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "validate_code_autofix_bundle",
+                "label": "Validar bundle",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "materialize_code_autofix_bundle",
+                "label": "Materializar artefactos",
                 "payload": {"plan": plan_payload},
             },
             {
@@ -45966,6 +46071,115 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             ],
             "sources": ["internal_copilot_action", "workspace_memory"],
             "suggestions": ["Crear tarea técnica", "Pasar a supervisor", "Qué hago ahora"],
+        }
+    if action_text == "validate_code_autofix_bundle":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or ("legal" if domain == "rrhh" else "supervisor")).strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or "Plan de reparación de código pendiente.").strip()
+        patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=patch_outline,
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        validation = _workspace_internal_copilot_run_validation_bundle(bundle)
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="code_autofix_validation",
+            title=f"Validación bundle {domain}",
+            content=f"Resultado: {str(validation.get('status') or 'partial')}.",
+            priority="alta" if str(validation.get("status") or "") == "failed" else "media",
+            meta={"domain": domain, "validation": validation, "bundle": bundle},
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Validación del bundle para {domain}: {str(validation.get('status') or 'partial')}.",
+            "validation": validation,
+            "cards": [
+                {
+                    "title": "Estado de validación",
+                    "summary": f"{str(validation.get('status') or 'partial').strip()} · {len(list(validation.get('steps') or []))} paso(s)",
+                    "priority": "alta" if str(validation.get("status") or "") == "failed" else "media",
+                    "impact_area": "codigo",
+                },
+                *[
+                    {
+                        "title": "Comando validado",
+                        "summary": f"{str(step.get('status') or '').strip()} · {str(step.get('command') or '').strip()}",
+                        "priority": "media",
+                        "impact_area": "codigo",
+                    }
+                    for step in list(validation.get("steps") or [])[:4]
+                ],
+            ],
+            "sources": ["internal_copilot_action", "workspace_memory"],
+            "suggestions": ["Materializar artefactos", "Crear tarea técnica", "Pasar a supervisor"],
+        }
+    if action_text == "materialize_code_autofix_bundle":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or ("legal" if domain == "rrhh" else "supervisor")).strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or "Plan de reparación de código pendiente.").strip()
+        patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        bundle = _workspace_internal_copilot_build_codefix_bundle(
+            domain=domain,
+            assigned_mode=assigned_mode,
+            diagnosis=diagnosis,
+            patch_outline=patch_outline,
+            probable_files=probable_files,
+            probable_tests=probable_tests,
+        )
+        artifacts = _workspace_internal_copilot_materialize_codefix_bundle(bundle, now=now)
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="code_autofix_materialized",
+            title=f"Artefactos bundle {domain}",
+            content=f"Materializado en {str(artifacts.get('artifact_dir') or '').strip()}",
+            priority="media",
+            meta={"domain": domain, "artifacts": artifacts, "bundle": bundle},
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He materializado los artefactos del bundle para {domain}.",
+            "artifacts": artifacts,
+            "cards": [
+                {
+                    "title": "Artefactos generados",
+                    "summary": f"Directorio: {str(artifacts.get('artifact_dir') or '').strip()}",
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+                {
+                    "title": "Prompt de parche",
+                    "summary": str(artifacts.get("prompt_path") or "").strip(),
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+                {
+                    "title": "Diff materializado",
+                    "summary": str(artifacts.get("diff_path") or "").strip(),
+                    "priority": "media",
+                    "impact_area": "codigo",
+                },
+            ],
+            "sources": ["internal_copilot_action", "workspace_memory"],
+            "suggestions": ["Validar bundle", "Crear tarea técnica", "Pasar a supervisor"],
         }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
