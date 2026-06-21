@@ -2704,6 +2704,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(card.get("title") or "") == "Prioridad de la ficha actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Entidad actual" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "diagnose_current_entity" for action in (reply.get("actions") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "run_catalog_process" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(action.get("id") or "") == "run_domain_microflow" for action in (reply.get("actions") or [])))
         self.assertTrue(any("Siguiente microflujo" in str(card.get("title") or "") for card in (reply.get("cards") or [])))
         self.assertTrue(any("Siguiente registro recomendado" == str(card.get("title") or "") for card in (reply.get("cards") or [])))

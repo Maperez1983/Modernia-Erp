@@ -41336,9 +41336,40 @@ def _workspace_internal_copilot_current_entity_actions(entity_summary):
         {"id": "diagnose_current_entity", "label": "Diagnosticar esta ficha", "payload": payload},
         {"id": "revalidate_current_entity", "label": "Revalidar esta ficha", "payload": payload},
     ]
+    process_map = {
+        "hipoteca": ("hipoteca_revalidate", "Operar esta hipoteca"),
+        "documento_rrhh": ("rrhh_expiry_review", "Operar este documento RRHH"),
+        "comunidad": ("community_quota_review", "Operar esta comunidad"),
+        "poliza": ("seguro_dashboard", "Operar esta póliza"),
+    }
+    if entity_kind == "cliente" and domain == "inmobiliaria":
+        process_map["cliente"] = ("client_open_update", "Operar este cliente")
+    process_info = process_map.get(entity_kind)
+    if process_info:
+        process_id, label = process_info
+        process_payload = {
+            "process_id": process_id,
+            "context": {
+                "current_crm": domain,
+                "current_client_id": entity_id if entity_kind == "cliente" else "",
+                "current_community_id": entity_id if entity_kind == "comunidad" else "",
+                "current_rrhh_document_id": entity_id if entity_kind == "documento_rrhh" else "",
+                "current_seguro_id": entity_id if entity_kind == "poliza" else "",
+                "current_hipoteca_id": entity_id if entity_kind == "hipoteca" else "",
+            },
+        }
+        actions.append(
+            {
+                "id": "run_catalog_process",
+                "label": label,
+                "requires_confirmation": True,
+                "confirm_text": f"Se ejecutará el proceso {label.lower()} con la ficha visible actual.",
+                "payload": process_payload,
+            }
+        )
     if entity_kind == "cliente":
         actions.append({"id": "open_client", "label": "Abrir ficha cliente", "payload": {"cliente_id": entity_id}})
-    return actions[:3]
+    return actions[:4]
 
 
 def _workspace_internal_copilot_current_entity_card(entity_summary):
