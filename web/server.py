@@ -41280,6 +41280,183 @@ def _workspace_internal_copilot_simulation_reply(conn, workspace_id, message, *,
     }
 
 
+def _workspace_internal_copilot_codefix_scope(service_hint="", context=None, message=""):
+    context_map = context if isinstance(context, dict) else {}
+    text = normalize_lookup_text(message or "").lower()
+    inferred = (
+        context_map.get("current_crm")
+        or context_map.get("service_hint")
+        or service_hint
+        or ("rrhh" if "rrhh" in text else "")
+        or ("fincas" if "fincas" in text or "comunidad" in text else "")
+        or ("financiaciones" if "hipoteca" in text or "financi" in text else "")
+        or ("seguros" if "seguro" in text or "poliza" in text or "póliza" in text else "")
+        or ("gestoria" if "factura" in text or "renta" in text or "gestoria" in text or "gestoría" in text else "")
+    )
+    domain = _workspace_internal_copilot_normalize_domain(inferred or "gestoria")
+    mapping = {
+        "gestoria": {
+            "probable_files": ["web/server.py", "web/app.js", "scripts/system_autofix_agent.py"],
+            "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py", "tests/test_ollama_automation_tools.py"],
+        },
+        "seguros": {
+            "probable_files": ["web/server.py", "web/app.js", "scripts/reocr_seguros_fill_missing_fields_postgres.py"],
+            "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py"],
+        },
+        "financiaciones": {
+            "probable_files": ["web/server.py", "web/app.js"],
+            "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py"],
+        },
+        "rrhh": {
+            "probable_files": ["web/server.py", "web/app.js"],
+            "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py"],
+        },
+        "fincas": {
+            "probable_files": ["web/server.py", "web/app.js"],
+            "probable_tests": ["tests/test_workspace_process_supervisor.py", "tests/test_frontend_smoke.py"],
+        },
+        "inmobiliaria": {
+            "probable_files": ["web/server.py", "web/app.js"],
+            "probable_tests": ["tests/test_frontend_smoke.py", "tests/test_inmobiliaria_e2e_playwright.py"],
+        },
+    }
+    scope = dict(mapping.get(domain, mapping["gestoria"]))
+    scope["domain"] = domain
+    return scope
+
+
+def _workspace_internal_copilot_codefix_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    text = normalize_lookup_text(message or "").lower()
+    if not any(token in text for token in ("autofix", "arregla el codigo", "arregla el código", "corrige el codigo", "corrige el código", "parche", "fix bug", "toca codigo", "toca código", "repara el codigo", "repara el código")):
+        return None
+    scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
+    domain = str(scope.get("domain") or "gestoria").strip()
+    events = fetch_workspace_process_supervisor_events(conn, workspace_id, limit=10, only_open=True).get("rows") or []
+    relevant = []
+    for row in events:
+        servicio = _workspace_internal_copilot_normalize_domain(row.get("servicio") or "")
+        process_type = normalize_lookup_text(row.get("process_type") or "").lower()
+        if servicio == domain or domain in process_type:
+            relevant.append(row)
+    if not relevant:
+        relevant = events[:3]
+    heuristics = {
+        "status": "needs_patch",
+        "risk_level": "medium",
+        "diagnosis": (
+            f"Hay una incidencia funcional abierta en {domain}. "
+            "El cambio debe concentrarse en backend/frontend del CRM afectado y revalidarse con tests dirigidos."
+        ),
+        "patch_outline": [
+            "localizar la ruta o el handler del proceso afectado",
+            "corregir el guard o la persistencia que deja el estado incoherente",
+            "añadir o ajustar test directo de regresión",
+            "revalidar el flujo con el supervisor de procesos",
+        ],
+        "probable_files": list(scope.get("probable_files") or []),
+        "probable_tests": list(scope.get("probable_tests") or []),
+    }
+    if _workspace_internal_copilot_agent_enabled() and ollama_available():
+        incident_lines = [
+            {
+                "servicio": str(row.get("servicio") or "").strip(),
+                "titulo": str(row.get("title") or row.get("process_type") or "").strip(),
+                "summary": str(row.get("summary") or "").strip(),
+                "impact_area": str(row.get("impact_area") or "").strip(),
+            }
+            for row in relevant[:4]
+        ]
+        prompt = (
+            "Responde SOLO en JSON valido. "
+            "Prepara un plan de autofix de codigo para el CRM. "
+            "Devuelve: "
+            "{\"status\":\"needs_patch|needs_more_data|no_action\","
+            "\"risk_level\":\"low|medium|high\","
+            "\"diagnosis\":\"...\","
+            "\"patch_outline\":[\"...\"],"
+            "\"probable_files\":[\"...\"],"
+            "\"probable_tests\":[\"...\"]}.\n\n"
+            + json.dumps(
+                {
+                    "domain": domain,
+                    "message": str(message or "").strip(),
+                    "current_context": context or {},
+                    "heuristics": heuristics,
+                    "incidents": incident_lines,
+                },
+                ensure_ascii=False,
+            )
+        )
+        parsed, err = call_ollama_json(
+            prompt,
+            required_keys={"status", "risk_level", "diagnosis", "patch_outline", "probable_files", "probable_tests"},
+            timeout=45,
+            retries=1,
+            model=str(os.environ.get("OLLAMA_AUTOFIX_MODEL") or os.environ.get("OLLAMA_REVIEW_MODEL") or os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip() or None,
+            system_text=_workspace_internal_copilot_agent_system_text() + " Actúas como agente de reparación de código. No inventes ficheros fuera del repo conocido.",
+        )
+        if not err and parsed:
+            heuristics["status"] = str(parsed.get("status") or heuristics["status"]).strip() or heuristics["status"]
+            heuristics["risk_level"] = str(parsed.get("risk_level") or heuristics["risk_level"]).strip() or heuristics["risk_level"]
+            heuristics["diagnosis"] = str(parsed.get("diagnosis") or heuristics["diagnosis"]).strip() or heuristics["diagnosis"]
+            heuristics["patch_outline"] = _normalize_text_list(parsed.get("patch_outline") or heuristics["patch_outline"], max_items=6, max_chars=220)
+            heuristics["probable_files"] = _normalize_text_list(parsed.get("probable_files") or heuristics["probable_files"], max_items=8, max_chars=180)
+            heuristics["probable_tests"] = _normalize_text_list(parsed.get("probable_tests") or heuristics["probable_tests"], max_items=8, max_chars=180)
+    assigned_mode = "legal" if domain == "rrhh" else "supervisor"
+    plan_payload = {
+        "domain": domain,
+        "assigned_mode": assigned_mode,
+        "status": heuristics["status"],
+        "risk_level": heuristics["risk_level"],
+        "diagnosis": heuristics["diagnosis"],
+        "patch_outline": list(heuristics.get("patch_outline") or []),
+        "probable_files": list(heuristics.get("probable_files") or []),
+        "probable_tests": list(heuristics.get("probable_tests") or []),
+    }
+    return {
+        "ok": True,
+        "intent": "code_autofix",
+        "answer": f"He preparado un plan de reparación de código para {domain}. Riesgo {heuristics['risk_level']}. Puedo dejarlo como tarea técnica con archivos, parche y tests probables.",
+        "cards": [
+            {
+                "title": "Diagnóstico técnico",
+                "summary": str(heuristics["diagnosis"] or "").strip(),
+                "priority": "alta" if str(heuristics["risk_level"]).lower() == "high" else "media",
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Parche propuesto",
+                "summary": " | ".join(list(heuristics.get("patch_outline") or [])[:4]),
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+            {
+                "title": "Archivos y tests probables",
+                "summary": (
+                    f"Ficheros: {', '.join(list(heuristics.get('probable_files') or [])[:4])} · "
+                    f"Tests: {', '.join(list(heuristics.get('probable_tests') or [])[:3])}"
+                )[:500],
+                "priority": "media",
+                "impact_area": "codigo",
+            },
+        ],
+        "actions": [
+            {
+                "id": "prepare_code_autofix_task",
+                "label": "Crear tarea técnica",
+                "payload": {"plan": plan_payload},
+            },
+            {
+                "id": "set_copilot_mode",
+                "label": f"Pasar a {assigned_mode}",
+                "payload": {"mode": assigned_mode, "domain": domain, "reason": f"Preparar reparación de código para {domain}."},
+            },
+        ],
+        "suggestions": ["Crear tarea técnica", "Pasar a supervisor", "Bandeja unificada"],
+        "sources": ["internal_copilot_codefix", "workspace_process_supervisor"],
+    }
+
+
 def _workspace_internal_copilot_resolve_mode(actor=None, service_hint="", context=None, message=""):
     actor_map = actor if isinstance(actor, dict) else {}
     context_map = context if isinstance(context, dict) else {}
@@ -44587,6 +44764,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if simulation_reply:
         response.update(simulation_reply)
         return _finish(response)
+    codefix_reply = _workspace_internal_copilot_codefix_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if codefix_reply:
+        response.update(codefix_reply)
+        return _finish(response)
     context_reply = _workspace_internal_copilot_context_reply(conn, workspace_text, context or {}, message_text, empresa_id=company_text)
     if context_reply:
         response.update(context_reply)
@@ -45511,6 +45700,73 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "refresh_supervisor": True,
             "sources": ["internal_copilot_action"],
             "suggestions": ["Qué hago ahora", "Operar ahora", "Bandeja unificada"],
+        }
+    if action_text == "prepare_code_autofix_task":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        domain = _workspace_internal_copilot_normalize_domain(plan.get("domain") or payload.get("domain") or payload.get("crm") or "")
+        assigned_mode = str(plan.get("assigned_mode") or ("legal" if domain == "rrhh" else "supervisor")).strip() or "supervisor"
+        diagnosis = str(plan.get("diagnosis") or "Plan de reparación de código pendiente.").strip()
+        patch_outline = _normalize_text_list(plan.get("patch_outline") or [], max_items=8, max_chars=220)
+        probable_files = _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180)
+        probable_tests = _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180)
+        risk_level = str(plan.get("risk_level") or "medium").strip() or "medium"
+        title = f"[Código:{domain}] Reparación guiada"
+        detail = (
+            f"{diagnosis} "
+            f"Parche: {' | '.join(patch_outline[:4])}. "
+            f"Tests: {', '.join(probable_tests[:4])}."
+        )[:1200]
+        task_id = _workspace_internal_copilot_create_task(
+            conn,
+            workspace_text,
+            actor=actor,
+            title=title,
+            detail=detail,
+            priority="alta" if risk_level == "high" else "media",
+            due_at=date.today().isoformat(),
+            source="code_autofix",
+            meta={
+                "domain": domain,
+                "assigned_mode": assigned_mode,
+                "risk_level": risk_level,
+                "probable_files": probable_files,
+                "probable_tests": probable_tests,
+                "patch_outline": patch_outline,
+            },
+            now=now,
+        )
+        _workspace_internal_copilot_store_memory_note(
+            conn,
+            workspace_text,
+            actor=actor,
+            memory_type="code_autofix_plan",
+            title=f"Autofix preparado {domain}",
+            content=diagnosis,
+            priority="alta" if risk_level == "high" else "media",
+            meta={
+                "task_id": task_id,
+                "domain": domain,
+                "assigned_mode": assigned_mode,
+                "probable_files": probable_files,
+                "probable_tests": probable_tests,
+            },
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He creado una tarea técnica de autofix para {domain} en modo {assigned_mode}.",
+            "task_id": task_id,
+            "cards": [
+                {
+                    "title": "Tarea técnica creada",
+                    "summary": f"Modo {assigned_mode} · riesgo {risk_level} · ficheros {', '.join(probable_files[:3])}",
+                    "priority": "alta" if risk_level == "high" else "media",
+                    "impact_area": "codigo",
+                }
+            ],
+            "sources": ["internal_copilot_action", "task_planner", "workspace_memory"],
+            "suggestions": ["Pasar a supervisor", "Qué hago ahora", "Bandeja unificada"],
         }
     if action_text == "director_morning_briefing":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)

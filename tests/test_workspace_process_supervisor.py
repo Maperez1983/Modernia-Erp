@@ -3318,6 +3318,63 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         meta = server._safe_json_object(task["meta_json"] or "{}")
         self.assertEqual(meta.get("assigned_mode"), "legal")
 
+    def test_internal_copilot_codefix_reply_prepares_plan(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_process_supervisor (
+              id, workspace_id, empresa_id, servicio, process_type, entity_type, entity_id, actor_user_id,
+              actor_label, status, severity, title, summary, anomaly_json, actions_json, llm_payload,
+              dedupe_key, acknowledged, acknowledged_at, created_at, updated_at
+            ) VALUES (
+              'evt-code-1', 'ws1', 'e1', 'gestoria', 'gestoria_factura', 'gestoria_factura', 'fac-1', '',
+              '', 'failed', 'error', 'Factura sin asiento', 'Impacto económico alto', '[]', '[]', '{}',
+              'code-1', 0, NULL, 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "arregla el código de gestoría y prepara un parche",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "code_autofix")
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_task" for action in (reply.get("actions") or [])))
+
+    def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "prepare_code_autofix_task",
+            {
+                "plan": {
+                    "domain": "gestoria",
+                    "assigned_mode": "supervisor",
+                    "risk_level": "high",
+                    "diagnosis": "Fallo en flujo de factura sin asiento.",
+                    "patch_outline": ["corregir handler", "añadir test de regresión"],
+                    "probable_files": ["web/server.py", "web/app.js"],
+                    "probable_tests": ["tests/test_workspace_process_supervisor.py"],
+                }
+            },
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-21T10:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        task = self.conn.execute(
+            "SELECT * FROM workspace_internal_copilot_tasks WHERE id = ?",
+            (str(result.get("task_id") or "").strip(),),
+        ).fetchone()
+        self.assertIsNotNone(task)
+        meta = server._safe_json_object(task["meta_json"] or "{}")
+        self.assertEqual(meta.get("domain"), "gestoria")
+        self.assertEqual(meta.get("assigned_mode"), "supervisor")
+
 
 if __name__ == "__main__":
     unittest.main()
