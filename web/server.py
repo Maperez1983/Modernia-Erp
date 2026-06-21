@@ -42260,6 +42260,43 @@ def _workspace_internal_copilot_strategy_options(domain="", message="", *, conte
     return {"recommended": recommended, "options": options}
 
 
+def _workspace_internal_copilot_strategy_learning(conn, workspace_id, *, actor=None, domain="", limit=24):
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(12, int(limit or 24)))
+    domain_key = _workspace_internal_copilot_normalize_domain(domain)
+    scores = {}
+    for row in rows:
+        memory_type = str(row.get("memory_type") or "").strip()
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        row_domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if domain_key and row_domain and row_domain != domain_key:
+            continue
+        strategy_id = str(meta.get("strategy_id") or meta.get("recommended_strategy_id") or "").strip()
+        if not strategy_id:
+            recommended = meta.get("recommended_strategy") if isinstance(meta.get("recommended_strategy"), dict) else {}
+            strategy_id = str(recommended.get("id") or "").strip()
+        if not strategy_id:
+            continue
+        entry = scores.setdefault(strategy_id, {"strategy_id": strategy_id, "count": 0, "success": 0, "blocked": 0, "followup": 0, "score": 0})
+        entry["count"] += 1
+        if memory_type == "implementation_session":
+            inspection = meta.get("inspection") if isinstance(meta.get("inspection"), dict) else {}
+            status = str(meta.get("status") or "").strip().lower()
+            inspection_status = str(inspection.get("status") or "").strip().lower()
+            if status == "passed" and inspection_status == "clean":
+                entry["success"] += 1
+                entry["score"] += 5
+            elif status == "passed":
+                entry["followup"] += 1
+                entry["score"] += 2
+            else:
+                entry["blocked"] += 1
+                entry["score"] -= 2
+        else:
+            entry["score"] += 1
+    ranked = sorted(scores.values(), key=lambda item: (int(item.get("score") or 0), int(item.get("success") or 0), int(item.get("count") or 0)), reverse=True)
+    return {"top": ranked[0] if ranked else {}, "ranked": ranked[:5]}
+
+
 def _workspace_internal_copilot_strategy_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(
@@ -42279,8 +42316,15 @@ def _workspace_internal_copilot_strategy_reply(conn, workspace_id, message, *, e
     scope = _workspace_internal_copilot_codefix_scope(service_hint, context=context, message=message)
     domain = str(scope.get("domain") or "gestoria").strip() or "gestoria"
     strategy = _workspace_internal_copilot_strategy_options(domain=domain, message=message, context=context if isinstance(context, dict) else {})
+    learning = _workspace_internal_copilot_strategy_learning(conn, workspace_id, actor=actor, domain=domain, limit=30)
     recommended = dict(strategy.get("recommended") or {})
     options = [dict(item) for item in list(strategy.get("options") or [])[:4] if isinstance(item, dict)]
+    learned_top = dict(learning.get("top") or {})
+    learned_id = str(learned_top.get("strategy_id") or "").strip()
+    if learned_id:
+        learned_option = next((item for item in options if str(item.get("id") or "") == learned_id), None)
+        if learned_option is not None:
+            recommended = dict(learned_option)
     decision = (
         f"Para {domain} conviene empezar por {str(recommended.get('title') or '').lower()}: "
         f"{str(recommended.get('summary') or '').strip()}"
@@ -42293,6 +42337,8 @@ def _workspace_internal_copilot_strategy_reply(conn, workspace_id, message, *, e
         "decision": decision,
         "strategy_options": options,
         "recommended_strategy": recommended,
+        "recommended_strategy_id": str(recommended.get("id") or "").strip(),
+        "strategy_learning": learning,
         "probable_files": list(scope.get("probable_files") or []),
         "probable_tests": list(scope.get("probable_tests") or []),
         "context": str(message or "").strip(),
@@ -42317,6 +42363,20 @@ def _workspace_internal_copilot_strategy_reply(conn, workspace_id, message, *, e
                 }
                 for item in options[:3]
             ],
+            *(
+                [
+                    {
+                        "title": "Aprendizaje aplicado",
+                        "summary": (
+                            f"Estrategia dominante en {domain}: {learned_id} · "
+                            f"{int(learned_top.get('success') or 0)} cierres limpios / {int(learned_top.get('count') or 0)} usos"
+                        ),
+                        "priority": "media",
+                        "impact_area": "copilot",
+                    }
+                ]
+                if learned_id else []
+            ),
         ],
         "actions": [
             {
@@ -47886,6 +47946,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "decision": decision_text,
                 "strategy_options": options,
                 "recommended_strategy": recommended,
+                "recommended_strategy_id": str(plan.get("recommended_strategy_id") or recommended.get("id") or "").strip(),
                 "probable_files": _normalize_text_list(plan.get("probable_files") or [], max_items=8, max_chars=180),
                 "probable_tests": _normalize_text_list(plan.get("probable_tests") or [], max_items=8, max_chars=180),
             },
@@ -47903,6 +47964,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "task_id": task_id,
                 "domain": domain,
                 "recommended_strategy": recommended,
+                "recommended_strategy_id": str(plan.get("recommended_strategy_id") or recommended.get("id") or "").strip(),
                 "strategy_options": options,
             },
             now=now,
@@ -48073,6 +48135,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
                 "applied_files": list(apply_result.get("applied_files") or []),
                 "session_summary_path": str(apply_result.get("session_summary_path") or "").strip(),
                 "inspection": inspection,
+                "strategy_id": str(plan.get("recommended_strategy_id") or ((plan.get("recommended_strategy") or {}).get("id") if isinstance(plan.get("recommended_strategy"), dict) else "") or "").strip(),
             },
             now=now,
         )

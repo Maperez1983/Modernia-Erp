@@ -3600,6 +3600,36 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any(str(action.get("id") or "") == "prepare_strategy_review" for action in (reply.get("actions") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Estrategia recomendada" for card in (reply.get("cards") or [])))
 
+    def test_internal_copilot_strategy_reply_uses_learning_when_available(self):
+        server._workspace_internal_copilot_store_memory_note(
+            self.conn,
+            "ws1",
+            actor={"id": "u1", "usuario": "QA"},
+            memory_type="implementation_session",
+            title="Sesion previa",
+            content="Cambio cerrado",
+            priority="media",
+            meta={
+                "domain": "gestoria",
+                "status": "passed",
+                "strategy_id": "safe_containment",
+                "inspection": {"status": "clean"},
+            },
+            now="2026-06-21T09:00:00Z",
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué estrategia conviene en gestoría, parche o rediseño",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "strategy_review")
+        self.assertTrue(any(str(card.get("title") or "") == "Aprendizaje aplicado" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_action_prepare_code_autofix_task_creates_task(self):
         result = server.perform_workspace_internal_copilot_action(
             self.conn,
@@ -3821,6 +3851,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(meta.get("domain"), "gestoria")
         self.assertTrue(list(meta.get("strategy_options") or []))
         self.assertEqual((meta.get("recommended_strategy") or {}).get("id"), "targeted_fix")
+        self.assertEqual(meta.get("recommended_strategy_id"), "targeted_fix")
 
     def test_internal_copilot_action_run_implementation_session(self):
         old_root = server._workspace_internal_copilot_codefix_root
