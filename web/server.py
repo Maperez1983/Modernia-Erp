@@ -41858,6 +41858,38 @@ def _workspace_internal_copilot_build_validation_focus(*, probable_files=None, p
     return focus
 
 
+def _workspace_internal_copilot_locate_code_targets(*, diagnosis="", patch_outline=None, code_context=None):
+    diagnosis_text = normalize_lookup_text(diagnosis or "").lower()
+    outline_text = normalize_lookup_text(" ".join(str(item or "") for item in list(patch_outline or []))).lower()
+    targets = []
+    for entry in list(code_context or [])[:4]:
+        if not isinstance(entry, dict):
+            continue
+        file_path = str(entry.get("file") or "").strip()
+        for symbol in list(entry.get("symbols") or [])[:8]:
+            symbol_text = str(symbol or "").strip()
+            normalized_symbol = normalize_lookup_text(symbol_text).lower()
+            if not normalized_symbol:
+                continue
+            if (
+                normalized_symbol in diagnosis_text
+                or normalized_symbol in outline_text
+                or any(token and token in normalized_symbol for token in diagnosis_text.split()[:6])
+            ):
+                targets.append({"file": file_path, "symbol": symbol_text, "reason": "match"})
+        if not targets and file_path:
+            targets.append({"file": file_path, "symbol": "", "reason": "file_scope"})
+    deduped = []
+    seen = set()
+    for item in targets:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped[:8]
+
+
 def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode="supervisor", diagnosis="", patch_outline=None, probable_files=None, probable_tests=None):
     probable_files = _normalize_text_list(probable_files or [], max_items=8, max_chars=180)
     probable_tests = _normalize_text_list(probable_tests or [], max_items=8, max_chars=180)
@@ -41865,6 +41897,11 @@ def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode
     branch_slug = re.sub(r"[^a-z0-9_.-]+", "-", normalize_lookup_text(domain or "copilot-fix").lower()).strip("-") or "copilot-fix"
     branch_name = f"copilot-fix/{branch_slug}-{date.today().isoformat()}"
     code_context = _workspace_internal_copilot_build_code_context(probable_files=probable_files)
+    code_targets = _workspace_internal_copilot_locate_code_targets(
+        diagnosis=diagnosis,
+        patch_outline=patch_outline,
+        code_context=code_context,
+    )
     validation_focus = _workspace_internal_copilot_build_validation_focus(probable_files=probable_files, probable_tests=probable_tests)
     commands = []
     python_files = [item for item in probable_files if str(item).endswith(".py")]
@@ -41884,6 +41921,7 @@ def _workspace_internal_copilot_build_codefix_bundle(*, domain="", assigned_mode
         "probable_tests": probable_tests,
         "patch_outline": patch_outline,
         "code_context": code_context,
+        "code_targets": code_targets,
         "validation_focus": validation_focus,
         "patch_prompt": _workspace_internal_copilot_build_patch_prompt(
             domain=domain,
@@ -41981,11 +42019,13 @@ def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
     commands_path = out_dir / "validation_commands.txt"
     bundle_path = out_dir / "bundle.json"
     context_path = out_dir / "code_context.json"
+    targets_path = out_dir / "code_targets.json"
     prompt_path.write_text(str((bundle or {}).get("patch_prompt") or "").strip() + "\n", encoding="utf-8")
     diff_path.write_text(str((bundle or {}).get("proposed_diff") or "").strip() + "\n", encoding="utf-8")
     commands = [str(item).strip() for item in list((bundle or {}).get("validation_commands") or []) if str(item).strip()]
     commands_path.write_text("\n".join(commands).strip() + ("\n" if commands else ""), encoding="utf-8")
     context_path.write_text(json.dumps(list((bundle or {}).get("code_context") or []), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    targets_path.write_text(json.dumps(list((bundle or {}).get("code_targets") or []), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     bundle_path.write_text(json.dumps(bundle or {}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "artifact_dir": str(out_dir),
@@ -41993,6 +42033,7 @@ def _workspace_internal_copilot_materialize_codefix_bundle(bundle, *, now=None):
         "diff_path": str(diff_path),
         "commands_path": str(commands_path),
         "context_path": str(context_path),
+        "targets_path": str(targets_path),
         "bundle_path": str(bundle_path),
     }
 

@@ -3577,6 +3577,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(list(bundle.get("validation_commands") or []))
         self.assertIn("*** Begin Patch", str(bundle.get("proposed_diff") or ""))
         self.assertTrue(list(bundle.get("code_context") or []))
+        self.assertIsInstance(bundle.get("code_targets"), list)
         self.assertTrue(list(bundle.get("validation_focus") or []))
 
     def test_internal_copilot_action_validate_code_autofix_bundle_reports_status(self):
@@ -3633,6 +3634,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(str(artifacts.get("artifact_dir") or "").strip())
         self.assertTrue(Path(str(artifacts.get("bundle_path") or "")).exists())
         self.assertTrue(Path(str(artifacts.get("context_path") or "")).exists())
+        self.assertTrue(Path(str(artifacts.get("targets_path") or "")).exists())
 
     def test_internal_copilot_action_apply_code_autofix_bundle_updates_file_and_validates(self):
         old_root = server._workspace_internal_copilot_codefix_root
