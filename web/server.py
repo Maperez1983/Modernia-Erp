@@ -41934,6 +41934,63 @@ def _workspace_internal_copilot_current_problem_reply(conn, workspace_id, *, emp
     }
 
 
+def _workspace_internal_copilot_impersonated_agenda_snapshot(conn, workspace_id, actor, *, limit=8):
+    workspace_text = str(workspace_id or "").strip()
+    sess = dict(actor or {})
+    services = parse_services_param(sess.get("servicio") or "")
+    where = ["COALESCE(fecha, '') <> ''"]
+    values = []
+    try:
+        action_columns = {
+            str(row_value(row, "name") or row_value(row, 1) or "").strip().lower()
+            for row in (conn.execute("PRAGMA table_info(acciones)").fetchall() or [])
+        }
+    except Exception:
+        action_columns = set()
+    if workspace_text and "workspace_id" in action_columns:
+        where.append("COALESCE(workspace_id, '') = ?")
+        values.append(workspace_text)
+    service_clauses = []
+    service_values = []
+    for service in services:
+        clause, clause_values = build_acciones_service_where("a", service)
+        service_clauses.append(clause)
+        service_values.extend(clause_values)
+    if service_clauses:
+        where.append("(" + " OR ".join(service_clauses) + ")")
+        values.extend(service_values)
+    count_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM acciones a WHERE {' AND '.join(where)}",
+        values,
+    ).fetchone()
+    total = int(row_value(count_row, "total", 0) or 0)
+    rows = conn.execute(
+        f"""
+        SELECT id, fecha, hora, tipo, estado, cliente_nombre, responsable, notas
+        FROM acciones a
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(fecha, '') ASC, COALESCE(hora, '') ASC, COALESCE(updated_at, created_at) DESC
+        LIMIT ?
+        """,
+        values + [max(1, int(limit or 8))],
+    ).fetchall()
+    items = []
+    for row in rows or []:
+        items.append(
+            {
+                "id": str(row_value(row, "id") or "").strip(),
+                "fecha": str(row_value(row, "fecha") or "").strip(),
+                "hora": str(row_value(row, "hora") or "").strip(),
+                "tipo": str(row_value(row, "tipo") or "").strip(),
+                "estado": str(row_value(row, "estado") or "").strip(),
+                "cliente_nombre": str(row_value(row, "cliente_nombre") or "").strip(),
+                "responsable": str(row_value(row, "responsable") or "").strip(),
+                "notas": str(row_value(row, "notas") or "").strip(),
+            }
+        )
+    return {"total": total, "items": items}
+
+
 def _workspace_internal_copilot_current_entity_priority(conn, workspace_id, *, empresa_id="", context=None):
     summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
     related = _workspace_internal_copilot_related_open_events(conn, workspace_id, summary)
@@ -45345,6 +45402,8 @@ def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
     if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
         return "inspect_current_problem"
+    if any(token in text for token in ("agenda", "citas")) and any(token in text for token in ("comprueba", "verifica", "revisa", "mira")):
+        return "review_impersonated_agenda"
     if any(token in text for token in ("entra como", "ver como", "ve como", "impersona", "inicia como", "accede como")):
         return "impersonate_user_session"
     if any(token in text for token in ("no puede entrar", "no pueden entrar", "no puede acceder", "revisa acceso", "arregla acceso", "problema de acceso", "error de acceso", "error de login", "falla login", "falla al entrar")):
@@ -46132,6 +46191,54 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
                     "payload": {"login": login, "reason": "Diagnóstico operativo desde el copilot"},
                 }
             ],
+        }
+    if intent == "review_impersonated_agenda":
+        query = _workspace_internal_copilot_extract_impersonation_query(message)
+        login = str(query.get("login") or "").strip()
+        if login:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Puedo entrar como {login}, recargar la sesión y comprobar cuántas citas ve en su agenda.",
+                "sources": ["auth_access", "internal_copilot_action"],
+                "suggestions": ["Entrar como usuario", "Revisar agenda"],
+                "cards": [
+                    {
+                        "title": "Revisión de agenda por usuario",
+                        "summary": f"Usuario {login} · agenda visible en el workspace {workspace_id}",
+                        "priority": "alta",
+                        "impact_area": "agenda",
+                        "entity": {"login": login, "workspace_id": workspace_id},
+                    }
+                ],
+                "actions": [
+                    {
+                        "id": "impersonate_user_session",
+                        "label": "Entrar y revisar agenda",
+                        "requires_confirmation": True,
+                        "confirm_text": "Se abrirá una sesión impersonada y se revisará automáticamente la agenda visible de ese usuario.",
+                        "payload": {"login": login, "reason": "Revisión de agenda desde el copilot", "post_review_action": "review_impersonated_agenda"},
+                    }
+                ],
+            }
+        if context and context.get("is_impersonated"):
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "Puedo revisar la agenda visible de la sesión impersonada actual.",
+                "sources": ["auth_access", "internal_copilot_action"],
+                "suggestions": ["Revisar agenda", "Salir de impersonación"],
+                "cards": [],
+                "actions": [{"id": "review_impersonated_agenda", "label": "Revisar agenda", "payload": dict(context or {})}],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo revisarlo, pero necesito el login del usuario o una sesión ya impersonada.",
+            "sources": ["agenda"],
+            "suggestions": ["Indicar login", "Entrar como usuario"],
+            "cards": [],
+            "actions": [],
         }
     if intent == "review_user_access":
         query = _workspace_internal_copilot_extract_user_access_query(message, context=context)
@@ -48863,6 +48970,54 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": ["internal_copilot_action", "auth_access"],
             "suggestions": suggestions,
         }
+    if action_text == "review_impersonated_agenda":
+        if not bool((actor or {}).get("impersonating")):
+            return {"error": "La sesión actual no está impersonada"}
+        snapshot = _workspace_internal_copilot_impersonated_agenda_snapshot(conn, workspace_text, actor, limit=8)
+        total = int(snapshot.get("total") or 0)
+        items = list(snapshot.get("items") or [])
+        current_login = str((actor or {}).get("usuario") or (actor or {}).get("email") or "").strip()
+        cards = [
+            {
+                "title": "Agenda visible",
+                "summary": f"{current_login} ve {total} cita(s) en la agenda de este workspace.",
+                "priority": "alta",
+                "impact_area": "agenda",
+                "entity": {"login": current_login, "workspace_id": workspace_text},
+            }
+        ]
+        for item in items[:6]:
+            cards.append(
+                {
+                    "title": " · ".join(part for part in [str(item.get("fecha") or "").strip(), str(item.get("hora") or "").strip(), str(item.get("tipo") or "").strip()] if part).strip(" ·") or "Cita",
+                    "summary": " · ".join(
+                        part
+                        for part in [
+                            str(item.get("cliente_nombre") or "").strip(),
+                            str(item.get("estado") or "").strip(),
+                            str(item.get("responsable") or "").strip(),
+                        ]
+                        if part
+                    ).strip(" ·"),
+                    "priority": "media",
+                    "impact_area": "agenda",
+                    "entity": {"accion_id": str(item.get("id") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": (
+                f"He comprobado la agenda de {current_login}: ve {total} cita(s) en este workspace."
+                if total
+                else f"He comprobado la agenda de {current_login}: no veo citas visibles en este workspace."
+            ),
+            "cards": cards,
+            "actions": [{"id": "stop_impersonation_session", "label": "Salir de impersonación", "payload": {}}],
+            "sources": ["internal_copilot_action", "agenda"],
+            "suggestions": ["Investigar este error", "Salir de impersonación"] if total else ["Revisar acceso", "Salir de impersonación"],
+            "status": "clean" if total >= 0 else "warning",
+        }
     if action_text == "impersonate_user_session":
         if not workspace_actor_is_privileged(conn, actor):
             return {"error": "Sin permisos para impersonar usuarios"}
@@ -48871,6 +49026,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         login = str(payload.get("login") or "").strip()
         user_id = str(payload.get("user_id") or "").strip()
         reason = str(payload.get("reason") or "Diagnóstico operativo desde el copilot").strip()
+        post_review_action = str(payload.get("post_review_action") or "review_impersonated_session").strip()
         if not login and not user_id:
             return {"error": "login o user_id requeridos"}
         target_row = None
@@ -48947,7 +49103,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": ["internal_copilot_action", "auth_access"],
             "suggestions": ["Investigar este error", "Diagnosticar esta ficha"],
             "reload_after_session_switch": True,
-            "post_reload_action": {"action_id": "review_impersonated_session"},
+            "post_reload_action": {"action_id": post_review_action},
         }
     if action_text == "stop_impersonation_session":
         if not bool((actor or {}).get("impersonating")):

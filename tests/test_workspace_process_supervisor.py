@@ -4679,6 +4679,57 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(((result.get("post_reload_action") or {}).get("action_id") or "").strip(), "review_impersonated_session")
         self.assertTrue(str(result.get("session_cookie_token") or "").strip())
 
+    def test_internal_copilot_build_action_reply_can_review_user_agenda_by_impersonation(self):
+        reply = server._workspace_internal_copilot_build_action_reply(
+            self.conn,
+            "ws1",
+            "entra como slallana y comprueba que se ve todas las citas de la agenda",
+            empresa_id="e1",
+            service_hint="gestoria",
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertEqual((reply.get("actions") or [])[0]["id"], "impersonate_user_session")
+        self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("post_review_action"), "review_impersonated_agenda")
+
+    def test_internal_copilot_review_impersonated_agenda_reports_visible_items(self):
+        server.ensure_workspace_core_tables(self.conn)
+        self.conn.execute(
+            """
+            INSERT INTO workspaces (id, nombre, slug, estado, plan, created_at, updated_at)
+            VALUES ('ws1', 'Workspace 1', 'workspace-1', 'Activo', 'Pro', datetime('now'), datetime('now'))
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_nombre, fecha, hora, tipo, responsable, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            """,
+            ("a_ag1", "e1", "Gestoría", "Cliente Agenda", "2026-06-23", "10:00", "Cita revisión", "SLallana", "Pendiente"),
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_impersonated_agenda",
+            {},
+            empresa_id="e1",
+            actor={
+                "user_id": "u_imp",
+                "usuario": "slallana",
+                "email": "slallana@example.com",
+                "servicio": "Gestoría",
+                "rol": "Lectura",
+                "impersonating": 1,
+                "impersonated_by_usuario": "admin.user",
+            },
+            now="2026-06-22T12:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("ve 1 cita", str(result.get("message") or "").lower())
+        self.assertTrue(any("Cliente Agenda" in str(card.get("summary") or "") for card in (result.get("cards") or [])))
+
 
 if __name__ == "__main__":
     unittest.main()
