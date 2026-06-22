@@ -39,6 +39,8 @@ class FrontendSmokeTests(unittest.TestCase):
         init_pos = auth_js.index("await deps.init();", route_pos)
         self.assertLess(route_pos, init_pos)
         self.assertIn('localStorage.getItem("crm.currentWorkspaceId")', auth_js)
+        self.assertIn('"/api/auth_request_access_recovery"', auth_js)
+        self.assertIn("Recuperar acceso", auth_js)
 
     def test_visible_service_cards_keep_click_and_href_invariants(self):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")

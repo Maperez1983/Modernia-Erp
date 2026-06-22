@@ -888,6 +888,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
 AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
+    "/api/auth_request_access_recovery",
     "/api/auth_set_password",
     "/api/leads",
     "/api/portal_leads",
@@ -11461,6 +11462,62 @@ def register_login_attempt(ip, username, ok=False):
         if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
             entry["locked_until"] = now + LOGIN_RATE_LOCK_SECONDS
         _LOGIN_RATE_STATE[key] = entry
+
+
+def get_login_attempt_count(ip, username):
+    key = _login_rate_key(ip, username)
+    if not key:
+        return 0
+    now = time.time()
+    with _LOGIN_RATE_LOCK:
+        entry = _LOGIN_RATE_STATE.get(key) or {}
+        attempts = [ts for ts in (entry.get("attempts") or []) if (now - float(ts)) <= LOGIN_RATE_WINDOW_SECONDS]
+        entry["attempts"] = attempts
+        _LOGIN_RATE_STATE[key] = entry
+        return len(attempts)
+
+
+def login_recovery_available(ip, username, *, min_attempts=3):
+    try:
+        threshold = max(1, int(min_attempts or 3))
+    except Exception:
+        threshold = 3
+    return get_login_attempt_count(ip, username) >= threshold
+
+
+def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, base_url=""):
+    login = str(login_value or "").strip()
+    attempts = get_login_attempt_count(ip, login)
+    generic_message = "Si la cuenta existe y cumple requisitos, se ha preparado una vía de recuperación."
+    if not login:
+        return {"ok": False, "error": "login requerido", "attempts": attempts}
+    if attempts < max(1, int(min_attempts or 3)):
+        return {
+            "ok": False,
+            "error": "Recuperación no disponible todavía",
+            "attempts": attempts,
+            "recovery_available": False,
+        }
+    ensure_usuarios_schema(conn)
+    ensure_auth_invites_table(conn)
+    matches = admin_lookup_users_by_login(conn, login)
+    if len(matches) != 1:
+        return {"ok": True, "queued": False, "attempts": attempts, "message": generic_message}
+    item = dict(matches[0] or {})
+    if not item.get("activo"):
+        return {"ok": True, "queued": False, "attempts": attempts, "message": generic_message}
+    result = admin_force_reset_password_invite(conn, login)
+    token = str(result.get("token") or "").strip()
+    public_base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
+    invite_url = f"{public_base}/?activar_token={urllib.parse.quote(token)}" if public_base and token else ""
+    return {
+        "ok": True,
+        "queued": True,
+        "attempts": attempts,
+        "message": "He preparado un enlace para restablecer el acceso.",
+        "invite_url": invite_url,
+        "expires_at": str(result.get("expires_at") or "").strip(),
+    }
 
 
 def send_mail_smtp(subject, to_email, text_body, html_body=None):
@@ -64246,10 +64303,19 @@ class Handler(BaseHTTPRequestHandler):
             self._track_conn(conn)
             ensure_usuarios_schema(conn)
             conn.commit()
+            def _login_failure_response(message, *, status=401):
+                register_login_attempt(ip, usuario_raw, ok=False)
+                attempts = get_login_attempt_count(ip, usuario_raw)
+                extra = {"error": message, "failed_attempts": attempts}
+                if attempts >= 3:
+                    extra["recovery_available"] = True
+                    extra["recovery_login"] = usuario_raw
+                    extra["recovery_message"] = "Puedes recuperar el acceso o cambiar la contraseña."
+                json_response(self, extra, status=status)
+                return
             matches = fetch_active_users_by_login(conn, usuario_raw)
             if not matches:
-                register_login_attempt(ip, usuario_raw, ok=False)
-                json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                _login_failure_response("Usuario o contraseña incorrectos", status=401)
                 return
             row = None
             if len(matches) > 1:
@@ -64263,13 +64329,12 @@ class Handler(BaseHTTPRequestHandler):
                 if len(valid) == 1:
                     row = valid[0]
                 else:
-                    register_login_attempt(ip, usuario_raw, ok=False)
                     message = (
                         "Email duplicado. Inicia sesión con tu usuario (login) o contacta con administración."
                         if "@" in usuario_raw
                         else "Usuario duplicado. Contacta con administración."
                     )
-                    json_response(self, {"error": message}, status=409)
+                    _login_failure_response(message, status=409)
                     return
             else:
                 row = matches[0]
@@ -64277,8 +64342,7 @@ class Handler(BaseHTTPRequestHandler):
             stored_hash = row["password_hash"]
             if stored_hash:
                 if not verify_password(password, stored_hash):
-                    register_login_attempt(ip, usuario_raw, ok=False)
-                    json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                    _login_failure_response("Usuario o contraseña incorrectos", status=401)
                     return
                 if needs_password_rehash(stored_hash):
                     conn.execute(
@@ -64295,8 +64359,7 @@ class Handler(BaseHTTPRequestHandler):
                     ).fetchone()
             else:
                 if not AUTH_ALLOW_FIRST_PASSWORD_SET:
-                    register_login_attempt(ip, usuario_raw, ok=False)
-                    json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
+                    _login_failure_response("Usuario sin contraseña inicializada", status=403)
                     return
                 if len(password) < 8:
                     json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
@@ -64325,6 +64388,30 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 cookies=[self._build_session_cookie(session["token"], max_age=APP_SESSION_TTL_SECONDS)],
             )
+            return
+
+        if parsed.path == "/api/auth_request_access_recovery":
+            login = str(payload.get("usuario") or payload.get("login") or payload.get("email") or "").strip()
+            if not login:
+                json_response(self, {"error": "login requerido"}, status=400)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            result = request_login_access_recovery(
+                conn,
+                login,
+                ip=_get_client_ip(self),
+                min_attempts=3,
+                base_url=self._external_base_url(),
+            )
+            if not result.get("ok"):
+                json_response(self, result, status=400)
+                return
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(self, result)
             return
 
         if parsed.path == "/api/auth_set_password":

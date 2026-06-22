@@ -1,4 +1,54 @@
 (function () {
+  function ensureRecoveryButton(deps) {
+    if (deps.authRecoveryBtn && deps.authRecoveryBtn.isConnected) return deps.authRecoveryBtn;
+    const status = deps.authLoginStatus;
+    if (!status || !status.parentElement) return null;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary-btn";
+    btn.textContent = "Recuperar acceso";
+    btn.style.display = "none";
+    btn.style.marginLeft = "8px";
+    btn.addEventListener("click", async () => {
+      const login = String(btn.dataset.login || "").trim();
+      if (!login) return;
+      if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Preparando recuperación de acceso...";
+      try {
+        const res = await fetch("/api/auth_request_access_recovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ login }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.error) {
+          if (deps.authLoginStatus) deps.authLoginStatus.textContent = data?.error || "No se pudo preparar la recuperación.";
+          return;
+        }
+        if (deps.authLoginStatus) deps.authLoginStatus.textContent = data?.message || "Recuperación preparada.";
+      } catch {
+        if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al preparar la recuperación.";
+      }
+    });
+    status.parentElement.appendChild(btn);
+    deps.authRecoveryBtn = btn;
+    return btn;
+  }
+
+  function hideRecoveryButton(deps) {
+    const btn = deps.authRecoveryBtn;
+    if (!btn) return;
+    btn.style.display = "none";
+    btn.dataset.login = "";
+  }
+
+  function showRecoveryButton(deps, login) {
+    const btn = ensureRecoveryButton(deps);
+    if (!btn) return;
+    btn.dataset.login = String(login || "").trim();
+    btn.style.display = btn.dataset.login ? "" : "none";
+  }
+
   async function waitForHealth(deps, options) {
     const maxMs = Math.max(5000, Number(options?.maxMs || 120000) || 120000);
     const reqTimeoutMs = Math.max(1500, Number(options?.requestTimeoutMs || 10000) || 10000);
@@ -229,9 +279,11 @@
     const usuario = deps.authLoginUser?.value?.trim() || "";
     const password = deps.authLoginPass?.value || "";
     if (!usuario || !password) {
+      hideRecoveryButton(deps);
       if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Introduce usuario/email y contraseña.";
       return;
     }
+    hideRecoveryButton(deps);
     if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Accediendo...";
     await waitForHealth(deps, { maxMs: 90000, requestTimeoutMs: 12000 });
     try {
@@ -243,9 +295,17 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.error) {
-        if (deps.authLoginStatus) deps.authLoginStatus.textContent = data?.error || "No se pudo iniciar sesión.";
+        const baseMessage = data?.error || "No se pudo iniciar sesión.";
+        const recoveryAvailable = Boolean(data?.recovery_available && (data?.recovery_login || usuario));
+        if (deps.authLoginStatus) {
+          deps.authLoginStatus.textContent = recoveryAvailable
+            ? `${baseMessage} ${data?.recovery_message || "Puedes recuperar el acceso."}`.trim()
+            : baseMessage;
+        }
+        if (recoveryAvailable) showRecoveryButton(deps, data?.recovery_login || usuario);
         return;
       }
+      hideRecoveryButton(deps);
       if (deps.authLoginPass) deps.authLoginPass.value = "";
       if (deps.authLoginStatus) {
         deps.authLoginStatus.textContent = data?.first_password_set
