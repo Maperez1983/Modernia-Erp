@@ -11536,6 +11536,93 @@ def classify_post_login_scope_issue(conn, session):
     return {"reason": "", "message": ""}
 
 
+def ensure_auth_access_requests_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_access_requests (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            usuario TEXT,
+            email TEXT,
+            reason TEXT,
+            request_type TEXT,
+            status TEXT,
+            message TEXT,
+            notes TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            resolved_at TEXT
+        )
+        """
+    )
+    try:
+        ensure_column(conn, "auth_access_requests", "email", "email TEXT")
+        ensure_column(conn, "auth_access_requests", "notes", "notes TEXT")
+        ensure_column(conn, "auth_access_requests", "resolved_at", "resolved_at TEXT")
+    except Exception:
+        pass
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_access_requests_user_reason_status ON auth_access_requests(user_id, reason, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_access_requests_created_at ON auth_access_requests(created_at)")
+
+
+def request_self_access_assistance(conn, session, *, requested_reason=""):
+    sess = dict(session or {})
+    user_id = str(sess.get("user_id") or "").strip()
+    usuario = str(sess.get("usuario") or "").strip()
+    email = str(sess.get("email") or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "Sesión inválida"}
+    issue = classify_post_login_scope_issue(conn, sess)
+    reason = str(issue.get("reason") or requested_reason or "").strip()
+    if not reason:
+        return {"ok": False, "error": "La cuenta no tiene un problema de acceso pendiente."}
+    request_type = "workspace_access" if reason == "no_workspace_membership" else "service_scope"
+    message_map = {
+        "workspace_access": "He registrado una solicitud de acceso a workspace para esta cuenta.",
+        "service_scope": "He registrado una solicitud de servicio/permisos para esta cuenta.",
+    }
+    note = str(issue.get("message") or "").strip()
+    ensure_auth_access_requests_table(conn)
+    existing = conn.execute(
+        """
+        SELECT id, request_type, message
+        FROM auth_access_requests
+        WHERE user_id = ? AND reason = ? AND status = 'open'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (user_id, reason),
+    ).fetchone()
+    if existing:
+        return {
+            "ok": True,
+            "queued": True,
+            "request_id": str(existing["id"] or "").strip(),
+            "request_type": str(existing["request_type"] or request_type).strip(),
+            "message": str(existing["message"] or message_map.get(request_type) or "").strip(),
+            "reason": reason,
+        }
+    now = datetime.now(timezone.utc).isoformat()
+    request_id = uuid.uuid4().hex
+    message = message_map.get(request_type) or "He registrado una solicitud de acceso."
+    conn.execute(
+        """
+        INSERT INTO auth_access_requests (
+            id, user_id, usuario, email, reason, request_type, status, message, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
+        """,
+        (request_id, user_id, usuario, email, reason, request_type, message, note, now, now),
+    )
+    return {
+        "ok": True,
+        "queued": True,
+        "request_id": request_id,
+        "request_type": request_type,
+        "message": message,
+        "reason": reason,
+    }
+
+
 def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, base_url=""):
     login = str(login_value or "").strip()
     attempts = get_login_attempt_count(ip, login)
@@ -64493,6 +64580,28 @@ class Handler(BaseHTTPRequestHandler):
                 ip=_get_client_ip(self),
                 min_attempts=3,
                 base_url=self._external_base_url(),
+            )
+            if not result.get("ok"):
+                json_response(self, result, status=400)
+                return
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(self, result)
+            return
+
+        if parsed.path == "/api/auth_request_access_help":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            result = request_self_access_assistance(
+                conn,
+                session,
+                requested_reason=str(payload.get("reason") or "").strip(),
             )
             if not result.get("ok"):
                 json_response(self, result, status=400)

@@ -21,7 +21,9 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("window.CRMAppAuth", auth_js)
         self.assertIn("window.CRMAppRouting", routing_js)
         self.assertIn("window.CRMUI", foundation_js)
-        self.assertIn("consumePostLoginNotice", (WEB_DIR / "app.js").read_text(encoding="utf-8"))
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("consumePostLoginNotice", app_js)
+        self.assertIn('"/api/auth_request_access_help"', app_js)
 
     def test_bank_branding_does_not_depend_on_remote_clearbit_logos(self):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
@@ -41,6 +43,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertLess(route_pos, init_pos)
         self.assertIn('localStorage.getItem("crm.currentWorkspaceId")', auth_js)
         self.assertIn('"/api/auth_request_access_recovery"', auth_js)
+        self.assertIn('"crm.postLoginAccessWarning"', auth_js)
         self.assertIn("Recuperar acceso", auth_js)
 
     def test_visible_service_cards_keep_click_and_href_invariants(self):

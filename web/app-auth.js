@@ -325,6 +325,13 @@
       if (postLoginWarning) {
         try {
           sessionStorage.setItem("crm.postLoginNotice", postLoginWarning);
+          sessionStorage.setItem(
+            "crm.postLoginAccessWarning",
+            JSON.stringify({
+              reason: String(data?.access_warning_reason || "").trim(),
+              message: postLoginWarning,
+            })
+          );
         } catch {}
       }
       deps.hideAuthOverlay();

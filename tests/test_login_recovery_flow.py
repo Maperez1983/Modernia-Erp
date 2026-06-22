@@ -19,11 +19,14 @@ except Exception:
 from web.server import (
     classify_login_access_issue,
     classify_post_login_scope_issue,
+    ensure_auth_access_requests_table,
     ensure_auth_invites_table,
     ensure_usuarios_schema,
+    ensure_workspace_core_tables,
     get_login_attempt_count,
     login_recovery_available,
     register_login_attempt,
+    request_self_access_assistance,
     request_login_access_recovery,
 )
 
@@ -142,6 +145,44 @@ class LoginRecoveryFlowTests(unittest.TestCase):
             {"user_id": "u1", "usuario": "recover.user", "servicio": "", "rol": "Lectura"},
         )
         self.assertEqual(issue.get("reason"), "no_service_scope")
+
+    def test_request_self_access_assistance_creates_workspace_access_request(self):
+        ensure_auth_access_requests_table(self.conn)
+        result = request_self_access_assistance(
+            self.conn,
+            {"user_id": "u1", "usuario": "recover.user", "email": "recover@example.com", "servicio": "Gestoría", "rol": "Lectura"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("request_type"), "workspace_access")
+        row = self.conn.execute(
+            "SELECT reason, request_type, status FROM auth_access_requests WHERE user_id = 'u1'"
+        ).fetchone()
+        self.assertEqual(str(row["reason"] or ""), "no_workspace_membership")
+        self.assertEqual(str(row["request_type"] or ""), "workspace_access")
+        self.assertEqual(str(row["status"] or ""), "open")
+
+    def test_request_self_access_assistance_creates_service_scope_request(self):
+        ensure_workspace_core_tables(self.conn)
+        self.conn.execute(
+            """
+            INSERT INTO workspaces (id, nombre, slug, estado, plan, created_at, updated_at)
+            VALUES ('ws1', 'Workspace 1', 'workspace-1', 'Activo', 'Pro', datetime('now'), datetime('now'))
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES ('m1', 'ws1', 'u1', 'Miembro', datetime('now'), datetime('now'))
+            """
+        )
+        self.conn.commit()
+        ensure_auth_access_requests_table(self.conn)
+        result = request_self_access_assistance(
+            self.conn,
+            {"user_id": "u1", "usuario": "recover.user", "email": "recover@example.com", "servicio": "", "rol": "Lectura"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("request_type"), "service_scope")
 
 
 if __name__ == "__main__":

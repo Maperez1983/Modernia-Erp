@@ -83,6 +83,32 @@ const hideUiToast = () => {
   toast.innerHTML = "";
 };
 
+const renderUiToastAction = (title, detail = "", actionLabel = "", onClick = null) => {
+  const toast = document.getElementById("uiErrorToast");
+  if (!toast) return;
+  toast.classList.remove("hidden");
+  toast.innerHTML = "";
+  const strong = document.createElement("strong");
+  strong.textContent = title || "";
+  toast.appendChild(strong);
+  if (detail) {
+    const pre = document.createElement("pre");
+    pre.textContent = String(detail).slice(0, 2000);
+    toast.appendChild(pre);
+  }
+  if (actionLabel && typeof onClick === "function") {
+    const row = document.createElement("div");
+    row.style.marginTop = "10px";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary";
+    btn.textContent = actionLabel;
+    btn.addEventListener("click", onClick);
+    row.appendChild(btn);
+    toast.appendChild(row);
+  }
+};
+
 const handleProcessSupervisorResponse = (data, fallbackWorkspaceId = "") => {
   const supervisor = data && typeof data === "object" ? data.process_supervision : null;
   if (!supervisor || typeof supervisor !== "object") return;
@@ -1791,10 +1817,47 @@ const RoutingModule = window.CRMAppRouting || null;
 
 const consumePostLoginNotice = () => {
   try {
+    const rawWarning = String(sessionStorage.getItem("crm.postLoginAccessWarning") || "").trim();
     const message = String(sessionStorage.getItem("crm.postLoginNotice") || "").trim();
-    if (!message) return;
+    if (!message && !rawWarning) return;
     sessionStorage.removeItem("crm.postLoginNotice");
-    setUiToast("Acceso con aviso", message);
+    sessionStorage.removeItem("crm.postLoginAccessWarning");
+    let warning = {};
+    try {
+      warning = rawWarning ? JSON.parse(rawWarning) : {};
+    } catch (e) {
+      warning = {};
+    }
+    const reason = String(warning?.reason || "").trim();
+    const detail = String(warning?.message || message || "").trim();
+    const actionLabel =
+      reason === "no_workspace_membership"
+        ? "Solicitar acceso"
+        : reason === "no_service_scope" || reason === "unsupported_service_scope"
+          ? "Solicitar servicio"
+          : "";
+    if (!actionLabel) {
+      setUiToast("Acceso con aviso", detail);
+      return;
+    }
+    renderUiToastAction("Acceso con aviso", detail, actionLabel, async () => {
+      try {
+        const result = await fetchWithTimeout("/api/auth_request_access_help", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ reason }),
+        });
+        const data = await result.json().catch(() => ({}));
+        if (!result.ok || data?.error) {
+          setUiToast("No se pudo registrar la solicitud", String(data?.error || `HTTP ${result.status}`));
+          return;
+        }
+        setUiToast(actionLabel, String(data?.message || "He registrado la solicitud de acceso para esta cuenta."));
+      } catch (error) {
+        setUiToast("No se pudo registrar la solicitud", String(error?.message || "Error desconocido"));
+      }
+    });
   } catch (e) {}
 };
 
