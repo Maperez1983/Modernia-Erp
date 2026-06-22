@@ -2509,6 +2509,7 @@ const authLoginPass = document.getElementById("authLoginPass");
 const authLoginPassToggle = document.getElementById("authLoginPassToggle");
 const authLoginStatus = document.getElementById("authLoginStatus");
 const authSessionPill = document.getElementById("authSessionPill");
+const authStopImpersonationBtn = document.getElementById("authStopImpersonationBtn");
 const authLogoutBtn = document.getElementById("authLogoutBtn");
 const authActivateOverlay = document.getElementById("authActivateOverlay");
 const authActivateForm = document.getElementById("authActivateForm");
@@ -13398,8 +13399,15 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         if (result?.mode_switch?.mode) {
           await setPersistentInternalCopilotMode(String(result.mode_switch.mode || "").trim() || "operator", { rePrime: true });
         }
+        if (result?.user && typeof setAuthUi === "function") {
+          setAuthUi(result.user);
+        }
         if (result?.navigation) {
           await applyWorkspaceSupervisorNavigation(result);
+        }
+        if (result?.reload_after_session_switch) {
+          window.location.reload();
+          return;
         }
         if (result?.process_supervision) {
           handleProcessSupervisorResponse(result.process_supervision, "");
@@ -13556,6 +13564,10 @@ const collectInternalCopilotContext = () => {
   const uiError = window.__CRM_LAST_UI_ERROR && typeof window.__CRM_LAST_UI_ERROR === "object" ? window.__CRM_LAST_UI_ERROR : {};
   const uiErrorHistory = Array.isArray(window.__CRM_UI_ERROR_HISTORY) ? window.__CRM_UI_ERROR_HISTORY : [];
   return {
+    current_user_login: String(authUser?.usuario || authUser?.email || "").trim(),
+    current_user_id: String(authUser?.id || "").trim(),
+    is_impersonated: Boolean(authUser?.is_impersonated),
+    impersonated_by: String(authUser?.impersonated_by || "").trim(),
     current_client_id: String(state.currentClienteId || "").trim(),
     current_seguro_id: String(state.currentSeguroId || "").trim(),
     current_renta_entry_id: String(state.currentRentaEntryId || "").trim(),
@@ -74382,13 +74394,20 @@ const setAuthUi = (user) => {
       "Sesión activa";
     const personaLabel = String(state.homeTimeStatus?.persona?.nombre || "").trim();
     const shownLabel = personaLabel || baseLabel;
-    authSessionPill.textContent = `${shownLabel} · ${APP_SW_VERSION}`;
+    const impersonationPrefix = state.authUser?.is_impersonated ? "Impersonando · " : "";
+    authSessionPill.textContent = `${impersonationPrefix}${shownLabel} · ${APP_SW_VERSION}`;
     // Si hay discrepancia, dejamos trazabilidad en tooltip para que se pueda corregir en administración.
     const mismatch = personaLabel && normalizeSimple(personaLabel) !== normalizeSimple(baseLabel);
-    authSessionPill.title = mismatch ? `Sesión: ${baseLabel}` : "";
+    const impersonationDetail = state.authUser?.is_impersonated
+      ? `Viendo como ${baseLabel}${state.authUser?.impersonated_by ? ` · por ${state.authUser.impersonated_by}` : ""}`
+      : "";
+    authSessionPill.title = [mismatch ? `Sesión: ${baseLabel}` : "", impersonationDetail].filter(Boolean).join(" · ");
     authSessionPill.classList.remove("hidden");
   };
   syncAuthSessionPill();
+  if (authStopImpersonationBtn) {
+    authStopImpersonationBtn.classList.toggle("hidden", !Boolean(user && user.is_impersonated));
+  }
   if (authLogoutBtn) {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
@@ -74433,6 +74452,15 @@ const showActivationOverlay = (introText = "") => {
 async function fetchCurrentSessionUser() {
   return AuthModule ? AuthModule.fetchCurrentSessionUser() : null;
 }
+
+const stopAuthImpersonation = async () => {
+  const result = await apiPost("/api/auth_stop_impersonation", {});
+  if (result?.user && typeof setAuthUi === "function") {
+    setAuthUi(result.user);
+  }
+  setUiToast("Impersonación cerrada", String(result?.message || "Se ha restaurado la sesión original."));
+  window.location.reload();
+};
 
 async function ensureAuthAndBoot() {
   if (!AuthModule) return;
@@ -85407,6 +85435,14 @@ if (authLoginPassToggle && authLoginPass) {
 if (authLogoutBtn) {
   authLogoutBtn.addEventListener("click", () => {
     logoutAuthSession();
+  });
+}
+
+if (authStopImpersonationBtn) {
+  authStopImpersonationBtn.addEventListener("click", () => {
+    stopAuthImpersonation().catch((error) => {
+      setUiToast("No se pudo cerrar la impersonación", String(error?.message || "Error desconocido"));
+    });
   });
 }
 

@@ -987,6 +987,43 @@ def ensure_auth_sessions_table(conn):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions (expires_at)")
     except Exception:
         pass
+    try:
+        ensure_column(conn, "auth_sessions", "impersonating", "impersonating INTEGER DEFAULT 0")
+        ensure_column(conn, "auth_sessions", "impersonated_by_user_id", "impersonated_by_user_id TEXT")
+        ensure_column(conn, "auth_sessions", "impersonated_by_usuario", "impersonated_by_usuario TEXT")
+        ensure_column(conn, "auth_sessions", "impersonation_reason", "impersonation_reason TEXT")
+        ensure_column(conn, "auth_sessions", "impersonation_audit_id", "impersonation_audit_id TEXT")
+        ensure_column(conn, "auth_sessions", "original_token", "original_token TEXT")
+    except Exception:
+        pass
+
+
+def ensure_auth_impersonation_audit_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_impersonation_audit (
+          id TEXT PRIMARY KEY,
+          actor_user_id TEXT,
+          actor_usuario TEXT,
+          target_user_id TEXT,
+          target_usuario TEXT,
+          workspace_id TEXT,
+          reason TEXT,
+          status TEXT,
+          created_at TEXT,
+          ended_at TEXT
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_impersonation_audit_actor_created ON auth_impersonation_audit(actor_user_id, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_impersonation_audit_target_created ON auth_impersonation_audit(target_user_id, created_at)"
+        )
+    except Exception:
+        pass
 
 
 def ensure_crm_stage_events_schema(conn):
@@ -11251,7 +11288,7 @@ def _cleanup_expired_sessions():
         pass
 
 
-def create_auth_session(user_row):
+def create_auth_session(user_row, *, extras=None):
     now = time.time()
     session = {
         "token": secrets.token_urlsafe(32),
@@ -11264,7 +11301,24 @@ def create_auth_session(user_row):
         "servicio": str(user_row["servicio"] or ""),
         "expires_at": now + APP_SESSION_TTL_SECONDS,
         "created_at": now,
+        "impersonating": 0,
+        "impersonated_by_user_id": "",
+        "impersonated_by_usuario": "",
+        "impersonation_reason": "",
+        "impersonation_audit_id": "",
+        "original_token": "",
     }
+    if isinstance(extras, dict):
+        for key in (
+            "impersonating",
+            "impersonated_by_user_id",
+            "impersonated_by_usuario",
+            "impersonation_reason",
+            "impersonation_audit_id",
+            "original_token",
+        ):
+            if key in extras:
+                session[key] = extras.get(key)
     with AUTH_SESSIONS_LOCK:
         _cleanup_expired_sessions()
         AUTH_SESSIONS[session["token"]] = session
@@ -11272,11 +11326,14 @@ def create_auth_session(user_row):
     try:
         conn = open_auth_store_conn(with_row_factory=False)
         try:
+            ensure_auth_sessions_table(conn)
             conn.execute(
                 """
                 INSERT INTO auth_sessions (
-                  token, user_id, usuario, nombre, apellido, rol, email, servicio, expires_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  token, user_id, usuario, nombre, apellido, rol, email, servicio, expires_at, created_at,
+                  impersonating, impersonated_by_user_id, impersonated_by_usuario, impersonation_reason,
+                  impersonation_audit_id, original_token
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(token) DO UPDATE SET
                   user_id=excluded.user_id,
                   usuario=excluded.usuario,
@@ -11285,7 +11342,13 @@ def create_auth_session(user_row):
                   rol=excluded.rol,
                   email=excluded.email,
                   servicio=excluded.servicio,
-                  expires_at=excluded.expires_at
+                  expires_at=excluded.expires_at,
+                  impersonating=excluded.impersonating,
+                  impersonated_by_user_id=excluded.impersonated_by_user_id,
+                  impersonated_by_usuario=excluded.impersonated_by_usuario,
+                  impersonation_reason=excluded.impersonation_reason,
+                  impersonation_audit_id=excluded.impersonation_audit_id,
+                  original_token=excluded.original_token
                 """,
                 [
                     session["token"],
@@ -11298,6 +11361,12 @@ def create_auth_session(user_row):
                     session["servicio"],
                     float(session["expires_at"]),
                     float(session["created_at"]),
+                    1 if bool(session.get("impersonating")) else 0,
+                    str(session.get("impersonated_by_user_id") or "").strip(),
+                    str(session.get("impersonated_by_usuario") or "").strip(),
+                    str(session.get("impersonation_reason") or "").strip(),
+                    str(session.get("impersonation_audit_id") or "").strip(),
+                    str(session.get("original_token") or "").strip(),
                 ],
             )
             conn.commit()
@@ -11675,6 +11744,64 @@ def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, b
         "recovery_reason": str(issue.get("reason") or "credentials"),
         "recovery_message": str(issue.get("message") or ""),
     }
+
+
+def build_impersonated_auth_session(conn, actor_session, actor_token, target_user_row, *, workspace_id="", reason=""):
+    ensure_auth_impersonation_audit_table(conn)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    audit_id = uuid.uuid4().hex
+    actor_user_id = str((actor_session or {}).get("user_id") or "").strip()
+    actor_usuario = str((actor_session or {}).get("usuario") or "").strip()
+    target_user_id = str(row_value(target_user_row, "id") or "").strip()
+    target_usuario = str(row_value(target_user_row, "usuario") or "").strip()
+    conn.execute(
+        """
+        INSERT INTO auth_impersonation_audit (
+            id, actor_user_id, actor_usuario, target_user_id, target_usuario,
+            workspace_id, reason, status, created_at, ended_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, '')
+        """,
+        (
+            audit_id,
+            actor_user_id,
+            actor_usuario,
+            target_user_id,
+            target_usuario,
+            str(workspace_id or "").strip(),
+            str(reason or "").strip(),
+            now_iso,
+        ),
+    )
+    return create_auth_session(
+        target_user_row,
+        extras={
+            "impersonating": 1,
+            "impersonated_by_user_id": actor_user_id,
+            "impersonated_by_usuario": actor_usuario,
+            "impersonation_reason": str(reason or "").strip(),
+            "impersonation_audit_id": audit_id,
+            "original_token": str(actor_token or "").strip(),
+        },
+    )
+
+
+def finish_impersonation_session(conn, session):
+    sess = dict(session or {})
+    audit_id = str(sess.get("impersonation_audit_id") or "").strip()
+    if audit_id:
+        ensure_auth_impersonation_audit_table(conn)
+        conn.execute(
+            """
+            UPDATE auth_impersonation_audit
+            SET status = 'ended', ended_at = ?
+            WHERE id = ? AND status = 'active'
+            """,
+            (datetime.now(timezone.utc).isoformat(), audit_id),
+        )
+    original_token = str(sess.get("original_token") or "").strip()
+    delete_auth_session(str(sess.get("token") or "").strip())
+    restored = get_auth_session(original_token) if original_token else None
+    return restored
 
 
 def send_mail_smtp(subject, to_email, text_body, html_body=None):
@@ -45218,6 +45345,8 @@ def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
     if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
         return "inspect_current_problem"
+    if any(token in text for token in ("entra como", "ver como", "ve como", "impersona", "inicia como", "accede como")):
+        return "impersonate_user_session"
     if any(token in text for token in ("no puede entrar", "no pueden entrar", "no puede acceder", "revisa acceso", "arregla acceso", "problema de acceso", "error de acceso", "error de login", "falla login", "falla al entrar")):
         return "review_user_access"
     if any(token in text for token in ("abre", "abreme", "ábreme", "abrirme", "ficha", "busca", "localiza")) and "cliente" in text:
@@ -45310,6 +45439,29 @@ def _workspace_internal_copilot_extract_user_access_query(message, context=None)
     if current_login and any(token in low for token in ("no puedo entrar", "no puedo acceder", "mi acceso", "mi login")):
         return {"login": current_login, "email": "", "query": current_login}
     return {"login": "", "email": "", "query": ""}
+
+
+def _workspace_internal_copilot_extract_impersonation_query(message):
+    text = str(message or "").strip()
+    email = _workspace_internal_copilot_extract_email(text)
+    if email:
+        return {"login": email, "query": email}
+    explicit = _workspace_internal_copilot_extract_after_marker(
+        text,
+        (
+            "usuario",
+            "entra como",
+            "ver como",
+            "ve como",
+            "impersona a",
+            "inicia como",
+            "accede como",
+        ),
+    )
+    if explicit:
+        token = str(explicit.split()[0] or "").strip(" .,;:()[]{}\"'")
+        return {"login": token, "query": token}
+    return {"login": "", "query": ""}
 
 
 def _workspace_internal_copilot_public_base_url():
@@ -45942,6 +46094,44 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "suggestions": ["Investigar este error", "Preparar fix técnico"],
             "cards": [],
             "actions": [{"id": "inspect_current_problem", "label": "Investigar este error", "payload": dict(context or {})}],
+        }
+    if intent == "impersonate_user_session":
+        query = _workspace_internal_copilot_extract_impersonation_query(message)
+        login = str(query.get("login") or "").strip()
+        if not login:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "Puedo entrar como ese usuario, pero necesito su login o email exacto.",
+                "sources": ["auth_access"],
+                "suggestions": ["Indicar login", "Indicar email"],
+                "cards": [],
+                "actions": [],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": f"Puedo abrir una sesión impersonada para {login} y ver exactamente lo que ve esa cuenta.",
+            "sources": ["auth_access", "internal_copilot_action"],
+            "suggestions": ["Entrar como usuario", "Revisar acceso"],
+            "cards": [
+                {
+                    "title": "Impersonación segura",
+                    "summary": f"Usuario {login} · workspace {workspace_id}",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                    "entity": {"login": login, "workspace_id": workspace_id},
+                }
+            ],
+            "actions": [
+                {
+                    "id": "impersonate_user_session",
+                    "label": "Entrar como usuario",
+                    "requires_confirmation": True,
+                    "confirm_text": "Se abrirá una sesión impersonada para diagnosticar exactamente lo que ve este usuario.",
+                    "payload": {"login": login, "reason": "Diagnóstico operativo desde el copilot"},
+                }
+            ],
         }
     if intent == "review_user_access":
         query = _workspace_internal_copilot_extract_user_access_query(message, context=context)
@@ -48594,6 +48784,122 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         return result
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "impersonate_user_session":
+        if not workspace_actor_is_privileged(conn, actor):
+            return {"error": "Sin permisos para impersonar usuarios"}
+        if bool((actor or {}).get("impersonating")):
+            return {"error": "Ya existe una impersonación activa. Sal primero de esa sesión."}
+        login = str(payload.get("login") or "").strip()
+        user_id = str(payload.get("user_id") or "").strip()
+        reason = str(payload.get("reason") or "Diagnóstico operativo desde el copilot").strip()
+        if not login and not user_id:
+            return {"error": "login o user_id requeridos"}
+        target_row = None
+        if user_id:
+            target_row = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                FROM usuarios
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+        else:
+            matches = admin_lookup_users_by_login(conn, login)
+            if len(matches) > 1:
+                return {"error": "Login ambiguo. Usa el usuario exacto o el id del usuario."}
+            if matches:
+                target_row = conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (str((matches[0] or {}).get("id") or "").strip(),),
+                ).fetchone()
+        if not target_row:
+            return {"error": "Usuario no encontrado"}
+        if int(row_value(target_row, "activo", 0) or 0) != 1:
+            return {"error": "El usuario está inactivo"}
+        actor_token = str((actor or {}).get("token") or "").strip()
+        impersonated_session = build_impersonated_auth_session(
+            conn,
+            actor,
+            actor_token,
+            target_row,
+            workspace_id=workspace_text,
+            reason=reason,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He entrado como {str(row_value(target_row, 'usuario') or row_value(target_row, 'email') or '').strip()}. Ya puedo ver exactamente su comportamiento en el CRM.",
+            "user": {
+                "id": impersonated_session.get("user_id"),
+                "usuario": impersonated_session.get("usuario") or "",
+                "nombre": impersonated_session.get("nombre") or "",
+                "apellido": impersonated_session.get("apellido") or "",
+                "nombre_completo": " ".join(
+                    x for x in [impersonated_session.get("nombre"), impersonated_session.get("apellido")] if x
+                ).strip()
+                or (impersonated_session.get("usuario") or ""),
+                "rol": impersonated_session.get("rol") or "",
+                "email": impersonated_session.get("email") or "",
+                "servicio": impersonated_session.get("servicio") or "",
+                "is_superadmin": bool(is_superadmin_actor(None, impersonated_session)),
+                "is_impersonated": True,
+                "impersonated_by": str(impersonated_session.get("impersonated_by_usuario") or "").strip(),
+                "impersonated_by_user_id": str(impersonated_session.get("impersonated_by_user_id") or "").strip(),
+                "impersonation_reason": str(impersonated_session.get("impersonation_reason") or "").strip(),
+            },
+            "session_cookie_token": str(impersonated_session.get("token") or "").strip(),
+            "cards": [
+                {
+                    "title": "Sesión impersonada activa",
+                    "summary": f"viendo como {str(row_value(target_row, 'usuario') or row_value(target_row, 'email') or '').strip()} · motivo {reason}",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                    "entity": {"user_id": str(row_value(target_row, 'id') or '').strip(), "login": str(row_value(target_row, 'usuario') or row_value(target_row, 'email') or '').strip()},
+                }
+            ],
+            "actions": [{"id": "stop_impersonation_session", "label": "Salir de impersonación", "payload": {}}],
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": ["Investigar este error", "Diagnosticar esta ficha"],
+            "reload_after_session_switch": True,
+        }
+    if action_text == "stop_impersonation_session":
+        if not bool((actor or {}).get("impersonating")):
+            return {"error": "La sesión actual no está impersonada"}
+        restored = finish_impersonation_session(conn, actor)
+        result = {
+            "ok": True,
+            "action_id": action_text,
+            "message": "He salido de la sesión impersonada.",
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": ["Qué hago ahora"],
+            "reload_after_session_switch": True,
+        }
+        if restored:
+            result["user"] = {
+                "id": restored.get("user_id"),
+                "usuario": restored.get("usuario") or "",
+                "nombre": restored.get("nombre") or "",
+                "apellido": restored.get("apellido") or "",
+                "nombre_completo": " ".join(x for x in [restored.get("nombre"), restored.get("apellido")] if x).strip()
+                or (restored.get("usuario") or ""),
+                "rol": restored.get("rol") or "",
+                "email": restored.get("email") or "",
+                "servicio": restored.get("servicio") or "",
+                "is_superadmin": bool(is_superadmin_actor(None, restored)),
+                "is_impersonated": False,
+                "impersonated_by": "",
+                "impersonated_by_user_id": "",
+                "impersonation_reason": "",
+            }
+            result["session_cookie_token"] = str(restored.get("token") or "").strip()
+        return result
     if action_text == "review_user_access":
         login = str(payload.get("login") or "").strip()
         return _workspace_internal_copilot_review_user_access(conn, workspace_text, login, actor=actor)
@@ -62845,6 +63151,10 @@ class Handler(BaseHTTPRequestHandler):
             "email": session.get("email") or "",
             "servicio": session.get("servicio") or "",
             "is_superadmin": bool(is_superadmin_actor(None, session)),
+            "is_impersonated": bool(session.get("impersonating")),
+            "impersonated_by": str(session.get("impersonated_by_usuario") or "").strip(),
+            "impersonated_by_user_id": str(session.get("impersonated_by_user_id") or "").strip(),
+            "impersonation_reason": str(session.get("impersonation_reason") or "").strip(),
         }
 
     def _external_base_url(self):
@@ -64734,6 +65044,117 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             json_response(self, result)
+            return
+
+        if parsed.path == "/api/auth_impersonate_user":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if bool(session.get("impersonating")):
+                json_response(self, {"error": "Ya existe una impersonación activa. Sal primero de esa sesión."}, status=409)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "Sin permisos para impersonar usuarios"}, status=403)
+                return
+            ensure_usuarios_schema(conn)
+            ensure_workspace_core_tables(conn)
+            target_user_id = str(payload.get("user_id") or "").strip()
+            target_login = str(payload.get("login") or payload.get("usuario") or payload.get("email") or "").strip()
+            workspace_hint = str(payload.get("workspace_id") or "").strip()
+            reason = str(payload.get("reason") or "Diagnóstico de acceso").strip()
+            target_row = None
+            if target_user_id:
+                target_row = conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (target_user_id,),
+                ).fetchone()
+            elif target_login:
+                matches = admin_lookup_users_by_login(conn, target_login)
+                if len(matches) > 1:
+                    json_response(self, {"error": "Login ambiguo. Usa el usuario exacto o el id del usuario."}, status=409)
+                    return
+                if matches:
+                    target_user_id = str((matches[0] or {}).get("id") or "").strip()
+                    target_row = conn.execute(
+                        """
+                        SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                        FROM usuarios
+                        WHERE id = ?
+                        LIMIT 1
+                        """,
+                        (target_user_id,),
+                    ).fetchone()
+            if not target_row:
+                json_response(self, {"error": "Usuario no encontrado"}, status=404)
+                return
+            if int(row_value(target_row, "activo", 0) or 0) != 1:
+                json_response(self, {"error": "El usuario está inactivo"}, status=409)
+                return
+            actor_token = str(self._parse_cookies().get(SESSION_COOKIE_NAME, "") or "").strip()
+            impersonated_session = build_impersonated_auth_session(
+                conn,
+                session,
+                actor_token,
+                target_row,
+                workspace_id=workspace_hint,
+                reason=reason,
+            )
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "message": f"Sesión impersonada iniciada para {str(row_value(target_row, 'usuario') or row_value(target_row, 'email') or '').strip()}.",
+                    "user": self._auth_user_payload(impersonated_session),
+                    "impersonation": {
+                        "active": True,
+                        "reason": reason,
+                        "target_user_id": str(row_value(target_row, "id") or "").strip(),
+                        "target_usuario": str(row_value(target_row, "usuario") or "").strip(),
+                        "workspace_id": workspace_hint,
+                    },
+                },
+                cookies=[self._build_session_cookie(impersonated_session["token"], max_age=APP_SESSION_TTL_SECONDS)],
+            )
+            return
+
+        if parsed.path == "/api/auth_stop_impersonation":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not bool(session.get("impersonating")):
+                json_response(self, {"error": "La sesión actual no está impersonada"}, status=409)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            restored = finish_impersonation_session(conn, session)
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            cookies = [self._build_session_cookie("", max_age=0)]
+            response_payload = {
+                "ok": True,
+                "message": "Impersonación cerrada.",
+                "restored": False,
+            }
+            if restored:
+                cookies = [self._build_session_cookie(restored["token"], max_age=APP_SESSION_TTL_SECONDS)]
+                response_payload["restored"] = True
+                response_payload["user"] = self._auth_user_payload(restored)
+            json_response(self, response_payload, cookies=cookies)
             return
 
         if parsed.path == "/api/auth_set_password":
@@ -79688,7 +80109,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": result.get("error")}, status=400)
                 return
             conn.commit()
-            json_response(self, result)
+            cookies = None
+            session_cookie_token = str(result.get("session_cookie_token") or "").strip()
+            if session_cookie_token:
+                cookies = [self._build_session_cookie(session_cookie_token, max_age=APP_SESSION_TTL_SECONDS)]
+            json_response(self, result, cookies=cookies)
             return
         elif parsed.path == "/api/legal_dgt_lookup":
             area = normalize_legal_area(payload.get("area") or "gestoria")

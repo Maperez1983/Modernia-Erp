@@ -13,6 +13,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("app-auth.js", html)
         self.assertIn("app-routing.js", html)
         self.assertIn("app.js", html)
+        self.assertIn('id="authStopImpersonationBtn"', html)
 
     def test_frontend_modules_export_expected_globals(self):
         auth_js = (WEB_DIR / "app-auth.js").read_text(encoding="utf-8")
@@ -24,6 +25,7 @@ class FrontendSmokeTests(unittest.TestCase):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         self.assertIn("consumePostLoginNotice", app_js)
         self.assertIn('"/api/auth_request_access_help"', app_js)
+        self.assertIn('"/api/auth_stop_impersonation"', app_js)
 
     def test_bank_branding_does_not_depend_on_remote_clearbit_logos(self):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
@@ -79,6 +81,9 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn('id="workspaceInternalCopilotFeed"', app_js)
         self.assertIn('id="workspaceInternalCopilotForm"', app_js)
         self.assertIn('root.id = "globalInternalCopilotWidget"', app_js)
+        self.assertIn("current_user_login", app_js)
+        self.assertIn("is_impersonated", app_js)
+        self.assertIn("impersonated_by", app_js)
         self.assertIn('id="globalInternalCopilotToggle"', app_js)
         self.assertIn('id="globalInternalCopilotPanel"', app_js)
         self.assertIn('id="globalInternalCopilotFeed"', app_js)
@@ -115,6 +120,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("renderWorkspaceInternalCopilotFeed", app_js)
         self.assertIn('name="attachment"', app_js)
         self.assertIn("multiple", app_js)
+        self.assertIn("Impersonando ·", app_js)
         self.assertIn("Supervisor de procesos", app_js)
         self.assertIn('id="workspaceProcessSupervisorFeed"', app_js)
         self.assertIn('id="workspaceProcessSupervisorHistory"', app_js)
