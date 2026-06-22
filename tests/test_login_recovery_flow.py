@@ -18,6 +18,7 @@ except Exception:
 
 from web.server import (
     classify_login_access_issue,
+    classify_post_login_scope_issue,
     ensure_auth_invites_table,
     ensure_usuarios_schema,
     get_login_attempt_count,
@@ -92,6 +93,55 @@ class LoginRecoveryFlowTests(unittest.TestCase):
         self.conn.commit()
         issue = classify_login_access_issue(self.conn, "recover.user")
         self.assertEqual(issue.get("reason"), "password_not_initialized")
+
+    def test_classify_post_login_scope_issue_detects_no_workspace_membership(self):
+        issue = classify_post_login_scope_issue(
+            self.conn,
+            {"user_id": "u1", "usuario": "recover.user", "servicio": "Gestoría", "rol": "Lectura"},
+        )
+        self.assertEqual(issue.get("reason"), "no_workspace_membership")
+
+    def test_classify_post_login_scope_issue_detects_no_service_scope(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspaces (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              slug TEXT,
+              estado TEXT,
+              plan TEXT,
+              kind TEXT,
+              descripcion TEXT,
+              logo_url TEXT,
+              primary_color TEXT,
+              accent_color TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspaces (id, nombre) VALUES ('ws1', 'Workspace 1')"
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_miembros (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              usuario_id TEXT,
+              rol TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol) VALUES ('m1', 'ws1', 'u1', 'Miembro')"
+        )
+        self.conn.commit()
+        issue = classify_post_login_scope_issue(
+            self.conn,
+            {"user_id": "u1", "usuario": "recover.user", "servicio": "", "rol": "Lectura"},
+        )
+        self.assertEqual(issue.get("reason"), "no_service_scope")
 
 
 if __name__ == "__main__":

@@ -11510,6 +11510,32 @@ def classify_login_access_issue(conn, login_value):
     return {"reason": "credentials", "message": "La cuenta existe y tiene acceso; el fallo dominante parece de credenciales."}
 
 
+def classify_post_login_scope_issue(conn, session):
+    sess = dict(session or {})
+    if not sess:
+        return {"reason": "", "message": ""}
+    try:
+        ensure_workspace_core_tables(conn)
+    except Exception:
+        pass
+    if workspace_actor_is_privileged(conn, sess):
+        return {"reason": "", "message": ""}
+    try:
+        visible_workspaces = fetch_workspace_rows_for_user(conn, sess)
+    except Exception:
+        visible_workspaces = []
+    if not visible_workspaces:
+        return {"reason": "no_workspace_membership", "message": "Acceso correcto, pero la cuenta no tiene ningún workspace visible."}
+    services = parse_services_param(sess.get("servicio") or "")
+    if not services:
+        return {"reason": "no_service_scope", "message": "Acceso correcto, pero la cuenta no tiene servicios visibles asignados."}
+    useful = [resolve_workspace_module_key_for_user_service(service) for service in services]
+    useful = [item for item in useful if item]
+    if not useful:
+        return {"reason": "unsupported_service_scope", "message": "Acceso correcto, pero el servicio asignado no abre un CRM útil."}
+    return {"reason": "", "message": ""}
+
+
 def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, base_url=""):
     login = str(login_value or "").strip()
     attempts = get_login_attempt_count(ip, login)
@@ -63204,7 +63230,19 @@ class Handler(BaseHTTPRequestHandler):
                         session = refreshed_session
                 except Exception:
                     pass
-            json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
+            response_payload = {"ok": True, "user": self._auth_user_payload(session)}
+            try:
+                if Handler._db_ready:
+                    conn = get_db(self.db_path)
+                    self._track_conn(conn)
+                    access_issue = classify_post_login_scope_issue(conn, session)
+                    if str(access_issue.get("reason") or "").strip():
+                        response_payload["access_warning"] = True
+                        response_payload["access_warning_reason"] = str(access_issue.get("reason") or "").strip()
+                        response_payload["access_warning_message"] = str(access_issue.get("message") or "").strip()
+            except Exception:
+                pass
+            json_response(self, response_payload)
             return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
@@ -64425,13 +64463,19 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
             register_login_attempt(ip, usuario_raw, ok=True)
             session = create_auth_session(row)
+            access_issue = classify_post_login_scope_issue(conn, session)
+            response_payload = {
+                "ok": True,
+                "user": self._auth_user_payload(session),
+                "first_password_set": first_password_set,
+            }
+            if str(access_issue.get("reason") or "").strip():
+                response_payload["access_warning"] = True
+                response_payload["access_warning_reason"] = str(access_issue.get("reason") or "").strip()
+                response_payload["access_warning_message"] = str(access_issue.get("message") or "").strip()
             json_response(
                 self,
-                {
-                    "ok": True,
-                    "user": self._auth_user_payload(session),
-                    "first_password_set": first_password_set,
-                },
+                response_payload,
                 cookies=[self._build_session_cookie(session["token"], max_age=APP_SESSION_TTL_SECONDS)],
             )
             return
@@ -86038,7 +86082,13 @@ class Handler(BaseHTTPRequestHandler):
                 token = refreshed_session.get("token")
                 if token in AUTH_SESSIONS:
                     AUTH_SESSIONS[token].update(refreshed_session)
-            json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
+            response_payload = {"ok": True, "user": self._auth_user_payload(refreshed_session)}
+            access_issue = classify_post_login_scope_issue(conn, refreshed_session)
+            if str(access_issue.get("reason") or "").strip():
+                response_payload["access_warning"] = True
+                response_payload["access_warning_reason"] = str(access_issue.get("reason") or "").strip()
+                response_payload["access_warning_message"] = str(access_issue.get("message") or "").strip()
+            json_response(self, response_payload)
             return
 
         if path == "/api/debug_auth":

@@ -21,6 +21,7 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("window.CRMAppAuth", auth_js)
         self.assertIn("window.CRMAppRouting", routing_js)
         self.assertIn("window.CRMUI", foundation_js)
+        self.assertIn("consumePostLoginNotice", (WEB_DIR / "app.js").read_text(encoding="utf-8"))
 
     def test_bank_branding_does_not_depend_on_remote_clearbit_logos(self):
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")

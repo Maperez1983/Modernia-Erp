@@ -313,11 +313,20 @@
       hideRecoveryButton(deps);
       if (deps.authLoginPass) deps.authLoginPass.value = "";
       if (deps.authLoginStatus) {
-        deps.authLoginStatus.textContent = data?.first_password_set
+        const successMessage = data?.first_password_set
           ? "Contraseña inicial guardada. Acceso correcto."
           : "Acceso correcto.";
+        deps.authLoginStatus.textContent = data?.access_warning_message
+          ? `${successMessage} ${String(data.access_warning_message).trim()}`.trim()
+          : successMessage;
       }
+      const postLoginWarning = String(data?.access_warning_message || "").trim();
       deps.setAuthUi(data?.user || null);
+      if (postLoginWarning) {
+        try {
+          sessionStorage.setItem("crm.postLoginNotice", postLoginWarning);
+        } catch {}
+      }
       deps.hideAuthOverlay();
       try {
         const current = new URLSearchParams(window.location.search || "");

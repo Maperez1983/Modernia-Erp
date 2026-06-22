@@ -1789,6 +1789,15 @@ const UI = window.CRMUI || null;
 const AuthModule = window.CRMAppAuth || null;
 const RoutingModule = window.CRMAppRouting || null;
 
+const consumePostLoginNotice = () => {
+  try {
+    const message = String(sessionStorage.getItem("crm.postLoginNotice") || "").trim();
+    if (!message) return;
+    sessionStorage.removeItem("crm.postLoginNotice");
+    setUiToast("Acceso con aviso", message);
+  } catch (e) {}
+};
+
 // Diagnóstico mínimo para no quedarnos con pantallas "vacías" sin feedback.
 // En Render, si hay un error JS, lo mostramos en un banner visible.
 (function setupClientDiagnostics() {
@@ -74435,6 +74444,7 @@ const init = async () => {
   state.booting = true;
   try {
     ensurePersistentInternalCopilotWidget();
+    consumePostLoginNotice();
     // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
     // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
     renderCompanyCards();
