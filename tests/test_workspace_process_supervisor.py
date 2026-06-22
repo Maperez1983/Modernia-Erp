@@ -2908,6 +2908,54 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["delegated_action"], "update_current_community")
 
+    def test_internal_copilot_prepare_catalog_process_autofills_open_renta_entry(self):
+        self.conn.execute("INSERT INTO clientes (id, nombre, nif, email, created_at, updated_at) VALUES ('crenta1', 'Cliente Renta Visible', '23232323A', 'crenta@test.local', 'now', 'now')")
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
+            ) VALUES (
+              'cgrenta1', 'crenta1', 'Particular', 0, 0, 0, 1, 0, 0, 0,
+              '{"entries":[{"id":"rent-entry-1","ejercicio":"2024","doc_key":"rentas/existente.pdf","estado_presentacion":"Borrador"}]}',
+              'now', 'now'
+            )
+            """
+        )
+        result = server._workspace_internal_copilot_prepare_catalog_process(
+            self.conn,
+            "ws1",
+            "e1",
+            "renta_attach",
+            {"context": {"current_client_id": "crenta1", "current_renta_entry_id": "rent-entry-1", "current_crm": "gestoria"}},
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "update_current_renta")
+        self.assertEqual(str(result["action_payload"].get("entry_id") or ""), "rent-entry-1")
+        self.assertEqual(str(result["action_payload"].get("ejercicio") or ""), "2024")
+
+    def test_internal_copilot_prepare_catalog_process_autofills_open_factura(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tipo, numero, fecha_emision, base_imponible, total, doc_key, created_at, updated_at
+            ) VALUES (
+              'f-auto-1', 'e1', 'c71', 'compra', 'F-AUTO-1', '2026-06-10', 100, 121, 'facturas/existente.pdf', 'now', 'now'
+            )
+            """
+        )
+        result = server._workspace_internal_copilot_prepare_catalog_process(
+            self.conn,
+            "ws1",
+            "e1",
+            "factura_ocr",
+            {"context": {"current_factura_id": "f-auto-1", "current_crm": "gestoria"}},
+            actor={"user_id": "u1", "usuario": "QA"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action_id"], "update_current_factura_validate")
+        self.assertEqual(str((result["action_payload"].get("patch") or {}).get("numero") or ""), "F-AUTO-1")
+
     def test_internal_copilot_close_loop_safe_stores_memory(self):
         self.conn.execute(
             """

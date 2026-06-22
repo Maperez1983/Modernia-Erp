@@ -41344,6 +41344,8 @@ def _workspace_internal_copilot_current_entity_actions(entity_summary, context=N
         {"id": "revalidate_current_entity", "label": "Revalidar esta ficha", "payload": payload},
     ]
     process_map = {
+        "renta": ("renta_attach", "Operar esta renta"),
+        "factura": ("factura_ocr", "Operar esta factura"),
         "hipoteca": ("hipoteca_revalidate", "Operar esta hipoteca"),
         "documento_rrhh": ("rrhh_expiry_review", "Operar este documento RRHH"),
         "comunidad": ("community_quota_review", "Operar esta comunidad"),
@@ -41381,6 +41383,10 @@ def _workspace_internal_copilot_current_entity_actions(entity_summary, context=N
             process_context["current_seguro_id"] = entity_id
         elif entity_kind == "hipoteca":
             process_context["current_hipoteca_id"] = entity_id
+        elif entity_kind == "factura":
+            process_context["current_factura_id"] = entity_id
+        elif entity_kind == "renta":
+            process_context["current_renta_entry_id"] = entity_id
         process_payload = {
             "process_id": process_id,
             "context": process_context,
@@ -44231,6 +44237,7 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
     low_message = normalize_lookup_text(data.get("message") or "").lower()
     if process_key == "renta_attach":
         cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        current_entry_id = str(data.get("entry_id") or context.get("current_renta_entry_id") or "").strip()
         if not cliente_id:
             return {
                 "ok": True,
@@ -44239,17 +44246,25 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
                 "suggestions": ["Abrir cliente", "Indicar cliente"],
                 "cards": [{"title": "Falta cliente", "summary": "El proceso de renta necesita cliente visible o identificado.", "priority": "alta", "impact_area": "gestoria"}],
             }
+        entry_data = {}
+        if current_entry_id:
+            cg_row = conn.execute("SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ? LIMIT 1", (cliente_id,)).fetchone()
+            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+            entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+            entry_data = next((dict(item) for item in entries if str(item.get("id") or "").strip() == current_entry_id), {})
         attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="renta")
-        if not attachment:
+        preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=actor) if attachment else {}
+        doc_key = str((attachment or {}).get("key") or entry_data.get("doc_key") or "").strip()
+        doc_url = str((attachment or {}).get("public_url") or entry_data.get("doc_url") or "").strip()
+        if not attachment and not (doc_key or doc_url):
             return {
                 "ok": True,
                 "guided": True,
-                "message": "Para cargar la renta necesito el PDF o documento de la renta adjunto.",
+                "message": "Para operar la renta necesito un PDF adjunto o un documento ya vinculado a esa renta.",
                 "suggestions": ["Adjuntar renta"],
-                "cards": [{"title": "Falta documento", "summary": "No hay un adjunto de renta disponible en el contexto actual.", "priority": "alta", "impact_area": "gestoria"}],
+                "cards": [{"title": "Falta documento", "summary": "La renta visible no tiene adjunto nuevo ni documento vinculado reutilizable.", "priority": "alta", "impact_area": "gestoria"}],
             }
-        preview = _workspace_internal_copilot_preview_renta(conn, attachment, actor=actor) or {}
-        ejercicio = str(data.get("ejercicio") or preview.get("ejercicio") or "").strip()
+        ejercicio = str(data.get("ejercicio") or (preview or {}).get("ejercicio") or entry_data.get("ejercicio") or "").strip()
         if not ejercicio:
             return {
                 "ok": True,
@@ -44258,20 +44273,46 @@ def _workspace_internal_copilot_prepare_catalog_process(conn, workspace_id, empr
                 "suggestions": ["Indicar ejercicio"],
                 "cards": [{"title": "Falta ejercicio", "summary": "El OCR de renta no ha devuelto ejercicio y no venía en la orden.", "priority": "alta", "impact_area": "gestoria"}],
             }
-        return {
-            "ok": True,
-            "action_id": "attach_renta",
-            "action_payload": {
-                "cliente_id": cliente_id,
-                "ejercicio": ejercicio,
-                "estado_presentacion": "Presentada" if "presentad" in low_message else "Borrador",
-                "doc_key": str(attachment.get("key") or "").strip(),
-                "doc_url": str(attachment.get("public_url") or "").strip(),
-            },
+        action_id = "update_current_renta" if current_entry_id else "attach_renta"
+        action_payload = {
+            "cliente_id": cliente_id,
+            "ejercicio": ejercicio,
+            "estado_presentacion": "Presentada" if "presentad" in low_message else "Borrador",
+            "doc_key": doc_key,
+            "doc_url": doc_url,
         }
+        if current_entry_id:
+            action_payload["entry_id"] = current_entry_id
+        return {"ok": True, "action_id": action_id, "action_payload": action_payload}
     if process_key == "factura_ocr":
         cliente_id = str(data.get("cliente_id") or context.get("current_client_id") or "").strip()
+        current_factura_id = str(data.get("factura_id") or context.get("current_factura_id") or "").strip()
         attachment = data.get("attachment") if isinstance(data.get("attachment"), dict) else _workspace_internal_copilot_pick_attachment(context, kind="factura")
+        if current_factura_id:
+            factura_row = conn.execute(
+                "SELECT id, cliente_id, numero, fecha_emision, total, base_imponible, tipo, doc_key FROM gestoria_facturas WHERE id = ? LIMIT 1",
+                (current_factura_id,),
+            ).fetchone()
+            if factura_row:
+                if not cliente_id:
+                    cliente_id = str(row_value(factura_row, "cliente_id") or "").strip()
+                patch = {}
+                for key in ("numero", "fecha_emision", "total", "base_imponible", "tipo", "doc_key"):
+                    value = row_value(factura_row, key)
+                    if value not in (None, ""):
+                        patch[key] = value
+                if attachment:
+                    patch["doc_key"] = str(attachment.get("key") or "").strip()
+                    preview = _workspace_internal_copilot_preview_factura(conn, attachment, actor=actor) or {}
+                    if preview.get("numero"):
+                        patch["numero"] = preview.get("numero")
+                    if preview.get("fecha"):
+                        patch["fecha_emision"] = preview.get("fecha")
+                    if preview.get("base_imponible") not in (None, ""):
+                        patch["base_imponible"] = preview.get("base_imponible")
+                    if preview.get("total") not in (None, ""):
+                        patch["total"] = preview.get("total")
+                return {"ok": True, "action_id": "update_current_factura_validate", "action_payload": {"factura_id": current_factura_id, "patch": patch}}
         if not cliente_id:
             return {
                 "ok": True,
