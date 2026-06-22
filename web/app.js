@@ -64,6 +64,14 @@ const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) =>
 const setUiToast = (title, detail = "") => {
   const toast = document.getElementById("uiErrorToast");
   if (!toast) return;
+  try {
+    window.__CRM_LAST_UI_ERROR = { title: String(title || "").trim(), detail: String(detail || "").trim(), at: new Date().toISOString() };
+    window.__CRM_UI_ERROR_HISTORY = Array.isArray(window.__CRM_UI_ERROR_HISTORY) ? window.__CRM_UI_ERROR_HISTORY : [];
+    window.__CRM_UI_ERROR_HISTORY.push(window.__CRM_LAST_UI_ERROR);
+    if (window.__CRM_UI_ERROR_HISTORY.length > 12) {
+      window.__CRM_UI_ERROR_HISTORY = window.__CRM_UI_ERROR_HISTORY.slice(-12);
+    }
+  } catch (e) {}
   toast.classList.remove("hidden");
   toast.innerHTML = "";
   const strong = document.createElement("strong");
@@ -86,6 +94,14 @@ const hideUiToast = () => {
 const renderUiToastAction = (title, detail = "", actionLabel = "", onClick = null) => {
   const toast = document.getElementById("uiErrorToast");
   if (!toast) return;
+  try {
+    window.__CRM_LAST_UI_ERROR = { title: String(title || "").trim(), detail: String(detail || "").trim(), at: new Date().toISOString() };
+    window.__CRM_UI_ERROR_HISTORY = Array.isArray(window.__CRM_UI_ERROR_HISTORY) ? window.__CRM_UI_ERROR_HISTORY : [];
+    window.__CRM_UI_ERROR_HISTORY.push(window.__CRM_LAST_UI_ERROR);
+    if (window.__CRM_UI_ERROR_HISTORY.length > 12) {
+      window.__CRM_UI_ERROR_HISTORY = window.__CRM_UI_ERROR_HISTORY.slice(-12);
+    }
+  } catch (e) {}
   toast.classList.remove("hidden");
   toast.innerHTML = "";
   const strong = document.createElement("strong");
@@ -1868,6 +1884,12 @@ const consumePostLoginNotice = () => {
   if (!banner) return;
 	const show = (title, detail) => {
     try {
+      window.__CRM_LAST_UI_ERROR = { title: String(title || "").trim(), detail: String(detail || "").trim(), at: new Date().toISOString() };
+      window.__CRM_UI_ERROR_HISTORY = Array.isArray(window.__CRM_UI_ERROR_HISTORY) ? window.__CRM_UI_ERROR_HISTORY : [];
+      window.__CRM_UI_ERROR_HISTORY.push(window.__CRM_LAST_UI_ERROR);
+      if (window.__CRM_UI_ERROR_HISTORY.length > 12) {
+        window.__CRM_UI_ERROR_HISTORY = window.__CRM_UI_ERROR_HISTORY.slice(-12);
+      }
       banner.classList.remove("hidden");
       banner.innerHTML = "";
       const strong = document.createElement("strong");
@@ -13531,6 +13553,8 @@ const collectInternalCopilotContext = () => {
   const selectedDoc = getGestoriaImportSelectedDoc();
   const authUser = getAuthScopeUser() || {};
   const params = new URLSearchParams(window.location.search || "");
+  const uiError = window.__CRM_LAST_UI_ERROR && typeof window.__CRM_LAST_UI_ERROR === "object" ? window.__CRM_LAST_UI_ERROR : {};
+  const uiErrorHistory = Array.isArray(window.__CRM_UI_ERROR_HISTORY) ? window.__CRM_UI_ERROR_HISTORY : [];
   return {
     current_client_id: String(state.currentClienteId || "").trim(),
     current_seguro_id: String(state.currentSeguroId || "").trim(),
@@ -13551,6 +13575,15 @@ const collectInternalCopilotContext = () => {
     actor_service: String(authUser?.servicio || state.currentUserServiceLabel || "").trim(),
     current_workspace_name: String(state.currentWorkspaceName || "").trim(),
     current_workspace_company_name: String(state.currentWorkspaceCompanyName || "").trim(),
+    current_url: String(window.location.href || "").trim(),
+    current_path: String(window.location.pathname || "").trim(),
+    current_page: String(state.currentPage || "").trim(),
+    current_module: String(state.currentModule || "").trim(),
+    route_query: Object.fromEntries(params.entries()),
+    ui_error_title: String(uiError.title || "").trim(),
+    ui_error_detail: String(uiError.detail || "").trim(),
+    ui_error_at: String(uiError.at || "").trim(),
+    ui_error_history: uiErrorHistory.slice(-6),
   };
 };
 

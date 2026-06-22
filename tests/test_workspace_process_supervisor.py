@@ -4546,6 +4546,57 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         user_row = self.conn.execute("SELECT password_hash FROM usuarios WHERE id = ?", ("u_reset",)).fetchone()
         self.assertFalse(str(user_row["password_hash"] or "").strip())
 
+    def test_internal_copilot_action_inspect_current_problem_uses_visible_error_and_recent_api_errors(self):
+        original_ring = list(getattr(server.Handler, "_api_err_ring", []) or [])
+        try:
+            server.Handler._api_err_ring = [
+                {
+                    "at": "2026-06-22T10:00:00Z",
+                    "path": "/api/gestoria_dashboard:segmentacion_trabajos",
+                    "type": "ProgrammingError",
+                    "message": "placeholder mismatch",
+                }
+            ]
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "inspect_current_problem",
+                {
+                    "current_crm": "gestoria",
+                    "current_workspace_view": "operations",
+                    "current_page": "cliente",
+                    "current_module": "clientes",
+                    "current_url": "https://crm.example.test/?holding=1&mode=tenant&workspace=ws1&crm=gestoria",
+                    "ui_error_title": "Error cargando dashboard",
+                    "ui_error_detail": "La segmentación de trabajos ha fallado.",
+                    "current_client_id": "c1",
+                },
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                now="2026-06-22T10:05:00Z",
+            )
+        finally:
+            server.Handler._api_err_ring = original_ring
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("action_id"), "inspect_current_problem")
+        self.assertTrue(any(str(card.get("title") or "") == "Lugar actual del problema" for card in (result.get("cards") or [])))
+        self.assertTrue(any("segmentacion_trabajos" in str(card.get("summary") or "") for card in (result.get("cards") or [])))
+        self.assertTrue(any(str(action.get("id") or "") == "prepare_code_autofix_task" for action in (result.get("actions") or [])))
+
+    def test_internal_copilot_build_action_reply_can_investigate_current_problem(self):
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "soluciona este error",
+            empresa_id="e1",
+            service_hint="gestoria",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"current_crm": "gestoria", "ui_error_title": "Error visible", "ui_error_detail": "fallo en dashboard"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply.get("intent"), "action")
+        self.assertTrue(any(str(action.get("id") or "") == "inspect_current_problem" for action in (reply.get("actions") or [])))
+
 
 if __name__ == "__main__":
     unittest.main()

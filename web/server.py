@@ -41698,6 +41698,115 @@ def _workspace_internal_copilot_diagnose_current_entity_reply(conn, workspace_id
     }
 
 
+def _workspace_internal_copilot_current_problem_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    ctx = dict(context or {})
+    current_crm = _workspace_internal_copilot_normalize_domain(ctx.get("current_crm") or ctx.get("service_hint") or "")
+    current_view = str(ctx.get("current_workspace_view") or "").strip()
+    current_page = str(ctx.get("current_page") or "").strip()
+    current_module = str(ctx.get("current_module") or "").strip()
+    current_url = str(ctx.get("current_url") or "").strip()
+    ui_error_title = str(ctx.get("ui_error_title") or "").strip()
+    ui_error_detail = str(ctx.get("ui_error_detail") or "").strip()
+    entity_summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=ctx)
+    related_events = _workspace_internal_copilot_related_open_events(conn, workspace_id, entity_summary)
+    recent_api_errors = []
+    try:
+        recent_api_errors = Handler._recent_api_errors(limit=12)
+    except Exception:
+        recent_api_errors = []
+    crm_token_map = {
+        "gestoria": ("/api/gestoria", "gestoria_", "renta_", "factura"),
+        "seguros": ("/api/seguros", "seguros_", "fincas_seguros_dashboard"),
+        "financiaciones": ("/api/hipoteca", "/api/fin_", "hipoteca_dashboard"),
+        "rrhh": ("/api/workspace_rrhh", "rrhh_"),
+        "fincas": ("/api/workspace_fincas", "/api/fincas_"),
+        "inmobiliaria": ("/api/inmueble", "/api/capt", "/api/visitas", "/api/acciones"),
+    }
+    tokens = crm_token_map.get(current_crm, ())
+    filtered_api_errors = []
+    for item in recent_api_errors:
+        path = str((item or {}).get("path") or "").strip().lower()
+        if tokens and any(token in path for token in tokens):
+            filtered_api_errors.append(dict(item or {}))
+    if not filtered_api_errors:
+        filtered_api_errors = [dict(item or {}) for item in recent_api_errors[-4:]]
+    cards = [
+        {
+            "title": "Lugar actual del problema",
+            "summary": " · ".join(part for part in [current_crm or "-", current_view or "-", current_page or current_module or "-", current_url or ""] if part).strip(" ·"),
+            "priority": "alta",
+            "impact_area": current_crm or "operativo",
+        },
+        _workspace_internal_copilot_visible_context_card(ctx),
+    ]
+    if ui_error_title or ui_error_detail:
+        cards.append(
+            {
+                "title": ui_error_title or "Error visible en la interfaz",
+                "summary": ui_error_detail or "Hay un error visible en la pantalla actual.",
+                "priority": "alta",
+                "impact_area": current_crm or "operativo",
+            }
+        )
+    if entity_summary:
+        cards.append(_workspace_internal_copilot_current_entity_card(entity_summary))
+    cards.extend([_workspace_internal_copilot_card_from_event(row) for row in related_events[:3]])
+    for item in filtered_api_errors[:3]:
+        cards.append(
+            {
+                "title": "Error reciente de API",
+                "summary": " · ".join(
+                    part for part in [
+                        str(item.get("path") or "").strip(),
+                        str(item.get("type") or "").strip(),
+                        str(item.get("message") or "").strip(),
+                    ] if part
+                ).strip(" ·"),
+                "priority": "alta",
+                "impact_area": current_crm or "tecnico",
+            }
+        )
+    error_brief = " / ".join(part for part in [ui_error_title, ui_error_detail] if part).strip(" /")
+    api_brief = " / ".join(
+        " · ".join(part for part in [str(item.get("path") or "").strip(), str(item.get("message") or "").strip()] if part).strip(" ·")
+        for item in filtered_api_errors[:2]
+    ).strip(" /")
+    action_payload = {
+        "title": f"Arreglar error en {current_crm or current_view or current_page or 'crm'}",
+        "detail": " · ".join(part for part in [error_brief, api_brief, current_url] if part).strip(" ·"),
+        "service_hint": current_crm or "",
+        "scope": "current_problem",
+        "current_url": current_url,
+        "current_page": current_page,
+        "current_module": current_module,
+        "current_workspace_view": current_view,
+        "ui_error_title": ui_error_title,
+        "ui_error_detail": ui_error_detail,
+        "recent_api_errors": filtered_api_errors[:4],
+        "current_entity": entity_summary or {},
+    }
+    actions = []
+    if entity_summary:
+        actions.extend(_workspace_internal_copilot_current_entity_actions(entity_summary, context=ctx))
+        actions.append({"id": "diagnose_current_entity", "label": "Diagnosticar esta ficha", "payload": dict(ctx)})
+    actions.extend(
+        [
+            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": current_crm or "", "copilot_mode": str(ctx.get("copilot_mode") or "operator").strip() or "operator"}},
+            {"id": "prepare_code_autofix_task", "label": "Preparar fix técnico", "payload": action_payload},
+            {"id": "prepare_discovery_review", "label": "Abrir discovery técnico", "payload": action_payload},
+        ]
+    )
+    return {
+        "ok": True,
+        "action_id": "inspect_current_problem",
+        "message": "He localizado el problema actual con contexto de pantalla, entidad y errores recientes para poder atacarlo directamente.",
+        "cards": cards[:8],
+        "actions": actions[:6],
+        "sources": ["internal_copilot_action", "workspace_process_supervisor", "recent_api_errors"],
+        "suggestions": ["Preparar fix técnico", "Diagnosticar esta ficha", "Abrir discovery técnico"],
+    }
+
+
 def _workspace_internal_copilot_current_entity_priority(conn, workspace_id, *, empresa_id="", context=None):
     summary = _workspace_internal_copilot_current_entity_summary(conn, workspace_id, empresa_id=empresa_id, context=context)
     related = _workspace_internal_copilot_related_open_events(conn, workspace_id, summary)
@@ -45107,6 +45216,8 @@ def _workspace_internal_copilot_continue_reply(conn, workspace_id, message, *, e
 
 def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
+    if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
+        return "inspect_current_problem"
     if any(token in text for token in ("no puede entrar", "no pueden entrar", "no puede acceder", "revisa acceso", "arregla acceso", "problema de acceso", "error de acceso", "error de login", "falla login", "falla al entrar")):
         return "review_user_access"
     if any(token in text for token in ("abre", "abreme", "ábreme", "abrirme", "ficha", "busca", "localiza")) and "cliente" in text:
@@ -45822,6 +45933,16 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
         return None
+    if intent == "inspect_current_problem":
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo aterrizar el error actual al lugar exacto y preparar el fix técnico o funcional desde ahí.",
+            "sources": ["internal_copilot_action", "recent_api_errors"],
+            "suggestions": ["Investigar este error", "Preparar fix técnico"],
+            "cards": [],
+            "actions": [{"id": "inspect_current_problem", "label": "Investigar este error", "payload": dict(context or {})}],
+        }
     if intent == "review_user_access":
         query = _workspace_internal_copilot_extract_user_access_query(message, context=context)
         login = str(query.get("login") or "").strip()
@@ -48471,6 +48592,8 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             result["delegated_action"] = delegated_action
             result["message"] = f"Proceso {process_id} ejecutado. {str(result.get('message') or '').strip()}".strip()
         return result
+    if action_text == "inspect_current_problem":
+        return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "review_user_access":
         login = str(payload.get("login") or "").strip()
         return _workspace_internal_copilot_review_user_access(conn, workspace_text, login, actor=actor)
