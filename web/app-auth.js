@@ -25,7 +25,11 @@
           if (deps.authLoginStatus) deps.authLoginStatus.textContent = data?.error || "No se pudo preparar la recuperación.";
           return;
         }
-        if (deps.authLoginStatus) deps.authLoginStatus.textContent = data?.message || "Recuperación preparada.";
+        if (deps.authLoginStatus) {
+          const main = String(data?.message || "Recuperación preparada.").trim();
+          const hint = String(data?.recovery_message || "").trim();
+          deps.authLoginStatus.textContent = `${main} ${hint}`.trim();
+        }
       } catch {
         if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al preparar la recuperación.";
       }
@@ -297,9 +301,10 @@
       if (!res.ok || data?.error) {
         const baseMessage = data?.error || "No se pudo iniciar sesión.";
         const recoveryAvailable = Boolean(data?.recovery_available && (data?.recovery_login || usuario));
+        const recoveryHint = String(data?.recovery_message || "").trim();
         if (deps.authLoginStatus) {
           deps.authLoginStatus.textContent = recoveryAvailable
-            ? `${baseMessage} ${data?.recovery_message || "Puedes recuperar el acceso."}`.trim()
+            ? `${baseMessage} ${recoveryHint || "Puedes recuperar el acceso."}`.trim()
             : baseMessage;
         }
         if (recoveryAvailable) showRecoveryButton(deps, data?.recovery_login || usuario);

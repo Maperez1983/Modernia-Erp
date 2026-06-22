@@ -11485,10 +11485,36 @@ def login_recovery_available(ip, username, *, min_attempts=3):
     return get_login_attempt_count(ip, username) >= threshold
 
 
+def classify_login_access_issue(conn, login_value):
+    login = str(login_value or "").strip()
+    if not login:
+        return {"reason": "credentials", "message": "Credenciales incorrectas o incompletas."}
+    try:
+        ensure_usuarios_schema(conn)
+        ensure_workspace_core_tables(conn)
+        items = admin_lookup_users_by_login(conn, login)
+    except Exception:
+        items = []
+    if not items:
+        return {"reason": "credentials", "message": "Usuario o contraseña incorrectos."}
+    if len(items) > 1:
+        return {"reason": "ambiguous_login", "message": "Hay varias cuentas con ese login. Conviene entrar con el usuario exacto o revisar duplicados."}
+    item = dict(items[0] or {})
+    memberships = list(item.get("memberships") or [])
+    if not item.get("activo"):
+        return {"reason": "inactive_user", "message": "La cuenta existe pero está inactiva."}
+    if not item.get("has_password"):
+        return {"reason": "password_not_initialized", "message": "La cuenta no tiene contraseña activa o requiere activación."}
+    if not memberships:
+        return {"reason": "missing_membership", "message": "La cuenta puede autenticarse, pero no tiene acceso a ningún workspace."}
+    return {"reason": "credentials", "message": "La cuenta existe y tiene acceso; el fallo dominante parece de credenciales."}
+
+
 def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, base_url=""):
     login = str(login_value or "").strip()
     attempts = get_login_attempt_count(ip, login)
     generic_message = "Si la cuenta existe y cumple requisitos, se ha preparado una vía de recuperación."
+    issue = classify_login_access_issue(conn, login)
     if not login:
         return {"ok": False, "error": "login requerido", "attempts": attempts}
     if attempts < max(1, int(min_attempts or 3)):
@@ -11497,15 +11523,31 @@ def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, b
             "error": "Recuperación no disponible todavía",
             "attempts": attempts,
             "recovery_available": False,
+            "recovery_reason": str(issue.get("reason") or "credentials"),
+            "recovery_message": str(issue.get("message") or ""),
         }
     ensure_usuarios_schema(conn)
     ensure_auth_invites_table(conn)
     matches = admin_lookup_users_by_login(conn, login)
     if len(matches) != 1:
-        return {"ok": True, "queued": False, "attempts": attempts, "message": generic_message}
+        return {
+            "ok": True,
+            "queued": False,
+            "attempts": attempts,
+            "message": generic_message,
+            "recovery_reason": str(issue.get("reason") or "credentials"),
+            "recovery_message": str(issue.get("message") or ""),
+        }
     item = dict(matches[0] or {})
     if not item.get("activo"):
-        return {"ok": True, "queued": False, "attempts": attempts, "message": generic_message}
+        return {
+            "ok": True,
+            "queued": False,
+            "attempts": attempts,
+            "message": generic_message,
+            "recovery_reason": str(issue.get("reason") or "inactive_user"),
+            "recovery_message": str(issue.get("message") or ""),
+        }
     result = admin_force_reset_password_invite(conn, login)
     token = str(result.get("token") or "").strip()
     public_base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
@@ -11517,6 +11559,8 @@ def request_login_access_recovery(conn, login_value, *, ip="", min_attempts=3, b
         "message": "He preparado un enlace para restablecer el acceso.",
         "invite_url": invite_url,
         "expires_at": str(result.get("expires_at") or "").strip(),
+        "recovery_reason": str(issue.get("reason") or "credentials"),
+        "recovery_message": str(issue.get("message") or ""),
     }
 
 
@@ -64306,11 +64350,13 @@ class Handler(BaseHTTPRequestHandler):
             def _login_failure_response(message, *, status=401):
                 register_login_attempt(ip, usuario_raw, ok=False)
                 attempts = get_login_attempt_count(ip, usuario_raw)
+                issue = classify_login_access_issue(conn, usuario_raw)
                 extra = {"error": message, "failed_attempts": attempts}
                 if attempts >= 3:
                     extra["recovery_available"] = True
                     extra["recovery_login"] = usuario_raw
-                    extra["recovery_message"] = "Puedes recuperar el acceso o cambiar la contraseña."
+                    extra["recovery_reason"] = str(issue.get("reason") or "credentials")
+                    extra["recovery_message"] = str(issue.get("message") or "Puedes recuperar el acceso o cambiar la contraseña.")
                 json_response(self, extra, status=status)
                 return
             matches = fetch_active_users_by_login(conn, usuario_raw)

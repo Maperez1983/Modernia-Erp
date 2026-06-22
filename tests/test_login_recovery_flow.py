@@ -1,7 +1,23 @@
 import sqlite3
+import sys
+import types
 import unittest
 
+try:
+    import PIL  # noqa: F401
+except Exception:
+    if "PIL" not in sys.modules:
+        pil_stub = types.ModuleType("PIL")
+        pil_stub.Image = object()
+        pil_stub.ImageDraw = object()
+        pil_stub.ImageEnhance = object()
+        pil_stub.ImageFilter = object()
+        pil_stub.ImageFont = object()
+        pil_stub.ImageOps = object()
+        sys.modules["PIL"] = pil_stub
+
 from web.server import (
+    classify_login_access_issue,
     ensure_auth_invites_table,
     ensure_usuarios_schema,
     get_login_attempt_count,
@@ -60,6 +76,22 @@ class LoginRecoveryFlowTests(unittest.TestCase):
         self.assertIn("/?activar_token=", str(result.get("invite_url") or ""))
         row = self.conn.execute("SELECT COALESCE(password_hash, '') AS ph FROM usuarios WHERE id = 'u1'").fetchone()
         self.assertEqual(str(row["ph"] or ""), "")
+
+    def test_classify_login_access_issue_detects_missing_membership(self):
+        issue = classify_login_access_issue(self.conn, "recover.user")
+        self.assertEqual(issue.get("reason"), "missing_membership")
+
+    def test_classify_login_access_issue_detects_inactive_user(self):
+        self.conn.execute("UPDATE usuarios SET activo = 0 WHERE id = 'u1'")
+        self.conn.commit()
+        issue = classify_login_access_issue(self.conn, "recover.user")
+        self.assertEqual(issue.get("reason"), "inactive_user")
+
+    def test_classify_login_access_issue_detects_password_not_initialized(self):
+        self.conn.execute("UPDATE usuarios SET password_hash = NULL WHERE id = 'u1'")
+        self.conn.commit()
+        issue = classify_login_access_issue(self.conn, "recover.user")
+        self.assertEqual(issue.get("reason"), "password_not_initialized")
 
 
 if __name__ == "__main__":
