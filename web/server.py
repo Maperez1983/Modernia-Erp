@@ -44893,6 +44893,8 @@ def _workspace_internal_copilot_continue_reply(conn, workspace_id, message, *, e
 
 def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
+    if any(token in text for token in ("no puede entrar", "no pueden entrar", "no puede acceder", "revisa acceso", "arregla acceso", "problema de acceso", "error de acceso", "error de login", "falla login", "falla al entrar")):
+        return "review_user_access"
     if any(token in text for token in ("abre", "abreme", "ábreme", "abrirme", "ficha", "busca", "localiza")) and "cliente" in text:
         return "open_client"
     if any(token in text for token in ("actualiza esta poliza", "actualiza esta póliza", "edita esta poliza", "edita esta póliza")):
@@ -44944,6 +44946,194 @@ def _workspace_internal_copilot_extract_nif(message):
 def _workspace_internal_copilot_extract_year(message):
     match = re.search(r"\b(20[0-9]{2})\b", str(message or ""))
     return str(match.group(1) or "").strip() if match else ""
+
+
+def _workspace_internal_copilot_extract_user_access_query(message, context=None):
+    text = str(message or "").strip()
+    low = normalize_lookup_text(text).lower()
+    email = _workspace_internal_copilot_extract_email(text)
+    if email:
+        return {"login": email, "email": email, "query": email}
+    explicit = _workspace_internal_copilot_extract_after_marker(
+        text,
+        (
+            "usuario",
+            "login",
+            "cuenta",
+            "acceso de",
+            "acceso del",
+            "revisa acceso de",
+            "revisa acceso del",
+            "arregla acceso de",
+            "arregla acceso del",
+        ),
+    )
+    if explicit:
+        token = str(explicit.split()[0] or "").strip(" .,;:()[]{}\"'")
+        return {"login": token, "email": "", "query": token}
+    for pattern in (
+        r"^(.+?)\s+no puede (?:entrar|acceder)",
+        r"^(.+?)\s+(?:da error|falla) al entrar",
+    ):
+        match = re.search(pattern, low, re.I)
+        if match:
+            raw = str(match.group(1) or "").strip(" .,;:()[]{}\"'")
+            token = str(raw.split()[-1] or "").strip(" .,;:()[]{}\"'")
+            if token:
+                return {"login": token, "email": "", "query": token}
+    current_login = str((context or {}).get("current_user_login") or "").strip()
+    if current_login and any(token in low for token in ("no puedo entrar", "no puedo acceder", "mi acceso", "mi login")):
+        return {"login": current_login, "email": "", "query": current_login}
+    return {"login": "", "email": "", "query": ""}
+
+
+def _workspace_internal_copilot_public_base_url():
+    configured = str(os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    if configured:
+        return configured
+    for env_key in ("RENDER_EXTERNAL_URL", "PUBLIC_BASE_URL", "PUBLIC_URL", "APP_PUBLIC_URL"):
+        value = str(os.environ.get(env_key) or "").strip().rstrip("/")
+        if value:
+            return value
+    return ""
+
+
+def _workspace_internal_copilot_review_user_access(conn, workspace_id, login, *, actor=None):
+    workspace_text = str(workspace_id or "").strip()
+    login_text = str(login or "").strip()
+    if not workspace_text or not login_text:
+        return {"error": "workspace_id y login requeridos"}
+    ensure_usuarios_schema(conn)
+    ensure_workspace_core_tables(conn)
+    items = admin_lookup_users_by_login(conn, login_text)
+    if not items:
+        return {
+            "ok": True,
+            "action_id": "review_user_access",
+            "message": "No he encontrado ningún usuario con ese login o email.",
+            "cards": [
+                {
+                    "title": "Usuario no encontrado",
+                    "summary": f"No existe una cuenta para {login_text}.",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                }
+            ],
+            "actions": [],
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": ["Comprobar login exacto", "Buscar por email completo"],
+        }
+    if len(items) > 1:
+        cards = []
+        for item in items[:6]:
+            memberships = list(item.get("memberships") or [])
+            cards.append(
+                {
+                    "title": str(item.get("usuario") or item.get("email") or "Usuario").strip(),
+                    "summary": (
+                        f"email {str(item.get('email') or '-').strip()} · "
+                        f"activo {'sí' if item.get('activo') else 'no'} · "
+                        f"memberships {len(memberships)}"
+                    )[:500],
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                    "entity": {"user_id": str(item.get("id") or "").strip(), "login": str(item.get("usuario") or item.get("email") or "").strip()},
+                }
+            )
+        return {
+            "ok": True,
+            "action_id": "review_user_access",
+            "message": "He encontrado varias cuentas con ese login. No conviene corregir acceso hasta elegir la buena.",
+            "cards": cards,
+            "actions": [],
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": ["Usar email exacto", "Revisar duplicados de usuarios"],
+        }
+    item = dict(items[0] or {})
+    user_id = str(item.get("id") or "").strip()
+    memberships = list(item.get("memberships") or [])
+    current_membership = next((row for row in memberships if str(row.get("workspace_id") or "").strip() == workspace_text), {})
+    active = bool(item.get("activo"))
+    has_password = bool(item.get("has_password"))
+    issues = []
+    if not active:
+        issues.append("inactive_user")
+    if not memberships:
+        issues.append("missing_all_memberships")
+    elif not current_membership:
+        issues.append("missing_workspace_membership")
+    if not has_password:
+        issues.append("missing_password")
+    status = "clean" if not issues else ("warning" if issues == ["missing_password"] else "attention")
+    summary_bits = [
+        f"usuario {str(item.get('usuario') or '-').strip()}",
+        f"email {str(item.get('email') or '-').strip()}",
+        f"activo {'sí' if active else 'no'}",
+        f"password {'sí' if has_password else 'no'}",
+        f"memberships {len(memberships)}",
+    ]
+    if current_membership:
+        summary_bits.append(f"rol {str(current_membership.get('rol') or 'Miembro').strip()}")
+    cards = [
+        {
+            "title": "Diagnóstico de acceso",
+            "summary": " · ".join(summary_bits)[:500],
+            "priority": "alta" if issues else "media",
+            "impact_area": "auth_access",
+            "entity": {"user_id": user_id, "login": str(item.get("usuario") or item.get("email") or "").strip(), "workspace_id": workspace_text},
+        }
+    ]
+    actions = []
+    if "inactive_user" in issues:
+        actions.append(
+            {
+                "id": "activate_user_access",
+                "label": "Activar usuario",
+                "requires_confirmation": True,
+                "confirm_text": "Se activará la cuenta del usuario para permitir login.",
+                "payload": {"user_id": user_id, "login": login_text},
+            }
+        )
+    if "missing_all_memberships" in issues or "missing_workspace_membership" in issues:
+        actions.append(
+            {
+                "id": "repair_user_membership",
+                "label": "Dar acceso al workspace",
+                "requires_confirmation": True,
+                "confirm_text": "Se creará o reparará la membership del usuario en este workspace.",
+                "payload": {"user_id": user_id, "login": login_text, "workspace_id": workspace_text, "role": "Miembro"},
+            }
+        )
+    if "missing_password" in issues or status == "clean":
+        actions.append(
+            {
+                "id": "force_reset_user_access",
+                "label": "Generar acceso nuevo",
+                "requires_confirmation": True,
+                "confirm_text": "Se limpiará la contraseña actual y se generará un nuevo enlace de activación.",
+                "payload": {"login": login_text},
+            }
+        )
+    actions.append({"id": "revalidate_user_access", "label": "Revalidar acceso", "payload": {"login": login_text}})
+    answer = "El acceso está razonablemente sano." if status == "clean" else "He detectado una incidencia de acceso y puedo corregirla desde aquí."
+    suggestions = []
+    if "missing_workspace_membership" in issues or "missing_all_memberships" in issues:
+        suggestions.append("Reparar membership")
+    if "inactive_user" in issues:
+        suggestions.append("Activar usuario")
+    if "missing_password" in issues or status == "clean":
+        suggestions.append("Regenerar acceso")
+    return {
+        "ok": True,
+        "action_id": "review_user_access",
+        "message": answer,
+        "cards": cards,
+        "actions": actions[:4],
+        "sources": ["internal_copilot_action", "auth_access"],
+        "suggestions": suggestions[:4],
+        "status": status,
+        "issues": issues,
+    }
 
 
 def _workspace_internal_copilot_extract_doc_ref(message):
@@ -45418,6 +45608,36 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
         return None
+    if intent == "review_user_access":
+        query = _workspace_internal_copilot_extract_user_access_query(message, context=context)
+        login = str(query.get("login") or "").strip()
+        if not login:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "Puedo revisar el acceso, pero necesito login o email del usuario.",
+                "sources": ["auth_access"],
+                "suggestions": ["Indicar usuario", "Indicar email"],
+                "cards": [],
+                "actions": [],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": f"Puedo diagnosticar y corregir el acceso de {login}.",
+            "sources": ["auth_access"],
+            "suggestions": ["Revisar acceso", "Revalidar acceso"],
+            "cards": [
+                {
+                    "title": "Revisión de acceso",
+                    "summary": f"Login {login} · workspace {workspace_id}",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                    "entity": {"login": login, "workspace_id": workspace_id},
+                }
+            ],
+            "actions": [{"id": "review_user_access", "label": "Revisar acceso", "payload": {"login": login}}],
+        }
     low_text = normalize_lookup_text(message or "").lower()
     prefer_current = any(token in low_text for token in ("esta renta", "esta poliza", "esta póliza", "esta hipoteca", "esta factura", "subela", "súbela", "metela", "métela"))
     client_resolution = _workspace_internal_copilot_resolve_client(conn, workspace_id, empresa_id, message, context=context, prefer_current=prefer_current and intent != "open_client")
@@ -48037,6 +48257,102 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             result["delegated_action"] = delegated_action
             result["message"] = f"Proceso {process_id} ejecutado. {str(result.get('message') or '').strip()}".strip()
         return result
+    if action_text == "review_user_access":
+        login = str(payload.get("login") or "").strip()
+        return _workspace_internal_copilot_review_user_access(conn, workspace_text, login, actor=actor)
+    if action_text == "revalidate_user_access":
+        login = str(payload.get("login") or "").strip()
+        result = _workspace_internal_copilot_review_user_access(conn, workspace_text, login, actor=actor)
+        if result.get("ok"):
+            result = dict(result)
+            result["action_id"] = action_text
+            result["message"] = f"Revalidación completada. {str(result.get('message') or '').strip()}".strip()
+        return result
+    if action_text == "activate_user_access":
+        user_id = str(payload.get("user_id") or "").strip()
+        login = str(payload.get("login") or "").strip()
+        if not user_id:
+            return {"error": "user_id requerido"}
+        ensure_usuarios_schema(conn)
+        row = conn.execute("SELECT id, usuario, email FROM usuarios WHERE id = ? LIMIT 1", (user_id,)).fetchone()
+        if not row:
+            return {"error": "Usuario no encontrado"}
+        conn.execute("UPDATE usuarios SET activo = 1, updated_at = datetime(?) WHERE id = ?", (now, user_id))
+        conn.commit()
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"Usuario activado. Ya puedo revalidar el acceso de {str(row_value(row, 'usuario') or row_value(row, 'email') or login).strip()}.",
+            "actions": [{"id": "revalidate_user_access", "label": "Revalidar acceso", "payload": {"login": login or str(row_value(row, 'usuario') or row_value(row, 'email') or '').strip()}}],
+            "sources": ["internal_copilot_action", "auth_access"],
+        }
+    if action_text == "repair_user_membership":
+        user_id = str(payload.get("user_id") or "").strip()
+        login = str(payload.get("login") or "").strip()
+        role = _normalize_workspace_member_role(payload.get("role") or "Miembro")
+        if not user_id and login:
+            matches = admin_lookup_users_by_login(conn, login)
+            if len(matches) != 1:
+                return {"error": "No se puede reparar membership: login ambiguo o no encontrado"}
+            user_id = str((matches[0] or {}).get("id") or "").strip()
+        if not user_id:
+            return {"error": "user_id o login requeridos"}
+        ensure_workspace_core_tables(conn)
+        existing = conn.execute(
+            "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+            (workspace_text, user_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE workspace_miembros SET rol = ?, updated_at = datetime(?) WHERE id = ?",
+                (role, now, row_value(existing, "id") or row_value(existing, 0)),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (os.urandom(16).hex(), workspace_text, user_id, role, now, now),
+            )
+        conn.commit()
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "Acceso al workspace reparado. Conviene revalidar el login ahora.",
+            "actions": [{"id": "revalidate_user_access", "label": "Revalidar acceso", "payload": {"login": login}}],
+            "sources": ["internal_copilot_action", "auth_access"],
+        }
+    if action_text == "force_reset_user_access":
+        login = str(payload.get("login") or "").strip()
+        if not login:
+            return {"error": "login requerido"}
+        try:
+            result = admin_force_reset_password_invite(conn, login)
+            conn.commit()
+        except LookupError:
+            return {"error": "Usuario no encontrado"}
+        base_url = _workspace_internal_copilot_public_base_url()
+        token = str(result.get("token") or "").strip()
+        invite_url = f"{base_url}/?activar_token={urllib.parse.quote(token)}" if base_url else f"/?activar_token={urllib.parse.quote(token)}"
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": "He regenerado el acceso del usuario con un nuevo enlace de activación.",
+            "cards": [
+                {
+                    "title": "Acceso regenerado",
+                    "summary": f"{str(result.get('usuario') or result.get('email') or login).strip()} · caduca {str(result.get('expires_at') or '').strip()}",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                    "entity": {"login": login, "invite_url": invite_url},
+                }
+            ],
+            "actions": [{"id": "revalidate_user_access", "label": "Revalidar acceso", "payload": {"login": login}}],
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": [invite_url],
+            "invite_url": invite_url,
+        }
     if action_text == "create_task":
         title = str(payload.get("title") or "").strip()
         if not title:

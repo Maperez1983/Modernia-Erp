@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -4411,6 +4412,139 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
             server._workspace_internal_copilot_codefix_root = old_root
             server._workspace_internal_copilot_generate_codefix_edits = old_generate
             server._workspace_internal_copilot_run_validation_bundle = old_validate
+
+    def test_internal_copilot_build_action_reply_detects_user_access_issue(self):
+        reply = server._workspace_internal_copilot_build_action_reply(
+            self.conn,
+            "ws1",
+            "revisa acceso de acceso.user",
+            empresa_id="e1",
+            service_hint="gestoria",
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertEqual((reply.get("actions") or [])[0]["id"], "review_user_access")
+        self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("login"), "acceso.user")
+
+    def test_internal_copilot_review_user_access_suggests_membership_repair(self):
+        server.ensure_usuarios_schema(self.conn)
+        server.ensure_workspace_core_tables(self.conn)
+        self.conn.execute("DELETE FROM usuarios WHERE usuario = 'acceso.user'")
+        self.conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            """,
+            ("u_access", "Acceso", "User", "acceso.user", "acceso@example.com", "Gestoría", "Lectura", "pbkdf2_sha256$abc"),
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_user_access",
+            {"login": "acceso.user"},
+            empresa_id="e1",
+            actor={"id": "admin", "usuario": "Admin"},
+            now="2026-06-22T09:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("missing_all_memberships", list(result.get("issues") or []))
+        self.assertTrue(any(str(action.get("id") or "") == "repair_user_membership" for action in (result.get("actions") or [])))
+
+    def test_internal_copilot_repair_user_membership_and_revalidate_access(self):
+        server.ensure_usuarios_schema(self.conn)
+        server.ensure_workspace_core_tables(self.conn)
+        self.conn.execute("DELETE FROM usuarios WHERE usuario = 'access.fix'")
+        self.conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            """,
+            ("u_fix", "Access", "Fix", "access.fix", "fix@example.com", "Gestoría", "Lectura", "pbkdf2_sha256$abc"),
+        )
+        repair = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "repair_user_membership",
+            {"user_id": "u_fix", "login": "access.fix", "role": "Miembro"},
+            empresa_id="e1",
+            actor={"id": "admin", "usuario": "Admin"},
+            now="2026-06-22T09:05:00Z",
+        )
+        self.assertTrue(repair["ok"])
+        membership = self.conn.execute(
+            "SELECT rol FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ?",
+            ("ws1", "u_fix"),
+        ).fetchone()
+        self.assertIsNotNone(membership)
+        revalidated = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "revalidate_user_access",
+            {"login": "access.fix"},
+            empresa_id="e1",
+            actor={"id": "admin", "usuario": "Admin"},
+            now="2026-06-22T09:06:00Z",
+        )
+        self.assertTrue(revalidated["ok"])
+        self.assertEqual(revalidated.get("status"), "clean")
+        self.assertFalse([issue for issue in (revalidated.get("issues") or []) if issue in {"missing_all_memberships", "missing_workspace_membership"}])
+
+    def test_internal_copilot_activate_user_access_marks_user_active(self):
+        server.ensure_usuarios_schema(self.conn)
+        self.conn.execute("DELETE FROM usuarios WHERE usuario = 'disabled.user'")
+        self.conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))
+            """,
+            ("u_disabled", "Disabled", "User", "disabled.user", "disabled@example.com", "Gestoría", "Lectura", "pbkdf2_sha256$abc"),
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "activate_user_access",
+            {"user_id": "u_disabled", "login": "disabled.user"},
+            empresa_id="e1",
+            actor={"id": "admin", "usuario": "Admin"},
+            now="2026-06-22T09:10:00Z",
+        )
+        self.assertTrue(result["ok"])
+        row = self.conn.execute("SELECT activo FROM usuarios WHERE id = ?", ("u_disabled",)).fetchone()
+        self.assertEqual(int(row["activo"] or 0), 1)
+
+    def test_internal_copilot_force_reset_user_access_returns_invite_url(self):
+        server.ensure_usuarios_schema(self.conn)
+        server.ensure_auth_invites_table(self.conn)
+        self.conn.execute("DELETE FROM usuarios WHERE usuario = 'reset.user'")
+        self.conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            """,
+            ("u_reset", "Reset", "User", "reset.user", "reset@example.com", "Gestoría", "Lectura", "pbkdf2_sha256$abc"),
+        )
+        old_base = os.environ.get("APP_BASE_URL")
+        try:
+            os.environ["APP_BASE_URL"] = "https://crm.example.test"
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "force_reset_user_access",
+                {"login": "reset.user"},
+                empresa_id="e1",
+                actor={"id": "admin", "usuario": "Admin"},
+                now="2026-06-22T09:15:00Z",
+            )
+        finally:
+            if old_base is None:
+                os.environ.pop("APP_BASE_URL", None)
+            else:
+                os.environ["APP_BASE_URL"] = old_base
+        self.assertTrue(result["ok"])
+        self.assertIn("/?activar_token=", str(result.get("invite_url") or ""))
+        user_row = self.conn.execute("SELECT password_hash FROM usuarios WHERE id = ?", ("u_reset",)).fetchone()
+        self.assertFalse(str(user_row["password_hash"] or "").strip())
 
 
 if __name__ == "__main__":
