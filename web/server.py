@@ -48784,6 +48784,85 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         return result
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "review_impersonated_session":
+        if not bool((actor or {}).get("impersonating")):
+            return {"error": "La sesión actual no está impersonada"}
+        issue = classify_post_login_scope_issue(conn, actor)
+        workspaces = fetch_workspace_rows_for_user(conn, actor) or []
+        services = parse_services_param((actor or {}).get("servicio") or "")
+        useful_modules = [
+            {"service": str(service or "").strip(), "module": str(resolve_workspace_module_key_for_user_service(service) or "").strip()}
+            for service in services
+        ]
+        useful_modules = [item for item in useful_modules if item["module"]]
+        current_login = str((actor or {}).get("usuario") or (actor or {}).get("email") or "").strip()
+        cards = [
+            {
+                "title": "Sesión impersonada revisada",
+                "summary": f"viendo como {current_login} · workspace actual {workspace_text or '-'}",
+                "priority": "alta",
+                "impact_area": "auth_access",
+                "entity": {"login": current_login, "workspace_id": workspace_text},
+            },
+            {
+                "title": "Workspaces visibles",
+                "summary": f"{len(workspaces)} visible(s): {', '.join(str((row or {}).get('nombre') or '').strip() for row in workspaces[:4] if str((row or {}).get('nombre') or '').strip()) or '-'}",
+                "priority": "media",
+                "impact_area": "auth_access",
+            },
+            {
+                "title": "Servicios visibles",
+                "summary": ", ".join(
+                    f"{item['service']} -> {item['module']}" for item in useful_modules[:6]
+                ) or "Sin módulos útiles resueltos",
+                "priority": "media",
+                "impact_area": "auth_access",
+            },
+        ]
+        status = "clean"
+        message = "He revisado la sesión impersonada y el acceso base parece sano para trabajar."
+        suggestions = ["Qué hago ahora", "Ficha actual", "Investigar este error"]
+        if str(issue.get("reason") or "").strip():
+            status = "attention"
+            message = f"He revisado la sesión impersonada y veo un problema base de acceso: {str(issue.get('message') or '').strip()}"
+            cards.append(
+                {
+                    "title": "Problema base de acceso",
+                    "summary": str(issue.get("message") or "").strip(),
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                }
+            )
+            suggestions = ["Revisar acceso", "Salir de impersonación"]
+        elif not useful_modules:
+            status = "warning"
+            message = "La sesión impersonada entra, pero no veo módulos útiles asignados para trabajar con normalidad."
+            cards.append(
+                {
+                    "title": "Ámbito funcional insuficiente",
+                    "summary": "La cuenta autentica, pero no resuelve ningún módulo operativo útil.",
+                    "priority": "alta",
+                    "impact_area": "auth_access",
+                }
+            )
+            suggestions = ["Solicitar servicio", "Salir de impersonación"]
+        actions = [
+            {"id": "stop_impersonation_session", "label": "Salir de impersonación", "payload": {}},
+        ]
+        if str(issue.get("reason") or "").strip():
+            actions.append({"id": "review_user_access", "label": "Revisar acceso", "payload": {"login": current_login}})
+        if str(payload.get("ui_error_title") or "").strip() or str(payload.get("ui_error_detail") or "").strip():
+            actions.append({"id": "inspect_current_problem", "label": "Investigar este error", "payload": dict(payload)})
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": message,
+            "status": status,
+            "cards": cards[:6],
+            "actions": actions[:4],
+            "sources": ["internal_copilot_action", "auth_access"],
+            "suggestions": suggestions,
+        }
     if action_text == "impersonate_user_session":
         if not workspace_actor_is_privileged(conn, actor):
             return {"error": "Sin permisos para impersonar usuarios"}
@@ -48868,6 +48947,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": ["internal_copilot_action", "auth_access"],
             "suggestions": ["Investigar este error", "Diagnosticar esta ficha"],
             "reload_after_session_switch": True,
+            "post_reload_action": {"action_id": "review_impersonated_session"},
         }
     if action_text == "stop_impersonation_session":
         if not bool((actor or {}).get("impersonating")):

@@ -84,6 +84,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("current_user_login", app_js)
         self.assertIn("is_impersonated", app_js)
         self.assertIn("impersonated_by", app_js)
+        self.assertIn("crm.pendingImpersonationReview", app_js)
+        self.assertIn("maybeRunPendingImpersonationReview", app_js)
         self.assertIn('id="globalInternalCopilotToggle"', app_js)
         self.assertIn('id="globalInternalCopilotPanel"', app_js)
         self.assertIn('id="globalInternalCopilotFeed"', app_js)

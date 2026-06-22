@@ -13402,6 +13402,9 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         if (result?.user && typeof setAuthUi === "function") {
           setAuthUi(result.user);
         }
+        if (result?.post_reload_action) {
+          storePendingImpersonationReview(result.post_reload_action);
+        }
         if (result?.navigation) {
           await applyWorkspaceSupervisorNavigation(result);
         }
@@ -13597,6 +13600,52 @@ const collectInternalCopilotContext = () => {
     ui_error_at: String(uiError.at || "").trim(),
     ui_error_history: uiErrorHistory.slice(-6),
   };
+};
+
+const storePendingImpersonationReview = (action = null) => {
+  try {
+    if (!action || typeof action !== "object") {
+      sessionStorage.removeItem("crm.pendingImpersonationReview");
+      return;
+    }
+    sessionStorage.setItem("crm.pendingImpersonationReview", JSON.stringify(action));
+  } catch (e) {}
+};
+
+const maybeRunPendingImpersonationReview = async () => {
+  let pending = null;
+  try {
+    pending = JSON.parse(sessionStorage.getItem("crm.pendingImpersonationReview") || "null");
+  } catch (e) {
+    pending = null;
+  }
+  if (!pending || typeof pending !== "object") return;
+  const authUser = getAuthScopeUser() || {};
+  if (!authUser?.is_impersonated) {
+    storePendingImpersonationReview(null);
+    return;
+  }
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const actionId = String(pending.action_id || "").trim();
+  if (!workspaceId || !actionId) return;
+  storePendingImpersonationReview(null);
+  try {
+    state.persistentInternalCopilotOpen = true;
+    state.persistentInternalCopilotTab = "chat";
+    syncPersistentInternalCopilotWidget();
+    const params = new URLSearchParams(window.location.search || "");
+    const result = await apiPost("/api/internal_copilot_action", {
+      workspace_id: workspaceId,
+      empresa_id: String(state.currentWorkspaceCompanyId || "").trim(),
+      service_hint: String(params.get("crm") || "").trim(),
+      action_id: actionId,
+      action_payload: collectInternalCopilotContext(),
+    });
+    addPersistentInternalCopilotAssistantMessage(result);
+    setUiToast("Sesión revisada", String(result?.message || "Se ha revisado la sesión impersonada."));
+  } catch (error) {
+    setUiToast("No se pudo revisar la sesión impersonada", String(error?.message || "Error desconocido"));
+  }
 };
 
 const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl = null, clear = null } = {}) => {
@@ -74660,6 +74709,7 @@ const init = async () => {
     handleRoute();
     UI?.boot(state);
     renderCompanyCards();
+    await maybeRunPendingImpersonationReview();
 
     // Cargas pesadas en segundo plano: stats, clientes, workspaces, etc.
     const safe = (promise) => promise.catch(() => null);

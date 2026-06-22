@@ -4597,6 +4597,88 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply.get("intent"), "action")
         self.assertTrue(any(str(action.get("id") or "") == "inspect_current_problem" for action in (reply.get("actions") or [])))
 
+    def test_internal_copilot_build_action_reply_can_impersonate_user(self):
+        reply = server._workspace_internal_copilot_build_action_reply(
+            self.conn,
+            "ws1",
+            "entra como slallana",
+            empresa_id="e1",
+            service_hint="gestoria",
+            context={},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertEqual((reply.get("actions") or [])[0]["id"], "impersonate_user_session")
+        self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("login"), "slallana")
+
+    def test_internal_copilot_review_impersonated_session_reports_clean_access(self):
+        server.ensure_workspace_core_tables(self.conn)
+        server.ensure_usuarios_schema(self.conn)
+        self.conn.execute(
+            """
+            INSERT INTO workspaces (id, nombre, slug, estado, plan, created_at, updated_at)
+            VALUES ('ws1', 'Workspace 1', 'workspace-1', 'Activo', 'Pro', datetime('now'), datetime('now'))
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES ('m1', 'ws1', 'u_imp', 'Miembro', datetime('now'), datetime('now'))
+            """
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_impersonated_session",
+            {},
+            empresa_id="e1",
+            actor={
+                "user_id": "u_imp",
+                "usuario": "slallana",
+                "email": "slallana@example.com",
+                "servicio": "Gestoría",
+                "rol": "Lectura",
+                "impersonating": 1,
+                "impersonated_by_usuario": "admin.user",
+            },
+            now="2026-06-22T12:00:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("status"), "clean")
+        self.assertIn("sano", str(result.get("message") or "").lower())
+        self.assertTrue(any(str(card.get("title") or "") == "Sesión impersonada revisada" for card in (result.get("cards") or [])))
+
+    def test_internal_copilot_impersonate_user_session_sets_post_reload_review(self):
+        server.ensure_workspace_core_tables(self.conn)
+        server.ensure_usuarios_schema(self.conn)
+        self.conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            """,
+            ("u_imp_target", "S", "Lallana", "slallana", "slallana@example.com", "Gestoría", "Lectura", "pbkdf2_sha256$abc"),
+        )
+        result = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "impersonate_user_session",
+            {"login": "slallana", "reason": "QA"},
+            empresa_id="e1",
+            actor={
+                "token": "orig-token",
+                "user_id": "admin-1",
+                "usuario": "admin.user",
+                "email": "admin@example.com",
+                "servicio": "Gestoría",
+                "rol": "Administrador",
+            },
+            now="2026-06-22T12:05:00Z",
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(bool(result.get("reload_after_session_switch")))
+        self.assertEqual(((result.get("post_reload_action") or {}).get("action_id") or "").strip(), "review_impersonated_session")
+        self.assertTrue(str(result.get("session_cookie_token") or "").strip())
+
 
 if __name__ == "__main__":
     unittest.main()
