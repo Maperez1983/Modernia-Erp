@@ -12332,7 +12332,7 @@ const renderWorkspaceCopilotHub = () => {
           <p class="muted">Consulta incidencias, tutoriales y dudas legales del CRM desde un único asistente.</p>
         </div>
       </div>
-      <div id="workspaceInternalCopilotFeed"><p class="muted">Haz una pregunta sobre un proceso, un error o una duda legal.</p></div>
+      <div id="workspaceInternalCopilotFeed"><p class="muted">Describe el trabajo. El asistente decide el proceso y lo empuja por detrás.</p></div>
       <form id="workspaceInternalCopilotForm" class="form-grid" style="margin-top:12px">
         <input type="hidden" name="workspace_id" value="${escapeHtml(String(state.currentWorkspaceId || ""))}" />
         <input type="hidden" name="empresa_id" value="${escapeHtml(String(activeCompanyId || ""))}" />
@@ -13898,20 +13898,9 @@ const ensurePersistentInternalCopilotWidget = () => {
           <span style="font-size:12px;padding:5px 9px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)">En línea</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button type="button" class="secondary ghost" data-global-copilot-mode="operator" style="border-radius:999px">Operar</button>
-          <button type="button" class="secondary ghost" data-global-copilot-mode="supervisor" style="border-radius:999px">Supervisar</button>
-          <button type="button" class="secondary ghost" data-global-copilot-mode="direccion" style="border-radius:999px">Dirección</button>
-          <button type="button" class="secondary ghost" data-global-copilot-mode="legal" style="border-radius:999px">Legal</button>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="briefing" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Qué hago ahora</button>
           <button type="button" class="secondary ghost" data-global-copilot-quick="current_entity" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Ficha actual</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="platform" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Centro IA</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="resume" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Retomar</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Cerrar ciclo</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Incidencias</button>
-          <button type="button" class="secondary ghost" data-global-copilot-quick="legal" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Legal</button>
+          <button type="button" class="secondary ghost" data-global-copilot-quick="hoy" style="border-radius:999px;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff">Urgente hoy</button>
         </div>
       </div>
       <div style="display:flex;gap:8px;padding:12px 14px 0">
@@ -13921,10 +13910,10 @@ const ensurePersistentInternalCopilotWidget = () => {
       </div>
       <div style="flex:1 1 auto;min-height:0;padding:12px 14px 14px;display:flex;flex-direction:column;gap:12px">
         <section data-global-copilot-panel="chat" style="display:flex;flex-direction:column;gap:12px;min-height:0;flex:1 1 auto">
-          <div id="globalInternalCopilotFeed" style="flex:1 1 auto;min-height:180px;overflow:auto;padding-right:4px"><p class="muted">Haz una pregunta sobre incidencias, cómo hacer un proceso o una consulta legal.</p></div>
+          <div id="globalInternalCopilotFeed" style="flex:1 1 auto;min-height:180px;overflow:auto;padding-right:4px"><p class="muted">Escribe lo que necesitas. El asistente decide el proceso y resuelve el trabajo por detrás.</p></div>
           <form id="globalInternalCopilotForm" style="display:grid;gap:10px">
             <div style="border:1px solid #dbe4d8;border-radius:14px;background:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);padding:10px 12px">
-              <textarea name="message" rows="3" placeholder="Escribe aquí sin salir de la pantalla actual" style="width:100%;border:0;outline:none;resize:none;background:transparent;font:inherit;color:#1f2d27"></textarea>
+              <textarea name="message" rows="3" placeholder="Pídeme el trabajo tal como lo harías a una persona" style="width:100%;border:0;outline:none;resize:none;background:transparent;font:inherit;color:#1f2d27"></textarea>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <label style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #dbe4d8;border-radius:999px;background:#fff;color:#365243;cursor:pointer">
@@ -13945,19 +13934,28 @@ const ensurePersistentInternalCopilotWidget = () => {
         <section data-global-copilot-panel="hoy" class="hidden" style="overflow:auto;flex:1 1 auto;min-height:0">
           <div id="globalInternalCopilotToday"><p class="muted">Todavía no hay agenda diaria preparada para este workspace.</p></div>
         </section>
-        <div style="padding:10px 12px;border:1px solid #e3eadf;border-radius:14px;background:#fbfdf9">
-          <div style="font-size:12px;font-weight:700;color:#365243;margin-bottom:6px">Consultas rápidas</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué hago ahora" style="border-radius:999px">Qué hago ahora</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="diagnostica la ficha actual" style="border-radius:999px">Ficha actual</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="arquitectura de la inteligencia verifika2" style="border-radius:999px">Centro IA</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="continúa con lo de esta mañana" style="border-radius:999px">Retomar</button>
-            <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px">Cerrar ciclo</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>
-            <button type="button" class="secondary ghost" data-global-copilot-suggest="resume las novedades legales de este workspace" style="border-radius:999px">Radar legal</button>
+        <details style="padding:10px 12px;border:1px solid #e3eadf;border-radius:14px;background:#fbfdf9">
+          <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#365243">Opciones avanzadas</summary>
+          <div style="display:grid;gap:10px;margin-top:10px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="secondary ghost" data-global-copilot-suggest="qué es lo más urgente hoy" style="border-radius:999px">Urgente hoy</button>
+              <button type="button" class="secondary ghost" data-global-copilot-suggest="diagnostica la ficha actual" style="border-radius:999px">Diagnosticar ficha</button>
+              <button type="button" class="secondary ghost" data-global-copilot-suggest="qué dashboards no cuadran contra el detalle real" style="border-radius:999px">Dashboards</button>
+              <button type="button" class="secondary ghost" data-global-copilot-suggest="resume las novedades legales de este workspace" style="border-radius:999px">Radar legal</button>
+              <button type="button" class="secondary ghost" data-global-copilot-suggest="continúa con lo de esta mañana" style="border-radius:999px">Retomar</button>
+              <button type="button" class="secondary ghost" data-global-copilot-quick="close_loop" style="border-radius:999px">Cerrar ciclo</button>
+              <button type="button" class="secondary ghost" data-global-copilot-quick="incidencias" style="border-radius:999px">Incidencias</button>
+              <button type="button" class="secondary ghost" data-global-copilot-quick="legal" style="border-radius:999px">Legal</button>
+              <button type="button" class="secondary ghost" data-global-copilot-quick="platform" style="border-radius:999px">Centro IA</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="secondary ghost" data-global-copilot-mode="operator" style="border-radius:999px">Operar</button>
+              <button type="button" class="secondary ghost" data-global-copilot-mode="supervisor" style="border-radius:999px">Supervisar</button>
+              <button type="button" class="secondary ghost" data-global-copilot-mode="direccion" style="border-radius:999px">Dirección</button>
+              <button type="button" class="secondary ghost" data-global-copilot-mode="legal" style="border-radius:999px">Legal</button>
+            </div>
           </div>
-        </div>
+        </details>
       </div>
     </div>
   `;
