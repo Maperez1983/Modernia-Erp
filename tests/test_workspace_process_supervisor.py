@@ -4721,6 +4721,20 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual((reply.get("actions") or [])[0]["id"], "review_browser_experience")
         self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("login"), "slallana")
 
+    def test_internal_copilot_build_action_reply_can_search_internet(self):
+        reply = server._workspace_internal_copilot_build_action_reply(
+            self.conn,
+            "ws1",
+            "busca en internet obligaciones de alquiler turistico en boe",
+            empresa_id="e1",
+            service_hint="gestoria",
+            context={"current_workspace_id": "ws1", "current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertEqual((reply.get("actions") or [])[0]["id"], "search_internet")
+        self.assertIn("alquiler turistico", (((reply.get("actions") or [])[0]).get("payload") or {}).get("query", ""))
+
     def test_internal_copilot_review_impersonated_agenda_reports_visible_items(self):
         server.ensure_workspace_core_tables(self.conn)
         self.conn.execute(

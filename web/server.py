@@ -1311,6 +1311,9 @@ _DEFAULT_COPILOT_WEB_ALLOWED_DOMAINS = {
     "eur-lex.europa.eu",
     "europa.eu",
 }
+COPILOT_WEB_SEARCH_BASE_URL = str(
+    os.environ.get("COPILOT_WEB_SEARCH_BASE_URL") or "https://html.duckduckgo.com/html/"
+).strip()
 _extra_domains = {
     d.strip().lower()
     for d in (os.environ.get("COPILOT_WEB_ALLOWED_DOMAINS") or "").split(",")
@@ -18257,6 +18260,86 @@ def copilot_web_answer(question, url, *, timeout_seconds=None):
             answer_lines.extend([f"- {item[:220]}" for item in snippets[2:5]])
         output = "\n".join(answer_lines).strip() or "No se pudo generar respuesta con el contenido disponible."
     return {"ok": True, "url": source, "title": title, "answer": output, "mode": mode, "fetched_at": fetched.get("fetched_at")}
+
+
+def _resolve_search_result_url(raw_url):
+    value = html.unescape(str(raw_url or "").strip())
+    if not value:
+        return ""
+    if value.startswith("//"):
+        value = "https:" + value
+    try:
+        parsed = urllib.parse.urlparse(value)
+    except Exception:
+        return ""
+    if "duckduckgo.com" in (parsed.netloc or "").lower():
+        target = urllib.parse.parse_qs(parsed.query or "").get("uddg", [""])[0]
+        if target:
+            return urllib.parse.unquote(target)
+    if parsed.scheme in {"http", "https"}:
+        return value
+    return ""
+
+
+def copilot_web_search(query, *, limit=5, timeout_seconds=None, now=None):
+    text = re.sub(r"\s+", " ", str(query or "")).strip()
+    if not text:
+        return {"error": "query requerida"}
+    timeout_seconds = float(timeout_seconds or COPILOT_WEB_TIMEOUT_SECONDS)
+    try:
+        limit_i = max(1, min(int(limit or 5), 10))
+    except Exception:
+        limit_i = 5
+    params = urllib.parse.urlencode({"q": text, "kl": "es-es"})
+    search_url = f"{COPILOT_WEB_SEARCH_BASE_URL}?{params}"
+    headers = {"User-Agent": "Verifika2CopilotWeb/1.0"}
+    request = urllib.request.Request(search_url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as resp:
+            raw_html = resp.read(COPILOT_WEB_MAX_BYTES).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as err:
+        return {"error": f"HTTP {int(err.code or 0)}", "query": text}
+    except Exception as err:
+        return {"error": str(err), "query": text}
+
+    results = []
+    for match in re.finditer(
+        r'(?is)<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+        raw_html,
+    ):
+        href = _resolve_search_result_url(match.group(1))
+        if not href:
+            continue
+        title = _html_to_text(match.group(2))
+        tail = raw_html[match.end() : match.end() + 1600]
+        snippet_match = re.search(r'(?is)<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>', tail)
+        if not snippet_match:
+            snippet_match = re.search(r'(?is)<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>', tail)
+        snippet = _html_to_text(snippet_match.group(1)) if snippet_match else ""
+        domain = ""
+        try:
+            domain = urllib.parse.urlparse(href).netloc.lower()
+        except Exception:
+            domain = ""
+        results.append(
+            {
+                "title": title or href,
+                "url": href,
+                "snippet": snippet[:400],
+                "domain": domain,
+                "allowed_fetch": bool(_domain_is_allowed(domain)),
+            }
+        )
+        if len(results) >= limit_i:
+            break
+    return {
+        "ok": True,
+        "query": text,
+        "results": results,
+        "count": len(results),
+        "fetched_at": now or datetime.now(timezone.utc).isoformat(),
+        "provider": "duckduckgo_html",
+    }
 
 
 def pdf_to_png_data_urls(pdf_path, max_pages=2, dpi=220):
@@ -45725,6 +45808,8 @@ def _workspace_internal_copilot_continue_reply(conn, workspace_id, message, *, e
 
 def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
+    if any(token in text for token in ("busca en internet", "buscar en internet", "busca en web", "buscar en web", "busca en google", "buscar en google", "busca en la web", "buscar en la web")):
+        return "search_internet"
     if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
         return "inspect_current_problem"
     if any(token in text for token in ("navegador", "browser")) and any(token in text for token in ("revisa", "comprueba", "verifica", "mira", "entra")):
@@ -45854,6 +45939,24 @@ def _workspace_internal_copilot_extract_impersonation_query(message):
         token = str(explicit.split()[0] or "").strip(" .,;:()[]{}\"'")
         return {"login": token, "query": token}
     return {"login": "", "query": ""}
+
+
+def _workspace_internal_copilot_extract_web_search_query(message):
+    text = re.sub(r"\s+", " ", str(message or "")).strip()
+    if not text:
+        return ""
+    patterns = (
+        r"(?i)\b(?:busca|buscar)\s+en\s+(?:internet|la web|web|google)\s+(.+)$",
+        r"(?i)\b(?:busca|buscar)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        raw = str(match.group(1) or "").strip(" .,:;")
+        if raw:
+            return raw
+    return text
 
 
 def _workspace_internal_copilot_public_base_url():
@@ -46477,6 +46580,35 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
     intent = _workspace_internal_copilot_action_intent(message)
     if not intent:
         return None
+    if intent == "search_internet":
+        query = _workspace_internal_copilot_extract_web_search_query(message)
+        if not query:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "Puedo buscar en internet desde el sistema, pero necesito la consulta concreta.",
+                "sources": ["copilot_web_search"],
+                "suggestions": ["Indicar búsqueda concreta"],
+                "cards": [],
+                "actions": [],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo buscar en internet desde el sistema y devolverte resultados resumidos con enlaces útiles.",
+            "sources": ["copilot_web_search"],
+            "suggestions": ["Buscar en internet"],
+            "cards": [
+                {
+                    "title": "Búsqueda web",
+                    "summary": query[:240],
+                    "priority": "media",
+                    "impact_area": "internet_search",
+                    "entity": {"query": query},
+                }
+            ],
+            "actions": [{"id": "search_internet", "label": "Buscar en internet", "payload": {"query": query}}],
+        }
     if intent == "inspect_current_problem":
         return {
             "ok": True,
@@ -49345,8 +49477,79 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             result["delegated_action"] = delegated_action
             result["message"] = f"Proceso {process_id} ejecutado. {str(result.get('message') or '').strip()}".strip()
         return result
+    if action_text == "search_internet":
+        search_result = copilot_web_search(
+            str(payload.get("query") or "").strip(),
+            limit=6,
+            timeout_seconds=20,
+            now=now,
+        )
+        if search_result.get("error"):
+            return search_result
+        rows = list(search_result.get("results") or [])
+        cards = []
+        actions = []
+        for item in rows[:6]:
+            cards.append(
+                {
+                    "title": str(item.get("title") or item.get("url") or "Resultado").strip()[:220],
+                    "summary": (
+                        f"{str(item.get('domain') or '').strip()} · "
+                        f"{str(item.get('snippet') or '').strip()}"
+                    )[:500],
+                    "priority": "media",
+                    "impact_area": "internet_search",
+                    "entity": {"url": str(item.get("url") or "").strip()},
+                }
+            )
+            if item.get("allowed_fetch"):
+                actions.append(
+                    {
+                        "id": "copilot_web_ask",
+                        "label": f"Leer {str(item.get('domain') or 'fuente').strip()}",
+                        "payload": {
+                            "url": str(item.get("url") or "").strip(),
+                            "question": "Resume esta fuente y extrae lo operativo.",
+                        },
+                    }
+                )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He encontrado {len(rows)} resultado(s) para la búsqueda web.",
+            "cards": cards,
+            "actions": actions[:3],
+            "sources": ["copilot_web_search"],
+            "suggestions": ["Abrir resultado", "Refinar búsqueda", "Leer fuente oficial"],
+            "search": search_result,
+        }
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "copilot_web_ask":
+        result = copilot_web_answer(
+            str(payload.get("question") or "").strip(),
+            str(payload.get("url") or "").strip(),
+            timeout_seconds=20,
+        )
+        if result.get("error"):
+            return result
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": str(result.get("answer") or "").strip()[:4000],
+            "cards": [
+                {
+                    "title": str(result.get("title") or result.get("url") or "Fuente").strip()[:220],
+                    "summary": str(result.get("url") or "").strip(),
+                    "priority": "media",
+                    "impact_area": "internet_search",
+                    "entity": {"url": str(result.get("url") or "").strip()},
+                }
+            ],
+            "sources": ["copilot_web_fetch", str(result.get("mode") or "basic").strip() or "basic"],
+            "suggestions": ["Buscar en internet", "Abrir resultado"],
+            "web_answer": result,
+        }
     if action_text == "review_browser_experience":
         browser_result = run_ollana_browser_review(
             {
@@ -65093,6 +65296,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_radar_digest",
                 "/api/copilot_web_fetch",
                 "/api/copilot_web_ask",
+                "/api/copilot_web_search",
                 "/api/iivtnu_municipios",
                     "/api/iivtnu_cp_lookup",
                     "/api/iivtnu_simulate",
@@ -66285,6 +66489,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/copilot_web_fetch",
             "/api/copilot_web_ask",
+            "/api/copilot_web_search",
             "/api/s3_presign",
             "/api/ingest_facturas_presign",
             "/api/ingest_facturas_ocr",
@@ -66576,6 +66781,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/copilot_web_fetch",
             "/api/copilot_web_ask",
+            "/api/copilot_web_search",
             # Empresa master data is not scoped by empresa_nombre; it is controlled by workspace membership.
             "/api/empresa_update",
             "/api/empresa_create",
@@ -81061,6 +81267,20 @@ class Handler(BaseHTTPRequestHandler):
             timeout = payload.get("timeout_seconds") or None
             max_chars = payload.get("max_chars") or None
             result = copilot_web_fetch_url(url, timeout_seconds=timeout, max_chars=max_chars, now=now)
+            if result.get("error"):
+                json_response(self, result, status=400)
+                return
+            json_response(self, result)
+            return
+        elif parsed.path == "/api/copilot_web_search":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            query = payload.get("query") or payload.get("q") or ""
+            limit = payload.get("limit") or 5
+            timeout = payload.get("timeout_seconds") or None
+            result = copilot_web_search(query, limit=limit, timeout_seconds=timeout, now=now)
             if result.get("error"):
                 json_response(self, result, status=400)
                 return

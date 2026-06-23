@@ -44,6 +44,7 @@ from web.server import (
     build_legal_copilot_ollama_analysis,
     build_legal_radar_digest_prompt,
     copilot_web_answer,
+    copilot_web_search,
     fetch_latest_system_audit_run,
     store_system_audit_run,
 )
@@ -148,6 +149,40 @@ class OllamaAutomationToolsTests(unittest.TestCase):
             server.openai_available = old_openai
             server.ollama_available = old_ollama
             server.call_ollama = old_call_ollama
+
+    def test_copilot_web_search_parses_duckduckgo_results(self):
+        import web.server as server
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, _max_bytes=None):
+                body = """
+                <html><body>
+                  <a class="result__a" href="https://boe.es/buscar/doc.php?id=BOE-A-2026-1">BOE resultado</a>
+                  <div class="result__snippet">Resumen breve del BOE.</div>
+                  <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Feur-lex.europa.eu%2Flegal-content%2FES%2FTXT%2F%3Furi%3DCELEX%3A32024R0001">EUR-Lex</a>
+                  <div class="result__snippet">Reglamento europeo.</div>
+                </body></html>
+                """
+                return body.encode("utf-8")
+
+        old_urlopen = server.urllib.request.urlopen
+        try:
+            server.urllib.request.urlopen = lambda *_args, **_kwargs: _FakeResponse()
+            result = copilot_web_search("obligación boe", limit=5)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["count"], 2)
+            self.assertIn("BOE", result["results"][0]["title"])
+            self.assertEqual(result["results"][0]["url"], "https://boe.es/buscar/doc.php?id=BOE-A-2026-1")
+            self.assertTrue(result["results"][0]["allowed_fetch"])
+            self.assertIn("eur-lex.europa.eu", result["results"][1]["url"])
+        finally:
+            server.urllib.request.urlopen = old_urlopen
 
     def test_legal_copilot_ollama_analysis_falls_back_to_text(self):
         import web.server as server
