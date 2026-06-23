@@ -95,6 +95,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("currentGlobalCopilotScopeLabel", app_js)
         self.assertIn("syncPersistentInternalCopilotAvailability", app_js)
         self.assertIn("crm.persistentInternalCopilotVisible.v5", app_js)
+        self.assertNotIn("createPayload.force_new = true", app_js)
+        self.assertIn("let hipotecaFormSubmitting = false;", app_js)
         self.assertIn("Accede al sistema para usar el asistente operativo", app_js)
         self.assertIn("Pantalla de acceso", app_js)
         self.assertIn("Activación de acceso", app_js)

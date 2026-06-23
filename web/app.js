@@ -43973,6 +43973,9 @@ const saveHipotecaFicha = async (event) => {
   if (!panel) return;
   const recordId = String(panel.dataset.recordId || "").trim();
   if (!recordId) return;
+  if (panel.dataset.submitting === "1") return;
+  panel.dataset.submitting = "1";
+  panel.querySelectorAll('#hipotecaFichaForm button[type="submit"]').forEach((btn) => btn.setAttribute("disabled", "disabled"));
   const isDraft = recordId === HIPOTECA_FICHA_DRAFT_ID;
   const status = panel.querySelector("#hipotecaFichaStatus");
   if (status) status.textContent = isDraft ? "Creando hipoteca..." : "Guardando cambios...";
@@ -44037,9 +44040,6 @@ const saveHipotecaFicha = async (event) => {
         return;
       }
       const createPayload = { ...base };
-      // Evita “herencias”/reutilización accidental: cada nueva operación debe crear un registro nuevo,
-      // incluso si coincide cliente/estado con una pendiente previa.
-      createPayload.force_new = true;
       // Endpoint legacy: crea (o reutiliza) una hipoteca en BDT y nos devuelve el id.
       [
         "cliente",
@@ -44102,6 +44102,9 @@ const saveHipotecaFicha = async (event) => {
     try {
       console.error("saveHipotecaFicha error", error);
     } catch (e) {}
+  } finally {
+    delete panel.dataset.submitting;
+    panel.querySelectorAll('#hipotecaFichaForm button[type="submit"]').forEach((btn) => btn.removeAttribute("disabled"));
   }
 };
 
@@ -86807,6 +86810,7 @@ if (hipotecaClienteForm) {
 }
 
 if (hipotecaForm) {
+  let hipotecaFormSubmitting = false;
   const comisionInput = hipotecaForm.querySelector("input[name='comision']");
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
   const comisionNetaModerniaInput = document.getElementById("hipotecaComisionNeta");
@@ -86908,6 +86912,9 @@ if (hipotecaForm) {
   updateFinanciacion();
   hipotecaForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (hipotecaFormSubmitting) return;
+    hipotecaFormSubmitting = true;
+    hipotecaForm.querySelectorAll('button[type="submit"]').forEach((btn) => btn.setAttribute("disabled", "disabled"));
     if (hipotecaFormStatus) {
       hipotecaFormStatus.textContent = "Guardando...";
     }
@@ -86946,6 +86953,10 @@ if (hipotecaForm) {
         if (hipotecaFormStatus) {
           hipotecaFormStatus.textContent = "Error al guardar.";
         }
+      })
+      .finally(() => {
+        hipotecaFormSubmitting = false;
+        hipotecaForm.querySelectorAll('button[type="submit"]').forEach((btn) => btn.removeAttribute("disabled"));
       });
   });
 }

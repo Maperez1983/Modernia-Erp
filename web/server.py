@@ -48674,18 +48674,16 @@ def _workspace_internal_copilot_create_hipoteca(conn, workspace_id, empresa_id, 
     estado_busqueda = ("estudio", "encargo", "pendiente")
     existing = None
     if (not force_new) and cliente:
-        where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
-        values = [row_value(empresa_row, "id"), *estado_busqueda, cliente]
-        if fecha_encargo:
-            where += " AND fecha_encargo = ?"
-            values.append(fecha_encargo)
-        if precio is not None:
-            where += " AND precio = ?"
-            values.append(precio)
-        if importe_hipoteca is not None:
-            where += " AND importe_hipoteca = ?"
-            values.append(importe_hipoteca)
-        existing = conn.execute(f"SELECT id FROM hipotecas WHERE {where} LIMIT 1", values).fetchone()
+        existing = find_reusable_hipoteca_open_record(
+            conn,
+            str(row_value(empresa_row, "id") or "").strip(),
+            cliente=cliente,
+            fecha_encargo=fecha_encargo,
+            precio=precio,
+            importe_hipoteca=importe_hipoteca,
+            banco=str(payload.get("banco") or "").strip(),
+            oficina=str(payload.get("oficina") or payload.get("inmobiliaria_compra") or "").strip(),
+        )
     existing_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (existing["id"],)).fetchone() if existing else None
     effective_comision = comision if comision is not None else (row_value(existing_row, "comision") if existing_row else 0)
     effective_agencia = (
@@ -48806,6 +48804,55 @@ def _workspace_internal_copilot_create_hipoteca(conn, workspace_id, empresa_id, 
         now=now,
     )
     return {"ok": True, "id": out_id, "created": created_flag, "process_supervision": process_supervision}
+
+
+def find_reusable_hipoteca_open_record(
+    conn,
+    empresa_id,
+    *,
+    cliente="",
+    fecha_encargo=None,
+    precio=None,
+    importe_hipoteca=None,
+    banco="",
+    oficina="",
+):
+    cliente = str(cliente or "").strip()
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id or not cliente:
+        return None
+    estado_busqueda = ("estudio", "encargo", "pendiente")
+    where = [
+        "empresa_id = ?",
+        "LOWER(TRIM(COALESCE(estado, ''))) IN (?, ?, ?)",
+        "LOWER(TRIM(COALESCE(cliente, ''))) = LOWER(TRIM(?))",
+    ]
+    values = [empresa_id, *estado_busqueda, cliente]
+    if fecha_encargo:
+        where.append("COALESCE(fecha_encargo, '') = ?")
+        values.append(str(fecha_encargo))
+    if precio is not None:
+        where.append("precio = ?")
+        values.append(precio)
+    if importe_hipoteca is not None:
+        where.append("importe_hipoteca = ?")
+        values.append(importe_hipoteca)
+    if str(banco or "").strip():
+        where.append("LOWER(TRIM(COALESCE(banco, ''))) = LOWER(TRIM(?))")
+        values.append(str(banco).strip())
+    if str(oficina or "").strip():
+        where.append("(LOWER(TRIM(COALESCE(oficina, ''))) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(inmobiliaria_compra, ''))) = LOWER(TRIM(?)))")
+        values.extend([str(oficina).strip(), str(oficina).strip()])
+    return conn.execute(
+        f"""
+        SELECT id
+        FROM hipotecas
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC
+        LIMIT 1
+        """,
+        values,
+    ).fetchone()
 
 
 def _workspace_internal_copilot_ingest_factura(conn, workspace_id, empresa_id, payload, *, actor=None, now=""):
@@ -86681,24 +86728,18 @@ class Handler(BaseHTTPRequestHandler):
             entrada = parse_optional_float(payload.get("entrada"))
             comision = parse_optional_float(payload.get("comision"))
             anio = parse_optional_int(payload.get("anio"))
-            estado_busqueda = ("estudio", "encargo", "pendiente")
             existing = None
             if (not force_new) and cliente:
-                where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
-                values = [empresa["id"], *estado_busqueda, cliente]
-                if fecha_encargo:
-                    where += " AND fecha_encargo = ?"
-                    values.append(fecha_encargo)
-                if precio is not None:
-                    where += " AND precio = ?"
-                    values.append(precio)
-                if importe_hipoteca is not None:
-                    where += " AND importe_hipoteca = ?"
-                    values.append(importe_hipoteca)
-                existing = conn.execute(
-                    f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
-                    values,
-                ).fetchone()
+                existing = find_reusable_hipoteca_open_record(
+                    conn,
+                    empresa["id"],
+                    cliente=cliente,
+                    fecha_encargo=fecha_encargo,
+                    precio=precio,
+                    importe_hipoteca=importe_hipoteca,
+                    banco=str(payload.get("banco") or "").strip(),
+                    oficina=str(payload.get("oficina") or payload.get("inmobiliaria_compra") or "").strip(),
+                )
             existing_row = None
             if existing:
                 existing_row = conn.execute(
