@@ -869,6 +869,14 @@ SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
 INGEST_API_KEY = str(os.environ.get("APP_INGEST_API_KEY") or "").strip()
+OLLANA_SYSTEM_ENABLED = os.environ.get("OLLANA_SYSTEM_ENABLED", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+OLLANA_SYSTEM_LOGIN = str(os.environ.get("OLLANA_SYSTEM_LOGIN") or "").strip()
+OLLANA_SYSTEM_PASSWORD = str(os.environ.get("OLLANA_SYSTEM_PASSWORD") or "")
+OLLANA_SYSTEM_SESSION_KIND = "technical_base"
+OLLANA_SYSTEM_SESSION_LABEL = "ollana_system"
+OLLANA_SYSTEM_WATCHDOG_INTERVAL_SECONDS = max(
+    30, min(3600, int(os.environ.get("OLLANA_SYSTEM_WATCHDOG_INTERVAL_SECONDS", "300") or "300"))
+)
 AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
     "/api/build_info",
@@ -907,6 +915,15 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 AUTH_SESSION_DB_REFRESH_AT = {}
 AUTH_SESSION_DB_REFRESH_SECONDS = max(15, int(os.environ.get("APP_SESSION_DB_REFRESH_SECONDS", "90") or "90"))
+OLLANA_SYSTEM_LOCK = threading.RLock()
+OLLANA_SYSTEM_STATE = {
+    "last_attempt_at": 0.0,
+    "last_error": "",
+    "last_token": "",
+    "last_user_id": "",
+    "last_usuario": "",
+    "last_expires_at": 0.0,
+}
 
 
 def _ct_eq(a: str, b: str) -> bool:
@@ -994,6 +1011,8 @@ def ensure_auth_sessions_table(conn):
         ensure_column(conn, "auth_sessions", "impersonation_reason", "impersonation_reason TEXT")
         ensure_column(conn, "auth_sessions", "impersonation_audit_id", "impersonation_audit_id TEXT")
         ensure_column(conn, "auth_sessions", "original_token", "original_token TEXT")
+        ensure_column(conn, "auth_sessions", "session_kind", "session_kind TEXT")
+        ensure_column(conn, "auth_sessions", "session_label", "session_label TEXT")
     except Exception:
         pass
 
@@ -11307,6 +11326,8 @@ def create_auth_session(user_row, *, extras=None):
         "impersonation_reason": "",
         "impersonation_audit_id": "",
         "original_token": "",
+        "session_kind": "",
+        "session_label": "",
     }
     if isinstance(extras, dict):
         for key in (
@@ -11316,6 +11337,8 @@ def create_auth_session(user_row, *, extras=None):
             "impersonation_reason",
             "impersonation_audit_id",
             "original_token",
+            "session_kind",
+            "session_label",
         ):
             if key in extras:
                 session[key] = extras.get(key)
@@ -11332,8 +11355,8 @@ def create_auth_session(user_row, *, extras=None):
                 INSERT INTO auth_sessions (
                   token, user_id, usuario, nombre, apellido, rol, email, servicio, expires_at, created_at,
                   impersonating, impersonated_by_user_id, impersonated_by_usuario, impersonation_reason,
-                  impersonation_audit_id, original_token
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  impersonation_audit_id, original_token, session_kind, session_label
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(token) DO UPDATE SET
                   user_id=excluded.user_id,
                   usuario=excluded.usuario,
@@ -11348,7 +11371,9 @@ def create_auth_session(user_row, *, extras=None):
                   impersonated_by_usuario=excluded.impersonated_by_usuario,
                   impersonation_reason=excluded.impersonation_reason,
                   impersonation_audit_id=excluded.impersonation_audit_id,
-                  original_token=excluded.original_token
+                  original_token=excluded.original_token,
+                  session_kind=excluded.session_kind,
+                  session_label=excluded.session_label
                 """,
                 [
                     session["token"],
@@ -11367,6 +11392,8 @@ def create_auth_session(user_row, *, extras=None):
                     str(session.get("impersonation_reason") or "").strip(),
                     str(session.get("impersonation_audit_id") or "").strip(),
                     str(session.get("original_token") or "").strip(),
+                    str(session.get("session_kind") or "").strip(),
+                    str(session.get("session_label") or "").strip(),
                 ],
             )
             conn.commit()
@@ -11458,6 +11485,253 @@ def delete_auth_session(token):
             conn.close()
     except Exception:
         pass
+
+
+def _ollana_system_config():
+    return {
+        "enabled": bool(OLLANA_SYSTEM_ENABLED),
+        "login": str(OLLANA_SYSTEM_LOGIN or "").strip(),
+        "has_password": bool(str(OLLANA_SYSTEM_PASSWORD or "")),
+    }
+
+
+def _find_session_in_memory(*, user_id="", session_kind="", session_label=""):
+    now_ts = time.time()
+    wanted_user_id = str(user_id or "").strip()
+    wanted_kind = str(session_kind or "").strip()
+    wanted_label = str(session_label or "").strip()
+    with AUTH_SESSIONS_LOCK:
+        _cleanup_expired_sessions()
+        for token, raw in AUTH_SESSIONS.items():
+            sess = dict(raw or {})
+            if wanted_user_id and str(sess.get("user_id") or "").strip() != wanted_user_id:
+                continue
+            if wanted_kind and str(sess.get("session_kind") or "").strip() != wanted_kind:
+                continue
+            if wanted_label and str(sess.get("session_label") or "").strip() != wanted_label:
+                continue
+            if float(sess.get("expires_at") or 0) <= now_ts:
+                continue
+            return dict(sess)
+    return None
+
+
+def _find_persisted_session(*, user_id="", session_kind="", session_label=""):
+    wanted_user_id = str(user_id or "").strip()
+    wanted_kind = str(session_kind or "").strip()
+    wanted_label = str(session_label or "").strip()
+    if not wanted_user_id:
+        return None
+    try:
+        conn = open_auth_store_conn(with_row_factory=True)
+        try:
+            ensure_auth_sessions_table(conn)
+            row = conn.execute(
+                """
+                SELECT *
+                FROM auth_sessions
+                WHERE user_id = ?
+                  AND COALESCE(session_kind, '') = ?
+                  AND COALESCE(session_label, '') = ?
+                  AND expires_at > ?
+                ORDER BY expires_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (wanted_user_id, wanted_kind, wanted_label, time.time()),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _set_ollana_system_state(*, session=None, error=""):
+    sess = dict(session or {})
+    with OLLANA_SYSTEM_LOCK:
+        OLLANA_SYSTEM_STATE.update(
+            {
+                "last_attempt_at": time.time(),
+                "last_error": str(error or "").strip(),
+                "last_token": str(sess.get("token") or "").strip(),
+                "last_user_id": str(sess.get("user_id") or "").strip(),
+                "last_usuario": str(sess.get("usuario") or "").strip(),
+                "last_expires_at": float(sess.get("expires_at") or 0.0),
+            }
+        )
+
+
+def describe_ollana_system_session(*, ensure=False, conn=None):
+    config = _ollana_system_config()
+    session = None
+    status = {"configured": bool(config["enabled"] and config["login"] and config["has_password"]), **config}
+    if ensure and status["configured"]:
+        result = ensure_ollana_system_session(conn=conn)
+        session = dict(result.get("session") or {})
+        status["last_error"] = str(result.get("error") or "").strip()
+    else:
+        token = str(OLLANA_SYSTEM_STATE.get("last_token") or "").strip()
+        session = get_auth_session(token) if token else None
+        if not session:
+            cached_user_id = str(OLLANA_SYSTEM_STATE.get("last_user_id") or "").strip()
+            session = _find_session_in_memory(
+                user_id=cached_user_id,
+                session_kind=OLLANA_SYSTEM_SESSION_KIND,
+                session_label=OLLANA_SYSTEM_SESSION_LABEL,
+            ) or _find_persisted_session(
+                user_id=cached_user_id,
+                session_kind=OLLANA_SYSTEM_SESSION_KIND,
+                session_label=OLLANA_SYSTEM_SESSION_LABEL,
+            )
+            if session:
+                session = get_auth_session(str(session.get("token") or "").strip()) or session
+        status["last_error"] = str(OLLANA_SYSTEM_STATE.get("last_error") or "").strip()
+    active = bool(session and str(session.get("token") or "").strip())
+    if active:
+        _set_ollana_system_state(session=session, error="")
+    status["active"] = active
+    status["session"] = {
+        "user_id": str((session or {}).get("user_id") or "").strip(),
+        "usuario": str((session or {}).get("usuario") or "").strip(),
+        "email": str((session or {}).get("email") or "").strip(),
+        "rol": str((session or {}).get("rol") or "").strip(),
+        "servicio": str((session or {}).get("servicio") or "").strip(),
+        "expires_at": float((session or {}).get("expires_at") or 0.0),
+        "session_kind": str((session or {}).get("session_kind") or "").strip(),
+        "session_label": str((session or {}).get("session_label") or "").strip(),
+    }
+    return status
+
+
+def ensure_ollana_system_session(*, conn=None):
+    config = _ollana_system_config()
+    if not config["enabled"]:
+        return {"ok": False, "error": "OLLANA_SYSTEM_ENABLED desactivado", "configured": False}
+    login = str(config["login"] or "").strip()
+    password = str(OLLANA_SYSTEM_PASSWORD or "")
+    if not login or not password:
+        return {"ok": False, "error": "Faltan OLLANA_SYSTEM_LOGIN/OLLANA_SYSTEM_PASSWORD", "configured": False}
+    with OLLANA_SYSTEM_LOCK:
+        active = None
+        cached_token = str(OLLANA_SYSTEM_STATE.get("last_token") or "").strip()
+        if cached_token:
+            active = get_auth_session(cached_token)
+        if active:
+            _set_ollana_system_state(session=active, error="")
+            return {"ok": True, "reused": True, "session": dict(active), "configured": True}
+        db_conn = conn
+        own_conn = False
+        if db_conn is None:
+            db_conn = get_db(getattr(Handler, "db_path", DB_DEFAULT))
+            own_conn = True
+        try:
+            ensure_usuarios_schema(db_conn)
+            matches = admin_lookup_users_by_login(db_conn, login)
+            if len(matches) != 1:
+                err = "Login técnico ambiguo o inexistente"
+                _set_ollana_system_state(error=err)
+                return {"ok": False, "error": err, "configured": True}
+            user_id = str((matches[0] or {}).get("id") or "").strip()
+            active = _find_session_in_memory(
+                user_id=user_id,
+                session_kind=OLLANA_SYSTEM_SESSION_KIND,
+                session_label=OLLANA_SYSTEM_SESSION_LABEL,
+            )
+            if not active:
+                active = _find_persisted_session(
+                    user_id=user_id,
+                    session_kind=OLLANA_SYSTEM_SESSION_KIND,
+                    session_label=OLLANA_SYSTEM_SESSION_LABEL,
+                )
+                if active:
+                    active = get_auth_session(str(active.get("token") or "").strip()) or active
+            if active:
+                _set_ollana_system_state(session=active, error="")
+                return {"ok": True, "reused": True, "session": dict(active), "configured": True}
+            row = db_conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+                FROM usuarios
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if not row:
+                err = "Usuario técnico no encontrado"
+                _set_ollana_system_state(error=err)
+                return {"ok": False, "error": err, "configured": True}
+            if int(row_value(row, "activo", 0) or 0) != 1:
+                err = "Usuario técnico inactivo"
+                _set_ollana_system_state(error=err)
+                return {"ok": False, "error": err, "configured": True}
+            stored_hash = str(row_value(row, "password_hash") or "")
+            if not stored_hash:
+                err = "Usuario técnico sin contraseña inicializada"
+                _set_ollana_system_state(error=err)
+                return {"ok": False, "error": err, "configured": True}
+            if not verify_password(password, stored_hash):
+                err = "Credenciales técnicas inválidas"
+                _set_ollana_system_state(error=err)
+                return {"ok": False, "error": err, "configured": True}
+            if needs_password_rehash(stored_hash):
+                db_conn.execute(
+                    "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                    (hash_password(password), user_id),
+                )
+                try:
+                    db_conn.commit()
+                except Exception:
+                    pass
+                row = db_conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                ).fetchone()
+            session = create_auth_session(
+                row,
+                extras={"session_kind": OLLANA_SYSTEM_SESSION_KIND, "session_label": OLLANA_SYSTEM_SESSION_LABEL},
+            )
+            _set_ollana_system_state(session=session, error="")
+            return {"ok": True, "reused": False, "session": dict(session), "configured": True}
+        finally:
+            if own_conn:
+                try:
+                    db_conn.close()
+                except Exception:
+                    pass
+
+
+def start_ollana_system_watchdog(db_path):
+    config = _ollana_system_config()
+    if not (config["enabled"] and config["login"] and config["has_password"]):
+        return False
+    with OLLANA_SYSTEM_LOCK:
+        if getattr(Handler, "_ollana_watchdog_started", False):
+            return True
+        Handler._ollana_watchdog_started = True
+
+    def _loop():
+        while True:
+            try:
+                conn = get_db(db_path)
+                try:
+                    ensure_ollana_system_session(conn=conn)
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            except Exception as exc:
+                _set_ollana_system_state(error=f"{type(exc).__name__}: {exc}")
+            time.sleep(float(OLLANA_SYSTEM_WATCHDOG_INTERVAL_SECONDS))
+
+    threading.Thread(target=_loop, name="ollana-system-watchdog", daemon=True).start()
+    return True
 
 def _get_client_ip(handler):
     xff = (handler.headers.get("X-Forwarded-For") or "").strip()
@@ -63150,6 +63424,7 @@ class Handler(BaseHTTPRequestHandler):
     _fincas_seguros_dash_cache = {}  # {(empresa_id, year, uploaded_only): (expires_ts, payload_dict)}
     _dashboard_lock = threading.Lock()
     _dashboard_cache = {}  # {empresa_id: (expires_ts, payload_dict)}
+    _ollana_watchdog_started = False
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -63274,6 +63549,14 @@ class Handler(BaseHTTPRequestHandler):
                         Handler._data_guard_done = True
                 Handler._db_ready = True
                 Handler._db_ready_last_error = ""
+                try:
+                    conn = get_db(self.db_path)
+                    try:
+                        ensure_ollana_system_session(conn=conn)
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass
             except Exception as exc:
                 Handler._db_ready = False
                 Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
@@ -63309,6 +63592,14 @@ class Handler(BaseHTTPRequestHandler):
                                 Handler._db_ready = True
                                 Handler._db_ready_last_error = ""
                                 Handler._db_ready_last_attempt_at = time.time()
+                                try:
+                                    conn = get_db(db_path)
+                                    try:
+                                        ensure_ollana_system_session(conn=conn)
+                                    finally:
+                                        conn.close()
+                                except Exception:
+                                    pass
                                 return
                         except Exception as exc:
                             Handler._db_ready = False
@@ -64016,6 +64307,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"ok": True, "tools": _ocr_tools_status()})
             return
+        if parsed.path == "/api/auth_ollana_status":
+            token = (self._parse_cookies().get(SESSION_COOKIE_NAME, "") or "").strip()
+            if not token:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            session = get_auth_session(token)
+            if not session:
+                json_response(
+                    self,
+                    {"error": "Sesión inválida"},
+                    status=401,
+                    cookies=[self._build_session_cookie("", max_age=0)],
+                )
+                return
+            if not Handler._db_ready:
+                json_response(self, {"error": "DB no disponible"}, status=503)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "Sin permisos"}, status=403)
+                return
+            status_payload = describe_ollana_system_session(
+                ensure=_bool_param(urllib.parse.parse_qs(parsed.query or ""), "ensure", default=False),
+                conn=conn,
+            )
+            json_response(self, {"ok": True, "ollana": status_payload})
+            return
         if parsed.path == "/api/me":
             # Fast path: evita abrir DB cuando el front solo está comprobando sesión.
             token = (self._parse_cookies().get(SESSION_COOKIE_NAME, "") or "").strip()
@@ -64705,6 +65024,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/logout",
             "/api/auth_request_access_recovery",
             "/api/auth_request_access_help",
+            "/api/auth_ollana_bootstrap",
             "/api/auth_impersonate_user",
             "/api/auth_stop_impersonation",
             "/api/auth_set_password",
@@ -65385,6 +65705,31 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             json_response(self, result)
+            return
+
+        if parsed.path == "/api/auth_ollana_bootstrap":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "Sin permisos"}, status=403)
+                return
+            result = ensure_ollana_system_session(conn=conn)
+            status_payload = describe_ollana_system_session(ensure=False, conn=conn)
+            status_code = 200 if result.get("ok") else 400
+            json_response(
+                self,
+                {
+                    "ok": bool(result.get("ok")),
+                    "message": "Sesión técnica de Ollana lista." if result.get("ok") else str(result.get("error") or "No se pudo preparar la sesión técnica."),
+                    "reused": bool(result.get("reused")),
+                    "ollana": status_payload,
+                },
+                status=status_code,
+            )
             return
 
         if parsed.path == "/api/auth_impersonate_user":
@@ -101101,6 +101446,10 @@ def main():
     # Bootstrap DB en background (no bloquea bind del puerto).
     try:
         Handler._trigger_db_bootstrap_async(args.db)
+    except Exception:
+        pass
+    try:
+        start_ollana_system_watchdog(args.db)
     except Exception:
         pass
     # OCR tables también en background (best-effort).
