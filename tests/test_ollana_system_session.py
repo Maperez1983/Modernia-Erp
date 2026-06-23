@@ -27,6 +27,7 @@ from web.server import (
     ensure_ollana_system_session,
     ensure_usuarios_schema,
     hash_password,
+    run_ollana_browser_review,
 )
 
 
@@ -104,6 +105,13 @@ class OllanaSystemSessionTests(unittest.TestCase):
         post_source = inspect.getsource(server_mod.Handler._do_POST)
         self.assertIn('"/api/auth_ollana_status"', get_source)
         self.assertIn('"/api/auth_ollana_bootstrap"', post_source)
+        self.assertIn('"/api/auth_ollana_browser_review"', post_source)
+
+    def test_run_ollana_browser_review_skips_when_account_not_configured(self):
+        server_mod.OLLANA_SYSTEM_ENABLED = False
+        result = run_ollana_browser_review({"route": "/?nosw=1&swcleared=1"})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result.get("status"), "skipped")
 
 
 if __name__ == "__main__":

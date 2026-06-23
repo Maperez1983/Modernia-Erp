@@ -11733,6 +11733,57 @@ def start_ollana_system_watchdog(db_path):
     threading.Thread(target=_loop, name="ollana-system-watchdog", daemon=True).start()
     return True
 
+
+def run_ollana_browser_review(payload=None):
+    data = dict(payload or {})
+    config = _ollana_system_config()
+    if not (config["enabled"] and config["login"] and config["has_password"]):
+        return {"ok": False, "status": "skipped", "detail": "La cuenta técnica de Ollana no está configurada."}
+    base_url = str(data.get("base_url") or _workspace_internal_copilot_public_base_url() or DEFAULT_BASE_URL).strip().rstrip("/")
+    route = str(data.get("route") or "").strip()
+    workspace_id = str(data.get("workspace_id") or "").strip()
+    impersonate_login = str(data.get("login") or data.get("impersonate_login") or "").strip()
+    module = str(data.get("module") or "").strip()
+    page = str(data.get("page") or "").strip()
+    env = dict(os.environ)
+    env["OLLANA_SYSTEM_LOGIN"] = str(OLLANA_SYSTEM_LOGIN or "").strip()
+    env["OLLANA_SYSTEM_PASSWORD"] = str(OLLANA_SYSTEM_PASSWORD or "")
+    env["OLLANA_BROWSER_BASE_URL"] = base_url
+    env["OLLANA_BROWSER_ROUTE"] = route
+    env["OLLANA_BROWSER_WORKSPACE_ID"] = workspace_id
+    env["OLLANA_BROWSER_IMPERSONATE_LOGIN"] = impersonate_login
+    env["OLLANA_BROWSER_MODULE"] = module
+    env["OLLANA_BROWSER_PAGE"] = page
+    script_path = ROOT.parent / "scripts" / "ollana_browser_review.py"
+    cmd = [sys.executable or "python3", str(script_path), "--json"]
+    try:
+        result = run_subprocess(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(60, min(180, int(data.get("timeout_seconds") or 90))),
+            cwd=str(ROOT.parent),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "status": "failed", "detail": "La revisión de navegador ha tardado demasiado."}
+    raw = str(result.stdout or "").strip()
+    parsed = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = {"ok": False, "status": "failed", "detail": raw[:4000]}
+    if not parsed:
+        parsed = {"ok": result.returncode == 0, "status": "passed" if result.returncode == 0 else "failed", "detail": str(result.stderr or "").strip()[:4000]}
+    if result.returncode != 0 and parsed.get("status") not in ("warning", "skipped"):
+        parsed["ok"] = False
+        parsed["status"] = "failed"
+        if not parsed.get("detail"):
+            parsed["detail"] = str(result.stderr or raw or "La revisión de navegador falló.").strip()[:4000]
+    return parsed
+
 def _get_client_ip(handler):
     xff = (handler.headers.get("X-Forwarded-For") or "").strip()
     if xff:
@@ -45676,6 +45727,8 @@ def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
     if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
         return "inspect_current_problem"
+    if any(token in text for token in ("navegador", "browser")) and any(token in text for token in ("revisa", "comprueba", "verifica", "mira", "entra")):
+        return "review_browser_experience"
     if any(token in text for token in ("que ve", "qué ve", "ve exactamente", "experimenta")):
         return "review_impersonated_session"
     if any(token in text for token in ("agenda", "citas")) and any(token in text for token in ("comprueba", "verifica", "revisa", "mira")):
@@ -46433,6 +46486,34 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "suggestions": ["Investigar este error", "Preparar fix técnico"],
             "cards": [],
             "actions": [{"id": "inspect_current_problem", "label": "Investigar este error", "payload": dict(context or {})}],
+        }
+    if intent == "review_browser_experience":
+        query = _workspace_internal_copilot_extract_impersonation_query(message)
+        login = str(query.get("login") or "").strip()
+        current_route = str((context or {}).get("current_route") or (context or {}).get("current_path") or "").strip()
+        payload = {
+            "login": login,
+            "workspace_id": str((context or {}).get("current_workspace_id") or workspace_id or "").strip(),
+            "route": current_route,
+            "module": str((context or {}).get("current_crm") or "").strip(),
+            "page": str((context or {}).get("current_page") or "").strip(),
+        }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo abrir un navegador real con la cuenta técnica de Ollana, impersonar al usuario si hace falta y revisar esa pantalla como si estuviera dentro.",
+            "sources": ["ollana_system", "browser_review"],
+            "suggestions": ["Revisar en navegador", "Investigar este error"],
+            "cards": [
+                {
+                    "title": "Revisión de navegador",
+                    "summary": f"Ruta {current_route or '/'} · usuario objetivo {login or 'sesión técnica Ollana'}",
+                    "priority": "alta",
+                    "impact_area": "browser_review",
+                    "entity": {"login": login, "workspace_id": workspace_id, "route": current_route},
+                }
+            ],
+            "actions": [{"id": "review_browser_experience", "label": "Revisar en navegador", "payload": payload}],
         }
     if intent == "impersonate_user_session":
         query = _workspace_internal_copilot_extract_impersonation_query(message)
@@ -49266,6 +49347,76 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         return result
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
+    if action_text == "review_browser_experience":
+        browser_result = run_ollana_browser_review(
+            {
+                "login": str(payload.get("login") or "").strip(),
+                "workspace_id": workspace_text,
+                "route": str(payload.get("route") or "").strip(),
+                "module": str(payload.get("module") or "").strip(),
+                "page": str(payload.get("page") or "").strip(),
+                "base_url": _workspace_internal_copilot_public_base_url(),
+                "timeout_seconds": 90,
+            }
+        )
+        snapshot = browser_result.get("snapshot") if isinstance(browser_result.get("snapshot"), dict) else {}
+        status = str(browser_result.get("status") or "failed").strip() or "failed"
+        cards = [
+            {
+                "title": "Revisión de navegador",
+                "summary": f"estado {status} · ruta {str(browser_result.get('route') or payload.get('route') or '/').strip()}",
+                "priority": "alta" if status == "failed" else "media",
+                "impact_area": "browser_review",
+            }
+        ]
+        if snapshot:
+            cards.append(
+                {
+                    "title": "Estado visible",
+                    "summary": (
+                        f"URL {str(snapshot.get('current_url') or '').strip()} · "
+                        f"agenda {int(((snapshot.get('metrics') or {}).get('agenda_events') or 0))} elemento(s) · "
+                        f"chars CRM {int(((snapshot.get('metrics') or {}).get('crm_chars') or 0))}"
+                    ),
+                    "priority": "media",
+                    "impact_area": "browser_review",
+                }
+            )
+        if browser_result.get("console_errors"):
+            cards.append(
+                {
+                    "title": "Errores de consola",
+                    "summary": " | ".join(str(item or "").strip() for item in list(browser_result.get("console_errors") or [])[:3])[:500],
+                    "priority": "alta",
+                    "impact_area": "browser_review",
+                }
+            )
+        if browser_result.get("api_errors"):
+            cards.append(
+                {
+                    "title": "Errores API en navegador",
+                    "summary": " | ".join(
+                        f"{int(item.get('status') or 0)} {str(item.get('url') or '').strip()}"
+                        for item in list(browser_result.get("api_errors") or [])[:3]
+                    )[:500],
+                    "priority": "alta",
+                    "impact_area": "browser_review",
+                }
+            )
+        return {
+            "ok": bool(browser_result.get("ok")),
+            "action_id": action_text,
+            "message": (
+                "He revisado el comportamiento real en navegador."
+                if status in ("passed", "warning")
+                else f"No he podido completar la revisión de navegador: {str(browser_result.get('detail') or '').strip() or 'fallo desconocido'}"
+            ),
+            "status": status,
+            "cards": cards,
+            "sources": ["ollana_system", "browser_review"],
+            "suggestions": ["Investigar este error", "Salir de impersonación"] if str(payload.get("login") or "").strip() else ["Investigar este error"],
+            "review": browser_result,
+        }
     if action_text == "review_impersonated_session":
         if not bool((actor or {}).get("impersonating")):
             return {"error": "La sesión actual no está impersonada"}
@@ -65025,6 +65176,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_request_access_recovery",
             "/api/auth_request_access_help",
             "/api/auth_ollana_bootstrap",
+            "/api/auth_ollana_browser_review",
             "/api/auth_impersonate_user",
             "/api/auth_stop_impersonation",
             "/api/auth_set_password",
@@ -65730,6 +65882,30 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 status=status_code,
             )
+            return
+
+        if parsed.path == "/api/auth_ollana_browser_review":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "Sin permisos"}, status=403)
+                return
+            result = run_ollana_browser_review(
+                {
+                    "login": str(payload.get("login") or "").strip(),
+                    "route": str(payload.get("route") or "").strip(),
+                    "workspace_id": str(payload.get("workspace_id") or "").strip(),
+                    "module": str(payload.get("module") or "").strip(),
+                    "page": str(payload.get("page") or "").strip(),
+                    "base_url": self._external_base_url(),
+                    "timeout_seconds": int(payload.get("timeout_seconds") or 90),
+                }
+            )
+            json_response(self, result, status=200 if result.get("status") in ("passed", "warning", "skipped") else 500)
             return
 
         if parsed.path == "/api/auth_impersonate_user":

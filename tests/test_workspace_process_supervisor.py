@@ -4707,6 +4707,20 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual((reply.get("actions") or [])[0]["id"], "impersonate_user_session")
         self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("post_review_action"), "review_impersonated_session")
 
+    def test_internal_copilot_build_action_reply_can_review_browser_experience(self):
+        reply = server._workspace_internal_copilot_build_action_reply(
+            self.conn,
+            "ws1",
+            "entra como slallana y revisa en navegador esta pantalla",
+            empresa_id="e1",
+            service_hint="gestoria",
+            context={"current_route": "/?holding=1&mode=tenant&workspace=ws1&crm=fin", "current_crm": "fin", "current_page": "dashboard"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "action")
+        self.assertEqual((reply.get("actions") or [])[0]["id"], "review_browser_experience")
+        self.assertEqual((((reply.get("actions") or [])[0]).get("payload") or {}).get("login"), "slallana")
+
     def test_internal_copilot_review_impersonated_agenda_reports_visible_items(self):
         server.ensure_workspace_core_tables(self.conn)
         self.conn.execute(
