@@ -45402,6 +45402,8 @@ def _workspace_internal_copilot_action_intent(message):
     text = normalize_lookup_text(message or "").lower()
     if any(token in text for token in ("este error", "arregla este error", "soluciona este error", "revisa este error", "mira este error", "arregla esto", "soluciona esto")):
         return "inspect_current_problem"
+    if any(token in text for token in ("que ve", "qué ve", "ve exactamente", "experimenta")):
+        return "review_impersonated_session"
     if any(token in text for token in ("agenda", "citas")) and any(token in text for token in ("comprueba", "verifica", "revisa", "mira")):
         return "review_impersonated_agenda"
     if any(token in text for token in ("entra como", "ver como", "ve como", "impersona", "inicia como", "accede como")):
@@ -45515,6 +45517,10 @@ def _workspace_internal_copilot_extract_impersonation_query(message):
             "impersona a",
             "inicia como",
             "accede como",
+            "que ve",
+            "qué ve",
+            "ve exactamente",
+            "experimenta",
         ),
     )
     if explicit:
@@ -46236,6 +46242,54 @@ def _workspace_internal_copilot_build_action_reply(conn, workspace_id, message, 
             "intent": "action",
             "answer": "Puedo revisarlo, pero necesito el login del usuario o una sesión ya impersonada.",
             "sources": ["agenda"],
+            "suggestions": ["Indicar login", "Entrar como usuario"],
+            "cards": [],
+            "actions": [],
+        }
+    if intent == "review_impersonated_session":
+        query = _workspace_internal_copilot_extract_impersonation_query(message)
+        login = str(query.get("login") or "").strip()
+        if login:
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": f"Puedo entrar como {login}, recargar su sesión y revisar exactamente qué experiencia tiene dentro del CRM.",
+                "sources": ["auth_access", "internal_copilot_action"],
+                "suggestions": ["Entrar como usuario", "Revisar sesión"],
+                "cards": [
+                    {
+                        "title": "Experiencia real del usuario",
+                        "summary": f"Usuario {login} · revisión completa de acceso y módulos visibles en {workspace_id}",
+                        "priority": "alta",
+                        "impact_area": "auth_access",
+                        "entity": {"login": login, "workspace_id": workspace_id},
+                    }
+                ],
+                "actions": [
+                    {
+                        "id": "impersonate_user_session",
+                        "label": "Entrar y revisar usuario",
+                        "requires_confirmation": True,
+                        "confirm_text": "Se abrirá una sesión impersonada y se revisará automáticamente la experiencia real de ese usuario.",
+                        "payload": {"login": login, "reason": "Revisión de experiencia de usuario desde el copilot", "post_review_action": "review_impersonated_session"},
+                    }
+                ],
+            }
+        if context and context.get("is_impersonated"):
+            return {
+                "ok": True,
+                "intent": "action",
+                "answer": "Puedo revisar la experiencia real de la sesión impersonada actual.",
+                "sources": ["auth_access", "internal_copilot_action"],
+                "suggestions": ["Revisar sesión", "Salir de impersonación"],
+                "cards": [],
+                "actions": [{"id": "review_impersonated_session", "label": "Revisar sesión", "payload": dict(context or {})}],
+            }
+        return {
+            "ok": True,
+            "intent": "action",
+            "answer": "Puedo revisarlo, pero necesito el login del usuario o una sesión ya impersonada.",
+            "sources": ["auth_access"],
             "suggestions": ["Indicar login", "Entrar como usuario"],
             "cards": [],
             "actions": [],
