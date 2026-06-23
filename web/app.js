@@ -13956,6 +13956,46 @@ const runPersistentInternalCopilotQuickAction = async (kind = "") => {
   }
 };
 
+const currentGlobalCopilotScopeLabel = () => {
+  if (document.body.classList.contains("auth-locked")) {
+    const activationOpen = authActivateOverlay && !authActivateOverlay.classList.contains("hidden");
+    return activationOpen ? "Activación de acceso" : "Pantalla de acceso";
+  }
+  const workspaceName = String(state.currentWorkspaceName || "").trim();
+  if (workspaceName) {
+    return `Workspace activo: ${workspaceName}`;
+  }
+  const page = String(state.currentPage || "").trim();
+  if (page === "portal-public") return "Portal público";
+  if (page === "admin") return "Administración";
+  if (page === "agenda") return "Agenda";
+  if (page === "holding") return "Holding";
+  if (page === "home") return "Inicio";
+  return "Sin workspace activo";
+};
+
+const syncPersistentInternalCopilotAvailability = () => {
+  const widget = document.getElementById("globalInternalCopilotWidget");
+  if (!widget) return;
+  const form = document.getElementById("globalInternalCopilotForm");
+  const textarea = form?.querySelector('[name="message"]');
+  const fileInput = form?.querySelector('[name="attachment"]');
+  const submitBtn = form?.querySelector('button[type="submit"]');
+  const authLocked = document.body.classList.contains("auth-locked");
+  const canOperate = !authLocked && Boolean(state.authUser);
+  if (textarea) {
+    textarea.disabled = !canOperate;
+    textarea.placeholder = canOperate
+      ? "Pídeme el trabajo tal como lo harías a una persona"
+      : "Accede al sistema para usar el asistente operativo";
+  }
+  if (fileInput) fileInput.disabled = !canOperate;
+  if (submitBtn) submitBtn.disabled = !canOperate;
+  widget.querySelectorAll("[data-global-copilot-quick], [data-global-copilot-mode]").forEach((button) => {
+    button.disabled = !canOperate;
+  });
+};
+
 const syncPersistentInternalCopilotWidget = () => {
   const panel = document.getElementById("globalInternalCopilotPanel");
   const toggle = document.getElementById("globalInternalCopilotToggle");
@@ -13966,9 +14006,9 @@ const syncPersistentInternalCopilotWidget = () => {
   toggle.textContent = isOpen ? "Cerrar asistente" : "Abrir asistente";
   toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   if (status) {
-    const workspaceName = String(state.currentWorkspaceName || "").trim();
-    status.textContent = workspaceName ? `Workspace activo: ${workspaceName}` : "Sin workspace activo";
+    status.textContent = currentGlobalCopilotScopeLabel();
   }
+  syncPersistentInternalCopilotAvailability();
   renderGlobalInternalCopilotPanels();
 };
 
@@ -14131,6 +14171,15 @@ const ensurePersistentInternalCopilotWidget = () => {
   syncPersistentInternalCopilotWidget();
   renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages || []);
   renderGlobalInternalCopilotPanels();
+};
+
+const bootPersistentInternalCopilotShell = () => {
+  try {
+    ensurePersistentInternalCopilotWidget();
+    syncPersistentInternalCopilotWidget();
+  } catch (error) {
+    console.warn("No se pudo montar el shell global del asistente", error);
+  }
 };
 
 const maybePrimeWorkspaceInternalCopilotAgenda = async ({ force = false } = {}) => {
@@ -25937,6 +25986,7 @@ const setPage = (page) => {
   try {
     debugLog("setPage()", page);
   } catch (e) {}
+  syncPersistentInternalCopilotWidget();
   // Diagnóstico: si la URL pide un deep-link pero acabamos en Home, lo mostramos en UI (sin depender de consola).
   try {
     if (page === "home" && isDebugEnabled()) {
@@ -74460,6 +74510,7 @@ const setAuthUi = (user) => {
   if (authLogoutBtn) {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
+  syncPersistentInternalCopilotWidget();
   try {
     if (user && state.currentPage === "home") {
       loadSegurosRenewalAlertForUser();
@@ -74473,6 +74524,7 @@ const showAuthOverlay = (message = "") => {
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
   setAuthUi(null);
+  syncPersistentInternalCopilotWidget();
   try {
     debugLog("showAuthOverlay()", message || "");
   } catch (e) {}
@@ -74482,6 +74534,7 @@ const hideAuthOverlay = () => {
   if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.remove("auth-locked");
+  syncPersistentInternalCopilotWidget();
   try {
     debugLog("hideAuthOverlay()");
   } catch (e) {}
@@ -74496,6 +74549,7 @@ const showActivationOverlay = (introText = "") => {
   if (authActivateOverlay) authActivateOverlay.classList.remove("hidden");
   if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
+  syncPersistentInternalCopilotWidget();
 };
 
 async function fetchCurrentSessionUser() {
@@ -74614,7 +74668,7 @@ const logoutAuthSession = async () => {
 const init = async () => {
   state.booting = true;
   try {
-    ensurePersistentInternalCopilotWidget();
+    bootPersistentInternalCopilotShell();
     consumePostLoginNotice();
     // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
     // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
@@ -74782,6 +74836,8 @@ const init = async () => {
     state.booting = false;
   }
 };
+
+bootPersistentInternalCopilotShell();
 
 applyBtn.addEventListener("click", loadTable);
 if (searchInput) {
