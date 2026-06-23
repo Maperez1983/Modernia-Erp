@@ -1,7 +1,10 @@
 import sqlite3
+import inspect
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 
 try:
     import PIL  # noqa: F401
@@ -130,6 +133,15 @@ class AuthImpersonationFlowTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(str(audit_row["status"] or "").strip(), "ended")
         self.assertTrue(str(audit_row["ended_at"] or "").strip())
+
+    def test_impersonation_endpoints_are_in_post_allowlist(self):
+        from web import server as server_mod
+
+        source = inspect.getsource(server_mod.Handler._do_POST)
+        self.assertIn('"/api/auth_impersonate_user"', source)
+        self.assertIn('"/api/auth_stop_impersonation"', source)
+        self.assertIn('"/api/auth_request_access_recovery"', source)
+        self.assertIn('"/api/auth_request_access_help"', source)
 
 
 if __name__ == "__main__":
