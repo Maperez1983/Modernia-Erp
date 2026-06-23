@@ -4735,6 +4735,36 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual((reply.get("actions") or [])[0]["id"], "search_internet")
         self.assertIn("alquiler turistico", (((reply.get("actions") or [])[0]).get("payload") or {}).get("query", ""))
 
+    def test_internal_copilot_action_search_internet_prefers_browser_results(self):
+        old_browser = server.run_ollana_browser_review
+        old_fallback = server.copilot_web_search
+        try:
+            server.run_ollana_browser_review = lambda payload=None: {
+                "ok": True,
+                "status": "passed",
+                "search": {
+                    "ok": True,
+                    "query": "obligaciones boe",
+                    "results": [
+                        {"title": "BOE", "url": "https://boe.es/test", "snippet": "Resumen", "domain": "boe.es", "allowed_fetch": True}
+                    ],
+                },
+            }
+            server.copilot_web_search = lambda *args, **kwargs: {"error": "no debería usarse"}
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "search_internet",
+                {"query": "obligaciones boe"},
+                actor={"usuario": "admin"},
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["sources"][0], "browser_search")
+            self.assertEqual((result.get("cards") or [])[0]["title"], "BOE")
+        finally:
+            server.run_ollana_browser_review = old_browser
+            server.copilot_web_search = old_fallback
+
     def test_internal_copilot_review_impersonated_agenda_reports_visible_items(self):
         server.ensure_workspace_core_tables(self.conn)
         self.conn.execute(

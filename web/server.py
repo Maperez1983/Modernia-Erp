@@ -11742,12 +11742,15 @@ def run_ollana_browser_review(payload=None):
     config = _ollana_system_config()
     if not (config["enabled"] and config["login"] and config["has_password"]):
         return {"ok": False, "status": "skipped", "detail": "La cuenta técnica de Ollana no está configurada."}
-    base_url = str(data.get("base_url") or _workspace_internal_copilot_public_base_url() or DEFAULT_BASE_URL).strip().rstrip("/")
+    base_url = str(data.get("base_url") or _workspace_internal_copilot_public_base_url() or "https://crm.verifika2.com").strip().rstrip("/")
     route = str(data.get("route") or "").strip()
     workspace_id = str(data.get("workspace_id") or "").strip()
     impersonate_login = str(data.get("login") or data.get("impersonate_login") or "").strip()
     module = str(data.get("module") or "").strip()
     page = str(data.get("page") or "").strip()
+    task = str(data.get("task") or "review").strip() or "review"
+    search_query = str(data.get("query") or "").strip()
+    search_provider = str(data.get("provider") or "bing").strip() or "bing"
     env = dict(os.environ)
     env["OLLANA_SYSTEM_LOGIN"] = str(OLLANA_SYSTEM_LOGIN or "").strip()
     env["OLLANA_SYSTEM_PASSWORD"] = str(OLLANA_SYSTEM_PASSWORD or "")
@@ -11757,6 +11760,9 @@ def run_ollana_browser_review(payload=None):
     env["OLLANA_BROWSER_IMPERSONATE_LOGIN"] = impersonate_login
     env["OLLANA_BROWSER_MODULE"] = module
     env["OLLANA_BROWSER_PAGE"] = page
+    env["OLLANA_BROWSER_TASK"] = task
+    env["OLLANA_BROWSER_SEARCH_QUERY"] = search_query
+    env["OLLANA_BROWSER_SEARCH_PROVIDER"] = search_provider
     script_path = ROOT.parent / "scripts" / "ollana_browser_review.py"
     cmd = [sys.executable or "python3", str(script_path), "--json"]
     try:
@@ -49478,15 +49484,32 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             result["message"] = f"Proceso {process_id} ejecutado. {str(result.get('message') or '').strip()}".strip()
         return result
     if action_text == "search_internet":
-        search_result = copilot_web_search(
-            str(payload.get("query") or "").strip(),
-            limit=6,
-            timeout_seconds=20,
-            now=now,
+        browser_search = run_ollana_browser_review(
+            {
+                "task": "web_search",
+                "query": str(payload.get("query") or "").strip(),
+                "provider": str(payload.get("provider") or "bing").strip() or "bing",
+                "timeout_seconds": 90,
+            }
         )
-        if search_result.get("error"):
-            return search_result
+        search_result = browser_search.get("search") if isinstance(browser_search.get("search"), dict) else {}
         rows = list(search_result.get("results") or [])
+        if not rows:
+            fallback = copilot_web_search(
+                str(payload.get("query") or "").strip(),
+                limit=6,
+                timeout_seconds=20,
+                now=now,
+            )
+            if fallback.get("error"):
+                if browser_search.get("detail"):
+                    return {
+                        "ok": False,
+                        "error": str(browser_search.get("detail") or fallback.get("error") or "No se pudo buscar en internet.").strip(),
+                    }
+                return fallback
+            search_result = fallback
+            rows = list(search_result.get("results") or [])
         cards = []
         actions = []
         for item in rows[:6]:
@@ -49519,9 +49542,13 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "message": f"He encontrado {len(rows)} resultado(s) para la búsqueda web.",
             "cards": cards,
             "actions": actions[:3],
-            "sources": ["copilot_web_search"],
+            "sources": list(dict.fromkeys([
+                "browser_search" if rows and browser_search.get("ok") else "copilot_web_search",
+                "copilot_web_search" if not rows or not browser_search.get("ok") else "",
+            ]))[:2],
             "suggestions": ["Abrir resultado", "Refinar búsqueda", "Leer fuente oficial"],
             "search": search_result,
+            "browser_review": browser_search,
         }
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)

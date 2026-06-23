@@ -1,5 +1,7 @@
 import inspect
+import json
 import sqlite3
+import subprocess
 import sys
 import types
 import unittest
@@ -112,6 +114,32 @@ class OllanaSystemSessionTests(unittest.TestCase):
         result = run_ollana_browser_review({"route": "/?nosw=1&swcleared=1"})
         self.assertFalse(result["ok"])
         self.assertEqual(result.get("status"), "skipped")
+
+    def test_run_ollana_browser_review_passes_web_search_env(self):
+        old_runner = server_mod.run_subprocess
+        captured = {}
+
+        def fake_run_subprocess(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            captured["env"] = dict(kwargs.get("env") or {})
+            payload = {
+                "ok": True,
+                "status": "passed",
+                "task": "web_search",
+                "search": {"ok": True, "query": "alquiler turístico", "results": [{"title": "BOE", "url": "https://boe.es"}]},
+            }
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+        try:
+            server_mod.run_subprocess = fake_run_subprocess
+            result = run_ollana_browser_review({"task": "web_search", "query": "alquiler turístico", "provider": "bing"})
+            self.assertTrue(result["ok"])
+            self.assertEqual(result.get("task"), "web_search")
+            self.assertEqual(captured["env"]["OLLANA_BROWSER_TASK"], "web_search")
+            self.assertEqual(captured["env"]["OLLANA_BROWSER_SEARCH_QUERY"], "alquiler turístico")
+            self.assertEqual(captured["env"]["OLLANA_BROWSER_SEARCH_PROVIDER"], "bing")
+        finally:
+            server_mod.run_subprocess = old_runner
 
 
 if __name__ == "__main__":

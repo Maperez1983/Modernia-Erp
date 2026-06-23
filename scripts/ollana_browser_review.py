@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover
 
 DEFAULT_BASE_URL = "https://crm.verifika2.com"
 DEFAULT_TIMEOUT_MS = 45000
+DEFAULT_SEARCH_PROVIDER = "bing"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -79,6 +80,73 @@ def _ui_snapshot(page) -> dict:
     return page.evaluate(js)
 
 
+def _browser_web_search(page, query: str, provider: str = DEFAULT_SEARCH_PROVIDER) -> dict:
+    text = " ".join(str(query or "").split()).strip()
+    if not text:
+        return {"ok": False, "status": "failed", "detail": "Consulta vacía"}
+    provider_key = str(provider or DEFAULT_SEARCH_PROVIDER).strip().lower()
+    if provider_key == "duckduckgo":
+        url = f"https://html.duckduckgo.com/html/?{urlencode({'q': text, 'kl': 'es-es'})}"
+        page.goto(url, wait_until="domcontentloaded")
+        challenge = page.locator("text=Unfortunately, bots use DuckDuckGo too.")
+        if challenge.count():
+            return {"ok": False, "status": "warning", "detail": "DuckDuckGo ha devuelto un challenge anti-bot.", "provider": "duckduckgo"}
+        selector = "a.result__a"
+        page.wait_for_selector(selector, timeout=15000)
+        cards = page.locator(selector)
+        results = []
+        total = min(cards.count(), 6)
+        for index in range(total):
+            link = cards.nth(index)
+            href = str(link.get_attribute("href") or "").strip()
+            title = " ".join((link.inner_text() or "").split()).strip()
+            snippet = ""
+            try:
+                snippet = " ".join(
+                    (link.locator("xpath=ancestor::*[contains(@class,'result')][1]").locator(".result__snippet").inner_text() or "").split()
+                ).strip()
+            except Exception:
+                snippet = ""
+            if href:
+                results.append({"title": title or href, "url": href, "snippet": snippet})
+        return {"ok": True, "status": "passed", "provider": "duckduckgo", "query": text, "results": results}
+
+    # Default: Bing
+    url = f"https://www.bing.com/search?{urlencode({'q': text, 'setlang': 'es'})}"
+    page.goto(url, wait_until="domcontentloaded")
+    # Consent or modal noise is not fatal; dismiss best-effort if present.
+    for selector in ("#bnp_btn_accept", "button[aria-label='Aceptar']", "button:has-text('Aceptar')"):
+        try:
+            if page.locator(selector).count():
+                page.locator(selector).first.click(timeout=1500)
+                break
+        except Exception:
+            pass
+    page.wait_for_selector("li.b_algo h2 a, #b_results .b_algo h2 a", timeout=20000)
+    results = page.evaluate(
+        """
+        () => {
+          const rows = [];
+          document.querySelectorAll('li.b_algo').forEach((item) => {
+            if (rows.length >= 6) return;
+            const anchor = item.querySelector('h2 a');
+            if (!anchor) return;
+            const snippetNode = item.querySelector('.b_caption p') || item.querySelector('p');
+            rows.push({
+              title: String(anchor.innerText || anchor.textContent || '').trim(),
+              url: String(anchor.href || '').trim(),
+              snippet: String(snippetNode ? (snippetNode.innerText || snippetNode.textContent || '') : '').trim(),
+            });
+          });
+          return rows;
+        }
+        """
+    )
+    if not results:
+        return {"ok": False, "status": "warning", "detail": "No he encontrado resultados visibles en el buscador.", "provider": "bing", "query": text}
+    return {"ok": True, "status": "passed", "provider": "bing", "query": text, "results": results}
+
+
 def _login(page, base_url: str, user: str, password: str) -> dict:
     page.goto(f"{base_url}/?nosw=1&swcleared=1", wait_until="domcontentloaded")
     page.wait_for_selector("#authLoginUser", timeout=DEFAULT_TIMEOUT_MS)
@@ -129,6 +197,9 @@ def run() -> dict:
     workspace_id = _env("OLLANA_BROWSER_WORKSPACE_ID")
     module = _env("OLLANA_BROWSER_MODULE")
     page_name = _env("OLLANA_BROWSER_PAGE")
+    task = _env("OLLANA_BROWSER_TASK", "review").lower() or "review"
+    search_query = _env("OLLANA_BROWSER_SEARCH_QUERY")
+    search_provider = _env("OLLANA_BROWSER_SEARCH_PROVIDER", DEFAULT_SEARCH_PROVIDER)
     if not route and workspace_id:
         route = _route_for(workspace_id, module, page_name)
 
@@ -153,14 +224,21 @@ def run() -> dict:
         try:
             login_data = _login(page, base_url, login, password)
             impersonation = _impersonate(page, impersonate_login)
-            if route:
-                page.goto(f"{base_url}{route}", wait_until="domcontentloaded")
-            snapshot = _ui_snapshot(page)
+            snapshot = {}
+            search = {}
+            if task == "web_search":
+                search = _browser_web_search(page, search_query, search_provider)
+            else:
+                if route:
+                    page.goto(f"{base_url}{route}", wait_until="domcontentloaded")
+                snapshot = _ui_snapshot(page)
         finally:
             context.close()
             browser.close()
     status = "passed"
-    if page_errors or failed_requests or any(int(item.get("status") or 0) >= 500 for item in api_errors):
+    if task == "web_search":
+        status = str((search or {}).get("status") or "failed").strip() or "failed"
+    elif page_errors or failed_requests or any(int(item.get("status") or 0) >= 500 for item in api_errors):
         status = "failed"
     elif console_errors or any(int(item.get("status") or 0) >= 400 for item in api_errors):
         status = "warning"
@@ -170,10 +248,12 @@ def run() -> dict:
         "started_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "base_url": base_url,
         "route": route,
+        "task": task,
         "impersonated_login": impersonate_login,
         "login_user": (login_data.get("user") or {}).get("usuario"),
         "impersonation": impersonation,
         "snapshot": snapshot,
+        "search": search,
         "console_errors": console_errors[:20],
         "page_errors": page_errors[:20],
         "failed_requests": failed_requests[:20],
