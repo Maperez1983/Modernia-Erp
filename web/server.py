@@ -96619,7 +96619,7 @@ class Handler(BaseHTTPRequestHandler):
             firmadas_mes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
@@ -96649,7 +96649,7 @@ class Handler(BaseHTTPRequestHandler):
                     END
                   ) AS porcentaje_medio,
                   AVG(COALESCE(comision, 0)) AS comision_media
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
