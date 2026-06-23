@@ -2133,9 +2133,9 @@ const state = {
   })(),
   persistentInternalCopilotOpen: (() => {
     try {
-      return (localStorage.getItem("crm.persistentInternalCopilotVisible.v4") || "0") === "1";
+      return (localStorage.getItem("crm.persistentInternalCopilotVisible.v5") || "1") === "1";
     } catch {
-      return false;
+      return true;
     }
   })(),
   workspaceCompanySearchQuery: "",
@@ -14102,7 +14102,7 @@ const ensurePersistentInternalCopilotWidget = () => {
     toggle.addEventListener("click", () => {
       state.persistentInternalCopilotOpen = !state.persistentInternalCopilotOpen;
       try {
-        localStorage.setItem("crm.persistentInternalCopilotVisible.v4", state.persistentInternalCopilotOpen ? "1" : "0");
+        localStorage.setItem("crm.persistentInternalCopilotVisible.v5", state.persistentInternalCopilotOpen ? "1" : "0");
       } catch (e) {}
       syncPersistentInternalCopilotWidget();
     });
