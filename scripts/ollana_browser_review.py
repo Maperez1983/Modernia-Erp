@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from datetime import datetime, timezone
+import time
 from urllib.parse import urlencode
 
 try:
@@ -60,6 +61,8 @@ def _ui_snapshot(page) -> dict:
       return {
         title: document.title || "",
         current_url: location.href,
+        auth_locked: !!document.body.classList.contains('auth-locked'),
+        auth_screen_visible: visible('#authScreen'),
         visible_sections: {
           crm: visible('#crmSection'),
           gestoria: visible('#gestoriaCrmSection'),
@@ -78,6 +81,35 @@ def _ui_snapshot(page) -> dict:
     }
     """
     return page.evaluate(js)
+
+
+def _fetch_me(page) -> dict:
+    return page.evaluate(
+        """
+        async () => {
+          const resp = await fetch('/api/me', { credentials: 'same-origin' });
+          let data = {};
+          try {
+            data = await resp.json();
+          } catch (_) {}
+          return { ok: resp.ok && !!data.ok, status: resp.status, data };
+        }
+        """
+    )
+
+
+def _await_authenticated_me(page, timeout_ms: int = 12000) -> dict:
+    deadline = time.time() + max(1.0, float(timeout_ms) / 1000.0)
+    last = {"ok": False, "status": 0, "data": {}}
+    while time.time() < deadline:
+        try:
+            last = _fetch_me(page)
+            if last.get("ok"):
+                return last
+        except Exception:
+            pass
+        page.wait_for_timeout(400)
+    return last
 
 
 def _browser_web_search(page, query: str, provider: str = DEFAULT_SEARCH_PROVIDER) -> dict:
@@ -159,6 +191,9 @@ def _login(page, base_url: str, user: str, password: str) -> dict:
     if not resp.ok or not payload.get("ok"):
         raise RuntimeError(f"login_failed http={resp.status} payload={payload}")
     page.wait_for_function("() => !document.body.classList.contains('auth-locked')", timeout=DEFAULT_TIMEOUT_MS)
+    me = _await_authenticated_me(page)
+    if not me.get("ok"):
+        raise RuntimeError(f"post_login_me_failed {me}")
     return payload
 
 
@@ -181,6 +216,9 @@ def _impersonate(page, login: str) -> dict:
     if not result.get("ok"):
         raise RuntimeError(f"impersonation_failed {result}")
     page.reload(wait_until="domcontentloaded")
+    me = _await_authenticated_me(page)
+    if not me.get("ok"):
+        raise RuntimeError(f"post_impersonation_me_failed {me}")
     return result
 
 
@@ -224,6 +262,11 @@ def run() -> dict:
         try:
             login_data = _login(page, base_url, login, password)
             impersonation = _impersonate(page, impersonate_login)
+            # Descarta el ruido normal del arranque anónimo previo al login.
+            console_errors.clear()
+            page_errors.clear()
+            failed_requests.clear()
+            api_errors.clear()
             snapshot = {}
             search = {}
             if task == "web_search":
@@ -231,6 +274,11 @@ def run() -> dict:
             else:
                 if route:
                     page.goto(f"{base_url}{route}", wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=8000)
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(1500)
                 snapshot = _ui_snapshot(page)
         finally:
             context.close()
