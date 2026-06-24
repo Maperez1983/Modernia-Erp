@@ -50505,6 +50505,15 @@ class Handler(BaseHTTPRequestHandler):
                     "db_host": db_host,
                     "pg_pool": pool_stats,
                     "recent_api_errors": Handler._recent_api_errors(limit=12),
+                    "openai": {
+                        "configured": openai_available(),
+                        "model": normalize_openai_model_name(os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"),
+                        "image_edit_model": (
+                            os.environ.get("OPENAI_IMAGE_EDIT_MODEL")
+                            or os.environ.get("OPENAI_IMAGE_MODEL")
+                            or "dall-e-2"
+                        ).strip(),
+                    },
                 },
             )
             return
