@@ -5,11 +5,15 @@ import sys
 import tempfile
 import types
 import unittest
+from base64 import b64encode
 from datetime import date
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     import PIL  # noqa: F401
+    from PIL import Image
 except Exception:
     if "PIL" not in sys.modules:
         pil_stub = types.ModuleType("PIL")
@@ -20,6 +24,7 @@ except Exception:
         pil_stub.ImageFont = object()
         pil_stub.ImageOps = object()
         sys.modules["PIL"] = pil_stub
+    Image = None
 
 import web.server as server
 
@@ -2631,6 +2636,50 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["intent"], "document")
         self.assertIn("FAC-1", reply["answer"])
+
+    def test_internal_copilot_image_reply_from_attachment(self):
+        if Image is None:
+            self.skipTest("Pillow no disponible")
+        buffer = BytesIO()
+        Image.new("RGB", (120, 80), "white").save(buffer, format="PNG")
+        data = "data:image/png;base64," + b64encode(buffer.getvalue()).decode("ascii")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "mejora esta imagen para OCR",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"attachments": [{"filename": "scan.png", "content_type": "image/png", "data": data}]},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "image_edit")
+        self.assertEqual(reply["actions"][0]["id"], "edit_attached_image")
+
+    def test_internal_copilot_action_edit_attached_image(self):
+        if Image is None:
+            self.skipTest("Pillow no disponible")
+        buffer = BytesIO()
+        Image.new("RGB", (160, 100), "white").save(buffer, format="PNG")
+        data = "data:image/png;base64," + b64encode(buffer.getvalue()).decode("ascii")
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(server, "UPLOADS", Path(tmpdir) / "uploads"):
+            server.UPLOADS.mkdir(parents=True, exist_ok=True)
+            result = server.perform_workspace_internal_copilot_action(
+                self.conn,
+                "ws1",
+                "edit_attached_image",
+                {
+                    "attachment": {"filename": "scan.png", "content_type": "image/png", "data": data},
+                    "plan": {"operations": [{"op": "enhance_ocr"}, {"op": "grayscale"}]},
+                },
+                empresa_id="e1",
+                actor={"id": "u1", "usuario": "QA"},
+                now="2026-06-24T10:00:00Z",
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["action_id"], "edit_attached_image")
+            self.assertTrue(str(result["image_edit"]["url"]).startswith("/uploads/copilot_image_edits/"))
+            saved_path = (server.UPLOADS.parent / str(result["image_edit"]["url"]).lstrip("/")).resolve()
+            self.assertTrue(saved_path.exists())
 
     def test_internal_copilot_reconciliation_and_simulation_reply(self):
         self.conn.execute(

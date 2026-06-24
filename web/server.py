@@ -13033,6 +13033,188 @@ def decode_document_payload(payload, *, conn=None, session=None):
     return raw_bytes, mime, source_hint
 
 
+def _copilot_image_edit_guess_extension(mime="", filename=""):
+    mime_text = str(mime or "").strip().lower()
+    name = str(filename or "").strip().lower()
+    if mime_text == "image/png" or name.endswith(".png"):
+        return "png"
+    if mime_text in {"image/webp"} or name.endswith(".webp"):
+        return "webp"
+    if mime_text == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    return "jpg"
+
+
+def _copilot_image_edit_plan_from_message(message):
+    low = normalize_lookup_text(message or "").lower()
+    plan = {"operations": []}
+    if any(token in low for token in ("ocr", "escane", "legible", "documento")):
+        plan["operations"].append({"op": "enhance_ocr"})
+    if any(token in low for token in ("blanco y negro", "escala de grises", "gris")):
+        plan["operations"].append({"op": "grayscale"})
+    if "gira 90" in low or "rota 90" in low:
+        plan["operations"].append({"op": "rotate", "degrees": 90})
+    elif "gira 180" in low or "rota 180" in low:
+        plan["operations"].append({"op": "rotate", "degrees": 180})
+    elif "gira 270" in low or "rota 270" in low:
+        plan["operations"].append({"op": "rotate", "degrees": 270})
+    if any(token in low for token in ("mejora", "nitidez", "enfoca")):
+        plan["operations"].append({"op": "sharpness", "factor": 1.4})
+        plan["operations"].append({"op": "contrast", "factor": 1.12})
+    if any(token in low for token in ("anonimiza", "oculta datos", "tapa datos", "redacta")):
+        plan["operations"].append({"op": "redact_center_band"})
+    if not plan["operations"]:
+        plan["operations"].append({"op": "autocontrast"})
+    return plan
+
+
+def _copilot_image_edit_apply_operations(image, operations):
+    img = ImageOps.exif_transpose(image)
+    summaries = []
+    for item in list(operations or []):
+        if not isinstance(item, dict):
+            continue
+        op = normalize_lookup_text(item.get("op") or "").lower()
+        if op == "rotate":
+            try:
+                degrees = int(float(item.get("degrees") or 0))
+            except Exception:
+                degrees = 0
+            if degrees:
+                img = img.rotate(-degrees, expand=True)
+                summaries.append(f"rotación {degrees}°")
+        elif op == "crop":
+            box = list(item.get("box") or [])
+            if len(box) == 4:
+                try:
+                    left, top, right, bottom = [int(float(v)) for v in box]
+                    img = img.crop((max(0, left), max(0, top), max(left + 1, right), max(top + 1, bottom)))
+                    summaries.append("recorte")
+                except Exception:
+                    pass
+        elif op == "resize_max":
+            try:
+                max_side = max(64, int(float(item.get("max_side") or 1800)))
+            except Exception:
+                max_side = 1800
+            if max(img.size) > max_side:
+                img.thumbnail((max_side, max_side))
+                summaries.append(f"reescalado a {max_side}px")
+        elif op == "grayscale":
+            img = ImageOps.grayscale(img).convert("RGB")
+            summaries.append("escala de grises")
+        elif op == "autocontrast":
+            img = ImageOps.autocontrast(img)
+            summaries.append("autocontraste")
+        elif op == "contrast":
+            try:
+                factor = float(item.get("factor") or 1.1)
+            except Exception:
+                factor = 1.1
+            img = ImageEnhance.Contrast(img).enhance(max(0.1, factor))
+            summaries.append(f"contraste x{round(max(0.1, factor), 2)}")
+        elif op == "brightness":
+            try:
+                factor = float(item.get("factor") or 1.05)
+            except Exception:
+                factor = 1.05
+            img = ImageEnhance.Brightness(img).enhance(max(0.1, factor))
+            summaries.append(f"brillo x{round(max(0.1, factor), 2)}")
+        elif op == "sharpness":
+            try:
+                factor = float(item.get("factor") or 1.2)
+            except Exception:
+                factor = 1.2
+            img = ImageEnhance.Sharpness(img).enhance(max(0.1, factor))
+            summaries.append(f"nitidez x{round(max(0.1, factor), 2)}")
+        elif op == "redact_boxes":
+            boxes = list(item.get("boxes") or [])
+            if boxes:
+                draw = ImageDraw.Draw(img)
+                for box in boxes:
+                    if not isinstance(box, (list, tuple)) or len(box) != 4:
+                        continue
+                    try:
+                        left, top, right, bottom = [int(float(v)) for v in box]
+                    except Exception:
+                        continue
+                    draw.rectangle((left, top, right, bottom), fill="black")
+                summaries.append("anonimización")
+        elif op == "redact_center_band":
+            draw = ImageDraw.Draw(img)
+            width, height = img.size
+            band_h = max(24, int(height * 0.12))
+            top = max(0, int(height * 0.44))
+            draw.rectangle((int(width * 0.08), top, int(width * 0.92), min(height, top + band_h)), fill="black")
+            summaries.append("anonimización básica")
+        elif op == "enhance_ocr":
+            img = ImageOps.grayscale(img)
+            img = ImageOps.autocontrast(img)
+            img = img.filter(ImageFilter.MedianFilter(size=3))
+            img = ImageEnhance.Contrast(img).enhance(1.35)
+            img = ImageEnhance.Sharpness(img).enhance(1.5)
+            img = img.convert("RGB")
+            summaries.append("mejora OCR")
+    return img, summaries
+
+
+def run_copilot_image_edit(payload, *, conn=None, session=None, now=None):
+    data = dict(payload or {})
+    attachment = dict(data.get("attachment") or {}) if isinstance(data.get("attachment"), dict) else {}
+    source_payload = {
+        "file_base64": data.get("file_base64") or attachment.get("file_base64") or "",
+        "data": data.get("data") or attachment.get("data") or "",
+        "s3_key": str(data.get("s3_key") or attachment.get("key") or "").strip(),
+        "local_path": str(data.get("local_path") or "").strip(),
+        "filename": str(data.get("filename") or attachment.get("filename") or "imagen.png").strip() or "imagen.png",
+        "content_type": str(data.get("content_type") or attachment.get("content_type") or "").strip(),
+    }
+    raw_bytes, mime, _hint = decode_document_payload(source_payload, conn=conn, session=session)
+    source_name = str(source_payload.get("filename") or "imagen").strip() or "imagen"
+    if not (str(mime or "").startswith("image/") or source_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        raise ValueError("El editor de fotos solo admite imágenes por ahora.")
+    try:
+        image = Image.open(BytesIO(raw_bytes))
+        image.load()
+    except Exception as exc:
+        raise ValueError(f"No se pudo abrir la imagen: {exc}")
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else {"operations": list(data.get("operations") or [])}
+    operations = list(plan.get("operations") or [])
+    edited, summaries = _copilot_image_edit_apply_operations(image, operations)
+    edited_dir = (UPLOADS / "copilot_image_edits" / datetime.now().strftime("%Y/%m/%d"))
+    edited_dir.mkdir(parents=True, exist_ok=True)
+    ext = _copilot_image_edit_guess_extension(str(data.get("output_format") or mime or "").strip(), source_name)
+    safe_stem = re.sub(r"[^0-9A-Za-z._-]+", "_", Path(source_name).stem).strip("._-") or "imagen"
+    out_name = f"{safe_stem}_{os.urandom(4).hex()}.{ext}"
+    out_path = edited_dir / out_name
+    save_kwargs = {}
+    if ext in {"jpg", "jpeg"}:
+        save_kwargs = {"format": "JPEG", "quality": 92, "optimize": True}
+        if edited.mode != "RGB":
+            edited = edited.convert("RGB")
+    elif ext == "png":
+        save_kwargs = {"format": "PNG", "optimize": True}
+    elif ext == "webp":
+        save_kwargs = {"format": "WEBP", "quality": 92}
+    elif ext == "pdf":
+        save_kwargs = {"format": "PDF", "resolution": 150.0}
+        if edited.mode != "RGB":
+            edited = edited.convert("RGB")
+    edited.save(out_path, **save_kwargs)
+    rel = out_path.relative_to(UPLOADS)
+    public_url = f"/uploads/{str(rel).replace(os.sep, '/')}"
+    return {
+        "ok": True,
+        "filename": out_name,
+        "url": public_url,
+        "mime": "application/pdf" if ext == "pdf" else f"image/{'jpeg' if ext in {'jpg', 'jpeg'} else ext}",
+        "size": {"width": int(edited.size[0]), "height": int(edited.size[1])},
+        "operations": operations,
+        "summary": summaries or ["autocontraste"],
+        "created_at": now or datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def parse_decimal_eu(value):
     raw = str(value or "").strip()
     if not raw:
@@ -42512,6 +42694,64 @@ def _workspace_internal_copilot_document_reply(conn, workspace_id, message, *, e
     }
 
 
+def _workspace_internal_copilot_image_reply(conn, workspace_id, message, *, empresa_id="", service_hint="", actor=None, context=None):
+    context = context if isinstance(context, dict) else {}
+    attachments = [item for item in (context.get("attachments") or []) if isinstance(item, dict)]
+    low = normalize_lookup_text(message or "").lower()
+    if not attachments:
+        return None
+    if not any(token in low for token in ("imagen", "foto", "escaneo", "escaneado", "ocr", "recorta", "gira", "rota", "anonimiza", "mejora")):
+        return None
+    attachment = next(
+        (
+            dict(item)
+            for item in attachments
+            if str(item.get("content_type") or "").lower().startswith("image/")
+            or str(item.get("filename") or "").lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+        ),
+        {},
+    )
+    if not attachment:
+        return {
+            "ok": True,
+            "intent": "image_edit",
+            "answer": "Veo adjuntos, pero no hay una imagen editable. El editor de fotos ahora mismo trabaja sobre PNG, JPG o WEBP.",
+            "cards": [{"title": "Adjunto no editable", "summary": "Para editar una foto necesito una imagen, no solo un PDF u otro documento.", "priority": "media", "impact_area": "documental"}],
+            "suggestions": ["Adjuntar imagen", "Preparar para OCR"],
+            "actions": [],
+            "sources": ["image_editor"],
+        }
+    plan = _copilot_image_edit_plan_from_message(message)
+    ops = [str(item.get("op") or "").strip() for item in list(plan.get("operations") or []) if isinstance(item, dict)]
+    return {
+        "ok": True,
+        "intent": "image_edit",
+        "answer": f"He preparado una edición documental sobre {str(attachment.get('filename') or 'la imagen').strip()} con operaciones: {', '.join(ops) or 'autocontraste'}.",
+        "cards": [
+            {
+                "title": "Editor de imagen",
+                "summary": (
+                    f"Archivo: {str(attachment.get('filename') or 'imagen').strip()}\n"
+                    f"Operaciones: {', '.join(ops) or 'autocontraste'}"
+                )[:500],
+                "priority": "media",
+                "impact_area": "documental",
+            }
+        ],
+        "suggestions": ["Aplicar edición", "Preparar para OCR", "Anonimizar imagen"],
+        "actions": [
+            {
+                "id": "edit_attached_image",
+                "label": "Aplicar edición",
+                "requires_confirmation": True,
+                "confirm_text": "Se generará una versión editada de la imagen adjunta.",
+                "payload": {"attachment": attachment, "plan": plan},
+            }
+        ],
+        "sources": ["image_editor"],
+    }
+
+
 def _workspace_internal_copilot_task_reply(conn, workspace_id, message, *, actor=None, context=None):
     text = normalize_lookup_text(message or "").lower()
     if not any(token in text for token in ("tarea", "recordar", "recuerdame", "recuérdame", "pendiente", "lista")):
@@ -49970,6 +50210,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     if action_reply:
         response.update(action_reply)
         return _finish(response)
+    image_reply = _workspace_internal_copilot_image_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        service_hint=service_hint,
+        actor=actor,
+        context=context or {},
+    )
+    if image_reply:
+        response.update(image_reply)
+        return _finish(response)
     document_reply = _workspace_internal_copilot_document_reply(
         conn,
         workspace_text,
@@ -51065,6 +51317,41 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             "sources": ["copilot_web_fetch", str(result.get("mode") or "basic").strip() or "basic"],
             "suggestions": ["Buscar en internet", "Abrir resultado"],
             "web_answer": result,
+        }
+    if action_text == "edit_attached_image":
+        attachment = dict(payload.get("attachment") or {}) if isinstance(payload.get("attachment"), dict) else {}
+        source_payload = {
+            "attachment": {
+                "filename": str(attachment.get("filename") or "imagen.png").strip(),
+                "content_type": str(attachment.get("content_type") or "").strip(),
+                "key": str(attachment.get("key") or "").strip(),
+                "data": attachment.get("data") or attachment.get("file_base64") or "",
+            },
+            "plan": dict(payload.get("plan") or {}) if isinstance(payload.get("plan"), dict) else {},
+            "output_format": str(payload.get("output_format") or "").strip(),
+        }
+        result = run_copilot_image_edit(source_payload, conn=conn, session=actor, now=now)
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He generado una imagen editada con {', '.join(list(result.get('summary') or [])[:4])}.",
+            "cards": [
+                {
+                    "title": "Imagen editada",
+                    "summary": (
+                        f"Salida: {str(result.get('filename') or '').strip()} · "
+                        f"{int((result.get('size') or {}).get('width') or 0)}x{int((result.get('size') or {}).get('height') or 0)} · "
+                        f"{str(result.get('url') or '').strip()}"
+                    )[:500],
+                    "priority": "media",
+                    "impact_area": "documental",
+                    "entity": {"url": str(result.get("url") or "").strip()},
+                }
+            ],
+            "image_edit": result,
+            "post_actions": [{"post_endpoint": str(result.get("url") or "").strip(), "label": "Abrir imagen editada"}],
+            "sources": ["image_editor"],
+            "suggestions": ["Preparar para OCR", "Anonimizar imagen", "Aplicar otra edición"],
         }
     if action_text == "review_browser_experience":
         browser_result = run_ollana_browser_review(
@@ -82799,6 +83086,18 @@ class Handler(BaseHTTPRequestHandler):
             result = copilot_web_search(query, limit=limit, timeout_seconds=timeout, now=now)
             if result.get("error"):
                 json_response(self, result, status=400)
+                return
+            json_response(self, result)
+            return
+        elif parsed.path == "/api/copilot_image_edit":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            try:
+                result = run_copilot_image_edit(payload, conn=conn, session=session, now=now)
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=400)
                 return
             json_response(self, result)
             return
