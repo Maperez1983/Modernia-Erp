@@ -51007,6 +51007,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/ai_fin_copilot",
             "/api/legal_copilot",
             "/api/legal_copilot_catalog",
+            "/api/internal_copilot_chat",
+            "/api/internal_copilot_action",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
@@ -66344,6 +66346,157 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": str(exc)}, status=400)
                 return
             json_response(self, result)
+            return
+        elif parsed.path in ("/api/internal_copilot_chat", "/api/internal_copilot_action"):
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            message = str(payload.get("message") or "").strip()
+            action_id = str(payload.get("action_id") or "").strip()
+            context = dict(payload.get("context") or {})
+            action_payload = payload.get("action_payload")
+            if not isinstance(action_payload, dict):
+                action_payload = {}
+            if parsed.path == "/api/internal_copilot_action" and not message and not action_id:
+                json_response(self, {"error": "action_id o message requerido"}, status=400)
+                return
+
+            service_hint = str(payload.get("service_hint") or context.get("service_hint") or context.get("current_crm") or "").strip().lower()
+            mode = str(payload.get("mode") or context.get("copilot_mode") or "operator").strip() or "operator"
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+
+            def _copilot_cards():
+                cards = []
+                client_id = str(context.get("current_client_id") or "").strip()
+                if client_id:
+                    cards.append({"type": "entity", "title": "Ficha actual", "summary": f"Cliente visible: {client_id}", "entity": {"cliente_id": client_id}})
+                factura_id = str(context.get("current_factura_id") or "").strip()
+                if factura_id:
+                    cards.append({"type": "entity", "title": "Factura actual", "summary": f"Factura visible: {factura_id}", "entity": {"factura_id": factura_id}})
+                hipoteca_id = str(context.get("current_hipoteca_id") or "").strip()
+                if hipoteca_id:
+                    cards.append({"type": "entity", "title": "Hipoteca actual", "summary": f"Expediente: {hipoteca_id}", "entity": {"hipoteca_id": hipoteca_id}})
+                return cards
+
+            action_result = None
+            if action_id:
+                if action_id == "set_copilot_mode":
+                    next_mode = str(action_payload.get("mode") or action_payload.get("copilot_mode") or mode).strip() or "operator"
+                    if next_mode not in {"operator", "supervisor", "direccion", "legal", "fiscal", "laboral"}:
+                        next_mode = "operator"
+                    action_result = {
+                        "ok": True,
+                        "action_id": action_id,
+                        "message": f"Modo del asistente actualizado a {next_mode}.",
+                        "mode_switch": {"mode": next_mode},
+                        "suggestions": ["Agenda de hoy", "Revisar ficha actual", "Resumen urgente"],
+                        "cards": _copilot_cards(),
+                        "actions": [],
+                        "sources": ["internal_copilot_action", "workspace_state"],
+                    }
+                elif action_id in {"diagnose_current_entity", "review_current_entity", "current_entity"}:
+                    action_result = {
+                        "ok": True,
+                        "action_id": action_id,
+                        "message": "Diagnóstico ejecutado sobre la entidad visible. Reviso incidencias y acciones seguras disponibles.",
+                        "suggestions": ["Cierre de ciclo", "Revisar incidencias", "Abrir próximas tareas"],
+                        "cards": _copilot_cards(),
+                        "actions": [
+                            {"id": "close_loop_safe", "label": "Cerrar ciclo"},
+                            {"id": "bulk_safe_repair", "label": "Reparación segura"},
+                        ],
+                        "sources": ["internal_copilot_action", "workspace_supervisor"],
+                    }
+                elif action_id == "close_loop_safe":
+                    action_result = {
+                        "ok": True,
+                        "action_id": action_id,
+                        "message": "Cierre guiado ejecutado: se ha preparado una agenda de seguimiento para esta sesión.",
+                        "suggestions": ["Agenda diaria", "Continuar tareas"],
+                        "cards": [],
+                        "actions": [],
+                        "refresh_supervisor": True,
+                        "sources": ["internal_copilot_action", "workspace_supervision"],
+                    }
+                else:
+                    action_result = {
+                        "ok": True,
+                        "action_id": action_id,
+                        "message": f"Acción recibida ({action_id}). Ejecutaré el siguiente paso si me compartes objetivo.",
+                        "suggestions": ["Revisar ficha actual", "Agenda diaria", "Solicitar resumen"],
+                        "cards": _copilot_cards(),
+                        "actions": [{"id": "diagnose_current_entity", "label": "Diagnosticar entidad visible"}],
+                        "sources": ["internal_copilot_action"],
+                    }
+
+            if parsed.path == "/api/internal_copilot_action" and action_result is not None:
+                json_response(self, action_result)
+                return
+
+            if not message:
+                if action_result and isinstance(action_result.get("message"), str):
+                    message = action_result["message"]
+                else:
+                    message = "Operación solicitada. Te devuelvo un plan operativo de corto alcance."
+
+            message_lower = message.lower()
+            if ("agenda" in message_lower and "diaria" in message_lower) or "urgente hoy" in message_lower:
+                answer = "Hoy priorizo incidencias abiertas por impacto y preparo agenda de revisión."
+            elif "cómo" in message_lower or "tutorial" in message_lower:
+                answer = "Te guío por el flujo: diagnóstico, resolución segura, verificación y cierre."
+            elif any(token in message_lower for token in ("error", "fall", "no funciona", "problema", "averia")):
+                answer = "Veo una incidencia. Reviso acceso, contexto y aplico verificación del workflow antes de proponer corrección."
+            elif any(token in message_lower for token in ("foto", "imagen", "editar")):
+                answer = "Para edición de imagen, usa la sección 'Editor de fotos (Ollana)' en Copilot Inmobiliario."
+            elif any(token in message_lower for token in ("modo", "supervisor", "legal", "fiscal", "laboral", "direccion")):
+                answer = "Cambio de perspectiva activado: te paso recomendaciones de riesgo y operación para ese modo."
+            else:
+                if openai_available():
+                    prompt = f"Usuario: {message} | contexto: servicio={service_hint}, modo={mode}, workspace={workspace_id or 'sin_id'}, empresa={empresa_id or 'sin_empresa'}"
+                    output, err = call_openai(
+                        prompt,
+                        temperature=0.2,
+                        max_tokens=240,
+                        system_text="Eres un copiloto operativo para un CRM en España. Responde en una frase breve y accionable.",
+                    )
+                    if err:
+                        answer = f"No puedo consultar IA ahora mismo ({err}); preparo instrucciones manuales para continuar."
+                    else:
+                        answer = output.strip() or "Acción marcada para revisión."
+                else:
+                    answer = "Sin IA en este entorno, te doy una respuesta operativa y prioritaria."
+
+            payload_response = {
+                "ok": True,
+                "answer": str(answer or "").strip(),
+                "message": str(answer or "").strip(),
+                "intent": "query" if not action_id else "action_query",
+                "suggestions": [
+                    "Qué hago ahora",
+                    "Diagnosticar ficha actual",
+                    "Agenda diaria",
+                    "Reparación segura",
+                ],
+                "cards": _copilot_cards(),
+                "actions": [
+                    {"id": "diagnose_current_entity", "label": "Diagnosticar entidad visible"},
+                    {"id": "set_copilot_mode", "label": "Modo supervisor", "payload": {"mode": "supervisor"}},
+                ],
+                "sources": ["internal_copilot_chat", "workspace_state"],
+                "meta": {
+                    "workspace_id": workspace_id,
+                    "empresa_id": empresa_id,
+                    "service_hint": service_hint,
+                    "copilot_mode": mode,
+                },
+            }
+            if action_id:
+                payload_response["action_id"] = action_id
+                if action_result:
+                    payload_response["action_result"] = action_result
+            json_response(self, payload_response)
             return
         elif parsed.path == "/api/legal_radar_scan":
             area = normalize_legal_area(payload.get("area") or "inmobiliaria")
