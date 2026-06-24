@@ -3057,6 +3057,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "fiscal")
         self.assertTrue(any(str(card.get("title") or "") == "Fiscal-contable" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Criterio experto" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Fiscal-contable" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_reply_mode_laboral(self):
@@ -3080,6 +3082,8 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "laboral")
         self.assertTrue(any(str(card.get("title") or "") == "Laboral/RRHH" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Criterio experto" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (reply.get("cards") or [])))
         self.assertTrue(any(str(card.get("title") or "") == "Laboral/RRHH" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_agent_mode_appendix_exposes_expert_rules(self):
@@ -3089,6 +3093,44 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertIn("Legal senior", legal_text)
         self.assertIn("Fiscal-contable", fiscal_text)
         self.assertIn("Laboral/RRHH", laboral_text)
+
+    def test_internal_copilot_expert_actions(self):
+        fiscal = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_fiscal_expert",
+            {"copilot_mode": "fiscal", "crm": "gestoria"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:47:00Z",
+        )
+        laboral = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_laboral_expert",
+            {"copilot_mode": "laboral", "crm": "rrhh"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:48:00Z",
+        )
+        legal = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "review_legal_expert",
+            {"copilot_mode": "legal", "crm": "gestoria"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:49:00Z",
+        )
+        self.assertTrue(fiscal["ok"])
+        self.assertEqual(fiscal["mode"], "fiscal")
+        self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (fiscal.get("cards") or [])))
+        self.assertTrue(laboral["ok"])
+        self.assertEqual(laboral["mode"], "laboral")
+        self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (laboral.get("cards") or [])))
+        self.assertTrue(legal["ok"])
+        self.assertEqual(legal["mode"], "legal")
+        self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (legal.get("cards") or [])))
 
     def test_internal_copilot_run_operator_sequence(self):
         self.conn.execute(
